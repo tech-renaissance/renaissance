@@ -55,7 +55,7 @@ DEP_CONFIG = {
         "version_cmd": ["cmake", "--version"],
         "version_pattern": r"cmake version (\d+\.\d+\.\d+)",
         "min_version": "3.24.0",
-        "user_selection": True,
+        "user_selection": True,  # 保留user_selection，但会在search_dependency中处理平台差异
         "install_hint": "Windows: https://cmake.org/download/ | Linux: sudo apt install cmake"
     },
 
@@ -73,7 +73,7 @@ DEP_CONFIG = {
         "paths_linux": ["/usr/bin", "/usr/local/bin"],
         "version_cmd": ["ninja", "--version"],
         "version_pattern": r"(\d+\.\d+\.\d+)",
-        "user_selection": True,
+        "user_selection": True,  # 保留user_selection，但会在search_dependency中处理平台差异
         "install_hint": "pip install ninja | Linux: sudo apt install ninja-build"
     },
 
@@ -136,6 +136,8 @@ DEP_CONFIG = {
             "C:/Program Files/NVIDIA/CUDNN/v9.*"
         ],
         "paths_linux": ["/usr/local/cuda", "/usr", "/usr/local/cuda/lib64"],
+        "version_cmd": ["grep", "CUDNN_MAJOR", "-A", "2", "{include}/cudnn_version.h"],
+        "version_pattern": r"#define CUDNN_MAJOR\s+(\d+).*#define CUDNN_MINOR\s+(\d+).*#define CUDNN_PATCHLEVEL\s+(\d+)",
         "min_version": "9.17",
         "install_hint": "https://developer.nvidia.com/cudnn"
     },
@@ -143,7 +145,7 @@ DEP_CONFIG = {
     # Python生态
     "python": {
         "name": "Python",
-        "exe": ["python3", "python", "python.exe"],
+        "exe": ["python3", "python3.14", "python", "python.exe"],
         "env": ["PYTHON_HOME", "VIRTUAL_ENV"],
         "paths_win": [
             "C:/Python314",
@@ -152,7 +154,7 @@ DEP_CONFIG = {
             "C:/Users/*/AppData/Local/Programs/Python/Python3*",
             "T:/Softwares/msys64/mingw64/bin"
         ],
-        "paths_linux": ["/usr/bin", "/usr/local/bin"],
+        "paths_linux": ["/home/ubuntu/venv/py314/bin", "/usr/bin", "/usr/local/bin"],
         "version_cmd": ["python", "--version"],
         "version_pattern": r"Python (\d+\.\d+\.\d+)",
         "min_version": "3.12.0",
@@ -190,10 +192,11 @@ DEP_CONFIG = {
 
     "libcurl": {
         "name": "libcurl",
-        "exe": [],  # 通过头文件检测
+        "exe": ["curl"],  # 通过curl命令检测系统安装
         "header": "curl/curl.h",
         "lib_files": ["libcurl.dll", "libcurl.so"],
         "env": ["CURL_ROOT"],
+        "paths_linux": ["/usr", "/usr/local", "/usr/local/curl"],
         "vcpkg_packages": ["curl"],
         "install_hint": "vcpkg install curl"
     },
@@ -232,7 +235,7 @@ INSTALL_SUGGESTIONS = {
         "both": "Download from https://developer.nvidia.com/cuda-toolkit"
     },
     "cudnn": {
-        "both": "Download from https://developer.nvidia.com/cudnn and extract to CUDA directory"
+        "both": "Download cuDNN 9.17.0+ for CUDA 13.x from: https://developer.download.nvidia.com/compute/cudnn/redist/cudnn/linux-x86_64/ Then extract and copy files to CUDA directory"
     },
     "python": {
         "both": "Download from https://python.org or run: conda create -n renaissance python=3.11"
@@ -250,5 +253,36 @@ INSTALL_SUGGESTIONS = {
     "libcurl": {
         "windows": "Run: vcpkg install curl",
         "linux": "Run: sudo apt install libcurl4-openssl-dev"
+    }
+}
+
+# ============================================================================
+# 详细安装指南
+# ============================================================================
+
+DETAILED_INSTALL_GUIDES = {
+    "cudnn": {
+        "title": "cuDNN 9.17.0+ Installation Guide (Linux x86_64, CUDA 13.x)",
+        "steps": [
+            "1. Visit NVIDIA cuDNN redistribution page:",
+            "   https://developer.download.nvidia.com/compute/cudnn/redist/cudnn/linux-x86_64/",
+            "2. Find cuDNN version 9.17.0 or higher for CUDA 13.x",
+            "3. Download the file (usually .tar.xz format) named like:",
+            "   cudnn-linux-x86_64-9.17.0_cuda13-archive.tar.xz",
+            "4. Extract the archive:",
+            "   tar -xf cudnn-linux-x86_64-9.17.0_cuda13-archive.tar.xz",
+            "5. Copy files to your CUDA installation directory:",
+            "   cd cudnn-linux-x86_64-9.17.0_cuda13-archive",
+            "   sudo cp include/cudnn*.h /usr/local/cuda-13.0/include",
+            "   sudo cp -P lib/libcudnn* /usr/local/cuda-13.0/lib64",
+            "   sudo chmod a+r /usr/local/cuda-13.0/include/cudnn*.h /usr/local/cuda-13.0/lib64/libcudnn*",
+            "6. Verify installation:",
+            "   cat /usr/local/cuda-13.0/include/cudnn_version.h | grep CUDNN_MAJOR -A 2"
+        ],
+        "notes": [
+            "Make sure to use cuDNN version 9.17.0+ for CUDA 13.x compatibility",
+            "If CUDA is installed in different location, adjust paths accordingly",
+            "The cuDNN library files should match your CUDA version exactly"
+        ]
     }
 }

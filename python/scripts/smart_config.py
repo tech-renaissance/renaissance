@@ -23,6 +23,9 @@ from typing import Dict, List, Optional, Tuple
 # 导入依赖配置
 from dependency_data import SCENE_DEPS, DEP_CONFIG, INSTALL_SUGGESTIONS
 
+# 全局变量：存储已经找到的Python依赖路径
+global_deps = {}
+
 # 导入配置变量（来自根目录的configure.py）
 try:
     from configure import VCPKG_ROOT, BUILD_DIR, PARALLEL_JOBS, CMAKE_GENERATOR, CMAKE_BUILD_TYPE, VERBOSE_OUTPUT
@@ -148,6 +151,12 @@ def get_user_choice(options: List[Dict], prompt: str) -> Dict:
                     print_fail("Path does not exist!")
             else:
                 print_fail(f"Invalid choice. Please enter 1-{len(options) + 1}")
+        except EOFError:
+            # 非交互模式，默认选择第一个选项
+            print_info(f"Non-interactive mode: selecting first {options[0]['name']} installation")
+            selected = options[0]
+            selected["found"] = True
+            return selected
         except ValueError:
             print_fail("Please enter a valid number")
         except KeyboardInterrupt:
@@ -184,8 +193,14 @@ def find_file_in_dirs(filename: str, dirs: List[str], subdirs: List[str] = None)
 
 def extract_version(output: str, pattern: str) -> Optional[str]:
     """从输出中提取版本号"""
-    match = re.search(pattern, output)
-    return match.group(1) if match else None
+    match = re.search(pattern, output, re.DOTALL)
+    if match:
+        # 如果有多个捕获组，组合成版本号
+        if len(match.groups()) > 1:
+            return ".".join(match.groups())
+        else:
+            return match.group(1)
+    return None
 
 def compare_version(v1: str, v2: str) -> int:
     """比较版本号，返回 -1, 0, 1"""
@@ -306,7 +321,7 @@ def detect_system() -> Dict:
 
 def detect_gpu() -> Dict:
     """检测GPU信息"""
-    gpu_info = {"type": None, "name": None, "count": 0}
+    gpu_info = {"type": None, "name": None, "count": 0, "detected": False}
 
     # 检测NVIDIA GPU
     success, output = run_cmd(["nvidia-smi", "--query-gpu=name,count", "--format=csv,noheader"])
@@ -316,6 +331,7 @@ def detect_gpu() -> Dict:
             gpu_info["type"] = "nvidia"
             gpu_info["name"] = lines[0].split(',')[0].strip()
             gpu_info["count"] = len(lines)
+            gpu_info["detected"] = True
             return gpu_info
 
     # 检测摩尔线程GPU
@@ -324,6 +340,7 @@ def detect_gpu() -> Dict:
         gpu_info["type"] = "musa"
         gpu_info["name"] = "Moore Threads GPU"
         gpu_info["count"] = 1
+        gpu_info["detected"] = True
         return gpu_info
 
     return gpu_info
@@ -351,25 +368,35 @@ def determine_scene(sys_info: Dict, gpu_info: Dict) -> str:
     if sys_info["is_windows"]:
         return "pc_cuda_win"
 
-    # 4. Linux下询问是否使用GPU
-    print("\nDo you want to use GPU? (Y/N): ", end="")
-    use_gpu = input().strip().upper()
+    # 4. Linux下智能判断GPU使用
+    if gpu_info["detected"]:
+        # 检测到GPU硬件，直接使用，无需询问
+        if gpu_info["type"] == "nvidia":
+            # 根据GPU数量选择场景
+            if gpu_info["count"] > 1:
+                return "gpu_cloud"
+            else:
+                return "pc_cuda_linux"
+        elif gpu_info["type"] == "mthreads":
+            return "pc_musa"
 
-    if use_gpu != "Y":
-        return "cpu_cloud"
-
-    # 5. 询问GPU类型
-    print("GPU type - (N)VIDIA or (M)oore Threads? (N/M): ", end="")
-    gpu_type = input().strip().upper()
-
-    if gpu_type == "M":
-        return "pc_musa"
-
-    # 6. NVIDIA GPU，检查数量
-    if gpu_info["count"] > 1:
-        return "gpu_cloud"
     else:
-        return "pc_cuda_linux"
+        # x86架构但没检测到GPU，询问用户是否有GPU但检测不到
+        try:
+            print("\nNo GPU detected. Do you have a GPU that wasn't detected? (Y/N): ", end="")
+            has_gpu = input().strip().upper()
+        except EOFError:
+            print_info("Non-interactive mode: continuing with CPU-only mode")
+            has_gpu = "N"
+
+        if has_gpu == "Y":
+            print_warn("GPU not detected. Please install GPU drivers first:")
+            print_info("  - For NVIDIA: https://developer.nvidia.com/cuda-downloads")
+            print_info("  - For Moore Threads: https://www.mthreads.com/download")
+            print_fail("Please install GPU drivers and run configure.py again")
+            sys.exit(1)
+        else:
+            return "cpu_cloud"
 
 # ============================================================================
 # 依赖搜索
@@ -491,19 +518,40 @@ def search_dependency(name: str, sys_info: Dict) -> Dict:
 
     # 检查是否需要用户选择
     if config.get("user_selection", False):
-        versions = find_all_dependency_versions(name, sys_info)
-        if versions:
-            if len(versions) == 1:
-                # 只有一个版本，直接返回，添加found字段
-                versions[0]["found"] = True
-                return versions[0]
-            else:
-                # 多个版本，让用户选择
-                selected = get_user_choice(versions, f"Multiple {config['name']} installations found:")
-                selected["found"] = True
-                return selected
+        # Linux下的CMake和Ninja直接使用，不需要用户选择
+        if sys_info.get("is_linux") and name in ["cmake", "ninja"]:
+            # 直接进入原有逻辑进行自动选择
+            pass
         else:
-            return {"found": False, "name": config["name"], "error": f"No {config['name']} installation found with required version"}
+            versions = find_all_dependency_versions(name, sys_info)
+            if versions:
+                # 如果只找到一个版本，直接使用；如果找到多个版本，让用户选择
+                if len(versions) == 1:
+                    print_ok(f"Found {config['name']}: {versions[0]['name']} v{versions[0].get('version', 'unknown')}")
+                    versions[0]["found"] = True
+                    return versions[0]
+                else:
+                    selected = get_user_choice(versions, f"Found {config['name']} installations:")
+                    selected["found"] = True
+                    return selected
+            else:
+                # 对于Python等用户选择的依赖，即使没找到也提供手动输入选项
+                print_info(f"No {config['name']} installation found with required version")
+                print_info("You can enter a custom path for {config['name']}")
+                try:
+                    custom_path = input(f"  Enter {config['name']} path (or press Enter to skip): ").strip()
+                    if custom_path and os.path.exists(custom_path):
+                        return {
+                            "found": True,
+                            "name": config["name"],
+                            "path": custom_path,
+                            "version": None,
+                            "from_vcpkg": False
+                        }
+                except (EOFError, KeyboardInterrupt):
+                    pass
+
+                return {"found": False, "name": config["name"], "error": f"No {config['name']} installation found with required version"}
 
     # 原有逻辑：自动选择最佳版本
     result = {"found": False, "name": config["name"], "path": None, "version": None, "from_vcpkg": False}
@@ -511,7 +559,24 @@ def search_dependency(name: str, sys_info: Dict) -> Dict:
 
     # 特殊处理：Python包检测
     if "check_cmd" in config:
-        success, output = run_cmd(config["check_cmd"])
+        # 对于NumPy等Python包，需要使用已选择的Python解释器
+        if name == "numpy":
+            # 从全局Python依赖中获取已选择的Python路径
+            from smart_config import global_deps
+            python_exe = None
+            if global_deps and "python" in global_deps and global_deps["python"]["found"]:
+                python_exe = global_deps["python"].get("exe_path")
+
+            if python_exe:
+                # 使用已选择的Python解释器检测NumPy
+                cmd = [python_exe, "-c", "import numpy; print(numpy.__version__)"]
+            else:
+                # 回退到原始逻辑
+                cmd = config["check_cmd"]
+        else:
+            cmd = config["check_cmd"]
+
+        success, output = run_cmd(cmd)
         if success:
             result["found"] = True
             result["version"] = output.strip()
@@ -541,7 +606,7 @@ def search_dependency(name: str, sys_info: Dict) -> Dict:
         paths = config.get("paths_win" if is_win else "paths_linux", [])
 
         # 可执行文件搜索
-        if "exe" in config:
+        if "exe" in config and config["exe"]:  # 确保exe列表不为空
             for exe in config["exe"]:
                 # 先检查PATH
                 exe_path = find_exe_in_path([exe])
@@ -592,6 +657,15 @@ def search_dependency(name: str, sys_info: Dict) -> Dict:
     if result["found"] and "version_cmd" in config:
         cmd = config["version_cmd"].copy()
         if result["path"]:
+            # 处理路径替换占位符
+            for i, arg in enumerate(cmd):
+                if "{path}" in arg:
+                    cmd[i] = arg.replace("{path}", result["path"])
+                elif "{include}" in arg:
+                    include_path = os.path.join(result["path"], "include")
+                    cmd[i] = arg.replace("{include}", include_path)
+
+            # 处理可执行文件路径替换
             bin_sub = config.get("bin_subdir", "bin")
             exe_path = os.path.join(result["path"], bin_sub, cmd[0])
             if os.path.exists(exe_path):
@@ -971,7 +1045,10 @@ def check_vcpkg():
         print_fail("VCPKG_ROOT not set")
         return False
 
-    vcpkg_exe = os.path.join(VCPKG_ROOT, "vcpkg.exe")
+    # 跨平台vcpkg可执行文件名
+    vcpkg_exe_name = "vcpkg.exe" if sys.platform == "win32" else "vcpkg"
+    vcpkg_exe = os.path.join(VCPKG_ROOT, vcpkg_exe_name)
+
     if not os.path.exists(vcpkg_exe):
         print_fail(f"vcpkg not found at {vcpkg_exe}")
         return False
@@ -1063,34 +1140,41 @@ def run_smart_config():
         else:
             print_fail(f"{result['name']} - NOT FOUND")
 
-    # Step 6: 检查CUDA和cuDNN (如果需要GPU)
-    print_step(6, total_steps, "Checking CUDA and cuDNN...")
-    cuda_deps = []
-    if gpu_info["type"] == "nvidia":
-        cuda_deps = ["cuda", "cudnn"]
-
-    found_cuda = {}
-    for dep in cuda_deps:
-        result = search_dependency(dep, sys_info)
-        found_cuda[dep] = result
-        if result["found"]:
-            ver = f" v{result['version']}" if result.get("version") else ""
-            path = result.get("path", "system")
-            # 如果路径为None或者等于"system"，就不显示路径
-            if path and path != "system":
-                print_ok(f"{result['name']}{ver} - {path}")
-            else:
-                print_ok(f"{result['name']}{ver}")
-        else:
-            print_fail(f"{result['name']} - NOT FOUND")
-
-    # Step 7: 检查其他库
-    print_step(7, total_steps, "Checking other libraries...")
+    # Step 6: 智能确定使用场景并检查相应依赖
+    print_step(6, total_steps, "Determining usage scenario...")
     scene = determine_scene(sys_info, gpu_info)
     scene_info = SCENE_DEPS.get(scene)
     if not scene_info:
         print_fail(f"Unsupported scene: {scene}")
         return False
+
+    # Step 7: 检查场景特定依赖
+    print_step(7, total_steps, "Checking GPU acceleration libraries...")
+
+    # 只检查CUDA/MUSA相关依赖（如果场景需要）
+    found_cuda = {}
+    if scene in ["pc_cuda_linux", "gpu_cloud", "pc_musa"]:
+        if scene in ["pc_cuda_linux", "gpu_cloud"]:
+            cuda_deps = ["cuda", "cudnn"]
+        elif scene == "pc_musa":
+            cuda_deps = ["cuda", "cudnn"]  # TODO: 改为musa, mudnn
+
+        for dep in cuda_deps:
+            result = search_dependency(dep, sys_info)
+            found_cuda[dep] = result
+            if result["found"]:
+                ver = f" v{result['version']}" if result.get("version") else ""
+                path = result.get("path", "system")
+                # 如果路径为None或者等于"system"，就不显示路径
+                if path and path != "system":
+                    print_ok(f"{result['name']}{ver} - {path}")
+                else:
+                    print_ok(f"{result['name']}{ver}")
+            else:
+                print_fail(f"{result['name']} - NOT FOUND")
+
+    # Step 8: 检查其他库
+    print_step(8, total_steps, "Checking other libraries...")
 
     # 搜索所有依赖
     all_found = {**found_toolchain, **found_cuda}
@@ -1100,6 +1184,11 @@ def run_smart_config():
     for dep in remaining_deps:
         result = search_dependency(dep, sys_info)
         found_other[dep] = result
+
+        # 保存Python依赖到全局变量，供NumPy检测使用
+        if dep == "python" and result["found"]:
+            global_deps["python"] = result
+
         if result["found"]:
             ver = f" v{result['version']}" if result.get("version") else ""
             path = result.get("path", "system")
@@ -1126,6 +1215,20 @@ def run_smart_config():
             version_str = f" (version {min_version}+)" if min_version else ""
             hint = config.get("install_hint", "Please check documentation")
             print(f"  • {name}{version_str}: {hint}")
+
+            # 显示详细安装指南（如果有的话）
+            from dependency_data import DETAILED_INSTALL_GUIDES
+            if dep in DETAILED_INSTALL_GUIDES:
+                guide = DETAILED_INSTALL_GUIDES[dep]
+                print(f"\n  [Detailed Guide] {guide['title']}:")
+                for step in guide['steps']:
+                    print(f"    {step}")
+                if guide.get('notes'):
+                    print(f"    [Important Notes]:")
+                    for note in guide['notes']:
+                        print(f"      {note}")
+                print()  # 空行分隔
+
         return False
 
     # Step 8: 生成配置文件
