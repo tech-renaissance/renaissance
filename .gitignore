@@ -1,24 +1,52 @@
-# Windows thumbnail cache files
-Thumbs.db
-Thumbs.db:encryptable
-ehthumbs.db
-ehthumbs_vista.db
+# Prompt
+INFO.md
+API.md
+renaissance_prompt.md
+AI_EXP.md
 
-# Dump file
-*.stackdump
+# AI
+.claude
 
-# Folder config file
-[Dd]esktop.ini
+# IDE
+.idea
 
-# Recycle Bin used on file shares
-$RECYCLE.BIN/
+# Exe
+*.exe
+*.out
 
-# Windows Installer files
-*.cab
-*.msi
-*.msix
-*.msm
-*.msp
+# Obj
+*.o
+*.obj
+*.pyc
 
-# Windows shortcuts
-*.lnk
+# Editors
+.vscode/
+*.code-workspace
+*.swp
+
+# Git
+.git/
+
+# Build
+build*/
+cmake*/
+config*/
+*.bat
+*.sh
+
+# Third-Party
+third_party/
+
+# LICENSE
+LICENSE
+
+null
+null*
+null*/
+MNIST/
+
+workspace/
+
+# Backup
+backup.py
+platform.md
