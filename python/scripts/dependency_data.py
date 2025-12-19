@@ -33,6 +33,13 @@ SCENE_DEPS = {
         "required": ["cmake", "ninja", "gcc", "cuda", "cudnn", "onednn", "xnnpack", "zlib", "libcurl", "python", "numpy"],
         "optional": [],
         "cmake_opts": ["-DTR_USE_CUDA=ON", "-DTR_USE_MUSA=OFF"]
+    },
+    "pc_musa": {
+        "name": "PC-MUSA (Linux)",
+        "description": "Linux + Moore Threads GPU + GCC",
+        "required": ["cmake", "ninja", "gcc", "musa", "mudnn", "onednn", "xnnpack", "zlib", "libcurl", "python", "numpy"],
+        "optional": [],
+        "cmake_opts": ["-DTR_USE_CUDA=OFF", "-DTR_USE_MUSA=ON"]
     }
 }
 
@@ -54,7 +61,7 @@ DEP_CONFIG = {
         "paths_linux": ["/usr/bin", "/usr/local/bin"],
         "version_cmd": ["cmake", "--version"],
         "version_pattern": r"cmake version (\d+\.\d+\.\d+)",
-        "min_version": "3.24.0",
+        "min_version": "3.20.0",
         "user_selection": True,  # 保留user_selection，但会在search_dependency中处理平台差异
         "install_hint": "Windows: https://cmake.org/download/ | Linux: sudo apt install cmake"
     },
@@ -142,6 +149,31 @@ DEP_CONFIG = {
         "install_hint": "https://developer.nvidia.com/cudnn"
     },
 
+    "musa": {
+        "name": "MUSA Toolkit",
+        "exe": ["mcc", "mcc.exe"],
+        "env": ["MUSA_INSTALL_PATH"],
+        "paths_linux": ["/usr/local/musa", "/usr/local/musa-3.*"],
+        "bin_subdir": "bin",
+        "version_cmd": ["mcc", "--version"],
+        "version_pattern": r"mcc version (\d+\.\d+)",
+        "min_version": "3.0",
+        "install_hint": "https://www.mthreads.com/download"
+    },
+
+    "mudnn": {
+        "name": "MUDNN",
+        "exe": [],  # MUDNN主要通过头文件和库文件检测
+        "header": "mudnn_version.h",
+        "lib_files": ["libmudnn.so"],
+        "env": ["DNN_PATH"],
+        "paths_linux": ["/usr/local/musa", "/usr/local/musa/lib", "/usr"],
+        "version_cmd": ["grep", "MUDNN_VERSION_MAJOR", "-A", "2", "{include}/mudnn_version.h"],
+        "version_pattern": r"#define MUDNN_VERSION_MAJOR\s+(\d+).*#define MUDNN_VERSION_MINOR\s+(\d+).*#define MUDNN_VERSION_PATCH\s+(\d+)",
+        "min_version": "2.8",
+        "install_hint": "https://www.mthreads.com/download"
+    },
+
     # Python生态
     "python": {
         "name": "Python",
@@ -154,7 +186,7 @@ DEP_CONFIG = {
             "C:/Users/*/AppData/Local/Programs/Python/Python3*",
             "T:/Softwares/msys64/mingw64/bin"
         ],
-        "paths_linux": ["/home/ubuntu/venv/py314/bin", "/usr/bin", "/usr/local/bin"],
+        "paths_linux": ["/home/tech-renaissance/venv/py314/bin", "/home/ubuntu/venv/py314/bin", "/usr/bin", "/usr/local/bin", "/opt/python/bin"],
         "version_cmd": ["python", "--version"],
         "version_pattern": r"Python (\d+\.\d+\.\d+)",
         "min_version": "3.12.0",
@@ -253,6 +285,12 @@ INSTALL_SUGGESTIONS = {
     "libcurl": {
         "windows": "Run: vcpkg install curl",
         "linux": "Run: sudo apt install libcurl4-openssl-dev"
+    },
+    "musa": {
+        "both": "Download from https://www.mthreads.com/download"
+    },
+    "mudnn": {
+        "both": "Download from https://www.mthreads.com/download"
     }
 }
 

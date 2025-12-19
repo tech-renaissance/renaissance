@@ -337,7 +337,7 @@ def detect_gpu() -> Dict:
     # 检测摩尔线程GPU
     success, output = run_cmd(["mthreads-gmi"])
     if success and "MTT" in output:
-        gpu_info["type"] = "musa"
+        gpu_info["type"] = "mthreads"  # 统一使用mthreads作为类型标识
         gpu_info["name"] = "Moore Threads GPU"
         gpu_info["count"] = 1
         gpu_info["detected"] = True
@@ -544,9 +544,10 @@ def search_dependency(name: str, sys_info: Dict) -> Dict:
                         return {
                             "found": True,
                             "name": config["name"],
-                            "path": custom_path,
+                            "path": os.path.dirname(custom_path),
                             "version": None,
-                            "from_vcpkg": False
+                            "from_vcpkg": False,
+                            "exe_path": custom_path
                         }
                 except (EOFError, KeyboardInterrupt):
                     pass
@@ -561,15 +562,73 @@ def search_dependency(name: str, sys_info: Dict) -> Dict:
     if "check_cmd" in config:
         # 对于NumPy等Python包，需要使用已选择的Python解释器
         if name == "numpy":
-            # 从全局Python依赖中获取已选择的Python路径
-            from smart_config import global_deps
             python_exe = None
+
+            # 1. 从全局Python依赖中获取已选择的Python路径
+            from smart_config import global_deps
             if global_deps and "python" in global_deps and global_deps["python"]["found"]:
                 python_exe = global_deps["python"].get("exe_path")
 
+            # 2. 如果没有找到全局Python依赖，尝试从主流程中已检测的Python获取
+            if not python_exe:
+                # 检查主流程中是否已经检测了Python
+                all_found = locals().get('all_found', {})  # 尝试从主循环获取
+                if "python" in all_found and all_found["python"]["found"]:
+                    python_exe = all_found["python"].get("exe_path")
+
+                # 如果还没找到，检查found_other（如果已经在循环中）
+                if not python_exe:
+                    found_other = locals().get('found_other', {})
+                    if "python" in found_other and found_other["python"]["found"]:
+                        python_exe = found_other["python"].get("exe_path")
+
+            # 3. 根据不同平台尝试从常见路径查找Python
+            if not python_exe:
+                if sys_info.get("is_linux"):
+                    python_paths = [
+                        "/home/tech-renaissance/venv/py314/bin/python3.14",
+                        "/home/ubuntu/venv/py314/bin/python3.14",
+                        "/usr/bin/python3",
+                        "python3"
+                    ]
+                elif sys_info.get("is_windows"):
+                    python_paths = [
+                        "python",
+                        "python3",
+                        "py",
+                        # 尝试常见的Windows Python安装路径
+                        "C:/Python314/python.exe",
+                        "C:/Python313/python.exe",
+                        "C:/Python312/python.exe"
+                    ]
+                else:
+                    python_paths = ["python3", "python"]
+
+                for py_path in python_paths:
+                    if os.path.exists(py_path):
+                        python_exe = py_path
+                        break
+                    elif not py_path.endswith('.exe'):  # 可能是命令名，尝试运行
+                        success, _ = run_cmd([py_path, "--version"])
+                        if success:
+                            python_exe = py_path
+                            break
+
             if python_exe:
-                # 使用已选择的Python解释器检测NumPy
+                # 使用找到的Python解释器检测NumPy
                 cmd = [python_exe, "-c", "import numpy; print(numpy.__version__)"]
+                success, output = run_cmd(cmd)
+                if success:
+                    result["found"] = True
+                    result["version"] = output.strip()
+                    result["path"] = os.path.dirname(python_exe)  # 保存Python路径
+                    if "min_version" in config and compare_version(result["version"], config["min_version"]) < 0:
+                        result["found"] = False
+                        result["error"] = f"Version {result['version']} < {config['min_version']}"
+                    return result
+                else:
+                    # 如果用找到的Python检测失败，继续使用原始逻辑
+                    pass
             else:
                 # 回退到原始逻辑
                 cmd = config["check_cmd"]
@@ -1157,7 +1216,7 @@ def run_smart_config():
         if scene in ["pc_cuda_linux", "gpu_cloud"]:
             cuda_deps = ["cuda", "cudnn"]
         elif scene == "pc_musa":
-            cuda_deps = ["cuda", "cudnn"]  # TODO: 改为musa, mudnn
+            cuda_deps = ["musa", "mudnn"]
 
         for dep in cuda_deps:
             result = search_dependency(dep, sys_info)
