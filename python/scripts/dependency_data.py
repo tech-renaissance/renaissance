@@ -261,7 +261,7 @@ DEP_CONFIG = {
     "numpy": {
         "name": "NumPy",
         "exe": [],  # 通过Python命令检查
-        "check_cmd": ["python", "-c", "import numpy; print(numpy.__version__)"],
+        "check_cmd": ["python", "-c", "import numpy; print(numpy.__version__); print(numpy.__file__)"],
         "min_version": "1.24.0",
         "install_hint": "pip install numpy"
     },
@@ -294,7 +294,9 @@ DEP_CONFIG = {
         "env": ["CURL_ROOT"],
         "paths_linux": ["/usr", "/usr/local", "/usr/local/curl"],
         "vcpkg_packages": ["curl"],
-        "install_hint": "vcpkg install curl"
+        "version_cmd": ["curl", "--version"],
+        "version_pattern": r"curl (\d+\.\d+\.\d+)",
+        "install_hint": "vcpkg install curl (Windows) | sudo apt install libcurl4-openssl-dev (Linux)"
     },
 
     "xnnpack": {
@@ -352,8 +354,8 @@ DEP_CONFIG = {
         "header": "nccl.h",
         "lib_files": ["nccl.dll", "libnccl.so"],
         "env": ["NCCL_ROOT", "NCCL_HOME"],
-        "paths_linux": ["/usr/local/nccl", "/usr", "/opt/nccl"],
-        "version_cmd": ["grep", "NCCL_MAJOR", "-A", "2", "{include}/nccl_version.h"],
+        "paths_linux": ["/usr/local/nccl", "/usr", "/opt/nccl", "/usr/local/cuda"],
+        "version_cmd": ["grep", "-E", "NCCL_MAJOR|NCCL_MINOR|NCCL_PATCH", "{include}/nccl.h"],
         "version_pattern": r"#define NCCL_MAJOR\s+(\d+).*#define NCCL_MINOR\s+(\d+).*#define NCCL_PATCH\s+(\d+)",
         "min_version": "2.28",
         "install_hint": "Download from https://developer.nvidia.com/nccl"
