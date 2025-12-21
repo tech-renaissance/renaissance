@@ -28,7 +28,7 @@ global_deps = {}
 
 # 全局变量：缓存vcpkg包列表，避免重复调用
 vcpkg_cache = {}
-vcpkg_all_packages_cache = None
+vcpkg_full_output_cache = None  # 缓存完整的vcpkg list输出字符串
 
 # 导入配置变量（来自根目录的configure.py）
 try:
@@ -1202,48 +1202,67 @@ def search_dependency(name: str, sys_info: Dict, suppress_print: bool = False) -
 
     return result
 
-def get_all_vcpkg_versions() -> Dict[str, str]:
-    """一次性获取所有vcpkg包版本（Linux下使用，更高效）"""
-    global vcpkg_all_packages_cache
 
-    if vcpkg_all_packages_cache is not None:
-        return vcpkg_all_packages_cache
+def get_vcpkg_full_output() -> str:
+    """获取完整的vcpkg list输出并缓存（只执行一次）"""
+    global vcpkg_full_output_cache
 
-    vcpkg_exe = os.path.join(VCPKG_ROOT, "vcpkg")
+    if vcpkg_full_output_cache is not None:
+        return vcpkg_full_output_cache
+
+    vcpkg_exe = os.path.join(VCPKG_ROOT, "vcpkg.exe") if sys.platform == "win32" else os.path.join(VCPKG_ROOT, "vcpkg")
+
     if not os.path.exists(vcpkg_exe):
-        vcpkg_all_packages_cache = {}
-        return {}
+        vcpkg_full_output_cache = ""
+        return ""
 
     success, output = run_cmd([vcpkg_exe, "list"])
-    if not success:
-        vcpkg_all_packages_cache = {}
-        return {}
+    if success:
+        vcpkg_full_output_cache = output
+        return output
+    else:
+        vcpkg_full_output_cache = ""
+        return ""
 
-    package_versions = {}
-    lines = output.strip().split('\n')
+def get_vcpkg_package_version(package_name: str, triplet: str = None) -> Optional[str]:
+    """通过缓存字符串搜索获取包版本号（全平台统一优化版本）"""
+    global vcpkg_cache
+
+    # 检查缓存
+    if package_name in vcpkg_cache:
+        return vcpkg_cache[package_name]
+
+    # 获取完整的vcpkg list输出（带缓存）
+    full_output = get_vcpkg_full_output()
+    if not full_output:
+        vcpkg_cache[package_name] = None
+        return None
+
+    # 在输出字符串中搜索包含包名的行
+    lines = full_output.strip().split('\n')
+    import re
+
     for line in lines:
         line = line.strip()
         if not line:
             continue
 
-        # vcpkg输出格式: package_name:arch     version    description
+        # 查找包含 "包名:" 的行
+        if f"{package_name}:" not in line:
+            continue
+
+        # 分割第一部分（包名+架构）
         first_space_idx = line.find(' ')
         if first_space_idx == -1:
             continue
 
         package_with_arch = line[:first_space_idx]
-        # 提取纯包名（去掉架构后缀）
-        colon_idx = package_with_arch.find(':')
-        if colon_idx != -1:
-            package_name = package_with_arch[:colon_idx]
-        else:
-            package_name = package_with_arch
 
-        # 只保存第一次出现的版本（可能是主架构）
-        if package_name in package_versions:
+        # 确保是我们要的包名开头（避免误匹配）
+        if not package_with_arch.startswith(f"{package_name}:"):
             continue
 
-        # 提取版本号
+        # 提取版本号部分（在第一个空格和第二个空格之间）
         version_part = line[first_space_idx:].strip()
         version_space_idx = version_part.find(' ')
         if version_space_idx == -1:
@@ -1252,91 +1271,19 @@ def get_all_vcpkg_versions() -> Dict[str, str]:
             version_str = version_part[:version_space_idx].strip()
 
         # 验证版本号格式
-        import re
-        if re.match(r'^\d+\.\d+', version_str):
+        result_version = None
+        if re.match(r'^\d+\.\d+', version_str):  # 如 3.7, 3.7.0
+            # 移除可能的#n后缀
             if '#' in version_str:
                 version_str = version_str.split('#')[0]
-            package_versions[package_name] = version_str.strip()
-        elif re.match(r'^\d{4}-\d{2}-\d{2}', version_str):
+            result_version = version_str.strip()
+        elif re.match(r'^\d{4}-\d{2}-\d{2}', version_str):  # 如 2024-08-20
+            # 移除可能的#n后缀
             if '#' in version_str:
                 version_str = version_str.split('#')[0]
-            package_versions[package_name] = version_str.strip()
+            result_version = version_str.strip()
 
-    vcpkg_all_packages_cache = package_versions
-    return package_versions
-
-def get_vcpkg_package_version(package_name: str, triplet: str = None) -> Optional[str]:
-    """通过vcpkg list命令获取包版本号（优化版本，使用缓存）"""
-    global vcpkg_cache
-
-    # 检查缓存
-    if package_name in vcpkg_cache:
-        return vcpkg_cache[package_name]
-
-    vcpkg_exe = os.path.join(VCPKG_ROOT, "vcpkg.exe") if sys.platform == "win32" else os.path.join(VCPKG_ROOT, "vcpkg")
-
-    if not os.path.exists(vcpkg_exe):
-        vcpkg_cache[package_name] = None
-        return None
-
-    # Windows：使用精确查询（Windows下vcpkg list很快）
-    if sys.platform == "win32":
-        success, output = run_cmd([vcpkg_exe, "list", package_name])
-        if success:
-            lines = output.strip().split('\n')
-            for line in lines:
-                line = line.strip()
-                if not line:
-                    continue
-
-                # 分割第一部分（包名+架构）
-                first_space_idx = line.find(' ')
-                if first_space_idx == -1:
-                    continue
-
-                package_with_arch = line[:first_space_idx]
-
-                # 检查是否以包名开头（可能带有架构后缀）
-                if not package_with_arch.startswith(package_name):
-                    continue
-
-                # RISC-V特殊处理：如果指定了triplet且是riscv开头，只匹配对应的架构
-                if triplet and triplet.startswith('riscv'):
-                    # 提取架构部分进行比较（如 riscv64-linux-clang）
-                    expected_arch = package_with_arch.split(':')[-1]
-                    if not expected_arch.startswith('riscv'):
-                        continue
-
-                # 提取版本号部分（在第一个空格和第二个空格之间）
-                version_part = line[first_space_idx:].strip()
-                version_space_idx = version_part.find(' ')
-                if version_space_idx == -1:
-                    version_str = version_part
-                else:
-                    version_str = version_part[:version_space_idx].strip()
-
-                # 验证版本号格式并缓存结果
-                import re
-                result_version = None
-                if re.match(r'^\d+\.\d+', version_str):  # 如 3.7, 3.7.0
-                    # 移除可能的#n后缀
-                    if '#' in version_str:
-                        version_str = version_str.split('#')[0]
-                    result_version = version_str.strip()
-                elif re.match(r'^\d{4}-\d{2}-\d{2}', version_str):  # 如 2024-08-20
-                    # 移除可能的#n后缀
-                    if '#' in version_str:
-                        version_str = version_str.split('#')[0]
-                    result_version = version_str.strip()
-
-                vcpkg_cache[package_name] = result_version
-                return result_version
-
-    # Linux：使用批量查询缓存（一次查询所有包，然后缓存）
-    else:
-        # 获取所有包版本（只执行一次）
-        all_versions = get_all_vcpkg_versions()
-        result_version = all_versions.get(package_name)
+        # 缓存结果
         vcpkg_cache[package_name] = result_version
         return result_version
 
@@ -1384,56 +1331,55 @@ def search_in_vcpkg(name: str, config: Dict, is_win: bool) -> Dict:
 
     vcpkg_installed = os.path.join(VCPKG_ROOT, "installed", triplet)
 
-    # RISC-V特殊处理：在所有riscv* triplet中搜索头文件
-    if "header" in config and machine and machine.startswith("riscv"):
+    # 检查头文件 - 使用统一的字符串搜索逻辑
+    if "header" in config:
         headers = config["header"] if isinstance(config["header"], list) else [config["header"]]
 
-        # 在所有找到的riscv* triplet中搜索
-        for item in os.listdir(vcpkg_installed_root):
-            item_path = os.path.join(vcpkg_installed_root, item)
-            if os.path.isdir(item_path) and item.startswith('riscv'):
-                for header in headers:
-                    header_path = os.path.join(item_path, "include", header)
-                    if os.path.exists(header_path):
-                        result = {
-                            "found": True,
-                            "name": config["name"],
-                            "path": item_path,
-                            "from_vcpkg": True
-                        }
+        # 首先在默认triplet中查找
+        for header in headers:
+            header_path = os.path.join(vcpkg_installed, "include", header)
+            if os.path.exists(header_path):
+                result = {
+                    "found": True,
+                    "name": config["name"],
+                    "path": vcpkg_installed,
+                    "from_vcpkg": True
+                }
 
-                        # 获取vcpkg包的版本号
-                        vcpkg_packages = config.get("vcpkg_packages", [])
-                        if vcpkg_packages:
-                            package_name = vcpkg_packages[0]  # 取第一个包名
-                            version = get_vcpkg_package_version(package_name, item)
-                            if version:
-                                result["version"] = version
+                # 获取vcpkg包的版本号（使用统一的全平台算法）
+                vcpkg_packages = config.get("vcpkg_packages", [])
+                if vcpkg_packages:
+                    package_name = vcpkg_packages[0]  # 取第一个包名
+                    version = get_vcpkg_package_version(package_name)
+                    if version:
+                        result["version"] = version
 
-                        return result
-    else:
-        # 非RISC-V平台，使用原有逻辑
-        if "header" in config:
-            headers = config["header"] if isinstance(config["header"], list) else [config["header"]]
-            for header in headers:
-                header_path = os.path.join(vcpkg_installed, "include", header)
-                if os.path.exists(header_path):
-                    result = {
-                        "found": True,
-                        "name": config["name"],
-                        "path": vcpkg_installed,
-                        "from_vcpkg": True
-                    }
+                return result
 
-                    # 获取vcpkg包的版本号
-                    vcpkg_packages = config.get("vcpkg_packages", [])
-                    if vcpkg_packages:
-                        package_name = vcpkg_packages[0]  # 取第一个包名
-                        version = get_vcpkg_package_version(package_name)
-                        if version:
-                            result["version"] = version
+        # 如果在默认triplet中没找到，且是RISC-V，尝试在其他riscv* triplet中查找
+        if machine and machine.startswith("riscv"):
+            for item in os.listdir(vcpkg_installed_root):
+                item_path = os.path.join(vcpkg_installed_root, item)
+                if os.path.isdir(item_path) and item.startswith('riscv') and item != os.path.basename(vcpkg_installed):
+                    for header in headers:
+                        header_path = os.path.join(item_path, "include", header)
+                        if os.path.exists(header_path):
+                            result = {
+                                "found": True,
+                                "name": config["name"],
+                                "path": item_path,
+                                "from_vcpkg": True
+                            }
 
-                    return result
+                            # 获取vcpkg包的版本号（使用统一的全平台算法）
+                            vcpkg_packages = config.get("vcpkg_packages", [])
+                            if vcpkg_packages:
+                                package_name = vcpkg_packages[0]  # 取第一个包名
+                                version = get_vcpkg_package_version(package_name)
+                                if version:
+                                    result["version"] = version
+
+                            return result
 
     return {"found": False}
 
