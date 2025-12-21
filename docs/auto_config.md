@@ -1,15 +1,19 @@
-# renAIssance Deep Learning Framework - 自动配置系统
+# renAIssance Deep Learning Framework V3.1.0 - 自动配置系统
 
 ## 概述
 
-本文档详细描述了 renAIssance 深度学习框架的自动配置系统设计思路、实现方案和技术特性。该系统旨在解决深度学习框架部署中的复杂依赖管理和环境配置问题。
+本文档详细描述了 renAIssance 深度学习框架 V3.1.0 的自动配置系统设计思路、实现方案和技术特性。该系统支持6大场景和16个依赖项的智能管理，旨在解决深度学习框架部署中的复杂依赖管理和环境配置问题。
+
+**版本**: V3.1.0
+**更新日期**: 2025-12-21
+**核心特性**: 6大场景自动配置 + 16依赖项智能管理
 
 ## 问题背景
 
 ### 核心问题
-1. **依赖复杂性**：深度学习框架依赖众多第三方库（CUDA、cuDNN、oneDNN、XNNPACK、编译器等）
-2. **跨平台差异**：Windows/Linux不同平台下依赖安装路径和版本要求各异
-3. **环境多样性**：用户系统环境千差万别，需要智能检测和适配
+1. **依赖复杂性**：深度学习框架依赖众多第三方库（CUDA、cuDNN、oneDNN、XNNPACK、mimalloc、编译器等）
+2. **跨平台差异**：Windows/Linux/ARM/RISC-V不同平台下依赖安装路径和版本要求各异
+3. **场景多样性**：PC端、云服务器、嵌入式设备的不同需求
 4. **配置繁杂性**：手动配置CMake、编译脚本、环境变量容易出错
 5. **版本兼容性**：不同版本的工具链可能存在兼容性问题
 
@@ -18,65 +22,213 @@
 - 缺乏智能环境检测能力
 - 依赖版本管理混乱
 - 跨平台配置不统一
+- 场景适配不完善
 
 ## 解决方案
 
 ### 设计目标
 1. **零配置启动**：用户只需运行一个命令即可完成所有配置
-2. **智能环境检测**：自动检测硬件、操作系统、已安装软件
+2. **智能场景检测**：自动检测硬件、操作系统，智能确定使用场景
 3. **智能依赖搜索**：多策略查找依赖，优先使用vcpkg等包管理器
-4. **跨平台统一**：Windows和Linux使用统一的配置逻辑
+4. **跨平台统一**：Windows/Linux/ARM/RISC-V使用统一的配置逻辑
 5. **用户友好界面**：清晰的彩色输出和错误提示
 
 ### 技术方案
 采用分层检测策略：
 ```
-硬件层 (CPU/GPU) → 系统层 (OS/架构) → 工具链层 (编译器/CMake)
-→ 依赖层 (CUDA/vcpkg库) → 配置生成层 (CMake/脚本)
+架构检测 → 场景判断 → 依赖搜索 → 版本检测 → 配置生成
 ```
 
 ## 功能特性
 
+### 六大场景支持
+1. **PC_CUDA** - Windows + NVIDIA GPU + MSVC
+2. **GPU_CLOUD** - Linux + Multi-NVIDIA GPU + GCC
+3. **PC_MUSA** - Linux + 摩尔线程GPU + GCC
+4. **CPU_CLOUD** - Windows/Linux x86 CPU服务器
+5. **EDGE_ARM** - ARM嵌入式Linux + GCC
+6. **EDGE_RISCV** - RISC-V嵌入式Linux + GCC
+
 ### 平台支持
 - **Windows**: x86_64 架构，支持 Visual Studio MSVC 编译器
 - **Linux**: x86_64 架构，支持 GCC 编译器
-- **未来扩展**: 支持 ARM/RISC-V 架构（预留接口）
+- **ARM**: arm64、aarch64 架构，支持 GCC 编译器
+- **RISC-V**: riscv64 架构，支持 GCC 编译器
+- **GPU加速**: NVIDIA CUDA/cuDNN, 摩尔线程 MUSA/muDNN
 
-### 依赖管理
-#### 核心依赖
-- **构建工具**: CMake (≥3.24.0), Ninja
-- **编译器**: MSVC (Windows), GCC (Linux)
-- **GPU加速**: CUDA (≥13.0), cuDNN (≥9.17)
-- **深度学习库**: oneDNN, XNNPACK
-- **基础库**: zlib, libcurl
-- **Python生态**: Python (≥3.12), NumPy
+### 依赖管理 (16个依赖项)
+#### 构建工具
+- **CMake** (≥3.20.0), **Ninja** (≥1.10.0)
+- **编译器**: MSVC (Windows), GCC (Linux/ARM/RISC-V)
 
-#### 场景化配置
-根据硬件环境自动确定使用场景：
-- **PC-CUDA (Windows)**: Windows + NVIDIA GPU + MSVC
-- **PC-CUDA (Linux)**: Linux + NVIDIA GPU + GCC
-- **GPU云服务器**: Linux + Multi-NVIDIA GPU + GCC
+#### GPU加速
+- **CUDA Toolkit** (≥13.0), **cuDNN** (≥9.17)
+- **MUSA Toolkit** (≥3.0), **muDNN** (≥2.8)
+- **NCCL** (≥2.28) - GPU_CLOUD专用多卡通信
+
+#### 深度学习库
+- **oneDNN** (Intel oneAPI Deep Neural Network Library)
+- **XNNPACK** (Google的移动端优化神经网络库)
+- **STB** (RISC-V图像预处理fallback库，全平台支持)
+- **libjpeg-turbo** (高性能JPEG解码库)
+
+#### 系统库
+- **zlib** (压缩库), **libcurl** (网络库)
+- **mimalloc** (微软高性能内存池)
+- **Python** (≥3.12.0), **NumPy** (≥1.24.0)
+- **内存池**: mimalloc (微软高性能内存池)
+
+### 编译宏系统
+生成的编译宏支持精细的功能控制：
+```cmake
+### 场景宏（互斥，只能有一个为1）
+TR_SCENE_PC_CUDA
+TR_SCENE_GPU_CLOUD
+TR_SCENE_PC_MUSA
+TR_SCENE_CPU_CLOUD
+TR_SCENE_EDGE_ARM
+TR_SCENE_EDGE_RISCV
+
+### 功能宏
+TR_USE_CUDA          ### 是否使用CUDA/cuDNN
+TR_USE_MUSA          ### 是否使用MUSA/muDNN
+TR_USE_ONEDNN        ### 是否使用oneDNN（x86专用）
+TR_USE_XNNPACK       ### 是否使用XNNPACK
+TR_USE_STB           ### 是否使用STB库
+TR_USE_MULTI_GPU     ### 是否启用多GPU支持
+TR_NUM_GPUS          ### 检测到的GPU数量
+
+### 边缘设备标识
+TR_IS_EDGE_DEVICE    ### EDGE_ARM 或 EDGE_RISCV 时为 1
+```
+
+## 技术架构
+
+### 系统架构
+```
+configure.py (入口点)
+├── smart_config.py (核心逻辑)
+│   ├── 系统检测 (CPU/OS/GPU)
+│   ├── 场景判断 (6大场景)
+│   ├── 依赖搜索 (16个依赖项)
+│   ├── 版本检测 (智能版本提取)
+│   └── 配置生成 (CMake/JSON/脚本)
+└── dependency_data.py (配置数据)
+    ├── 场景定义 (SCENE_DEPS)
+    ├── 依赖配置 (DEP_CONFIG)
+    └── 安装建议 (INSTALL_SUGGESTIONS)
+```
+
+### 检测流程 (6步GPU检测)
+1. **CPU架构判断**: ARM→EDGE_ARM, RISC-V→EDGE_RISCV, x86→继续
+2. **GPU使用询问**: ([Y]/N) 默认为Y，直接回车使用
+3. **GPU类型判断**: 检测到则直接使用，未检测到则询问并提供驱动安装建议
+4. **操作系统判断**: Windows→PC_CUDA, Linux→继续
+5. **GPU数量判断**: 多卡→GPU_CLOUD, 单卡→PC_CUDA
+6. **默认场景**: CPU_CLOUD
+
+### 版本检测策略
+- **cuDNN**: Windows路径推导 + Linux头文件解析
+- **vcpkg包**: 全字匹配 + 版本格式验证
+- **可执行文件**: 标准命令行版本检测
+- **头文件**: 文件内容解析
+
+### 场景化配置 (V3.1.0)
+根据硬件环境自动确定6大使用场景：
+- **PC_CUDA**: Windows + NVIDIA GPU + MSVC
+- **GPU_CLOUD**: Linux + Multi-NVIDIA GPU + GCC
+- **PC_MUSA**: Linux + 摩尔线程GPU + GCC
+- **CPU_CLOUD**: Windows/Linux x86 CPU云服务器
+- **EDGE_ARM**: ARM嵌入式Linux + GCC
+- **EDGE_RISCV**: RISC-V嵌入式Linux + GCC
 
 ### 智能特性
-- **硬件自动检测**: CPU架构、GPU型号、数量
-- **多版本选择**: 对关键工具提供用户选择界面
-- **vcpkg集成**: 优先通过vcpkg查找依赖
-- **版本验证**: 严格检查依赖版本兼容性
-- **用户交互**: 友好的彩色输出和错误提示
+- **硬件自动检测**: CPU架构、GPU型号、数量、驱动版本
+- **智能GPU检测**: 6步GPU检测流程，自动判断场景并提供驱动安装建议
+- **vcpkg集成**: 优先通过vcpkg查找依赖，精确包匹配
+- **版本检测**: 智能版本提取（路径推导、头文件解析、命令检测）
+- **用户交互**: 优化默认选择，减少用户输入，统一格式输出
+
+### 用户体验优化
+- **统一输出格式**: 14字符依赖项名 + 15字符版本号 + 路径
+- **智能默认选项**: GPU使用默认为Y，减少用户输入
+- **颜色编码**: 不同类型信息使用不同颜色标识
+- **错误处理**: 详细的错误提示和安装建议
+
+## 使用方法
+
+### 快速启动
+```bash
+# 1. 进入项目根目录
+cd R:/renaissance
+
+# 2. 运行自动配置
+python configure.py
+
+# 3. 选择使用GPU加速（直接回车即可）
+# 询问GPU类型：检测到则直接使用，未检测到则提供安装建议
+
+# 4. 选择Python安装（非交互模式自动选择第一个）
+```
+
+### 输出示例
+```
+[Step 1/8] Checking CPU architecture...
+[OK] Architecture: x86_64
+
+[Step 2/8] Checking operating system...
+[OK] OS: Windows
+
+[Step 3/8] Detecting GPU hardware...
+[OK] GPU: NVIDIA GeForce RTX 4060 Laptop GPU (x1), Driver: 591.44
+
+[Step 4/8] Checking vcpkg package manager...
+[OK] vcpkg: T:\Softwares\vcpkg
+
+[Step 5/8] Checking C++ toolchain...
+[OK] MSVC          [v14.44.35207]  - C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/bin/Hostx64
+[OK] CMake         [v4.1.0]        - T:/Softwares/CMake/bin
+[OK] Ninja         [v1.12.1]       - B:/Softwares/JetBrains/CLion 2025.2/bin/ninja/win/x64
+
+[Step 6/8] Determining usage scenario...
+Do you want to use GPU acceleration? ([Y]/N): [用户直接回车]
+
+[Step 7/8] Checking GPU acceleration libraries...
+[OK] CUDA Toolkit  [v13.0]         - C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.0
+[OK] cuDNN         [v9.17]         - C:/Program Files/NVIDIA/CUDNN/v9.17
+
+[Step 8/8] Checking other libraries...
+[OK] oneDNN        [v3.7]          - T:/Softwares/vcpkg/installed/x64-windows
+[OK] XNNPACK       [v2024-08-20]   - T:/Softwares/vcpkg/installed/x64-windows
+[OK] STB           [v2024-07-29]   - T:/Softwares/vcpkg/installed/x64-windows
+[INFO] Selected: Python        [v3.14.0]       - C:/Python314
+
+[Step 8/8] Generating configuration files...
+[OK] Build Directory: build/cmake-build-release
+[OK] Generated: config\cmake_paths.cmake
+[OK] Generated: config\project_config.json
+[OK] Generated: build.bat
+```
+
+### 生成文件
+运行配置后自动生成：
+- **config/cmake_paths.cmake** - CMake路径配置和编译宏
+- **config/project_config.json** - 完整的项目和依赖信息
+- **build.bat** - Windows一键构建脚本
 
 ## 系统架构
 
-### 脚本组织
+### 脚本组织 (V3.1.0)
 ```
 renAIssance/
-├── configure.py              # 根目录配置入口
+├── configure.py              # V3.1.0 配置入口，支持6大场景
 ├── python/scripts/
-│   ├── smart_config.py      # 核心智能配置逻辑
-│   └── dependency_data.py    # 依赖定义和场景配置
+│   ├── smart_config.py      # V3.1.0 核心配置逻辑，6步GPU检测
+│   └── dependency_data.py    # V3.1.0 6大场景+16依赖项配置
 ├── config/                   # 生成的配置文件
-│   ├── cmake_paths.cmake     # CMake路径配置
-│   └── project_config.json   # 项目配置JSON
-└── build.bat                 # Windows构建脚本
+│   ├── cmake_paths.cmake     # CMake配置+完整编译宏
+│   └── project_config.json   # 项目配置+GPU信息+版本详情
+└── build.bat                 # Windows构建脚本，支持CUDA/OpenMP
 ```
 
 ### 核心组件
@@ -94,8 +246,8 @@ renAIssance/
 - **用户选择模块**: get_user_choice()
 
 #### 3. dependency_data.py (数据定义)
-- **场景定义**: SCENE_DEPS - 三大核心场景配置
-- **依赖配置**: DEP_CONFIG - 详细依赖搜索策略
+- **场景定义**: SCENE_DEPS - 五大核心场景配置（包含嵌入式和MUSA）
+- **依赖配置**: DEP_CONFIG - 详细依赖搜索策略（支持MUSA/mudnn）
 - **安装建议**: INSTALL_SUGGESTIONS - 依赖安装指引
 
 ## 实现细节
@@ -131,12 +283,15 @@ def detect_gpu() -> Dict
 def determine_scene(sys_info: Dict, gpu_info: Dict) -> str
 ```
 **功能**: 根据系统信息判断使用场景
-**返回**: 场景标识符（如`pc_cuda_win`、`gpu_cloud`）
+**返回**: 场景标识符（如`pc_cuda_win`、`gpu_cloud`、`pc_musa`、`embedded`）
 **实现逻辑**:
-1. ARM/RISC-V → 嵌入式场景
+1. ARM/RISC-V架构 → 嵌入式场景（已实现）
 2. Windows → PC-CUDA场景
-3. Linux → 交互式选择CPU/GPU云场景
+3. Linux + GPU检测：
+   - NVIDIA GPU → PC-CUDA或GPU云场景
+   - 摩尔线程GPU → PC-MUSA场景（已实现）
 4. GPU数量决定单卡或多卡云场景
+5. 无GPU → CPU云场景
 
 #### 2. 依赖搜索函数
 
@@ -160,9 +315,10 @@ def find_all_dependency_versions(name: str, sys_info: Dict) -> List[Dict]
 **功能**: 找到所有符合版本要求的依赖版本
 **返回**: 版本信息列表，供用户选择
 **特殊处理**:
-- Python包使用`check_cmd`直接检测
+- Python包使用`check_cmd`直接检测，优先使用当前运行的Python解释器
 - 可执行文件使用`extract_version_from_path()`获取精确版本
-- 支持多版本用户选择界面
+- 支持多版本用户选择界面，单个版本时自动选择无需询问（已实现）
+- 智能重复检测，避免相同Python安装的重复添加
 
 ##### `search_in_vcpkg(name, config, is_win)` - vcpkg专用搜索
 ```python
@@ -170,8 +326,13 @@ def search_in_vcpkg(name: str, config: Dict, is_win: bool) -> Dict
 ```
 **功能**: 在vcpkg安装目录中查找依赖
 **实现原理**:
+- 根据系统架构智能选择triplet：
+  - Windows: `x64-windows`
+  - Linux x86_64: `x64-linux`
+  - Linux ARM64: `arm64-linux`
+  - Linux ARM: `arm-linux`
+  - Linux RISC-V: `riscv64-linux`（已实现）
 - 构建vcpkg安装路径：`{VCPKG_ROOT}/installed/{triplet}`
-- 根据平台选择triplet（`x64-windows`或`x64-linux`）
 - 检查`include`子目录下的头文件存在性
 
 ##### `find_msvc()` - MSVC专用查找
@@ -390,19 +551,25 @@ python configure.py
 
 # 自动化使用
 python configure.py && ./build.bat  # Windows
-python configure.py && ./build.sh  # Linux
+python configure.py && ./build.sh  # Linux/ARM/Debian
 ```
+
+### 平台兼容性（已验证）
+- **Windows 11**: ✅ x86_64 + MSVC + CUDA
+- **Ubuntu 24.04 LTS**: ✅ x86_64 + GCC + CUDA
+- **树莓派5 (Debian)**: ✅ ARM64 + GCC（嵌入式场景）
+- **摩尔线程GPU**: ✅ Linux + MUSA + muDNN
 
 ### 配置结果
 - **config/cmake_paths.cmake**: CMake路径配置
 - **config/project_config.json**: 完整项目配置
-- **build.bat / build.sh**: 构建脚本
+- **build.bat / build.sh**: 平台特定构建脚本
 
 ## 扩展性和未来发展
 
 ### 短期扩展计划
-1. **更多平台支持**: ARM, RISC-V, macOS
-2. **更多依赖支持**: NCCL, MPI, 分布式训练
+1. ✅ **更多平台支持**: ARM, RISC-V 已实现，macOS 预留接口
+2. ✅ **更多依赖支持**: MUSA/muDNN 已实现，NCCL, MPI 预留接口
 3. **自动化安装**: 自动安装缺失依赖
 4. **配置验证**: 配置正确性检查和测试
 
@@ -413,6 +580,13 @@ python configure.py && ./build.sh  # Linux
 
 ## 总结
 
-renAIssance 自动配置系统通过智能检测、多策略搜索、用户友好的界面设计，彻底解决了深度学习框架部署中的依赖管理难题。系统采用模块化架构、数据驱动配置，具有良好的可扩展性和可维护性。通过vcpkg集成、版本控制、跨平台支持等特性，为深度学习框架的快速部署和广泛使用奠定了坚实基础。
+renAIssance 自动配置系统通过智能检测、多策略搜索、用户友好的界面设计，彻底解决了深度学习框架部署中的依赖管理难题。系统采用模块化架构、数据驱动配置，具有良好的可扩展性和可维护性。
 
-该系统不仅提高了部署效率，更重要的是降低了用户使用门槛，让开发者能够专注于算法和模型开发，而不是环境配置的繁琐工作。这对于推动深度学习技术的普及和应用具有重要的实际意义。
+### 核心成就（V3.0.4）
+- ✅ **跨平台支持**: Windows、Linux、ARM/RISC-V全面实现
+- ✅ **多GPU支持**: NVIDIA CUDA、摩尔线程MUSA完整支持
+- ✅ **智能检测**: 自动场景判断、依赖版本管理
+- ✅ **用户体验**: 单版本自动选择、多版本友好交互
+- ✅ **平台验证**: Windows 11、Ubuntu 24.04、树莓派5实际测试通过
+
+通过vcpkg集成、版本控制、跨平台支持等特性，为深度学习框架的快速部署和广泛使用奠定了坚实基础。该系统不仅提高了部署效率，更重要的是降低了用户使用门槛，让开发者能够专注于算法和模型开发，而不是环境配置的繁琐工作。这对于推动深度学习技术的普及和应用具有重要的实际意义。

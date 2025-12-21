@@ -1,45 +1,107 @@
 # -*- coding: utf-8 -*-
 """
 @file dependency_data.py
-@brief 技术觉醒框架依赖配置数据（Phase 1：核心场景精简版）
-@details 只包含PC-CUDA和GPU云场景的必需依赖
-@version 3.00.04
-@date 2025-01-01
+@brief 技术觉醒框架依赖配置数据（V3.1.0：六大场景升级版）
+@details 支持6大场景、16个依赖项的完整配置系统
+@version 3.01.00
+@date 2025-12-21
 @author 技术觉醒团队
 """
 
 # ============================================================================
-# 场景定义（Phase 1：三大核心场景）
+# 场景定义（Phase 1：六大核心场景）
 # ============================================================================
 
 SCENE_DEPS = {
-    "pc_cuda_win": {
-        "name": "PC-CUDA (Windows)",
+    "pc_cuda": {
+        "name": "PC-CUDA",
         "description": "Windows + NVIDIA GPU + MSVC",
-        "required": ["cmake", "ninja", "msvc", "cuda", "cudnn", "onednn", "xnnpack", "zlib", "libcurl", "python", "numpy"],
+        "required": ["cmake", "ninja", "msvc", "cuda", "cudnn", "onednn", "xnnpack", "zlib", "libcurl", "libjpeg-turbo", "mimalloc", "stb", "python", "numpy"],
         "optional": [],
-        "cmake_opts": ["-DTR_USE_CUDA=ON", "-DTR_USE_MUSA=OFF"]
-    },
-    "pc_cuda_linux": {
-        "name": "PC-CUDA (Linux)",
-        "description": "Linux + NVIDIA GPU + GCC",
-        "required": ["cmake", "ninja", "gcc", "cuda", "cudnn", "onednn", "xnnpack", "zlib", "libcurl", "python", "numpy"],
-        "optional": [],
-        "cmake_opts": ["-DTR_USE_CUDA=ON", "-DTR_USE_MUSA=OFF"]
+        "cmake_opts": [
+            "-DTR_SCENE_PC_CUDA=ON",
+            "-DTR_USE_CUDA=ON",
+            "-DTR_USE_MUSA=OFF",
+            "-DTR_USE_ONEDNN=ON",
+            "-DTR_USE_XNNPACK=ON",
+            "-DTR_USE_SIMD=ON",
+            "-DTR_USE_STB=ON"
+        ]
     },
     "gpu_cloud": {
-        "name": "GPU云服务器",
+        "name": "GPU_CLOUD",
         "description": "Linux + Multi-NVIDIA GPU + GCC",
-        "required": ["cmake", "ninja", "gcc", "cuda", "cudnn", "onednn", "xnnpack", "zlib", "libcurl", "python", "numpy"],
+        "required": ["cmake", "ninja", "gcc", "cuda", "cudnn", "nccl", "onednn", "xnnpack", "zlib", "libcurl", "libjpeg-turbo", "mimalloc", "stb", "python", "numpy"],
         "optional": [],
-        "cmake_opts": ["-DTR_USE_CUDA=ON", "-DTR_USE_MUSA=OFF"]
+        "cmake_opts": [
+            "-DTR_SCENE_GPU_CLOUD=ON",
+            "-DTR_USE_CUDA=ON",
+            "-DTR_USE_MUSA=OFF",
+            "-DTR_USE_ONEDNN=ON",
+            "-DTR_USE_XNNPACK=ON",
+            "-DTR_USE_NCCL=ON",
+            "-DTR_USE_MULTI_GPU=ON",
+            "-DTR_USE_SIMD=ON",
+            "-DTR_USE_STB=ON"
+        ]
     },
     "pc_musa": {
-        "name": "PC-MUSA (Linux)",
+        "name": "PC-MUSA",
         "description": "Linux + Moore Threads GPU + GCC",
-        "required": ["cmake", "ninja", "gcc", "musa", "mudnn", "onednn", "xnnpack", "zlib", "libcurl", "python", "numpy"],
+        "required": ["cmake", "ninja", "gcc", "musa", "mudnn", "onednn", "xnnpack", "zlib", "libcurl", "libjpeg-turbo", "mimalloc", "stb", "python", "numpy"],
         "optional": [],
-        "cmake_opts": ["-DTR_USE_CUDA=OFF", "-DTR_USE_MUSA=ON"]
+        "cmake_opts": [
+            "-DTR_SCENE_PC_MUSA=ON",
+            "-DTR_USE_CUDA=OFF",
+            "-DTR_USE_MUSA=ON",
+            "-DTR_USE_ONEDNN=ON",
+            "-DTR_USE_XNNPACK=ON",
+            "-DTR_USE_SIMD=ON",
+            "-DTR_USE_STB=ON"
+        ]
+    },
+    "cpu_cloud": {
+        "name": "CPU_CLOUD",
+        "description": "Windows/Linux x86 CPU Cloud Server + GCC/MSVC",
+        "required": ["cmake", "ninja", "onednn", "xnnpack", "zlib", "libcurl", "libjpeg-turbo", "mimalloc", "stb", "python", "numpy"],
+        "optional": ["gcc", "msvc"],  # 编译器为可选，根据平台选择
+        "cmake_opts": [
+            "-DTR_SCENE_CPU_CLOUD=ON",
+            "-DTR_USE_CUDA=OFF",
+            "-DTR_USE_MUSA=OFF",
+            "-DTR_USE_ONEDNN=ON",
+            "-DTR_USE_XNNPACK=ON",
+            "-DTR_USE_SIMD=ON",
+            "-DTR_USE_STB=ON"
+        ]
+    },
+    "edge_arm": {
+        "name": "EDGE_ARM",
+        "description": "ARM Embedded Linux + GCC",
+        "required": ["cmake", "ninja", "gcc", "xnnpack", "zlib", "libcurl", "libjpeg-turbo", "mimalloc", "stb", "python", "numpy"],
+        "optional": [],
+        "cmake_opts": [
+            "-DTR_SCENE_EDGE_ARM=ON",
+            "-DTR_USE_CUDA=OFF",
+            "-DTR_USE_MUSA=OFF",
+            "-DTR_USE_XNNPACK=ON",
+            "-DTR_USE_STB=ON",
+            "-DTR_IS_EDGE_DEVICE=ON"
+        ]
+    },
+    "edge_riscv": {
+        "name": "EDGE_RISCV",
+        "description": "RISC-V Embedded Linux + GCC",
+        "required": ["cmake", "ninja", "gcc", "xnnpack", "zlib", "libcurl", "libjpeg-turbo", "mimalloc", "stb", "python", "numpy"],
+        "optional": [],
+        "cmake_opts": [
+            "-DTR_SCENE_EDGE_RISCV=ON",
+            "-DTR_USE_CUDA=OFF",
+            "-DTR_USE_MUSA=OFF",
+            "-DTR_USE_XNNPACK=ON",
+            "-DTR_USE_STB=ON",
+            "-DTR_IS_EDGE_DEVICE=ON"
+        ]
     }
 }
 
@@ -140,13 +202,15 @@ DEP_CONFIG = {
         "env": ["CUDNN_ROOT", "CUDNN_PATH"],
         "paths_win": [
             "C:/Program Files/NVIDIA/CUDNN",
-            "C:/Program Files/NVIDIA/CUDNN/v9.*"
+            "C:/Program Files/NVIDIA/CUDNN/v9.*",
+            "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/*/include"
         ],
         "paths_linux": ["/usr/local/cuda", "/usr", "/usr/local/cuda/lib64"],
         "version_cmd": ["grep", "CUDNN_MAJOR", "-A", "2", "{include}/cudnn_version.h"],
         "version_pattern": r"#define CUDNN_MAJOR\s+(\d+).*#define CUDNN_MINOR\s+(\d+).*#define CUDNN_PATCHLEVEL\s+(\d+)",
         "min_version": "9.17",
-        "install_hint": "https://developer.nvidia.com/cudnn"
+        "install_hint": "https://developer.nvidia.com/cudnn",
+        "use_path_version": True  # 使用路径推导版本号
     },
 
     "musa": {
@@ -186,7 +250,7 @@ DEP_CONFIG = {
             "C:/Users/*/AppData/Local/Programs/Python/Python3*",
             "T:/Softwares/msys64/mingw64/bin"
         ],
-        "paths_linux": ["/home/tech-renaissance/venv/py314/bin", "/home/ubuntu/venv/py314/bin", "/usr/bin", "/usr/local/bin", "/opt/python/bin"],
+        "paths_linux": ["~/venv/py314/bin", "/home/tech-renaissance/venv/py314/bin", "/usr/bin", "/usr/local/bin", "/opt/python/bin"],
         "version_cmd": ["python", "--version"],
         "version_pattern": r"Python (\d+\.\d+\.\d+)",
         "min_version": "3.12.0",
@@ -208,8 +272,8 @@ DEP_CONFIG = {
         "exe": [],  # 通过头文件检测
         "header": ["dnnl.hpp", "dnn.hpp"],
         "env": ["ONEDNN_ROOT", "DNNL_ROOT"],
-        "vcpkg_packages": ["dnnl"],
-        "install_hint": "vcpkg install dnnl"
+        "vcpkg_packages": ["onednn"],
+        "install_hint": "vcpkg install onednn"
     },
 
     "zlib": {
@@ -240,7 +304,59 @@ DEP_CONFIG = {
         "lib_files": ["xnnpack.dll", "libxnnpack.so"],
         "env": ["XNNPACK_ROOT"],
         "vcpkg_packages": ["xnnpack"],
+        "version_pattern": r"(\d{4}-\d{2}-\d{2})",  # 日期格式: 2024-08-20
         "install_hint": "vcpkg install xnnpack"
+    },
+
+    # 新增依赖项
+    "mimalloc": {
+        "name": "mimalloc",
+        "exe": [],  # 通过头文件检测
+        "header": "mimalloc.h",
+        "lib_files": ["mimalloc.dll", "libmimalloc.so"],
+        "env": ["MIMALLOC_ROOT"],
+        "vcpkg_packages": ["mimalloc"],
+        "install_hint": "vcpkg install mimalloc"
+    },
+
+    "stb": {
+        "name": "STB",
+        "exe": [],  # 通过头文件检测 (单头文件库)
+        "header": "stb_image.h",  # 主要检测stb_image.h
+        "env": ["STB_ROOT"],
+        "vcpkg_packages": ["stb"],
+        "version_pattern": r"(\d{4}-\d{2}-\d{2})",  # 日期格式: 2024-07-29
+        "install_hint": "vcpkg install stb"
+    },
+
+    "libjpeg-turbo": {
+        "name": "libjpeg-turbo",
+        "exe": ["jpegtran", "cjpeg", "djpeg"],  # 通过可执行文件检测
+        "header": "jpeglib.h",
+        "lib_files": ["libjpeg-turbo.dll", "libjpeg.so", "libjpeg-turbo.so"],
+        "env": ["JPEG_ROOT"],
+        "vcpkg_packages": ["libjpeg-turbo"],
+        "paths_win": [
+            "C:/Program Files/libjpeg-turbo",
+            "C:/Program Files/libjpeg-turbo64"
+        ],
+        "paths_linux": ["/usr", "/usr/local", "/opt/libjpeg-turbo"],
+        "version_cmd": ["jpegtran", "-version"],
+        "version_pattern": r"version (\d+\.\d+\.\d+)",
+        "install_hint": "vcpkg install libjpeg-turbo"
+    },
+
+    "nccl": {
+        "name": "NCCL",
+        "exe": [],  # 通过头文件检测
+        "header": "nccl.h",
+        "lib_files": ["nccl.dll", "libnccl.so"],
+        "env": ["NCCL_ROOT", "NCCL_HOME"],
+        "paths_linux": ["/usr/local/nccl", "/usr", "/opt/nccl"],
+        "version_cmd": ["grep", "NCCL_MAJOR", "-A", "2", "{include}/nccl_version.h"],
+        "version_pattern": r"#define NCCL_MAJOR\s+(\d+).*#define NCCL_MINOR\s+(\d+).*#define NCCL_PATCH\s+(\d+)",
+        "min_version": "2.28",
+        "install_hint": "Download from https://developer.nvidia.com/nccl"
     }
 }
 
@@ -291,6 +407,19 @@ INSTALL_SUGGESTIONS = {
     },
     "mudnn": {
         "both": "Download from https://www.mthreads.com/download"
+    },
+    "mimalloc": {
+        "both": "Run: vcpkg install mimalloc"
+    },
+    "stb": {
+        "both": "Run: vcpkg install stb"
+    },
+    "libjpeg-turbo": {
+        "windows": "Run: vcpkg install libjpeg-turbo",
+        "linux": "Run: sudo apt install libjpeg-turbo8-dev OR vcpkg install libjpeg-turbo"
+    },
+    "nccl": {
+        "linux": "Download from https://developer.nvidia.com/nccl"
     }
 }
 

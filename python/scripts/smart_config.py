@@ -2,10 +2,10 @@
 # -*- coding: utf-8 -*-
 """
 @file smart_config.py
-@brief 技术觉醒深度学习框架 V3.0.4 智能配置模块
-@details 系统检测、场景判断、依赖搜索、配置文件生成的核心逻辑
-@version 3.00.04
-@date 2025-01-01
+@brief 技术觉醒深度学习框架 V3.1.0 智能配置模块
+@details 系统检测、6大场景判断、16依赖项搜索、完整编译宏生成的核心逻辑
+@version 3.01.00
+@date 2025-12-21
 @author 技术觉醒团队
 """
 
@@ -77,10 +77,10 @@ def print_header(title: str):
     except:
         version = "3.0.4"
 
-    print_colored(f"\n{'='*60}", Colors.BOLD)
+    print_colored(f"\n{'='*46}", Colors.BOLD)
     print_colored(f"  {title}", Colors.BOLD)
     print_colored(f"  renAIssance Deep Learning Framework v{version}", Colors.BOLD)
-    print_colored(f"{'='*60}", Colors.BOLD)
+    print_colored(f"{'='*46}", Colors.BOLD)
 
 def print_step(step: int, total: int, msg: str):
     """打印步骤"""
@@ -93,6 +93,41 @@ def print_ok(msg: str):
 def print_fail(msg: str):
     """打印失败信息"""
     print_colored(f"[FAIL] {msg}", Colors.FAIL)
+
+def format_dependency_output(name: str, version: str = None, path: str = None) -> str:
+    """格式化依赖项输出
+
+    Args:
+        name: 依赖项名称
+        version: 版本号 (可选)
+        path: 路径 (可选)
+
+    Returns:
+        格式化后的字符串
+    """
+    # 依赖项名占14字符，左对齐
+    name_part = f"{name:<14}"
+
+    # 版本号部分 - 完整版本信息在括号内，括号后补空格
+    if version:
+        version_part = f"[v{version}]"  # 完整版本信息在括号内
+    else:
+        version_part = "[             ]"  # 空版本号占位，15字符宽度
+
+    # 计算需要的空格数来保持总宽度一致
+    if version:
+        needed_spaces = 15 - len(version_part)
+        version_part += " " * needed_spaces
+
+    # 路径部分 - 统一使用斜线分隔
+    if path and path != "system PATH" and path != "system":
+        # 统一转换为斜线分隔
+        path_part = path.replace("\\", "/")
+        result = f"{name_part}{version_part} - {path_part}"
+    else:
+        result = f"{name_part}{version_part}"
+
+    return result
 
 def print_info(msg: str):
     """打印信息"""
@@ -121,9 +156,11 @@ def get_user_choice(options: List[Dict], prompt: str) -> Dict:
 
     # 列出选项
     for i, option in enumerate(options, 1):
-        version_str = f" v{option['version']}" if option.get("version") else ""
-        path_str = f" ({option['path']})" if option.get("path") else ""
-        print(f"  {i}. {option['name']}{version_str}{path_str}")
+        version = option.get("version", "")
+        path = option.get("path", "")
+        # 使用统一的格式化函数，但不要加上[OK]前缀
+        formatted = format_dependency_output(option['name'], version, path)
+        print(f"  {i}. {formatted}")
 
     # 添加"其他"选项
     print(f"  {len(options) + 1}. Other (enter custom path)")
@@ -132,11 +169,17 @@ def get_user_choice(options: List[Dict], prompt: str) -> Dict:
     while True:
         try:
             choice = input(f"  Please select [1-{len(options) + 1}]: ").strip()
-            choice_num = int(choice)
+            if not choice:  # 空输入默认为1
+                choice_num = 1
+            else:
+                choice_num = int(choice)
 
             if 1 <= choice_num <= len(options):
                 selected = options[choice_num - 1]
-                print_ok(f"Selected: {selected['name']} v{selected.get('version', 'unknown')}")
+                version = selected.get('version', 'unknown')
+                path = selected.get('path')
+                formatted_output = format_dependency_output(selected['name'], version, path)
+                print_info(f"Selected: {formatted_output}")
                 return selected
             elif choice_num == len(options) + 1:
                 custom_path = input("  Enter custom path: ").strip()
@@ -212,6 +255,155 @@ def compare_version(v1: str, v2: str) -> int:
         if a > b: return 1
     return 0
 
+def extract_cudnn_version_from_path(path: str) -> str:
+    """从cuDNN路径推导版本号 - Windows看路径，Linux看头文件"""
+    # 标准化路径
+    path = path.replace("\\", "/")
+    import re
+    import platform
+
+    if platform.system() == "Windows":
+        # Windows下：从路径中提取版本号
+        # 模式1: CUDNN/v9.17
+        pattern1 = r"/v(\d+\.\d+)"
+        match = re.search(pattern1, path)
+        if match:
+            return match.group(1)
+
+        # 模式2: CUDNN/v9.17.0
+        pattern2 = r"/v(\d+\.\d+\.\d+)"
+        match = re.search(pattern2, path)
+        if match:
+            return match.group(1)
+
+        # 模式3: 检查常见的cuDNN版本目录名
+        common_versions = ["9.17", "9.16", "9.15", "9.14", "9.13", "9.12", "9.11", "9.10"]
+        for version in common_versions:
+            if version in path:
+                return version
+
+    else:
+        # Linux下：从CUDA路径的include/cudnn_version.h读取版本号
+        # 假设cuDNN安装在CUDA目录中，先找到CUDA目录
+        cuda_paths = [
+            "/usr/local/cuda",
+            "/usr/local/cuda-13.0",
+            "/usr/local/cuda-12.0",
+            "/usr/local/cuda-11.8"
+        ]
+
+        # 如果当前路径就是CUDA路径，直接使用
+        if "cuda" in path.lower():
+            cuda_paths.insert(0, path)
+
+        for cuda_path in cuda_paths:
+            cudnn_version_file = os.path.join(cuda_path, "include", "cudnn_version.h")
+            if os.path.exists(cudnn_version_file):
+                try:
+                    # 使用grep命令读取版本信息
+                    success, output = run_cmd(["cat", cudnn_version_file])
+                    if success:
+                        lines = output.split('\n')
+                        major = minor = patch = None
+
+                        for line in lines:
+                            if '#define CUDNN_MAJOR' in line:
+                                major_match = re.search(r'#define\s+CUDNN_MAJOR\s+(\d+)', line)
+                                if major_match:
+                                    major = major_match.group(1)
+                            elif '#define CUDNN_MINOR' in line:
+                                minor_match = re.search(r'#define\s+CUDNN_MINOR\s+(\d+)', line)
+                                if minor_match:
+                                    minor = minor_match.group(1)
+                            elif '#define CUDNN_PATCHLEVEL' in line:
+                                patch_match = re.search(r'#define\s+CUDNN_PATCHLEVEL\s+(\d+)', line)
+                                if patch_match:
+                                    patch = patch_match.group(1)
+
+                        if major and minor:
+                            return f"{major}.{minor}.{patch if patch else '0'}"
+
+                except Exception:
+                    pass
+
+        # 备用方案：从头文件解析
+        include_paths = [
+            path + "/include",
+            path,
+            path + "/include/cudnn",
+            path + "/cudnn"
+        ]
+
+        for include_path in include_paths:
+            version_file = os.path.join(include_path, "cudnn_version.h")
+            if os.path.exists(version_file):
+                try:
+                    with open(version_file, 'r') as f:
+                        content = f.read()
+
+                    # 解析版本号
+                    major_match = re.search(r'#define\s+CUDNN_MAJOR\s+(\d+)', content)
+                    minor_match = re.search(r'#define\s+CUDNN_MINOR\s+(\d+)', content)
+                    patch_match = re.search(r'#define\s+CUDNN_PATCHLEVEL\s+(\d+)', content)
+
+                    if major_match and minor_match:
+                        major = major_match.group(1)
+                        minor = minor_match.group(1)
+                        patch = patch_match.group(1) if patch_match else "0"
+                        return f"{major}.{minor}.{patch}"
+
+                except Exception:
+                    pass
+
+    return "unknown"
+
+def extract_date_version_from_header(path: str, header_names: List[str]) -> str:
+    """从头文件中提取日期格式的版本号"""
+    import re
+
+    # 构建可能的头文件路径
+    include_paths = [
+        path + "/include",
+        path,
+        path + "/include/xnnpack",
+        path + "/include/stb"
+    ]
+
+    for include_path in include_paths:
+        for header_name in header_names:
+            header_path = os.path.join(include_path, header_name)
+            if os.path.exists(header_path):
+                try:
+                    with open(header_path, 'r', encoding='utf-8', errors='ignore') as f:
+                        content = f.read()
+
+                    # 查找日期格式的版本号 (YYYY-MM-DD)
+                    date_patterns = [
+                        r'(\d{4}-\d{2}-\d{2})',  # 2024-08-20
+                        r'(\d{1,2}/\d{1,2}/\d{4})',  # 8/20/2024
+                        r'(20\d{2}-[A-Za-z]{3}-\d{1,2})',  # 2024-Aug-20
+                    ]
+
+                    for pattern in date_patterns:
+                        matches = re.findall(pattern, content)
+                        for match in matches:
+                            # 验证这是一个合理的日期版本号
+                            if re.match(r'20\d{2}-\d{2}-\d{2}', match):
+                                return match
+                            elif re.match(r'\d{1,2}/\d{1,2}/20\d{2}', match):
+                                # 转换 M/D/YYYY 为 YYYY-MM-DD
+                                parts = match.split('/')
+                                if len(parts) == 3:
+                                    year = parts[2]
+                                    month = parts[0].zfill(2)
+                                    day = parts[1].zfill(2)
+                                    return f"{year}-{month}-{day}"
+
+                except Exception:
+                    pass
+
+    return "unknown"
+
 def extract_version_from_path(path: str, dep_name: str) -> str:
     """通过执行--version命令从路径获取准确版本信息"""
     if not path:
@@ -221,6 +413,16 @@ def extract_version_from_path(path: str, dep_name: str) -> str:
     config = DEP_CONFIG.get(dep_name.lower())
     if not config:
         return "unknown"
+
+    # 特殊处理：cuDNN使用路径推导版本号
+    if dep_name.lower() == "cudnn" and config.get("use_path_version"):
+        return extract_cudnn_version_from_path(path)
+
+    # 特殊处理：XNNPACK和STB尝试从文件内容解析日期版本
+    if dep_name.lower() in ["xnnpack", "stb"] and "header" in config:
+        version = extract_date_version_from_header(path, config["header"])
+        if version != "unknown":
+            return version
 
     # 构建版本命令
     if "version_cmd" in config:
@@ -320,26 +522,64 @@ def detect_system() -> Dict:
     return info
 
 def detect_gpu() -> Dict:
-    """检测GPU信息"""
-    gpu_info = {"type": None, "name": None, "count": 0, "detected": False}
+    """检测GPU信息 - 增强GPU数量和版本检查"""
+    gpu_info = {"type": None, "name": None, "count": 0, "detected": False, "driver_version": None}
 
     # 检测NVIDIA GPU
-    success, output = run_cmd(["nvidia-smi", "--query-gpu=name,count", "--format=csv,noheader"])
+    success, output = run_cmd(["nvidia-smi", "--query-gpu=name,count,driver_version", "--format=csv,noheader,nounits"])
     if success:
         lines = [l.strip() for l in output.strip().split('\n') if l.strip()]
         if lines:
             gpu_info["type"] = "nvidia"
-            gpu_info["name"] = lines[0].split(',')[0].strip()
             gpu_info["count"] = len(lines)
+
+            # 解析第一行GPU信息获取名称和驱动版本
+            first_line = lines[0]
+            parts = [p.strip() for p in first_line.split(',')]
+            if len(parts) >= 3:
+                gpu_info["name"] = parts[0]
+                gpu_info["driver_version"] = parts[2]
+                # 如果有多张相同型号的GPU，显示为"GPU名称 x N"
+                if gpu_info["count"] > 1:
+                    gpu_info["name"] = f"{parts[0]} x {gpu_info['count']}"
+                else:
+                    gpu_info["name"] = parts[0]
+            else:
+                # 兼容旧格式
+                gpu_info["name"] = parts[0].split(',')[0].strip()
+
             gpu_info["detected"] = True
             return gpu_info
 
     # 检测摩尔线程GPU
     success, output = run_cmd(["mthreads-gmi"])
     if success and "MTT" in output:
-        gpu_info["type"] = "mthreads"  # 统一使用mthreads作为类型标识
-        gpu_info["name"] = "Moore Threads GPU"
+        gpu_info["type"] = "mthreads"
         gpu_info["count"] = 1
+
+        # 解析摩尔线程GPU信息
+        lines = output.split('\n')
+        for line in lines:
+            if "MTT" in line and "ID" in line:
+                # 提取GPU型号
+                parts = line.split()
+                for i, part in enumerate(parts):
+                    if "MTT" in part:
+                        gpu_info["name"] = part
+                        break
+                break
+
+        # 提取驱动版本
+        for line in lines:
+            if "Driver Version" in line:
+                version_parts = line.split(':')
+                if len(version_parts) >= 2:
+                    gpu_info["driver_version"] = version_parts[1].strip()
+                break
+
+        if not gpu_info["name"]:
+            gpu_info["name"] = "Moore Threads GPU"
+
         gpu_info["detected"] = True
         return gpu_info
 
@@ -350,53 +590,90 @@ def detect_gpu() -> Dict:
 # ============================================================================
 
 def determine_scene(sys_info: Dict, gpu_info: Dict) -> str:
-    """根据系统和GPU信息判断使用场景"""
+    """根据系统和GPU信息判断使用场景 - 严格按照文档6步流程"""
 
-    # 1. ARM/RISC-V → 嵌入式
-    if sys_info["arch"] in ["arm64", "aarch64", "riscv"]:
+    # Step 1: CPU架构判断
+    if sys_info["arch"] in ["arm64", "aarch64"] or sys_info["arch"].startswith("arm"):
         if not sys_info["is_linux"]:
-            print_fail("Embedded devices must run Linux!")
+            print_fail("ARM devices must run Linux!")
             sys.exit(1)
-        return "embedded"
+        return "edge_arm"
 
-    # 2. 非x86架构报错
-    if sys_info["arch"] != "x86_64":
+    if sys_info["arch"].startswith("riscv") or sys_info["arch"] == "riscv64":
+        if not sys_info["is_linux"]:
+            print_fail("RISC-V devices must run Linux!")
+            sys.exit(1)
+        return "edge_riscv"
+
+    # 非x86/ARM/RISC-V架构报错
+    if sys_info["arch"] not in ["x86_64", "i686", "i386"]:
         print_fail(f"Unsupported architecture: {sys_info['arch']}")
+        print_info("Supported architectures: x86_64, i686, i386, arm64, aarch64, riscv64")
         sys.exit(1)
 
-    # 3. Windows → PC-CUDA（唯一选择）
-    if sys_info["is_windows"]:
-        return "pc_cuda_win"
+    # Step 2: 询问用户是否使用GPU（默认Y）
+    try:
+        has_gpu = input("\nDo you want to use GPU acceleration? ([Y]/N):")
+        if not has_gpu:  # 空输入默认为Y
+            has_gpu = "Y"
+        else:
+            has_gpu = has_gpu.strip().upper()
+    except EOFError:
+        print_info("Non-interactive mode: continuing with GPU mode")
+        has_gpu = "Y"
 
-    # 4. Linux下智能判断GPU使用
+    if has_gpu != "Y":
+        # 用户选择不使用GPU
+        return "cpu_cloud"
+
+    # 用户选择使用GPU，检查GPU检测情况
     if gpu_info["detected"]:
-        # 检测到GPU硬件，直接使用，无需询问
+        # GPU已检测到，根据类型判断场景
         if gpu_info["type"] == "nvidia":
-            # 根据GPU数量选择场景
-            if gpu_info["count"] > 1:
-                return "gpu_cloud"
+            # NVIDIA GPU
+            if sys_info["is_windows"]:
+                return "pc_cuda"
             else:
-                return "pc_cuda_linux"
+                # Linux下根据GPU数量判断
+                if gpu_info["count"] > 1:
+                    return "gpu_cloud"
+                else:
+                    return "pc_cuda"
         elif gpu_info["type"] == "mthreads":
+            # 摩尔线程GPU只支持Linux
+            if not sys_info["is_linux"]:
+                print_fail("Moore Threads GPU only supports Linux!")
+                sys.exit(1)
             return "pc_musa"
-
+        else:
+            print_fail(f"Unknown GPU type detected: {gpu_info['type']}")
+            sys.exit(1)
     else:
-        # x86架构但没检测到GPU，询问用户是否有GPU但检测不到
-        try:
-            print("\nNo GPU detected. Do you have a GPU that wasn't detected? (Y/N): ", end="")
-            has_gpu = input().strip().upper()
-        except EOFError:
-            print_info("Non-interactive mode: continuing with CPU-only mode")
-            has_gpu = "N"
+        # 未检测到GPU，询问用户GPU类型并提供驱动安装建议
+        print_fail("No GPU found. You may need to properly install a GPU driver.")
 
-        if has_gpu == "Y":
-            print_warn("GPU not detected. Please install GPU drivers first:")
-            print_info("  - For NVIDIA: https://developer.nvidia.com/cuda-downloads")
-            print_info("  - For Moore Threads: https://www.mthreads.com/download")
-            print_fail("Please install GPU drivers and run configure.py again")
+        print("\nWhat type of GPU do you have?")
+        print("  1. NVIDIA GPU (GeForce, RTX, Tesla, A10, etc.)")
+        print("  2. Moore Threads GPU (MTT S80, etc.)")
+
+        try:
+            print("Please select [1-2]:")
+            choice = input().strip()
+        except EOFError:
+            choice = "1"  # 默认NVIDIA
+
+        if choice == "2":
+            # 摩尔线程GPU
+            print_info("For Moore Threads GPU, please install drivers from:")
+            print_info("  https://www.mthreads.com/download")
+            print_fail("Please install drivers and run configure.py again")
             sys.exit(1)
         else:
-            return "cpu_cloud"
+            # NVIDIA GPU
+            print_info("For NVIDIA GPU, please install drivers from:")
+            print_info("  https://developer.nvidia.com/cuda-downloads")
+            print_fail("Please install drivers and run configure.py again")
+            sys.exit(1)
 
 # ============================================================================
 # 依赖搜索
@@ -414,6 +691,23 @@ def find_all_dependency_versions(name: str, sys_info: Dict) -> List[Dict]:
 
     # 特殊处理：Python包检测 - 返回一个版本
     if "check_cmd" in config:
+        # 对于Python本身，优先使用当前运行的Python解释器
+        if name == "python":
+            current_python = sys.executable
+            if current_python:
+                success, output = run_cmd([current_python, "--version"])
+                if success:
+                    version = extract_version(output, config["version_pattern"])
+                    if version and (not min_version or compare_version(version, min_version) >= 0):
+                        versions.append({
+                            "name": config["name"],
+                            "path": os.path.dirname(current_python),
+                            "version": version,
+                            "from_vcpkg": False,
+                            "exe_path": current_python
+                        })
+
+        # 对于NumPy等Python包，使用默认python命令
         success, output = run_cmd(config["check_cmd"])
         if success:
             version = output.strip()
@@ -422,25 +716,67 @@ def find_all_dependency_versions(name: str, sys_info: Dict) -> List[Dict]:
                 python_exe = find_exe_in_path(config["exe"])
                 python_path = os.path.dirname(python_exe) if python_exe else "system PATH"
 
-                versions.append({
-                    "name": config["name"],
-                    "path": python_path,
-                    "version": version,
-                    "from_vcpkg": False,
-                    "exe_path": python_exe
-                })
+                # 避免重复添加相同的Python路径
+                is_duplicate = False
+                for existing in versions:
+                    if existing["path"] == python_path and existing["version"] == version:
+                        is_duplicate = True
+                        break
+
+                if not is_duplicate:
+                    versions.append({
+                        "name": config["name"],
+                        "path": python_path,
+                        "version": version,
+                        "from_vcpkg": False,
+                        "exe_path": python_exe
+                    })
         return versions
+
+    # 对于Python，总是优先使用当前运行的Python解释器
+    if name == "python":
+        current_python = sys.executable
+        if current_python:
+            # 检查当前Python是否满足版本要求
+            success, output = run_cmd([current_python, "--version"])
+            if success:
+                version = extract_version(output, config["version_pattern"])
+                if version and (not min_version or compare_version(version, min_version) >= 0):
+                    # 计算正确的安装路径
+                    install_path = os.path.dirname(current_python)
+
+                    # 如果在 Windows 的 Python 目录中
+                    if is_win and not install_path.endswith(('Scripts', 'bin')):
+                        # 直接使用包含 python.exe 的目录
+                        pass
+                    elif is_win and install_path.endswith('Scripts'):
+                        # 从 Scripts 目录回到 Python 安装根目录
+                        install_path = os.path.dirname(install_path)
+
+                    versions.append({
+                        "name": config["name"],
+                        "path": install_path,
+                        "version": version,
+                        "from_vcpkg": False,
+                        "exe_path": current_python
+                    })
 
     # 搜索所有可能的版本
     paths = config.get("paths_win" if is_win else "paths_linux", [])
 
     for path_pattern in paths:
-        # 展开通配符
-        if "*" in path_pattern:
-            import glob
-            matches = glob.glob(path_pattern)
+        # 展开 ~ 符号（用户主目录）
+        if path_pattern.startswith("~"):
+            expanded_path = os.path.expanduser(path_pattern)
         else:
-            matches = [path_pattern] if os.path.exists(path_pattern) else []
+            expanded_path = path_pattern
+
+        # 展开通配符
+        if "*" in expanded_path:
+            import glob
+            matches = glob.glob(expanded_path)
+        else:
+            matches = [expanded_path] if os.path.exists(expanded_path) else []
 
         for path in matches:
             # 检查版本
@@ -452,23 +788,75 @@ def find_all_dependency_versions(name: str, sys_info: Dict) -> List[Dict]:
                     if os.path.exists(full_exe_path):
                         exe_path = full_exe_path
                         break
-                    # 也尝试在bin子目录中查找
-                    bin_exe_path = os.path.join(path, "bin", exe)
-                    if os.path.exists(bin_exe_path):
-                        exe_path = bin_exe_path
-                        break
+
+                    # Windows: 直接在根目录查找（Windows Python通常直接安装路径）
+                    if is_win and not exe.endswith('.exe'):
+                        full_exe_exe = os.path.join(path, exe + '.exe')
+                        if os.path.exists(full_exe_exe):
+                            exe_path = full_exe_exe
+                            break
+                    # Linux/macOS: 尝试在bin子目录中查找
+                    elif not is_win:
+                        bin_exe_path = os.path.join(path, "bin", exe)
+                        if os.path.exists(bin_exe_path):
+                            exe_path = bin_exe_path
+                            break
 
                 if exe_path:
                     # 使用改进的版本提取方法
                     version = extract_version_from_path(os.path.dirname(exe_path), name)
                     if version != "unknown" and (not min_version or compare_version(version, min_version) >= 0):
-                        versions.append({
-                            "name": config["name"],
-                            "path": os.path.dirname(os.path.dirname(exe_path)),
-                            "version": version,
-                            "from_vcpkg": False,
-                            "exe_path": exe_path
-                        })
+                        # 避免重复添加当前Python解释器
+                        is_duplicate = False
+                        if name == "python":
+                            for existing in versions:
+                                # 检查可执行文件路径是否相同
+                                if existing.get("exe_path") == exe_path:
+                                    is_duplicate = True
+                                    break
+
+                                # 跨平台重复检测：检查是否为同一Python安装目录
+                                existing_path = existing.get("path", "")
+                                current_path = os.path.dirname(exe_path)
+
+                                # 标准化路径格式进行比较
+                                existing_normalized = os.path.normpath(existing_path).lower()
+                                current_normalized = os.path.normpath(current_path).lower()
+
+                                if existing_normalized == current_normalized:
+                                    is_duplicate = True
+                                    break
+
+                                # 对于Linux，还要检查bin目录结构
+                                if not is_win:
+                                    # 如果一个是bin目录，一个不是，但指向同一安装
+                                    if current_path.endswith('/bin') and not existing_path.endswith('/bin'):
+                                        current_install = current_path[:-4]  # 移除 /bin
+                                        if existing_normalized == os.path.normpath(current_install).lower():
+                                            is_duplicate = True
+                                            break
+                                    elif existing_path.endswith('/bin') and not current_path.endswith('/bin'):
+                                        existing_install = existing_path[:-4]  # 移除 /bin
+                                        if current_normalized == os.path.normpath(existing_install).lower():
+                                            is_duplicate = True
+                                            break
+
+                        if not is_duplicate:
+                            # 计算正确的安装路径
+                            if is_win:
+                                # Windows: 直接使用包含python.exe的目录
+                                install_path = os.path.dirname(exe_path)
+                            else:
+                                # Linux: 使用bin目录的父目录
+                                install_path = os.path.dirname(os.path.dirname(exe_path))
+
+                            versions.append({
+                                "name": config["name"],
+                                "path": install_path,
+                                "version": version,
+                                "from_vcpkg": False,
+                                "exe_path": exe_path
+                            })
 
             # 头文件/库文件检测
             elif "header" in config:
@@ -512,6 +900,7 @@ def search_dependency(name: str, sys_info: Dict) -> Dict:
     if not config:
         return {"found": False, "error": f"Unknown dependency: {name}"}
 
+    
     # 特殊处理：MSVC使用专门的查找函数
     if name == "msvc" and sys_info["is_windows"]:
         return find_msvc()
@@ -527,7 +916,10 @@ def search_dependency(name: str, sys_info: Dict) -> Dict:
             if versions:
                 # 如果只找到一个版本，直接使用；如果找到多个版本，让用户选择
                 if len(versions) == 1:
-                    print_ok(f"Found {config['name']}: {versions[0]['name']} v{versions[0].get('version', 'unknown')}")
+                    version = versions[0].get('version', 'unknown')
+                    path = versions[0].get('path')
+                    formatted_output = format_dependency_output(config['name'], version, path)
+                    print_ok(formatted_output)
                     versions[0]["found"] = True
                     return versions[0]
                 else:
@@ -582,13 +974,22 @@ def search_dependency(name: str, sys_info: Dict) -> Dict:
                     if "python" in found_other and found_other["python"]["found"]:
                         python_exe = found_other["python"].get("exe_path")
 
-            # 3. 根据不同平台尝试从常见路径查找Python
+            # 3. 优先使用当前运行的Python解释器
+            if not python_exe:
+                current_python = sys.executable
+                if current_python:
+                    python_exe = current_python
+
+            # 4. 根据不同平台尝试从常见路径查找Python
             if not python_exe:
                 if sys_info.get("is_linux"):
                     python_paths = [
-                        "/home/tech-renaissance/venv/py314/bin/python3.14",
-                        "/home/ubuntu/venv/py314/bin/python3.14",
+                        # 虚拟环境常见路径（从配置文件获取）
+                        "/home/tech-renaissance/venv/py314/bin/python3",
+                        "/home/ubuntu/venv/py314/bin/python3",
+                        # 标准系统路径
                         "/usr/bin/python3",
+                        "/usr/local/bin/python3",
                         "python3"
                     ]
                 elif sys_info.get("is_windows"):
@@ -596,7 +997,7 @@ def search_dependency(name: str, sys_info: Dict) -> Dict:
                         "python",
                         "python3",
                         "py",
-                        # 尝试常见的Windows Python安装路径
+                        # 常见Windows Python安装路径
                         "C:/Python314/python.exe",
                         "C:/Python313/python.exe",
                         "C:/Python312/python.exe"
@@ -712,29 +1113,35 @@ def search_dependency(name: str, sys_info: Dict) -> Dict:
                     result["found"] = True
                     break
 
-    # 版本检测
-    if result["found"] and "version_cmd" in config:
-        cmd = config["version_cmd"].copy()
-        if result["path"]:
-            # 处理路径替换占位符
-            for i, arg in enumerate(cmd):
-                if "{path}" in arg:
-                    cmd[i] = arg.replace("{path}", result["path"])
-                elif "{include}" in arg:
-                    include_path = os.path.join(result["path"], "include")
-                    cmd[i] = arg.replace("{include}", include_path)
+    # 版本检测 - 只有在result["found"]为True且尚未设置version时才执行
+    if result["found"] and not result.get("version"):
+        # 特殊处理：使用路径推导版本号（如cuDNN）
+        if config.get("use_path_version"):
+            if result["path"]:
+                result["version"] = extract_version_from_path(result["path"], name)
+        # 标准版本命令检测
+        elif "version_cmd" in config:
+            cmd = config["version_cmd"].copy()
+            if result["path"]:
+                # 处理路径替换占位符
+                for i, arg in enumerate(cmd):
+                    if "{path}" in arg:
+                        cmd[i] = arg.replace("{path}", result["path"])
+                    elif "{include}" in arg:
+                        include_path = os.path.join(result["path"], "include")
+                        cmd[i] = arg.replace("{include}", include_path)
 
-            # 处理可执行文件路径替换
-            bin_sub = config.get("bin_subdir", "bin")
-            exe_path = os.path.join(result["path"], bin_sub, cmd[0])
-            if os.path.exists(exe_path):
-                cmd[0] = exe_path
-            elif os.path.exists(exe_path + ".exe"):
-                cmd[0] = exe_path + ".exe"
+                # 处理可执行文件路径替换
+                bin_sub = config.get("bin_subdir", "bin")
+                exe_path = os.path.join(result["path"], bin_sub, cmd[0])
+                if os.path.exists(exe_path):
+                    cmd[0] = exe_path
+                elif os.path.exists(exe_path + ".exe"):
+                    cmd[0] = exe_path + ".exe"
 
-        success, output = run_cmd(cmd)
-        if success and "version_pattern" in config:
-            result["version"] = extract_version(output, config["version_pattern"])
+            success, output = run_cmd(cmd)
+            if success and "version_pattern" in config:
+                result["version"] = extract_version(output, config["version_pattern"])
 
             # 版本检查
             if result["version"] and "min_version" in config:
@@ -744,12 +1151,86 @@ def search_dependency(name: str, sys_info: Dict) -> Dict:
 
     return result
 
+def get_vcpkg_package_version(package_name: str) -> Optional[str]:
+    """通过vcpkg list命令获取包版本号"""
+    vcpkg_exe = os.path.join(VCPKG_ROOT, "vcpkg.exe") if sys.platform == "win32" else os.path.join(VCPKG_ROOT, "vcpkg")
+
+    if not os.path.exists(vcpkg_exe):
+        return None
+
+    success, output = run_cmd([vcpkg_exe, "list", package_name])
+    if not success:
+        return None
+
+    lines = output.strip().split('\n')
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+
+        # vcpkg输出格式: package_name:arch     version    description
+        # 示例: onednn:x64-windows                  3.7                 oneAPI Deep Neural Network Library (oneDNN)
+
+        # 分割第一部分（包名+架构）
+        first_space_idx = line.find(' ')
+        if first_space_idx == -1:
+            continue
+
+        package_with_arch = line[:first_space_idx]
+
+        # 检查是否以包名开头（可能带有架构后缀）
+        if not package_with_arch.startswith(package_name):
+            continue
+
+        # 提取版本号部分（在第一个空格和第二个空格之间）
+        version_part = line[first_space_idx:].strip()
+        version_space_idx = version_part.find(' ')
+        if version_space_idx == -1:
+            version_str = version_part
+        else:
+            version_str = version_part[:version_space_idx].strip()
+
+        # 验证版本号格式
+        import re
+        if re.match(r'^\d+\.\d+', version_str):  # 如 3.7, 3.7.0
+            # 移除可能的#n后缀
+            if '#' in version_str:
+                version_str = version_str.split('#')[0]
+            return version_str.strip()
+        elif re.match(r'^\d{4}-\d{2}-\d{2}', version_str):  # 如 2024-08-20
+            # 移除可能的#n后缀
+            if '#' in version_str:
+                version_str = version_str.split('#')[0]
+            return version_str.strip()
+
+    return None
+
 def search_in_vcpkg(name: str, config: Dict, is_win: bool) -> Dict:
     """在vcpkg中搜索依赖"""
     if not VCPKG_ROOT or not os.path.exists(VCPKG_ROOT):
         return {"found": False}
 
-    triplet = "x64-windows" if is_win else "x64-linux"
+    # 根据系统架构确定triplet
+    if is_win:
+        triplet = "x64-windows"
+    else:
+        # 检测系统架构
+        import platform
+        machine = platform.machine().lower()
+        if machine == "x86_64":
+            triplet = "x64-linux"
+        elif machine in ["arm64", "aarch64"]:
+            triplet = "arm64-linux"
+        elif machine.startswith("arm"):
+            triplet = "arm-linux"
+        elif machine.startswith("aarch"):
+            triplet = "aarch64-linux"
+        elif machine.startswith("riscv"):
+            triplet = "riscv64-linux"
+        else:
+            # 默认使用x64-linux
+            triplet = "x64-linux"
+
     vcpkg_installed = os.path.join(VCPKG_ROOT, "installed", triplet)
 
     if not os.path.exists(vcpkg_installed):
@@ -761,12 +1242,22 @@ def search_in_vcpkg(name: str, config: Dict, is_win: bool) -> Dict:
         for header in headers:
             header_path = os.path.join(vcpkg_installed, "include", header)
             if os.path.exists(header_path):
-                return {
+                result = {
                     "found": True,
                     "name": config["name"],
                     "path": vcpkg_installed,
                     "from_vcpkg": True
                 }
+
+                # 获取vcpkg包的版本号
+                vcpkg_packages = config.get("vcpkg_packages", [])
+                if vcpkg_packages:
+                    package_name = vcpkg_packages[0]  # 取第一个包名
+                    version = get_vcpkg_package_version(package_name)
+                    if version:
+                        result["version"] = version
+
+                return result
 
     return {"found": False}
 
@@ -787,7 +1278,7 @@ def search_dependencies(scene: str, sys_info: Dict) -> Dict:
         found_deps[dep_name] = result
 
         if result["found"]:
-            ver = f" v{result['version']}" if result.get("version") else ""
+            version = result.get("version", "")
             path = result.get("path")
             if not path or path == "system":
                 # 尝试获取可执行文件路径作为路径信息
@@ -795,11 +1286,8 @@ def search_dependencies(scene: str, sys_info: Dict) -> Dict:
                     path = os.path.dirname(result["exe_path"])
                 else:
                     path = "system PATH"
-            # 如果路径为None或者等于"system PATH"，就不显示路径
-            if path and path != "system PATH":
-                print_ok(f"{result['name']}{ver} ({status}) - {path}")
-            else:
-                print_ok(f"{result['name']}{ver} ({status})")
+            formatted_output = format_dependency_output(result['name'], version, path)
+            print_ok(f"{formatted_output} ({status})")
         else:
             if is_required:
                 print_fail(f"{DEP_CONFIG[dep_name]['name']} ({status}) - NOT FOUND")
@@ -826,7 +1314,7 @@ def check_required_deps(scene: str, found_deps: Dict) -> List[str]:
 # ============================================================================
 
 def generate_cmake_config(scene: str, deps: Dict, sys_info: Dict) -> str:
-    """生成CMake配置文件内容"""
+    """生成CMake配置文件内容 - 支持新的编译宏系统"""
     lines = [
         "# Auto-generated by configure.py",
         f"# Scene: {SCENE_DEPS[scene]['name']}",
@@ -849,11 +1337,26 @@ def generate_cmake_config(scene: str, deps: Dict, sys_info: Dict) -> str:
         cudnn_path = deps["cudnn"]["path"].replace("\\", "/")
         lines.append(f'set(CUDNN_ROOT "{cudnn_path}")')
 
+    # MUSA配置
+    if "musa" in deps and deps["musa"]["found"]:
+        musa_path = deps["musa"]["path"].replace("\\", "/")
+        lines.append(f'set(MUSA_ROOT "{musa_path}")')
+
+    # muDNN配置
+    if "mudnn" in deps and deps["mudnn"]["found"]:
+        mudnn_path = deps["mudnn"]["path"].replace("\\", "/")
+        lines.append(f'set(MUDNN_ROOT "{mudnn_path}")')
+
     # Python配置
     if "python" in deps and deps["python"]["found"]:
-        python_exe = find_exe_in_path(["python3", "python", "python.exe"])
-        if python_exe:
-            lines.append(f'set(Python3_EXECUTABLE "{python_exe.replace("\\\\", "/")}" )')
+        python_path = deps["python"].get("exe_path")
+        if python_path:
+            lines.append(f'set(Python3_EXECUTABLE "{python_path.replace("\\\\", "/")}" )')
+        else:
+            # 回退到PATH查找
+            python_exe = find_exe_in_path(["python3", "python", "python.exe"])
+            if python_exe:
+                lines.append(f'set(Python3_EXECUTABLE "{python_exe.replace("\\\\", "/")}" )')
 
     # MSVC配置 - 使用Alpha编译标准路径
     if "msvc" in deps and deps["msvc"]["found"]:
@@ -871,10 +1374,29 @@ def generate_cmake_config(scene: str, deps: Dict, sys_info: Dict) -> str:
 
     lines.append("")
 
-    # CMake选项
+    # 添加GPU数量信息
+    gpu_count = 0
+    if "cuda" in deps and deps["cuda"]["found"]:
+        # 尝试从GPU检测信息获取GPU数量
+        try:
+            from smart_config import detect_gpu
+            gpu_info = detect_gpu()
+            if gpu_info["detected"] and gpu_info["type"] == "nvidia":
+                gpu_count = gpu_info["count"]
+        except:
+            pass
+
+    # 基础CMake选项
+    lines.append("# Scene-specific options")
     for opt in SCENE_DEPS[scene]["cmake_opts"]:
         key, val = opt.split("=")
         lines.append(f'set({key.replace("-D", "")} {val})')
+
+    # 添加GPU数量宏
+    if gpu_count > 0:
+        lines.append(f'set(TR_NUM_GPUS {gpu_count})')
+    else:
+        lines.append('set(TR_NUM_GPUS 0)')
 
     return "\n".join(lines)
 
@@ -1009,6 +1531,15 @@ def generate_config_files(scene: str, found_deps: Dict, sys_info: Dict):
     cmake_path.write_text(cmake_content)
     print_ok(f"Generated: {cmake_path}")
 
+    # 获取GPU数量信息
+    gpu_count = 0
+    try:
+        gpu_info = detect_gpu()
+        if gpu_info["detected"]:
+            gpu_count = gpu_info["count"]
+    except:
+        pass
+
     # 生成project_config.json
     json_config = {
         "system": sys_info,
@@ -1021,13 +1552,27 @@ def generate_config_files(scene: str, found_deps: Dict, sys_info: Dict):
             "cmake_build_type": CMAKE_BUILD_TYPE,
             "vcpkg_root": VCPKG_ROOT
         },
+        "gpu_info": {
+            "detected": gpu_count > 0,
+            "count": gpu_count,
+            "type": gpu_info.get("type") if gpu_count > 0 else None,
+            "name": gpu_info.get("name") if gpu_count > 0 else None
+        },
         "dependencies": {k: {
             "found": v["found"],
             "path": v.get("path"),
             "version": v.get("version"),
             "from_vcpkg": v.get("from_vcpkg", False)
         } for k, v in found_deps.items()},
-        "cmake_options": SCENE_DEPS[scene]["cmake_opts"]
+        "cmake_options": SCENE_DEPS[scene]["cmake_opts"],
+        "compilation_macros": {
+            "scene_macros": [opt for opt in SCENE_DEPS[scene]["cmake_opts"] if opt.startswith("-DTR_SCENE_")],
+            "feature_macros": [opt for opt in SCENE_DEPS[scene]["cmake_opts"] if opt.startswith("-DTR_USE_")],
+            "system_macros": {
+                "TR_NUM_GPUS": gpu_count,
+                "TR_IS_EDGE_DEVICE": scene in ["edge_arm", "edge_riscv"]
+            }
+        }
     }
     json_path = config_dir / "project_config.json"
     json_path.write_text(json.dumps(json_config, indent=2))
@@ -1048,13 +1593,16 @@ def find_msvc():
     # 1. 直接搜索技术觉醒2中确认的路径
     known_path = "C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/bin/Hostx64/x64/cl.exe"
     if os.path.exists(known_path):
-        print_ok(f"Found MSVC: {known_path}")
+        version = "14.44.35207"
+        path = os.path.dirname(os.path.dirname(known_path))
+        formatted_output = format_dependency_output("MSVC", version, path)
+        print_ok(formatted_output)
         return {
             "found": True,
             "name": "MSVC",
-            "path": os.path.dirname(os.path.dirname(known_path)),
+            "path": path,
             "exe_path": known_path,
-            "version": "14.44.35207",
+            "version": version,
             "from_vcpkg": False
         }
 
@@ -1072,11 +1620,13 @@ def find_msvc():
             # 选择最新的版本（按路径排序）
             latest_cl = max(matches)
             version = extract_version_from_path(os.path.dirname(latest_cl), "msvc")
-            print_ok(f"Found MSVC: {latest_cl}")
+            path = os.path.dirname(os.path.dirname(latest_cl))
+            formatted_output = format_dependency_output("MSVC", version, path)
+            print_ok(formatted_output)
             return {
                 "found": True,
                 "name": "MSVC",
-                "path": os.path.dirname(os.path.dirname(latest_cl)),
+                "path": path,
                 "exe_path": latest_cl,
                 "version": version,
                 "from_vcpkg": False
@@ -1085,11 +1635,13 @@ def find_msvc():
     # 3. 在PATH中查找
     cl_path = find_exe_in_path(["cl.exe"])
     if cl_path:
-        print_ok(f"Found MSVC in PATH: {cl_path}")
+        path = os.path.dirname(os.path.dirname(cl_path))
+        formatted_output = format_dependency_output("MSVC", "", path)
+        print_ok(formatted_output)
         return {
             "found": True,
             "name": "MSVC",
-            "path": os.path.dirname(os.path.dirname(cl_path)),
+            "path": path,
             "exe_path": cl_path,
             "version": "unknown",
             "from_vcpkg": False
@@ -1136,8 +1688,9 @@ def run_smart_config():
     # Step 3: 检查GPU硬件
     print_step(3, total_steps, "Detecting GPU hardware...")
     gpu_info = detect_gpu()
-    if gpu_info["type"]:
-        print_ok(f"GPU: {gpu_info['name']} (x{gpu_info['count']})")
+    if gpu_info["detected"]:
+        version_info = f", Driver: {gpu_info['driver_version']}" if gpu_info.get("driver_version") else ""
+        print_ok(f"GPU: {gpu_info['name']} (x{gpu_info['count']}){version_info}")
     else:
         print_info("No GPU detected")
 
@@ -1160,42 +1713,45 @@ def run_smart_config():
         if not msvc_result["found"]:
             print_fail("MSVC compiler is required but not found!")
             return False
+        found_toolchain = {"msvc": msvc_result}
     else:
         # Linux下检查GCC
         gcc_path = find_exe_in_path(["g++", "gcc"])
         if not gcc_path:
             print_fail("GCC compiler is required but not found!")
             return False
-        print_ok(f"GCC: {gcc_path}")
+
+        # 获取GCC版本信息
+        gcc_result = {"found": True, "name": "GCC", "exe_path": gcc_path}
+        version_cmd = ["gcc", "--version"]
+        success, output = run_cmd(version_cmd)
+        if success:
+            # 从输出中提取版本号
+            version_match = re.search(r"gcc.*?(\d+\.\d+\.\d+)", output)
+            if version_match:
+                gcc_result["version"] = version_match.group(1)
+
+        # 打印GCC结果
+        version = gcc_result.get("version", "")
+        path = os.path.dirname(gcc_path)
+        formatted_output = format_dependency_output(gcc_result['name'], version, path)
+        print_ok(formatted_output)
+
+        found_toolchain = {"gcc": gcc_result}
 
     # 5b: 检查CMake和Ninja (通过依赖搜索)
     toolchain_deps = ["cmake", "ninja"]
-    # 注意：MSVC和GCC已经在5a步检查过了，不需要重复检查
-
-    found_toolchain = {}
-    if sys_info["is_windows"]:
-        found_toolchain["msvc"] = msvc_result
-        # 显示MSVC结果
-        ver = f" v{msvc_result['version']}" if msvc_result.get("version") else ""
-        path = msvc_result.get("path", "system PATH")
-        if path and path != "system PATH":
-            print_ok(f"{msvc_result['name']}{ver} - {path}")
-        else:
-            print_ok(f"{msvc_result['name']}{ver}")
-    else:
-        found_toolchain["gcc"] = {"found": True, "name": "GCC", "exe_path": gcc_path}
+    # 注意：MSVC和GCC已经在5a步检查过了，find_msvc函数已经打印了MSVC结果
 
     for dep in toolchain_deps:
+        if dep in found_toolchain:
+            continue  # 跳过已经查找过的依赖
         result = search_dependency(dep, sys_info)
         found_toolchain[dep] = result
         if result["found"]:
-            ver = f" v{result['version']}" if result.get("version") else ""
-            path = result.get("path", "system PATH")
-            # 如果路径为None或者等于"system PATH"，就不显示路径
-            if path and path != "system PATH":
-                print_ok(f"{result['name']}{ver} - {path}")
-            else:
-                print_ok(f"{result['name']}{ver}")
+            version = result.get("version", "")
+            path = result.get("path", "")
+            formatted_output = format_dependency_output(result['name'], version, path)
         else:
             print_fail(f"{result['name']} - NOT FOUND")
 
@@ -1208,13 +1764,18 @@ def run_smart_config():
         return False
 
     # Step 7: 检查场景特定依赖
-    print_step(7, total_steps, "Checking GPU acceleration libraries...")
+    if scene in ["pc_cuda", "gpu_cloud", "pc_musa"]:
+        print_step(7, total_steps, "Checking GPU acceleration libraries...")
+    else:
+        print_step(7, total_steps, "Checking system libraries...")
 
     # 只检查CUDA/MUSA相关依赖（如果场景需要）
     found_cuda = {}
-    if scene in ["pc_cuda_linux", "gpu_cloud", "pc_musa"]:
-        if scene in ["pc_cuda_linux", "gpu_cloud"]:
+    if scene in ["pc_cuda", "gpu_cloud", "pc_musa"]:
+        if scene in ["pc_cuda", "gpu_cloud"]:
             cuda_deps = ["cuda", "cudnn"]
+            if scene == "gpu_cloud":
+                cuda_deps.append("nccl")  # GPU云服务器需要NCCL
         elif scene == "pc_musa":
             cuda_deps = ["musa", "mudnn"]
 
@@ -1222,13 +1783,10 @@ def run_smart_config():
             result = search_dependency(dep, sys_info)
             found_cuda[dep] = result
             if result["found"]:
-                ver = f" v{result['version']}" if result.get("version") else ""
-                path = result.get("path", "system")
-                # 如果路径为None或者等于"system"，就不显示路径
-                if path and path != "system":
-                    print_ok(f"{result['name']}{ver} - {path}")
-                else:
-                    print_ok(f"{result['name']}{ver}")
+                version = result.get("version", "")
+                path = result.get("path", "")
+                formatted_output = format_dependency_output(result['name'], version, path)
+                print_ok(formatted_output)
             else:
                 print_fail(f"{result['name']} - NOT FOUND")
 
@@ -1249,13 +1807,10 @@ def run_smart_config():
             global_deps["python"] = result
 
         if result["found"]:
-            ver = f" v{result['version']}" if result.get("version") else ""
-            path = result.get("path", "system")
-            # 如果路径为None或者等于"system"，就不显示路径
-            if path and path != "system":
-                print_ok(f"{result['name']}{ver} - {path}")
-            else:
-                print_ok(f"{result['name']}{ver}")
+            version = result.get("version", "")
+            path = result.get("path", "")
+            formatted_output = format_dependency_output(result['name'], version, path)
+            print_ok(formatted_output)
         else:
             print_fail(f"{result['name']} - NOT FOUND")
 

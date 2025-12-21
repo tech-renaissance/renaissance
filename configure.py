@@ -2,10 +2,10 @@
 # -*- coding: utf-8 -*-
 """
 @file configure.py
-@brief 技术觉醒深度学习框架 V3.0.4 配置脚本
-@details 根目录配置脚本，定义配置变量后调用smart_config.py
-@version 3.00.04
-@date 2025-01-01
+@brief 技术觉醒深度学习框架 V3.1.0 配置脚本
+@details 根目录配置脚本，支持6大场景和16依赖项的完整配置系统
+@version 3.01.00
+@date 2025-12-21
 @author 技术觉醒团队
 """
 
