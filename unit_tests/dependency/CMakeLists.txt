@@ -12,21 +12,57 @@ message(STATUS "=== Configuring Dependencies Hello World Tests ===")
 set(DEPENDENCY_OUTPUT_DIR ${CMAKE_BINARY_DIR}/bin/dependency)
 
 # ============================================================================
-# Hello World测试源文件配置
+# Hello World测试源文件配置 - 场景感知智能编译
 # ============================================================================
 
-# 聚焦CUDA测试 - 只构建hello_cuda.cpp
-set(HELLO_WORLD_SOURCES
-    hello_cuda.cpp
-)
+# 始终编译hello_world.cpp（所有平台都支持）
+list(APPEND HELLO_WORLD_SOURCES hello_world.cpp)
+list(APPEND HELLO_WORLD_DEPS BASE)
+list(APPEND HELLO_WORLD_MACROS ALWAYS)
 
-set(HELLO_WORLD_DEPS
-    CUDA
-)
+# 根据GPU支持添加相应测试
+if(TR_USE_CUDA)
+    list(APPEND HELLO_WORLD_SOURCES hello_cuda.cpp)
+    list(APPEND HELLO_WORLD_DEPS CUDA)
+    list(APPEND HELLO_WORLD_MACROS TR_USE_CUDA)
+    message(STATUS "Will build CUDA test: hello_cuda.cpp")
+endif()
 
-set(HELLO_WORLD_MACROS
-    TR_USE_CUDA
-)
+if(TR_USE_MUSA)
+    list(APPEND HELLO_WORLD_SOURCES hello_musa.mu)
+    list(APPEND HELLO_WORLD_DEPS MUSA)
+    list(APPEND HELLO_WORLD_MACROS TR_USE_MUSA)
+    message(STATUS "Will build MUSA test: hello_musa.mu")
+endif()
+
+# 全平台支持的依赖测试
+if(TR_USE_MIMALLOC)
+    list(APPEND HELLO_WORLD_SOURCES hello_mimalloc.cpp)
+    list(APPEND HELLO_WORLD_DEPS MIMALLOC)
+    list(APPEND HELLO_WORLD_MACROS TR_USE_MIMALLOC)
+    message(STATUS "Will build mimalloc test: hello_mimalloc.cpp")
+endif()
+
+if(TR_USE_ZLIB)
+    list(APPEND HELLO_WORLD_SOURCES hello_zlib.cpp)
+    list(APPEND HELLO_WORLD_DEPS ZLIB)
+    list(APPEND HELLO_WORLD_MACROS TR_USE_ZLIB)
+    message(STATUS "Will build zlib test: hello_zlib.cpp")
+endif()
+
+if(TR_USE_LIBCURL)
+    list(APPEND HELLO_WORLD_SOURCES hello_libcurl.cpp)
+    list(APPEND HELLO_WORLD_DEPS CURL)
+    list(APPEND HELLO_WORLD_MACROS TR_USE_LIBCURL)
+    message(STATUS "Will build libcurl test: hello_libcurl.cpp")
+endif()
+
+if(TR_USE_LIBJPEG)
+    list(APPEND HELLO_WORLD_SOURCES hello_libjpeg.cpp)
+    list(APPEND HELLO_WORLD_DEPS LIBJPEG)
+    list(APPEND HELLO_WORLD_MACROS TR_USE_LIBJPEG)
+    message(STATUS "Will build libjpeg-turbo test: hello_libjpeg.cpp")
+endif()
 
 # 收集需要构建的源文件
 set(BUILD_SOURCES)
@@ -42,8 +78,8 @@ foreach(idx RANGE 0 ${SOURCES_LEN})
     list(GET HELLO_WORLD_DEPS ${idx} DEP_NAME)
     list(GET HELLO_WORLD_MACROS ${idx} REQUIRED_MACRO)
 
-    # 检查宏是否定义
-    if(${REQUIRED_MACRO})
+    # 检查宏是否定义（ALWAYS总是编译）
+    if(${REQUIRED_MACRO} OR REQUIRED_MACRO STREQUAL "ALWAYS")
         list(APPEND BUILD_SOURCES "${SOURCE_FILE}")
         list(APPEND BUILD_NAMES "${DEP_NAME}")
         message(STATUS "Will build ${DEP_NAME} test: ${SOURCE_FILE}")
@@ -89,7 +125,13 @@ if(TR_USE_MIMALLOC)
     if(DEFINED TR_MIMALLOC_INCLUDE_DIR AND DEFINED TR_MIMALLOC_LIBRARY_DIR)
         set(mimalloc_FOUND TRUE)
         set(mimalloc_INCLUDE_DIRS ${TR_MIMALLOC_INCLUDE_DIR})
-        set(mimalloc_LIBRARIES mimalloc)
+        # Windows下使用mimalloc.dll.lib，Linux下使用mimalloc
+        if(WIN32)
+            # Windows上vcpkg安装的库文件名是mimalloc.dll.lib
+            set(mimalloc_LIBRARIES "${TR_MIMALLOC_LIBRARY_DIR}/mimalloc.dll.lib")
+        else()
+            set(mimalloc_LIBRARIES mimalloc)
+        endif()
         set(mimalloc_LIBRARY_DIRS ${TR_MIMALLOC_LIBRARY_DIR})
         message(STATUS "Found mimalloc: ${TR_MIMALLOC_INCLUDE_DIR}")
     else()
@@ -103,7 +145,12 @@ if(TR_USE_ZLIB)
     if(DEFINED TR_ZLIB_INCLUDE_DIR AND DEFINED TR_ZLIB_LIBRARY_DIR)
         set(ZLIB_FOUND TRUE)
         set(ZLIB_INCLUDE_DIRS ${TR_ZLIB_INCLUDE_DIR})
-        set(ZLIB_LIBRARIES zlib)
+        # Windows下使用zlib，Linux下使用z
+        if(WIN32)
+            set(ZLIB_LIBRARIES zlib)
+        else()
+            set(ZLIB_LIBRARIES z)
+        endif()
         set(ZLIB_LIBRARY_DIRS ${TR_ZLIB_LIBRARY_DIR})
         message(STATUS "Found zlib: ${TR_ZLIB_INCLUDE_DIR}")
     else()
@@ -117,7 +164,12 @@ if(TR_USE_LIBCURL)
     if(DEFINED TR_CURL_INCLUDE_DIR AND DEFINED TR_CURL_LIBRARY_DIR)
         set(CURL_FOUND TRUE)
         set(CURL_INCLUDE_DIRS ${TR_CURL_INCLUDE_DIR})
-        set(CURL_LIBRARIES curl)
+        # Windows下使用libcurl.lib，Linux下使用curl
+        if(WIN32)
+            set(CURL_LIBRARIES libcurl)
+        else()
+            set(CURL_LIBRARIES curl)
+        endif()
         set(CURL_LIBRARY_DIRS ${TR_CURL_LIBRARY_DIR})
         message(STATUS "Found libcurl: ${TR_CURL_INCLUDE_DIR}")
     else()
@@ -131,7 +183,8 @@ if(TR_USE_LIBJPEG)
     if(DEFINED TR_JPEG_INCLUDE_DIR AND DEFINED TR_JPEG_LIBRARY_DIR)
         set(JPEG_FOUND TRUE)
         set(JPEG_INCLUDE_DIRS ${TR_JPEG_INCLUDE_DIR})
-        set(JPEG_LIBRARIES jpeg)
+        # libjpeg-turbo的TurboJPEG API在turbojpeg库中
+        set(JPEG_LIBRARIES turbojpeg)
         set(JPEG_LIBRARY_DIRS ${TR_JPEG_LIBRARY_DIR})
         message(STATUS "Found libjpeg-turbo: ${TR_JPEG_INCLUDE_DIR}")
     else()
@@ -181,12 +234,40 @@ foreach(idx RANGE 0 ${BUILD_SOURCES_LEN})
 
     message(STATUS "Creating ${DEP_NAME} test executable: ${TEST_NAME}")
 
-    # 创建可执行文件
-    add_executable(${TEST_NAME} ${TEST_SOURCE})
+    # 创建可执行文件 - MUSA需要特殊处理
+    set(IS_MUSA_SOURCE FALSE)
+    if(TEST_SOURCE MATCHES "\\.mu$")
+        set(IS_MUSA_SOURCE TRUE)
+        # MUSA文件使用musa_add_executable
+        message(STATUS "  - Using MUSA compiler for ${TEST_SOURCE}")
+        # 查找MUSA并启用MUSA语言支持
+        if(DEFINED TR_MUSA_PATH)
+            set(MUSA_ROOT ${TR_MUSA_PATH})
+        elseif(DEFINED ENV{MUSA_ROOT})
+            set(MUSA_ROOT $ENV{MUSA_ROOT})
+        elseif(EXISTS /usr/local/musa)
+            set(MUSA_ROOT /usr/local/musa)
+        endif()
 
-    # 设置C++标准
-    set_property(TARGET ${TEST_NAME} PROPERTY CXX_STANDARD 20)
-    set_property(TARGET ${TEST_NAME} PROPERTY CXX_STANDARD_REQUIRED ON)
+        if(MUSA_ROOT)
+            list(APPEND CMAKE_MODULE_PATH ${MUSA_ROOT}/cmake)
+            find_package(MUSA REQUIRED)
+            musa_add_executable(${TEST_NAME} ${TEST_SOURCE}
+                OPTIONS -Xclang -I/usr/include/c++/13 -Xclang -I/usr/include/x86_64-linux-gnu/c++/13
+            )
+        else()
+            message(FATAL_ERROR "MUSA_ROOT not found for compiling .mu files")
+        endif()
+    else()
+        # 标准C++文件使用add_executable
+        add_executable(${TEST_NAME} ${TEST_SOURCE})
+    endif()
+
+    # 设置C++标准（仅对C++文件）
+    if(NOT IS_MUSA_SOURCE)
+        set_property(TARGET ${TEST_NAME} PROPERTY CXX_STANDARD 20)
+        set_property(TARGET ${TEST_NAME} PROPERTY CXX_STANDARD_REQUIRED ON)
+    endif()
 
     # 确保使用Release编译模式优化
     if(CMAKE_BUILD_TYPE STREQUAL "Release")
@@ -206,7 +287,11 @@ foreach(idx RANGE 0 ${BUILD_SOURCES_LEN})
     )
 
     # 根据测试名称链接相应的库
-    if(TEST_NAME MATCHES "cuda")
+    if(DEP_NAME STREQUAL "BASE")
+        # hello_world.cpp - 不需要任何特殊库
+        message(STATUS "  - BASE test configured (no dependencies)")
+
+    elseif(TEST_NAME MATCHES "cuda")
         if(TR_USE_CUDA)
             # 项目级配置：为测试设置CUDA PATH环境变量（方法二）
             if(WIN32 AND TR_USE_CUDA)
@@ -321,8 +406,68 @@ foreach(idx RANGE 0 ${BUILD_SOURCES_LEN})
 
     elseif(TEST_NAME MATCHES "musa")
         if(TR_USE_MUSA)
-            # TODO: MUSA support
-            message(WARNING "  - MUSA support not yet implemented")
+            # 查找MUSA包
+            if(DEFINED TR_MUSA_PATH)
+                set(MUSA_ROOT ${TR_MUSA_PATH})
+                message(STATUS "  - Using MUSA root: ${MUSA_ROOT}")
+            else()
+                # 尝试从环境变量或标准路径查找
+                if(DEFINED ENV{MUSA_ROOT})
+                    set(MUSA_ROOT $ENV{MUSA_ROOT})
+                elseif(DEFINED ENV{MUSA_HOME})
+                    set(MUSA_ROOT $ENV{MUSA_HOME})
+                else()
+                    # Linux默认路径
+                    if(EXISTS /usr/local/musa)
+                        set(MUSA_ROOT /usr/local/musa)
+                    endif()
+                endif()
+
+                if(MUSA_ROOT)
+                    message(STATUS "  - Found MUSA at: ${MUSA_ROOT}")
+                else()
+                    message(WARNING "  - MUSA_ROOT not found, trying standard paths")
+                endif()
+            endif()
+
+            if(MUSA_ROOT)
+                # MUSA include目录
+                set(MUSA_INCLUDE_DIRS ${MUSA_ROOT}/include)
+                target_include_directories(${TEST_NAME} PRIVATE ${MUSA_INCLUDE_DIRS})
+                message(STATUS "  - MUSA include: ${MUSA_INCLUDE_DIRS}")
+
+                # MUSA库目录 - 尝试多个可能的目录
+                set(MUSA_LIBRARY_DIRS "")
+                if(WIN32)
+                    set(MUSA_LIBRARY_DIRS ${MUSA_ROOT}/lib/x64)
+                else()
+                    # Linux下尝试多个目录：lib64, lib
+                    if(EXISTS ${MUSA_ROOT}/lib64)
+                        set(MUSA_LIBRARY_DIRS ${MUSA_ROOT}/lib64)
+                        message(STATUS "  - MUSA library dir: ${MUSA_LIBRARY_DIRS} (found lib64)")
+                    elseif(EXISTS ${MUSA_ROOT}/lib)
+                        set(MUSA_LIBRARY_DIRS ${MUSA_ROOT}/lib)
+                        message(STATUS "  - MUSA library dir: ${MUSA_LIBRARY_DIRS} (found lib)")
+                    else()
+                        # 如果两个都不存在，先尝试lib64（常见情况）
+                        set(MUSA_LIBRARY_DIRS ${MUSA_ROOT}/lib64)
+                        message(STATUS "  - MUSA library dir: ${MUSA_LIBRARY_DIRS} (default, may not exist)")
+                    endif()
+                endif()
+
+                # 链接MUSA运行时库 - 注意：musa_add_executable已经自动链接了MUSA库
+                # 所以这里不需要再次手动链接
+                message(STATUS "  - MUSA runtime will be linked automatically by musa_add_executable")
+
+                # 添加MUSA CMake模块路径（用于musa_add_executable）
+                list(APPEND CMAKE_MODULE_PATH ${MUSA_ROOT}/cmake)
+
+                message(STATUS "  - MUSA test configured successfully")
+            else()
+                message(WARNING "  - MUSA not available")
+            endif()
+        else()
+            message(WARNING "  - MUSA support disabled (TR_USE_MUSA=OFF)")
         endif()
 
     elseif(TEST_NAME MATCHES "onednn")
@@ -347,6 +492,8 @@ foreach(idx RANGE 0 ${BUILD_SOURCES_LEN})
         if(mimalloc_FOUND)
             target_include_directories(${TEST_NAME} PRIVATE ${mimalloc_INCLUDE_DIRS})
             target_link_directories(${TEST_NAME} PRIVATE ${mimalloc_LIBRARY_DIRS})
+            message(STATUS "  - mimalloc libraries: ${mimalloc_LIBRARIES}")
+            message(STATUS "  - mimalloc library dirs: ${mimalloc_LIBRARY_DIRS}")
             target_link_libraries(${TEST_NAME} PRIVATE ${mimalloc_LIBRARIES})
             message(STATUS "  - Linked mimalloc")
         else()

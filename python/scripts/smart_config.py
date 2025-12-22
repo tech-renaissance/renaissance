@@ -1702,7 +1702,6 @@ if %errorlevel% neq 0 (
 
 echo [OK] Build completed successfully!
 echo [INFO] Build artifacts are in: {windows_build_dir}
-echo [INFO] Run tests: %PROJECT_ROOT%\\{windows_build_dir}\\bin\\dependency\\hello_cuda.exe
 
 REM Return to root directory
 cd "%PROJECT_ROOT%"
@@ -1762,8 +1761,6 @@ fi
 
 echo "[OK] Build completed successfully!"
 echo "[INFO] Build artifacts are in: {BUILD_DIR}"
-echo "[INFO] Run tests: $PWD/bin/dependency/hello_cuda"
-echo "[INFO] Or run: ./bin/dependency/hello_cuda"
 
 # 返回根目录
 cd ..

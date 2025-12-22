@@ -68,7 +68,14 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
 
     # GCC Release优化
     if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-        set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -march=native")
+        # RISC-V场景：不使用-march=native
+        if(TR_SCENE_EDGE_RISCV)
+            set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3")
+            message(STATUS "EDGE_RISCV scene: using -O3 without -march=native")
+        else()
+            # 其他场景：可以使用-march=native
+            set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -march=native")
+        endif()
         set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} -flto")
     endif()
 endif()
