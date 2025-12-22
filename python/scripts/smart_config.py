@@ -34,9 +34,9 @@ vcpkg_full_output_cache = None  # 缓存完整的vcpkg list输出字符串
 try:
     from configure import VCPKG_ROOT, BUILD_DIR, PARALLEL_JOBS, CMAKE_GENERATOR, CMAKE_BUILD_TYPE, VERBOSE_OUTPUT
 except ImportError:
-    # 默认配置
+    # 默认配置 - 统一为build目录（与Linux保持一致）
     VCPKG_ROOT = os.environ.get("VCPKG_ROOT", "T:/Softwares/vcpkg")
-    BUILD_DIR = "build/cmake-build-release"
+    BUILD_DIR = "build"
     PARALLEL_JOBS = 30
     CMAKE_GENERATOR = "Ninja"
     CMAKE_BUILD_TYPE = "Release"
@@ -1473,28 +1473,15 @@ def generate_cmake_config(scene: str, deps: Dict, sys_info: Dict) -> str:
     if "python" in deps and deps["python"]["found"]:
         python_path = deps["python"].get("exe_path")
         if python_path:
-            lines.append(f'set(Python3_EXECUTABLE "{python_path.replace("\\\\", "/")}" )')
+            # 使用正斜杠替换Windows反斜杠，避免转义问题
+            lines.append(f'set(Python3_EXECUTABLE "{python_path.replace(chr(92), "/")}" )')
         else:
             # 回退到PATH查找
             python_exe = find_exe_in_path(["python3", "python", "python.exe"])
             if python_exe:
-                lines.append(f'set(Python3_EXECUTABLE "{python_exe.replace("\\\\", "/")}" )')
+                lines.append(f'set(Python3_EXECUTABLE "{python_exe.replace(chr(92), "/")}" )')
 
-    # MSVC配置 - 使用Alpha编译标准路径
-    if "msvc" in deps and deps["msvc"]["found"]:
-        msvc_path = deps["msvc"]["path"].replace("\\", "/")
-        # 查找vcvars64.bat - Alpha编译标准路径
-        vs_root = msvc_path.split("/VC/Tools/MSVC")[0] if "/VC/Tools/MSVC" in msvc_path else msvc_path
-        vcvars = os.path.join(vs_root, "VC/Auxiliary/Build/vcvars64.bat")
-        if os.path.exists(vcvars):
-            lines.append(f'set(VCVARS_PATH "{vcvars.replace("\\\\", "/")}" )')
-
-        # cl.exe路径 - Alpha编译优化
-        cl_path = os.path.join(msvc_path, "cl.exe").replace("\\\\", "/")
-        if os.path.exists(cl_path):
-            lines.append(f'set(cl_path "{cl_path}")')
-
-    lines.append("")
+    # MSVC配置已通过build.bat中的vcvars64.bat处理，无需在cmake_paths.cmake中重复设置
 
     # 添加GPU数量信息
     gpu_count = 0
@@ -1520,6 +1507,105 @@ def generate_cmake_config(scene: str, deps: Dict, sys_info: Dict) -> str:
     else:
         lines.append('set(TR_NUM_GPUS 0)')
 
+    # 添加所有依赖项的具体路径配置（V3.2.0新增）
+    lines.append("")
+    lines.append("# Dependency library paths (V3.2.0 enhancement)")
+
+    # CUDA/cuDNN路径（已在前面设置，这里确保一致性）
+    if "cuda" in deps and deps["cuda"]["found"]:
+        cuda_path = deps["cuda"]["path"].replace("\\", "/")
+        lines.append(f'set(TR_CUDA_PATH "{cuda_path}")')
+
+    if "cudnn" in deps and deps["cudnn"]["found"]:
+        cudnn_path = deps["cudnn"]["path"].replace("\\", "/")
+        lines.append(f'set(TR_CUDNN_PATH "{cudnn_path}")')
+        # 确保include和lib路径
+        if sys_info["is_windows"]:
+            lines.append(f'set(TR_CUDNN_INCLUDE_DIR "{cudnn_path}/include")')
+            lines.append(f'set(TR_CUDNN_LIBRARY_DIR "{cudnn_path}/lib")')
+        else:
+            lines.append(f'set(TR_CUDNN_INCLUDE_DIR "{cudnn_path}/include")')
+            lines.append(f'set(TR_CUDNN_LIBRARY_DIR "{cudnn_path}/lib64")')
+
+    # MUSA/muDNN路径
+    if "musa" in deps and deps["musa"]["found"]:
+        musa_path = deps["musa"]["path"].replace("\\", "/")
+        lines.append(f'set(TR_MUSA_PATH "{musa_path}")')
+
+    if "mudnn" in deps and deps["mudnn"]["found"]:
+        mudnn_path = deps["mudnn"]["path"].replace("\\", "/")
+        lines.append(f'set(TR_MUDNN_PATH "{mudnn_path}")')
+        if sys_info["is_windows"]:
+            lines.append(f'set(TR_MUDNN_INCLUDE_DIR "{mudnn_path}/include")')
+            lines.append(f'set(TR_MUDNN_LIBRARY_DIR "{mudnn_path}/lib")')
+        else:
+            lines.append(f'set(TR_MUDNN_INCLUDE_DIR "{mudnn_path}/include")')
+            lines.append(f'set(TR_MUDNN_LIBRARY_DIR "{mudnn_path}/lib64")')
+
+    # vcpkg安装的依赖项路径 (使用实际的vcpkg包名)
+    vcpkg_packages = {
+        "onednn": "oneDNN",           # vcpkg包名: onednn
+        "xnnpack": "XNNPACK",         # vcpkg包名: xnnpack
+        "mimalloc": "mimalloc",       # vcpkg包名: mimalloc
+        "zlib": "zlib",              # vcpkg包名: zlib
+        "libcurl": "CURL",           # vcpkg包名: curl
+        "libjpeg-turbo": "JPEG",     # vcpkg包名: libjpeg-turbo
+        "stb": "STB",               # vcpkg包名: stb
+        "simd": "Simd"              # vcpkg包名: simd
+    }
+
+    for dep_key, cmake_name in vcpkg_packages.items():
+        if dep_key in deps and deps[dep_key]["found"]:
+            dep_path = deps[dep_key]["path"].replace("\\", "/")
+            lines.append(f'set(TR_{cmake_name.upper()}_PATH "{dep_path}")')
+
+            # 根据平台确定include和lib子目录
+            if sys_info["is_windows"]:
+                # Windows下使用packages目录，需要映射到实际的vcpkg包名
+                vcpkg_package_name = {
+                    "libcurl": "curl",
+                    "libjpeg-turbo": "libjpeg-turbo",
+                    "onednn": "onednn",
+                    "xnnpack": "xnnpack",
+                    "mimalloc": "mimalloc",
+                    "zlib": "zlib",
+                    "stb": "stb",
+                    "simd": "simd"
+                }.get(dep_key, dep_key)
+
+                installed_triplet = get_installed_triplet(dep_key, sys_info) or "x64-windows"
+                package_name = f"{vcpkg_package_name}_{installed_triplet}"
+                include_dir = f"{VCPKG_ROOT.replace(chr(92), '/')}/packages/{package_name}/include"
+                lib_dir = f"{VCPKG_ROOT.replace(chr(92), '/')}/packages/{package_name}/lib"
+                lines.append(f'set(TR_{cmake_name.upper()}_TRIPLET "{installed_triplet}")')
+            else:
+                # Linux下使用installed目录，优先使用真实triplet
+                installed_triplet = get_installed_triplet(dep_key, sys_info)
+                if installed_triplet:
+                    include_dir = f"{VCPKG_ROOT}/installed/{installed_triplet}/include"
+                    lib_dir = f"{VCPKG_ROOT}/installed/{installed_triplet}/lib"
+                    lines.append(f'set(TR_{cmake_name.upper()}_TRIPLET "{installed_triplet}")')
+                else:
+                    # 回退到默认triplet
+                    default_triplet = get_default_triplet(sys_info)
+                    include_dir = f"{VCPKG_ROOT}/installed/{default_triplet}/include"
+                    lib_dir = f"{VCPKG_ROOT}/installed/{default_triplet}/lib"
+                    lines.append(f'set(TR_{cmake_name.upper()}_TRIPLET "{default_triplet}")')
+
+            lines.append(f'set(TR_{cmake_name.upper()}_INCLUDE_DIR "{include_dir}")')
+            lines.append(f'set(TR_{cmake_name.upper()}_LIBRARY_DIR "{lib_dir}")')
+
+    # STB现在通过vcpkg_packages统一处理，无需特殊处理
+
+    # 添加项目路径宏
+    project_root = os.path.abspath(os.getcwd()).replace("\\", "/")
+    workspace_root = os.path.join(project_root, "workspace").replace("\\", "/")
+
+    lines.append("")
+    lines.append("# Project path macros")
+    lines.append(f'set(TR_PROJECT_ROOT "{project_root}")')
+    lines.append(f'set(TR_WORKSPACE "{workspace_root}")')
+
     return "\n".join(lines)
 
 def generate_build_script(scene: str, deps: Dict, sys_info: Dict) -> Tuple[str, str]:
@@ -1533,91 +1619,131 @@ def generate_build_script(scene: str, deps: Dict, sys_info: Dict) -> Tuple[str, 
         toolchain_opt = ""
 
     if sys_info["is_windows"]:
-        # Windows脚本 - 基于alpha编译成功经验
-        vcvars_path = ""
-        cl_path = ""
+        # Windows脚本 - 2025-12-23验证版本
+        # 使用正确的构建目录：build/windows-msvc-release
+        windows_build_dir = "build/windows-msvc-release"
+
+        # VS路径推导
+        vcvars_path = "C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Auxiliary/Build/vcvars64.bat"
         if "msvc" in deps and deps["msvc"]["found"]:
             msvc_path = deps["msvc"]["path"]
-            vs_root = msvc_path.split("\\VC\\Tools\\MSVC")[0] if "\\VC\\Tools\\MSVC" in msvc_path else msvc_path
-            vcvars_path = os.path.join(vs_root, "VC\\Auxiliary\\Build\\vcvars64.bat")
-            if os.path.exists(vcvars_path):
-                vcvars_path = vcvars_path.replace("\\", "/")
-            cl_path = os.path.join(msvc_path, "cl.exe").replace("\\", "/")
+            # 从MSVC路径推导VS根目录，统一使用正斜杠
+            msvc_path = msvc_path.replace("\\", "/")
+            if "/VC/Tools/MSVC" in msvc_path:
+                vs_root = msvc_path.split("/VC/Tools/MSVC")[0]
+            else:
+                # 默认路径
+                vs_root = "C:/Program Files/Microsoft Visual Studio/2022/Community"
+            vcvars_path = vs_root + "/VC/Auxiliary/Build/vcvars64.bat"
+
+        # vcpkg路径统一使用正斜杠
+        vcpkg_root = VCPKG_ROOT.replace("\\", "/") if VCPKG_ROOT else "T:/Softwares/vcpkg"
 
         script = f'''@echo off
 REM ================================================================
-REM renAIssance Framework - Alpha Build Script (Windows)
-REM Generated by configure.py - High Performance Build
+REM renAIssance Framework - Build Script (Windows)
+REM Generated by configure.py - Verified 2025-12-23
+REM Build Directory: {windows_build_dir}
 REM ================================================================
 
-echo [INFO] renAIssance Framework Alpha Build
-echo [INFO] Build Directory: {BUILD_DIR}
+setlocal enabledelayedexpansion
+
+REM Get script directory (project root) and remove trailing backslash
+set PROJECT_ROOT=%~dp0
+set PROJECT_ROOT=%PROJECT_ROOT:~0,-1%
+
+echo [INFO] renAIssance Framework Build (Windows)
+echo [INFO] Build Directory: {windows_build_dir}
 echo [INFO] Parallel Jobs: {PARALLEL_JOBS}
 
-REM 设置环境变量
-set CMAKE="T:\\Softwares\\CMake\\bin\\cmake.exe"
-set NINJA="B:\\Softwares\\JetBrains\\CLion 2025.2\\bin\\ninja\\win\\x64\\ninja.exe"
-
-REM 设置构建目录
-if not exist {BUILD_DIR} mkdir {BUILD_DIR}
-cd {BUILD_DIR}
-
-REM 配置CMake (Alpha编译标准)
-echo [INFO] Configuring with CMake...
-%CMAKE% ^
-    -G Ninja ^
-    -DCMAKE_BUILD_TYPE=Release ^
-    -DCMAKE_C_COMPILER=cl ^
-    -DCMAKE_CXX_COMPILER=cl ^
-    -DCMAKE_TOOLCHAIN_FILE="{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" ^
-    {cmake_opts} ^
-    ../..
+REM Key step: Initialize Visual Studio Developer Command Prompt environment
+echo [INFO] Initializing Visual Studio Developer Command Prompt...
+call "{vcvars_path}"
 
 if %errorlevel% neq 0 (
-    echo [ERROR] CMake configuration failed
+    echo [ERROR] Failed to initialize Visual Studio environment
+    echo [INFO] Please check Visual Studio installation
     exit /b 1
 )
 
-REM 编译项目
-echo [INFO] Building with Ninja...
-%CMAKE% --build . --parallel {PARALLEL_JOBS}
+REM Clean and create build directory (using correct directory name)
+if exist {windows_build_dir} (
+    echo [INFO] Cleaning existing build directory...
+    rmdir /s /q {windows_build_dir}
+)
+mkdir {windows_build_dir}
+
+REM Configure CMake - using verified parameters from 2025-12-23
+REM Note: Use -B and -S to explicitly specify build and source directories
+echo [INFO] Configuring with CMake...
+cmake -G Ninja ^
+    -S "%PROJECT_ROOT%" ^
+    -B {windows_build_dir} ^
+    -DCMAKE_BUILD_TYPE=Release ^
+    -DCMAKE_CXX_COMPILER=cl ^
+    -DCMAKE_TOOLCHAIN_FILE={vcpkg_root}/scripts/buildsystems/vcpkg.cmake ^
+    {cmake_opts}
+
+if %errorlevel% neq 0 (
+    echo [ERROR] CMake configuration failed
+    echo [INFO] This might be due to missing dependencies or path issues
+    exit /b 1
+)
+
+REM Build all targets
+echo [INFO] Building all targets with Ninja...
+cmake --build {windows_build_dir} --parallel {PARALLEL_JOBS}
 
 if %errorlevel% neq 0 (
     echo [ERROR] Build failed
+    echo [INFO] This might be due to missing dependencies or compilation errors
     exit /b 1
 )
 
 echo [OK] Build completed successfully!
-echo [INFO] Build artifacts are in: {BUILD_DIR}
-echo [INFO] Run tests: %cd%\\bin\\tests\\*.exe
-cd ../..
+echo [INFO] Build artifacts are in: {windows_build_dir}
+echo [INFO] Run tests: %PROJECT_ROOT%\\{windows_build_dir}\\bin\\dependency\\hello_cuda.exe
+
+REM Return to root directory
+cd "%PROJECT_ROOT%"
+endlocal
 '''
         return "build.bat", script
 
     else:
-        # Linux脚本
+        # Linux脚本 - 使用特定构建目录名避免时间戳问题
+        linux_build_dir = "build/linux-gcc-release"
         script = f'''#!/bin/bash
 # ================================================================
 # renAIssance Framework - Build Script (Linux)
 # Generated by configure.py
+# Version: V3.3.4
 # ================================================================
 
-echo "[INFO] renAIssance Framework Build"
+set -e  # 遇到错误时退出
+
+echo "[INFO] renAIssance Framework Alpha Build (Linux)"
 echo "[INFO] Build Directory: {BUILD_DIR}"
 echo "[INFO] Parallel Jobs: {PARALLEL_JOBS}"
 
-# 设置构建目录
+# 清理并创建构建目录（使用特定目录名避免时间戳冲突）
+if [ -d "{BUILD_DIR}" ]; then
+    echo "[INFO] Cleaning existing build directory..."
+    rm -rf {BUILD_DIR}
+fi
 mkdir -p {BUILD_DIR}
 cd {BUILD_DIR}
 
-# 配置CMake
+# 配置CMake - 使用Ninja构建系统，避免时间戳问题
 echo "[INFO] Configuring with CMake..."
-cmake ../.. \
-    -G Ninja \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_C_COMPILER=gcc \
-    -DCMAKE_CXX_COMPILER=g++ \
-    -DCMAKE_TOOLCHAIN_FILE="{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" \
+cmake .. \\
+    -G Ninja \\
+    -DCMAKE_BUILD_TYPE=Release \\
+    -DCMAKE_CXX_COMPILER=g++ \\
+    -DCMAKE_TOOLCHAIN_FILE="{VCPKG_ROOT}/scripts/buildsystems/vcpkg.cmake" \\
+    -DCMAKE_DISABLE_SOURCE_CHANGES=ON \\
+    -DCMAKE_EXPORT_NO_PACKAGE_REGISTRY=ON \\
+    -DCMAKE_FIND_PACKAGE_NO_PACKAGE_REGISTRY=ON \\
     {cmake_opts}
 
 if [ $? -ne 0 ]; then
@@ -1625,9 +1751,9 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-# 编译项目
+# 编译项目 - 使用Ninja并行构建（通用版）
 echo "[INFO] Building with Ninja..."
-cmake --build . --parallel {PARALLEL_JOBS}
+ninja -j{PARALLEL_JOBS}
 
 if [ $? -ne 0 ]; then
     echo "[ERROR] Build failed"
@@ -1636,8 +1762,11 @@ fi
 
 echo "[OK] Build completed successfully!"
 echo "[INFO] Build artifacts are in: {BUILD_DIR}"
-echo "[INFO] Run tests: $PWD/bin/tests/*.exe"
-cd ../..
+echo "[INFO] Run tests: $PWD/bin/dependency/hello_cuda"
+echo "[INFO] Or run: ./bin/dependency/hello_cuda"
+
+# 返回根目录
+cd ..
 '''
         return "build.sh", script
 
@@ -1787,6 +1916,56 @@ def check_vcpkg():
         return False
 
     return True
+
+def get_installed_triplet(dep_name: str, sys_info: Dict) -> str:
+    """从vcpkg list输出中获取实际安装的triplet"""
+    global vcpkg_full_output_cache
+
+    if not vcpkg_full_output_cache:
+        return None
+
+    # 搜索依赖项的实际安装记录
+    # 支持多种包名格式：onednn, libcurl, libjpeg-turbo等
+    import re
+
+    # 可能的包名列表
+    possible_names = []
+    if dep_name == "onednn":
+        possible_names = ["onednn"]
+    elif dep_name == "libcurl":
+        possible_names = ["curl"]
+    elif dep_name == "libjpeg-turbo":
+        possible_names = ["libjpeg-turbo"]
+    elif dep_name == "xnnpack":
+        possible_names = ["xnnpack"]
+    elif dep_name == "mimalloc":
+        possible_names = ["mimalloc"]
+    elif dep_name == "zlib":
+        possible_names = ["zlib"]
+
+    for name in possible_names:
+        # 查找 pattern: "name:triplet"
+        pattern = rf"{name}:([^\s]+)"
+        match = re.search(pattern, vcpkg_full_output_cache, re.IGNORECASE)
+        if match:
+            return match.group(1)
+
+    return None
+
+def get_default_triplet(sys_info: Dict) -> str:
+    """获取默认triplet（作为回退方案）"""
+    arch = sys_info.get("arch", "x86_64")
+
+    if arch == "x86_64":
+        return "x64-linux" if not sys_info.get("is_windows", False) else "x64-windows"
+    elif arch == "aarch64" or arch == "arm64":
+        return "arm64-linux"
+    elif arch.startswith("arm"):
+        return "arm-linux"
+    elif arch.startswith("riscv64"):
+        return "riscv64-linux"
+    else:
+        return "x64-linux"  # 默认
 
 # ============================================================================
 # 主函数

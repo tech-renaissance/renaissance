@@ -1,10 +1,10 @@
 /**
  * @file renaissance.h
  * @brief renAIssance Deep Learning Framework Main Header
- * @details €/É’ñ¦f`F¶8Ã4‡ö
+ * @details ï¿½/É’ï¿½f`Fï¿½8ï¿½4ï¿½ï¿½
  * @version 3.0.4
  * @date 2025-12-20
- * @author €/É’â
+ * @author ï¿½/É’ï¿½
  */
 
 #ifndef RENAISSANCE_H
@@ -23,7 +23,6 @@
 #define RENAISSANCE_VERSION "3.0.4"
 
 #define RENAISSANCE_NAME "renAIssance"
-#define RENAISSANCE_FULL_NAME "€/É’ñ¦f`F¶"
 
 // ============================================================================
 // Platform Detection
@@ -85,13 +84,6 @@ public:
      * @brief Print welcome message
      */
     static void printWelcome() {
-        std::cout << std::endl;
-        std::cout << "================================================================" << std::endl;
-        std::cout << "  Welcome to " << RENAISSANCE_FULL_NAME << std::endl;
-        std::cout << "  Version: " << RENAISSANCE_VERSION << std::endl;
-        std::cout << "  €/É’z*e" << std::endl;
-        std::cout << "================================================================" << std::endl;
-        std::cout << std::endl;
     }
 
 private:
@@ -110,7 +102,7 @@ private:
 #ifdef RENAISSANCE_CUDA_ENABLED
         std::cout << "[" << RENAISSANCE_NAME << "] CUDA: Enabled" << std::endl;
 
-        // ÀåCUDA¾pÏ
+        // ï¿½ï¿½CUDAï¿½pï¿½
         int deviceCount = 0;
         cudaError_t err = cudaGetDeviceCount(&deviceCount);
         if (err == cudaSuccess && deviceCount > 0) {
@@ -160,6 +152,23 @@ public:
         std::cout << "[" << RENAISSANCE_NAME << "] Tensor '" << name_ << "'" << std::endl;
     }
 };
+
+/**
+ * @brief Hello World function
+ */
+inline void helloWorld() {
+    std::cout << "[" << RENAISSANCE_NAME << "] Hello World!" << std::endl;
+}
+
+/**
+ * @brief Demonstrate framework features
+ */
+inline void demonstrateFramework() {
+    std::cout << "[" << RENAISSANCE_NAME << "] Demonstrating framework features..." << std::endl;
+    Tensor t1("demo_tensor");
+    t1.print();
+    std::cout << "[" << RENAISSANCE_NAME << "] Framework demonstration complete!" << std::endl;
+}
 
 } // namespace renAIssance
 

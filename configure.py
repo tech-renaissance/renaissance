@@ -25,8 +25,8 @@ from dependency_data import SCENE_DEPS, DEP_CONFIG
 # vcpkg路径（如果使用vcpkg管理依赖）
 VCPKG_ROOT = os.environ.get("VCPKG_ROOT", "T:/Softwares/vcpkg")
 
-# 构建目录
-BUILD_DIR = "build/cmake-build-release"
+# 构建目录 - 修复为build子目录以支持CMakeLists.txt的输出目录配置
+BUILD_DIR = "build"
 
 # 并行构建线程数
 PARALLEL_JOBS = 30
