@@ -5,11 +5,35 @@
 message(STATUS "=== Configuring Dependencies Hello World Tests ===")
 
 # ============================================================================
+# 确保workspace目录存在
+# ============================================================================
+
+if(DEFINED TR_WORKSPACE)
+    execute_process(COMMAND ${CMAKE_COMMAND} -E make_directory ${TR_WORKSPACE}
+                    RESULT_VARIABLE WORKSPACE_RESULT)
+    if(NOT WORKSPACE_RESULT EQUAL 0)
+        message(WARNING "Failed to create workspace directory: ${TR_WORKSPACE}")
+    else()
+        message(STATUS "Workspace directory ensured: ${TR_WORKSPACE}")
+    endif()
+else()
+    # 如果未定义TR_WORKSPACE，使用默认路径
+    set(TR_WORKSPACE "${CMAKE_SOURCE_DIR}/workspace")
+    execute_process(COMMAND ${CMAKE_COMMAND} -E make_directory ${TR_WORKSPACE}
+                    RESULT_VARIABLE WORKSPACE_RESULT)
+    if(NOT WORKSPACE_RESULT EQUAL 0)
+        message(WARNING "Failed to create default workspace directory: ${TR_WORKSPACE}")
+    else()
+        message(STATUS "Default workspace directory created: ${TR_WORKSPACE}")
+    endif()
+endif()
+
+# ============================================================================
 # 设置输出目录
 # ============================================================================
 
 # 输出目录设置为build目录下的bin/dependency
-set(DEPENDENCY_OUTPUT_DIR ${CMAKE_BINARY_DIR}/bin/dependency)
+set(DEPENDENCY_OUTPUT_DIR ${CMAKE_BINARY_DIR}/bin/tests/dependency)
 
 # ============================================================================
 # Hello World测试源文件配置 - 场景感知智能编译
@@ -604,7 +628,6 @@ foreach(idx RANGE 0 ${BUILD_SOURCES_LEN})
             target_compile_definitions(${TEST_NAME} PRIVATE
                 STB_IMAGE_IMPLEMENTATION
                 STB_IMAGE_WRITE_IMPLEMENTATION
-                TR_PROJECT_ROOT="${TR_PROJECT_ROOT}"
             )
 
             # ========== STB Warning Suppression ==========

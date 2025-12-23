@@ -6,7 +6,7 @@
 
 ## 概述
 
-本文档提供renAIssance深度学习框架的编译指南,包含Windows和Linux两个平台的正确编译方法。
+本文档提供renAIssance深度学习框架的编译指南，包含Windows和Linux两个平台的正确编译方法（统称**“Alpha编译”**）。
 
 **前置条件**: 必须先运行 `python configure.py` 生成配置文件
 

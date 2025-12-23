@@ -2,7 +2,7 @@
 
 ## 概述
 
-本文档介绍 renAIssance 深度学习框架的依赖项验证系统。该系统位于 `unit_tests/dependency/` 目录下，通过一系列 Hello World 示例程序验证所有第三方依赖项的正确安装和链接。
+本文档介绍 renAIssance 深度学习框架的依赖项验证系统。该系统位于 `tests/dependency/` 目录下，通过一系列 Hello World 示例程序验证所有第三方依赖项的正确安装和链接。
 
 **版本**: V3.5.1
 **更新日期**: 2025-12-24
@@ -234,8 +234,11 @@ python configure.py
 
 ### 3. 运行测试
 ```bash
-# 所有测试程序在 build/cmake-build-release/bin/dependency/ 目录下
-cd build/cmake-build-release/bin/dependency/
+# 所有测试程序在 build/windows-msvc-release/bin/dependency/ 目录下 (Windows)
+# 或 build/bin/dependency/ 目录下 (Linux)
+cd build/windows-msvc-release/bin/dependency/  # Windows
+# 或
+cd build/bin/dependency/  # Linux
 
 # 运行特定测试
 ./hello_cuda          # CUDA 测试
@@ -289,22 +292,26 @@ undefined reference to `dnnl_sgemm'
 #### 1. 查看详细配置
 ```bash
 # CMake 配置详细输出
-cmake --build build/cmake-build-release --verbose
+cmake --build build/windows-msvc-release --verbose  # Windows
+# 或
+cmake --build build/ --verbose  # Linux
 ```
 
 #### 2. 检查宏定义
 ```bash
 # 查看 CMake 缓存中的宏定义
-cmake -LAH build/cmake-build-release/
+cmake -LAH build/windows-msvc-release/  # Windows
+# 或
+cmake -LAH build/  # Linux
 ```
 
 #### 3. 验证库文件
 ```bash
 # Linux 下检查库文件是否存在
-ldd build/cmake-build-release/bin/dependency/hello_onednn
+ldd build/bin/dependency/hello_onednn
 
 # Windows 下检查依赖
-dumpbin /dependents build/cmake-build-release/bin/dependency/hello_onednn.exe
+dumpbin /dependents build/windows-msvc-release/bin/dependency/hello_onednn.exe
 ```
 
 ## 扩展指南

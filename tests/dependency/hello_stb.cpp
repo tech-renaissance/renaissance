@@ -16,8 +16,8 @@
 // ==== 主程序 ====
 int main() {
     // 输入和输出图像路径（使用项目根目录）
-    const std::string inputPath  = TR_PROJECT_ROOT "/input.jpg";
-    const std::string outputPath = "output_resized.jpg";
+    const std::string inputPath  = TR_PROJECT_ROOT "/docs/logo.jpg";
+    const std::string outputPath = TR_WORKSPACE "/output.jpg";
 
     // 图像基本信息
     int width, height, channels;

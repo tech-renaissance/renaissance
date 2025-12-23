@@ -1,175 +1,47 @@
 /**
  * @file renaissance.h
- * @brief renAIssance Deep Learning Framework Main Header
- * @details �/ɒ�f`F�8�4��
- * @version 3.0.4
- * @date 2025-12-20
- * @author �/ɒ�
+ * @brief renAIssance深度学习框架主头文件
+ * @details 统一对外接口，包含所有必要的头文件，用户只需包含此文件即可使用框架
+ * @version 3.5.5
+ * @date 2025-12-24
+ * @author 技术觉醒团队
+ * @note 依赖项:
+ * @note 所属系列: root
  */
 
 #ifndef RENAISSANCE_H
 #define RENAISSANCE_H
 
+// 标准库包含
 #include <iostream>
 #include <string>
+#include <sstream>
+#include <chrono>
+#include <vector>
 
 // ============================================================================
-// Framework Information
+// 基础设施（最先包含，其他类依赖它们）
 // ============================================================================
 
-#define RENAISSANCE_VERSION_MAJOR 3
-#define RENAISSANCE_VERSION_MINOR 0
-#define RENAISSANCE_VERSION_PATCH 4
-#define RENAISSANCE_VERSION "3.0.4"
+// 日志器：提供日志输出功能
+#include "renaissance/base/logger.h"
 
-#define RENAISSANCE_NAME "renAIssance"
-
-// ============================================================================
-// Platform Detection
-// ============================================================================
-
-#ifdef _WIN32
-    #define RENAISSANCE_PLATFORM_WINDOWS
-#elif defined(__linux__)
-    #define RENAISSANCE_PLATFORM_LINUX
-#else
-    #define RENAISSANCE_PLATFORM_UNKNOWN
-#endif
+// 异常类：提供统一的异常处理体系
+#include "renaissance/base/tr_exception.h"
 
 // ============================================================================
-// CUDA Support Detection
+// 命名空间
 // ============================================================================
-
-#ifdef TR_USE_CUDA
-    #include <cuda_runtime.h>
-    #include <cudnn.h>
-    #define RENAISSANCE_CUDA_ENABLED
-#endif
-
-// ============================================================================
-// Core Namespace
-// ============================================================================
-
-namespace renAIssance {
 
 /**
- * @brief Framework initialization class
+ * @namespace tr
+ * @brief 技术觉醒框架的命名空间
+ * @details 所有公共API都在tr命名空间下
  */
-class Framework {
-public:
-    /**
-     * @brief Initialize the renAIssance framework
-     */
-    static void initialize() {
-        std::cout << "[" << RENAISSANCE_NAME << "] Framework v" << RENAISSANCE_VERSION << " initializing..." << std::endl;
-        printSystemInfo();
-        std::cout << "[" << RENAISSANCE_NAME << "] Framework initialized successfully!" << std::endl;
-    }
+namespace tr {
 
-    /**
-     * @brief Get framework version
-     */
-    static std::string getVersion() {
-        return RENAISSANCE_VERSION;
-    }
+// 未来会在这里添加更多全局函数和类...
 
-    /**
-     * @brief Get framework name
-     */
-    static std::string getName() {
-        return RENAISSANCE_NAME;
-    }
-
-    /**
-     * @brief Print welcome message
-     */
-    static void printWelcome() {
-    }
-
-private:
-    /**
-     * @brief Print system information
-     */
-    static void printSystemInfo() {
-#ifdef RENAISSANCE_PLATFORM_WINDOWS
-        std::cout << "[" << RENAISSANCE_NAME << "] Platform: Windows" << std::endl;
-#elif defined(RENAISSANCE_PLATFORM_LINUX)
-        std::cout << "[" << RENAISSANCE_NAME << "] Platform: Linux" << std::endl;
-#else
-        std::cout << "[" << RENAISSANCE_NAME << "] Platform: Unknown" << std::endl;
-#endif
-
-#ifdef RENAISSANCE_CUDA_ENABLED
-        std::cout << "[" << RENAISSANCE_NAME << "] CUDA: Enabled" << std::endl;
-
-        // ��CUDA�p�
-        int deviceCount = 0;
-        cudaError_t err = cudaGetDeviceCount(&deviceCount);
-        if (err == cudaSuccess && deviceCount > 0) {
-            std::cout << "[" << RENAISSANCE_NAME << "] CUDA Devices: " << deviceCount << std::endl;
-        } else {
-            std::cout << "[" << RENAISSANCE_NAME << "] CUDA Devices: None available" << std::endl;
-        }
-#else
-        std::cout << "[" << RENAISSANCE_NAME << "] CUDA: Disabled" << std::endl;
-#endif
-    }
-};
-
-/**
- * @brief Simple logging utility
- */
-class Logger {
-public:
-    static void info(const std::string& message) {
-        std::cout << "[" << RENAISSANCE_NAME << "][INFO] " << message << std::endl;
-    }
-
-    static void warn(const std::string& message) {
-        std::cout << "[" << RENAISSANCE_NAME << "][WARN] " << message << std::endl;
-    }
-
-    static void error(const std::string& message) {
-        std::cerr << "[" << RENAISSANCE_NAME << "][ERROR] " << message << std::endl;
-    }
-};
-
-/**
- * @brief Basic tensor class placeholder
- */
-class Tensor {
-private:
-    std::string name_;
-
-public:
-    Tensor(const std::string& name = "tensor") : name_(name) {}
-
-    const std::string& getName() const { return name_; }
-
-    void setName(const std::string& name) { name_ = name; }
-
-    void print() const {
-        std::cout << "[" << RENAISSANCE_NAME << "] Tensor '" << name_ << "'" << std::endl;
-    }
-};
-
-/**
- * @brief Hello World function
- */
-inline void helloWorld() {
-    std::cout << "[" << RENAISSANCE_NAME << "] Hello World!" << std::endl;
-}
-
-/**
- * @brief Demonstrate framework features
- */
-inline void demonstrateFramework() {
-    std::cout << "[" << RENAISSANCE_NAME << "] Demonstrating framework features..." << std::endl;
-    Tensor t1("demo_tensor");
-    t1.print();
-    std::cout << "[" << RENAISSANCE_NAME << "] Framework demonstration complete!" << std::endl;
-}
-
-} // namespace renAIssance
+} // namespace tr
 
 #endif // RENAISSANCE_H

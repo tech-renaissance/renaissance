@@ -20,7 +20,7 @@
 
 #include <cuda_runtime.h>
 #include <cudnn.h>
-#include "renaissance.h"
+
 
 /**
  * @brief CUDA API调用检查宏
@@ -421,14 +421,6 @@ int main() {
     std::cout << std::fixed << std::setprecision(6);
     std::cerr << std::fixed << std::setprecision(6);
 
-    // 初始化renAIssance框架
-    renAIssance::Framework::printWelcome();
-    renAIssance::Logger::info("Starting CUDA Matrix Multiplication Test");
-
-    // 演示框架基础功能
-    renAIssance::helloWorld();
-    renAIssance::demonstrateFramework();
-
     std::cout << "=== Matrix Multiplication Solution E Test ===" << std::endl;
     std::cout << "Algorithm: cuDNN 1x1 convolution with automatic algorithm finding" << std::endl;
     std::cout << "Implementation: Matrix multiplication as 1x1 convolution" << std::endl;
@@ -438,11 +430,9 @@ int main() {
 
     if (success) {
         std::cout << "\n[SUCCESS] Solution E test completed successfully!" << std::endl;
-        renAIssance::Logger::info("renAIssance Framework CUDA test completed successfully!");
         return 0;
     } else {
         std::cout << "\n[FAILURE] Solution E test failed!" << std::endl;
-        renAIssance::Logger::error("renAIssance Framework CUDA test failed!");
         return 1;
     }
 }

@@ -77,6 +77,21 @@ else()
 endif()
 
 # ============================================================================
+# 项目全局宏定义
+# ============================================================================
+
+# 定义项目根目录和工作空间目录宏，使所有源文件可见（包括src和tests目录）
+if(DEFINED TR_PROJECT_ROOT)
+    add_compile_definitions(TR_PROJECT_ROOT="${TR_PROJECT_ROOT}")
+    message(STATUS "Global macro TR_PROJECT_ROOT defined: ${TR_PROJECT_ROOT}")
+endif()
+
+if(DEFINED TR_WORKSPACE)
+    add_compile_definitions(TR_WORKSPACE="${TR_WORKSPACE}")
+    message(STATUS "Global macro TR_WORKSPACE defined: ${TR_WORKSPACE}")
+endif()
+
+# ============================================================================
 # 构建选项配置
 # ============================================================================
 
@@ -264,18 +279,13 @@ endif()
 # 单元测试配置
 # ============================================================================
 
-# 检查unit_tests目录是否存在
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit_tests AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/unit_tests)
-    # 检查dependency目录是否存在
-    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit_tests/dependency AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/unit_tests/dependency)
-        # 只包含dependency测试（聚焦CUDA）
-        add_subdirectory(unit_tests/dependency)
-        message(STATUS "Dependency tests enabled")
-    else()
-        message(STATUS "Dependency tests disabled - unit_tests/dependency directory not found")
-    endif()
+# 检查tests目录是否存在
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/tests AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tests)
+    # 包含tests目录，由tests/CMakeLists.txt统一管理所有测试
+    add_subdirectory(tests)
+    message(STATUS "Unit tests directory included")
 else()
-    message(STATUS "Unit tests disabled - unit_tests directory not found")
+    message(STATUS "Unit tests disabled - tests directory not found")
 endif()
 
 # ============================================================================
