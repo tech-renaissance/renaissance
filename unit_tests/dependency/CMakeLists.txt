@@ -606,10 +606,33 @@ foreach(idx RANGE 0 ${BUILD_SOURCES_LEN})
                 STB_IMAGE_WRITE_IMPLEMENTATION
                 TR_PROJECT_ROOT="${TR_PROJECT_ROOT}"
             )
-            # 禁用STB头文件内部的警告
-            if(NOT MSVC)
-                target_compile_options(${TEST_NAME} PRIVATE -Wno-missing-field-initializers)
+
+            # ========== STB Warning Suppression ==========
+            # Windows MSVC: 禁用CRT安全警告(C4996 - sprintf等函数)
+            if(MSVC)
+                target_compile_definitions(${TEST_NAME} PRIVATE
+                    _CRT_SECURE_NO_WARNINGS
+                )
+                message(STATUS "  - STB: Disabled CRT security warnings (_CRT_SECURE_NO_WARNINGS)")
+
+            # Linux/ARM/RISC-V: 禁用pedantic警告(GCC/Clang扩展)
+            elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+                # 禁用ISO C++严格标准检查(compound-literals警告)
+                target_compile_options(${TEST_NAME} PRIVATE
+                    -Wno-pedantic
+                    -Wno-missing-field-initializers
+                )
+                message(STATUS "  - STB: Disabled pedantic warnings (-Wno-pedantic)")
+
+                # MUSA平台: 可选禁用LTO串行编译提示
+                if(DEFINED TR_SCENE_PC_MUSA AND TR_SCENE_PC_MUSA)
+                    target_compile_options(${TEST_NAME} PRIVATE
+                        -Wno-lto-type-mismatch
+                    )
+                    message(STATUS "  - STB: Disabled LTO warnings for MUSA")
+                endif()
             endif()
+
             message(STATUS "  - Using header-only STB")
         else()
             message(WARNING "  - STB not available")
@@ -681,12 +704,21 @@ foreach(idx RANGE 0 ${BUILD_SOURCES_LEN})
         endif()
     endif()
 
-  
-    # 编译器警告设置
+    # ========== 编译器警告设置 ==========
+    # 注意：STB测试会有特殊处理，这里设置的警告可能在后面被覆盖
     if(MSVC)
-        target_compile_options(${TEST_NAME} PRIVATE /W4)
+        # Windows: 启用/W4高级警告，但STB会单独禁用CRT安全警告
+        if(NOT TEST_NAME MATCHES "stb")
+            target_compile_options(${TEST_NAME} PRIVATE /W4)
+        endif()
     else()
-        target_compile_options(${TEST_NAME} PRIVATE -Wall -Wextra -Wpedantic)
+        # Linux/ARM: 启用严格警告，但STB需要禁用pedantic(GCC扩展)
+        if(TEST_NAME MATCHES "stb")
+            # STB库使用GCC扩展(NEON SIMD)，不能启用pedantic
+            target_compile_options(${TEST_NAME} PRIVATE -Wall -Wextra)
+        else()
+            target_compile_options(${TEST_NAME} PRIVATE -Wall -Wextra -Wpedantic)
+        endif()
     endif()
 
     message(STATUS "  - ${DEP_NAME} test configured successfully")

@@ -1329,11 +1329,26 @@ def search_in_vcpkg(name: str, config: Dict, is_win: bool) -> Dict:
                 if os.path.exists(dynamic_path):
                     triplet = "x64-linux-dynamic"
         elif machine in ["arm64", "aarch64"]:
-            triplet = "arm64-linux"
+            if name == "xnnpack":
+                dynamic_path = os.path.join(VCPKG_ROOT, "installed", "arm64-linux-dynamic")
+                if os.path.exists(dynamic_path):
+                    triplet = "arm64-linux-dynamic"
+            else:
+                triplet = "arm64-linux"
         elif machine.startswith("arm"):
-            triplet = "arm-linux"
+            if name == "xnnpack":
+                dynamic_path = os.path.join(VCPKG_ROOT, "installed", "arm-linux-dynamic")
+                if os.path.exists(dynamic_path):
+                    triplet = "arm-linux-dynamic"
+            else:
+                triplet = "arm-linux"
         elif machine.startswith("aarch"):
-            triplet = "aarch64-linux"
+            if name == "xnnpack":
+                dynamic_path = os.path.join(VCPKG_ROOT, "installed", "aarch64-linux-dynamic")
+                if os.path.exists(dynamic_path):
+                    triplet = "aarch64-linux-dynamic"
+            else:
+                triplet = "aarch64-linux"
         elif machine.startswith("riscv"):
             # RISC-V特殊处理：查找所有riscv*开头的triplet
             vcpkg_installed_root = os.path.join(VCPKG_ROOT, "installed")
