@@ -28,6 +28,22 @@ if(TR_USE_CUDA)
     message(STATUS "Will build CUDA test: hello_cuda.cpp")
 endif()
 
+# NCCL - 仅在GPU_CLOUD场景支持
+if(TR_USE_NCCL)
+    list(APPEND HELLO_WORLD_SOURCES hello_nccl.cpp)
+    list(APPEND HELLO_WORLD_DEPS NCCL)
+    list(APPEND HELLO_WORLD_MACROS TR_USE_NCCL)
+    message(STATUS "Will build NCCL test: hello_nccl.cpp")
+endif()
+
+# XNNPACK
+if(TR_USE_XNNPACK)
+    list(APPEND HELLO_WORLD_SOURCES hello_xnnpack.cpp)
+    list(APPEND HELLO_WORLD_DEPS XNNPACK)
+    list(APPEND HELLO_WORLD_MACROS TR_USE_XNNPACK)
+    message(STATUS "Will build XNNPACK test: hello_xnnpack.cpp")
+endif()
+
 if(TR_USE_MUSA)
     list(APPEND HELLO_WORLD_SOURCES hello_musa.mu)
     list(APPEND HELLO_WORLD_DEPS MUSA)
@@ -62,6 +78,28 @@ if(TR_USE_LIBJPEG)
     list(APPEND HELLO_WORLD_DEPS LIBJPEG)
     list(APPEND HELLO_WORLD_MACROS TR_USE_LIBJPEG)
     message(STATUS "Will build libjpeg-turbo test: hello_libjpeg.cpp")
+endif()
+
+# 三个新增的依赖测试
+if(TR_USE_ONEDNN)
+    list(APPEND HELLO_WORLD_SOURCES hello_onednn.cpp)
+    list(APPEND HELLO_WORLD_DEPS ONEDNN)
+    list(APPEND HELLO_WORLD_MACROS TR_USE_ONEDNN)
+    message(STATUS "Will build oneDNN test: hello_onednn.cpp")
+endif()
+
+if(TR_USE_SIMD)
+    list(APPEND HELLO_WORLD_SOURCES hello_simd.cpp)
+    list(APPEND HELLO_WORLD_DEPS SIMD)
+    list(APPEND HELLO_WORLD_MACROS TR_USE_SIMD)
+    message(STATUS "Will build Simd test: hello_simd.cpp")
+endif()
+
+if(TR_USE_STB)
+    list(APPEND HELLO_WORLD_SOURCES hello_stb.cpp)
+    list(APPEND HELLO_WORLD_DEPS STB)
+    list(APPEND HELLO_WORLD_MACROS TR_USE_STB)
+    message(STATUS "Will build STB test: hello_stb.cpp")
 endif()
 
 # 收集需要构建的源文件
@@ -214,6 +252,20 @@ if(TR_USE_SIMD)
     else()
         set(SIMD_FOUND FALSE)
         message(WARNING "TR_SIMD paths not defined")
+    endif()
+endif()
+
+# NCCL (NVIDIA Collective Communications Library) - 仅在GPU_CLOUD场景
+if(TR_USE_NCCL)
+    if(DEFINED TR_NCCL_INCLUDE_DIR AND DEFINED TR_NCCL_LIBRARY_DIR)
+        set(NCCL_FOUND TRUE)
+        set(NCCL_INCLUDE_DIRS ${TR_NCCL_INCLUDE_DIR})
+        set(NCCL_LIBRARIES nccl)
+        set(NCCL_LIBRARY_DIRS ${TR_NCCL_LIBRARY_DIR})
+        message(STATUS "Found NCCL: ${TR_NCCL_INCLUDE_DIR}")
+    else()
+        set(NCCL_FOUND FALSE)
+        message(WARNING "TR_NCCL paths not defined")
     endif()
 endif()
 
@@ -472,7 +524,14 @@ foreach(idx RANGE 0 ${BUILD_SOURCES_LEN})
 
     elseif(TEST_NAME MATCHES "onednn")
         if(oneDNN_FOUND)
+            target_include_directories(${TEST_NAME} PRIVATE ${oneDNN_INCLUDE_DIRS})
+            target_link_directories(${TEST_NAME} PRIVATE ${oneDNN_LIBRARY_DIRS})
             target_link_libraries(${TEST_NAME} PRIVATE ${oneDNN_LIBRARIES})
+            # 抑制 oneDNN 库的 execstack 警告（ittptmark64.S.o）
+            # PC_MUSA 场景使用 binutils 2.38，不支持 --no-warn-execstack 选项
+            if(NOT MSVC AND NOT TR_SCENE_PC_MUSA)
+                target_link_options(${TEST_NAME} PRIVATE "LINKER:--no-warn-execstack")
+            endif()
             message(STATUS "  - Linked oneDNN")
         else()
             message(WARNING "  - oneDNN not available")
@@ -482,8 +541,46 @@ foreach(idx RANGE 0 ${BUILD_SOURCES_LEN})
         if(XNNPACK_FOUND)
             target_include_directories(${TEST_NAME} PRIVATE ${XNNPACK_INCLUDE_DIRS})
             target_link_directories(${TEST_NAME} PRIVATE ${XNNPACK_LIBRARY_DIRS})
-            target_link_libraries(${TEST_NAME} PRIVATE ${XNNPACK_LIBRARIES})
-            message(STATUS "  - Linked XNNPACK")
+
+            # XNNPACK使用C标准库，需要降低C++标准版本以避免兼容性问题
+            set_property(TARGET ${TEST_NAME} PROPERTY CXX_STANDARD 17)
+
+            if(MSVC)
+                # Windows上使用WHOLE_ARCHIVE强制包含所有microkernel符号
+                target_link_libraries(${TEST_NAME} PRIVATE
+                    XNNPACK
+                    pthreadpool
+                    cpuinfo
+                    xnnpack-microkernels-prod
+                )
+
+                # MSVC需要使用/WHOLEARCHIVE来强制链接所有符号
+                # 否则链接器会优化掉未直接引用的microkernel函数
+                target_link_options(${TEST_NAME} PRIVATE
+                    "/WHOLEARCHIVE:XNNPACK.lib"
+                    "/WHOLEARCHIVE:pthreadpool.lib"
+                    "/WHOLEARCHIVE:cpuinfo.lib"
+                    "/WHOLEARCHIVE:xnnpack-microkernels-prod.lib"
+                )
+
+                # XNNPACK需要_CRT_SECURE_NO_WARNINGS来避免某些C标准库函数的警告
+                target_compile_definitions(${TEST_NAME} PRIVATE _CRT_SECURE_NO_WARNINGS)
+
+                # C:\XNNPACK的库使用动态CRT(/MD)，与项目默认设置一致
+                message(STATUS "  - Linked XNNPACK (static with WHOLE_ARCHIVE, /MD CRT, C++17)")
+            else()
+                # Linux/macOS使用动态库
+                target_link_libraries(${TEST_NAME} PRIVATE ${XNNPACK_LIBRARIES})
+
+                # 设置运行时 RPATH 以便找到动态库
+                if(UNIX AND NOT APPLE)
+                    set_target_properties(${TEST_NAME} PROPERTIES
+                        INSTALL_RPATH "${XNNPACK_LIBRARY_DIRS}"
+                        BUILD_RPATH "${XNNPACK_LIBRARY_DIRS}"
+                    )
+                endif()
+                message(STATUS "  - Linked XNNPACK (dynamic, C++17)")
+            endif()
         else()
             message(WARNING "  - XNNPACK not available")
         endif()
@@ -507,7 +604,12 @@ foreach(idx RANGE 0 ${BUILD_SOURCES_LEN})
             target_compile_definitions(${TEST_NAME} PRIVATE
                 STB_IMAGE_IMPLEMENTATION
                 STB_IMAGE_WRITE_IMPLEMENTATION
+                TR_PROJECT_ROOT="${TR_PROJECT_ROOT}"
             )
+            # 禁用STB头文件内部的警告
+            if(NOT MSVC)
+                target_compile_options(${TEST_NAME} PRIVATE -Wno-missing-field-initializers)
+            endif()
             message(STATUS "  - Using header-only STB")
         else()
             message(WARNING "  - STB not available")
@@ -545,8 +647,27 @@ foreach(idx RANGE 0 ${BUILD_SOURCES_LEN})
 
     elseif(TEST_NAME MATCHES "nccl")
         if(TR_USE_NCCL)
-            # TODO: NCCL support
-            message(WARNING "  - NCCL support not yet implemented")
+            if(NCCL_FOUND)
+                # NCCL 需要 CUDA 支持
+                target_include_directories(${TEST_NAME} PRIVATE ${NCCL_INCLUDE_DIRS})
+                target_link_directories(${TEST_NAME} PRIVATE ${NCCL_LIBRARY_DIRS})
+                target_link_libraries(${TEST_NAME} PRIVATE ${NCCL_LIBRARIES})
+
+                # 添加 CUDA include 路径（NCCL 依赖 CUDA）
+                if(DEFINED TR_CUDA_PATH)
+                    target_include_directories(${TEST_NAME} PRIVATE ${TR_CUDA_PATH}/include)
+                    message(STATUS "  - Added CUDA include for NCCL: ${TR_CUDA_PATH}/include")
+                endif()
+
+                # 链接 CUDA runtime（NCCL 依赖 CUDA）
+                target_link_libraries(${TEST_NAME} PRIVATE ${CUDA_cudart_LIBRARY})
+
+                message(STATUS "  - Linked NCCL")
+            else()
+                message(WARNING "  - NCCL not available")
+            endif()
+        else()
+            message(STATUS "  - NCCL support disabled (TR_USE_NCCL=OFF)")
         endif()
 
     elseif(TEST_NAME MATCHES "simd")

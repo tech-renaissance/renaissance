@@ -331,6 +331,7 @@ DEP_CONFIG = {
         "header": "xnnpack.h",
         "lib_files": ["xnnpack.dll", "libxnnpack.so"],
         "env": ["XNNPACK_ROOT"],
+        "paths_win": ["C:\\XNNPACK"],  # Windows手动安装路径（静态库）
         "vcpkg_packages": ["xnnpack"],
         "version_pattern": r"(\d{4}-\d{2}-\d{2})",  # 日期格式: 2024-08-20
         "install_hint": "vcpkg install xnnpack"

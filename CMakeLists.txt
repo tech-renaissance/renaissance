@@ -34,23 +34,45 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/config/cmake_paths.cmake)
     include(${CMAKE_CURRENT_SOURCE_DIR}/config/cmake_paths.cmake)
 endif()
 
-# 确保workspace目录存在（使用构建目录而非源码目录）
+# 确保workspace目录存在（在项目根目录）
 if(DEFINED TR_WORKSPACE)
-    # 如果TR_WORKSPACE在源码目录中，则重定向到构建目录
-    if(TR_WORKSPACE STREQUAL "${CMAKE_CURRENT_SOURCE_DIR}/workspace")
-        set(TR_WORKSPACE "${CMAKE_BINARY_DIR}/workspace")
+    # 使用execute_process创建目录，绕过CMake的源码目录限制
+    if(TR_WORKSPACE MATCHES "\\$\\{TR_PROJECT_ROOT\\}")
+        # 需要展开变量，先设置临时路径
+        set(TR_WORKSPACE_TEMP "${CMAKE_CURRENT_SOURCE_DIR}/workspace")
+        execute_process(COMMAND ${CMAKE_COMMAND} -E make_directory ${TR_WORKSPACE_TEMP}
+                        RESULT_VARIABLE TR_WORKSPACE_RESULT)
+        if(NOT TR_WORKSPACE_RESULT EQUAL 0)
+            message(WARNING "Failed to create workspace directory")
+        endif()
+        # 更新TR_WORKSPACE为实际路径
+        set(TR_WORKSPACE ${TR_WORKSPACE_TEMP})
+    else()
+        # 直接使用已定义的路径
+        execute_process(COMMAND ${CMAKE_COMMAND} -E make_directory ${TR_WORKSPACE}
+                        RESULT_VARIABLE TR_WORKSPACE_RESULT)
+        if(NOT TR_WORKSPACE_RESULT EQUAL 0)
+            message(WARNING "Failed to create workspace directory")
+        endif()
     endif()
-    file(MAKE_DIRECTORY ${TR_WORKSPACE})
     message(STATUS "Workspace directory ensured: ${TR_WORKSPACE}")
 elseif(DEFINED TR_PROJECT_ROOT)
-    # 如果只有TR_PROJECT_ROOT，则创建workspace子目录在构建目录中
-    set(TR_WORKSPACE "${CMAKE_BINARY_DIR}/workspace")
-    file(MAKE_DIRECTORY ${TR_WORKSPACE})
+    # 如果只有TR_PROJECT_ROOT，则在源码目录中创建workspace
+    set(TR_WORKSPACE "${CMAKE_CURRENT_SOURCE_DIR}/workspace")
+    execute_process(COMMAND ${CMAKE_COMMAND} -E make_directory ${TR_WORKSPACE}
+                    RESULT_VARIABLE TR_WORKSPACE_RESULT)
+    if(NOT TR_WORKSPACE_RESULT EQUAL 0)
+        message(WARNING "Failed to create workspace directory")
+    endif()
     message(STATUS "Workspace directory created: ${TR_WORKSPACE}")
 else()
     # 回退到默认workspace目录（在构建目录中）
     set(TR_WORKSPACE "${CMAKE_BINARY_DIR}/workspace")
-    file(MAKE_DIRECTORY ${TR_WORKSPACE})
+    execute_process(COMMAND ${CMAKE_COMMAND} -E make_directory ${TR_WORKSPACE}
+                    RESULT_VARIABLE TR_WORKSPACE_RESULT)
+    if(NOT TR_WORKSPACE_RESULT EQUAL 0)
+        message(WARNING "Failed to create workspace directory")
+    endif()
     message(STATUS "Default workspace directory created: ${TR_WORKSPACE}")
 endif()
 

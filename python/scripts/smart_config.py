@@ -199,9 +199,17 @@ def get_user_choice(options: List[Dict], prompt: str) -> Dict:
             else:
                 print_fail(f"Invalid choice. Please enter 1-{len(options) + 1}")
         except EOFError:
-            # 非交互模式，默认选择第一个选项
-            print_info(f"Non-interactive mode: selecting first {options[0]['name']} installation")
-            selected = options[0]
+            # 非交互模式，Windows默认选第一个，Linux默认选第二个
+            import platform
+            is_windows = platform.system() == "Windows"
+
+            if is_windows or len(options) < 2:
+                print_info(f"Non-interactive mode: selecting first {options[0]['name']} installation")
+                selected = options[0]
+            else:
+                # Linux：默认选第二个（通常是有完整库的虚拟环境）
+                print_info(f"Non-interactive mode: selecting second {options[1]['name']} installation")
+                selected = options[1]
             selected["found"] = True
             return selected
         except ValueError:
@@ -868,20 +876,28 @@ def find_all_dependency_versions(name: str, sys_info: Dict) -> List[Dict]:
                 if header_path:
                     # 对于没有可执行文件的依赖，尝试从路径获取版本
                     version = extract_version_from_path(path, name)
-                    if version != "unknown" and (not min_version or compare_version(version, min_version) >= 0):
-                        versions.append({
-                            "name": config["name"],
-                            "path": path,
-                            "version": version,
-                            "from_vcpkg": False
-                        })
+
+                    # 特殊处理：对于XNNPACK等库，即使版本未知也接受
+                    # 因为这些库主要是通过头文件使用的
+                    allow_unknown = name.lower() in ["xnnpack", "stb", "cpuinfo", "pthreadpool"]
+
+                    if version != "unknown" or allow_unknown:
+                        if version == "unknown" or not min_version or compare_version(version, min_version) >= 0:
+                            versions.append({
+                                "name": config["name"],
+                                "path": path,
+                                "version": version if version != "unknown" else None,
+                                "from_vcpkg": False
+                            })
 
     # vcpkg版本
+    # 特殊处理：Windows下XNNPACK跳过vcpkg，优先使用本地安装
     if VCPKG_ROOT and config.get("vcpkg_packages"):
-        vcpkg_found = search_in_vcpkg(name, config, is_win)
-        if vcpkg_found["found"]:
-            vcpkg_found["from_vcpkg"] = True
-            versions.append(vcpkg_found)
+        if not (is_win and name == "xnnpack"):
+            vcpkg_found = search_in_vcpkg(name, config, is_win)
+            if vcpkg_found["found"]:
+                vcpkg_found["from_vcpkg"] = True
+                versions.append(vcpkg_found)
 
     # 环境变量版本
     for env in config.get("env", []):
@@ -1088,12 +1104,14 @@ def search_dependency(name: str, sys_info: Dict, suppress_print: bool = False) -
         return result
 
     # 第一层：vcpkg搜索 (最高优先级)
+    # 特殊处理：Windows下XNNPACK跳过vcpkg，优先使用本地安装
     if VCPKG_ROOT and config.get("vcpkg_packages"):
-        vcpkg_found = search_in_vcpkg(name, config, is_win)
-        if vcpkg_found["found"]:
-            result = vcpkg_found
-            result["from_vcpkg"] = True
-            return result
+        if not (is_win and name == "xnnpack"):
+            vcpkg_found = search_in_vcpkg(name, config, is_win)
+            if vcpkg_found["found"]:
+                result = vcpkg_found
+                result["from_vcpkg"] = True
+                return result
 
     # 第二层：环境变量
     for env in config.get("env", []):
@@ -1303,7 +1321,13 @@ def search_in_vcpkg(name: str, config: Dict, is_win: bool) -> Dict:
         import platform
         machine = platform.machine().lower()
         if machine == "x86_64":
+            # x64平台：默认使用 x64-linux
             triplet = "x64-linux"
+            # 只有 XNNPACK 需要动态库（由于 microkernel 链接问题）
+            if not is_win and name == "xnnpack":  # Linux + XNNPACK
+                dynamic_path = os.path.join(VCPKG_ROOT, "installed", "x64-linux-dynamic")
+                if os.path.exists(dynamic_path):
+                    triplet = "x64-linux-dynamic"
         elif machine in ["arm64", "aarch64"]:
             triplet = "arm64-linux"
         elif machine.startswith("arm"):
@@ -1325,9 +1349,6 @@ def search_in_vcpkg(name: str, config: Dict, is_win: bool) -> Dict:
             # 如果没找到，使用默认
             if not triplet:
                 triplet = "riscv64-linux"
-        else:
-            # 默认使用x64-linux
-            triplet = "x64-linux"
 
     vcpkg_installed = os.path.join(VCPKG_ROOT, "installed", triplet)
 
@@ -1542,6 +1563,19 @@ def generate_cmake_config(scene: str, deps: Dict, sys_info: Dict) -> str:
             lines.append(f'set(TR_MUDNN_INCLUDE_DIR "{mudnn_path}/include")')
             lines.append(f'set(TR_MUDNN_LIBRARY_DIR "{mudnn_path}/lib64")')
 
+    # NCCL路径（仅Linux，GPU_CLOUD场景专用）
+    if "nccl" in deps and deps["nccl"]["found"]:
+        nccl_path = deps["nccl"]["path"].replace("\\", "/")
+        lines.append(f'set(TR_NCCL_PATH "{nccl_path}")')
+        if sys_info["is_linux"]:
+            # NCCL通常安装在/usr/include和/usr/lib
+            lines.append('set(TR_NCCL_INCLUDE_DIR "/usr/include")')
+            lines.append('set(TR_NCCL_LIBRARY_DIR "/usr/lib/x86_64-linux-gnu")')
+        else:
+            # Windows暂不支持NCCL
+            lines.append(f'set(TR_NCCL_INCLUDE_DIR "{nccl_path}/include")')
+            lines.append(f'set(TR_NCCL_LIBRARY_DIR "{nccl_path}/lib")')
+
     # vcpkg安装的依赖项路径 (使用实际的vcpkg包名)
     vcpkg_packages = {
         "onednn": "oneDNN",           # vcpkg包名: onednn
@@ -1561,35 +1595,95 @@ def generate_cmake_config(scene: str, deps: Dict, sys_info: Dict) -> str:
 
             # 根据平台确定include和lib子目录
             if sys_info["is_windows"]:
-                # Windows下使用packages目录，需要映射到实际的vcpkg包名
-                vcpkg_package_name = {
-                    "libcurl": "curl",
-                    "libjpeg-turbo": "libjpeg-turbo",
-                    "onednn": "onednn",
-                    "xnnpack": "xnnpack",
-                    "mimalloc": "mimalloc",
-                    "zlib": "zlib",
-                    "stb": "stb",
-                    "simd": "simd"
-                }.get(dep_key, dep_key)
+                # 特殊处理：Windows + XNNPACK 使用本地安装（C:\XNNPACK）
+                if dep_key == "xnnpack" and not deps[dep_key].get("from_vcpkg", False):
+                    # 使用本地安装路径，包含include和lib子目录
+                    include_dir = f"{dep_path}/include"
+                    lib_dir = f"{dep_path}/lib"
+                    lines.append(f'set(TR_{cmake_name.upper()}_TRIPLET "x64-windows")')
+                else:
+                    # Windows下使用packages目录，需要映射到实际的vcpkg包名
+                    vcpkg_package_name = {
+                        "libcurl": "curl",
+                        "libjpeg-turbo": "libjpeg-turbo",
+                        "onednn": "onednn",
+                        "xnnpack": "xnnpack",
+                        "mimalloc": "mimalloc",
+                        "zlib": "zlib",
+                        "stb": "stb",
+                        "simd": "simd"
+                    }.get(dep_key, dep_key)
 
-                installed_triplet = get_installed_triplet(dep_key, sys_info) or "x64-windows"
-                package_name = f"{vcpkg_package_name}_{installed_triplet}"
-                include_dir = f"{VCPKG_ROOT.replace(chr(92), '/')}/packages/{package_name}/include"
-                lib_dir = f"{VCPKG_ROOT.replace(chr(92), '/')}/packages/{package_name}/lib"
-                lines.append(f'set(TR_{cmake_name.upper()}_TRIPLET "{installed_triplet}")')
+                    installed_triplet = get_installed_triplet(dep_key, sys_info) or "x64-windows"
+                    package_name = f"{vcpkg_package_name}_{installed_triplet}"
+                    include_dir = f"{VCPKG_ROOT.replace(chr(92), '/')}/packages/{package_name}/include"
+                    lib_dir = f"{VCPKG_ROOT.replace(chr(92), '/')}/packages/{package_name}/lib"
+                    lines.append(f'set(TR_{cmake_name.upper()}_TRIPLET "{installed_triplet}")')
             else:
-                # Linux下使用installed目录，优先使用真实triplet
+                # Linux下优先使用installed目录，如果不存在则检查packages目录
                 installed_triplet = get_installed_triplet(dep_key, sys_info)
                 if installed_triplet:
-                    include_dir = f"{VCPKG_ROOT}/installed/{installed_triplet}/include"
-                    lib_dir = f"{VCPKG_ROOT}/installed/{installed_triplet}/lib"
+                    # 先检查installed目录
+                    installed_include = f"{VCPKG_ROOT}/installed/{installed_triplet}/include"
+                    installed_lib = f"{VCPKG_ROOT}/installed/{installed_triplet}/lib"
+
+                    # 如果installed目录不存在，检查packages目录（某些架构如RISC-V）
+                    if not os.path.exists(installed_include):
+                        # 映射依赖名到vcpkg包名
+                        vcpkg_package_name = {
+                            "libcurl": "curl",
+                            "libjpeg-turbo": "libjpeg-turbo",
+                            "onednn": "onednn",
+                            "xnnpack": "xnnpack",
+                            "mimalloc": "mimalloc",
+                            "zlib": "zlib",
+                            "stb": "stb",
+                            "simd": "simd"
+                        }.get(dep_key, dep_key)
+
+                        packages_include = f"{VCPKG_ROOT}/packages/{vcpkg_package_name}_{installed_triplet}/include"
+                        packages_lib = f"{VCPKG_ROOT}/packages/{vcpkg_package_name}_{installed_triplet}/lib"
+
+                        if os.path.exists(packages_include):
+                            include_dir = packages_include
+                            lib_dir = packages_lib
+                        else:
+                            # 回退到installed目录
+                            include_dir = installed_include
+                            lib_dir = installed_lib
+                    else:
+                        include_dir = installed_include
+                        lib_dir = installed_lib
+
                     lines.append(f'set(TR_{cmake_name.upper()}_TRIPLET "{installed_triplet}")')
                 else:
                     # 回退到默认triplet
                     default_triplet = get_default_triplet(sys_info)
-                    include_dir = f"{VCPKG_ROOT}/installed/{default_triplet}/include"
-                    lib_dir = f"{VCPKG_ROOT}/installed/{default_triplet}/lib"
+                    default_include = f"{VCPKG_ROOT}/installed/{default_triplet}/include"
+                    default_lib = f"{VCPKG_ROOT}/installed/{default_triplet}/lib"
+
+                    # 检查packages目录
+                    vcpkg_package_name = {
+                        "libcurl": "curl",
+                        "libjpeg-turbo": "libjpeg-turbo",
+                        "onednn": "onednn",
+                        "xnnpack": "xnnpack",
+                        "mimalloc": "mimalloc",
+                        "zlib": "zlib",
+                        "stb": "stb",
+                        "simd": "simd"
+                    }.get(dep_key, dep_key)
+
+                    packages_include = f"{VCPKG_ROOT}/packages/{vcpkg_package_name}_{default_triplet}/include"
+                    packages_lib = f"{VCPKG_ROOT}/packages/{vcpkg_package_name}_{default_triplet}/lib"
+
+                    if os.path.exists(packages_include):
+                        include_dir = packages_include
+                        lib_dir = packages_lib
+                    else:
+                        include_dir = default_include
+                        lib_dir = default_lib
+
                     lines.append(f'set(TR_{cmake_name.upper()}_TRIPLET "{default_triplet}")')
 
             lines.append(f'set(TR_{cmake_name.upper()}_INCLUDE_DIR "{include_dir}")')
@@ -1599,12 +1693,11 @@ def generate_cmake_config(scene: str, deps: Dict, sys_info: Dict) -> str:
 
     # 添加项目路径宏
     project_root = os.path.abspath(os.getcwd()).replace("\\", "/")
-    workspace_root = os.path.join(project_root, "workspace").replace("\\", "/")
 
     lines.append("")
     lines.append("# Project path macros")
     lines.append(f'set(TR_PROJECT_ROOT "{project_root}")')
-    lines.append(f'set(TR_WORKSPACE "{workspace_root}")')
+    lines.append('set(TR_WORKSPACE "${TR_PROJECT_ROOT}/workspace")')
 
     return "\n".join(lines)
 
@@ -1939,6 +2032,8 @@ def get_installed_triplet(dep_name: str, sys_info: Dict) -> str:
         possible_names = ["mimalloc"]
     elif dep_name == "zlib":
         possible_names = ["zlib"]
+    elif dep_name == "stb":
+        possible_names = ["stb"]
 
     for name in possible_names:
         # 查找 pattern: "name:triplet"
