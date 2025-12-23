@@ -1,222 +1,123 @@
-# renAIssance Deep Learning Framework V3.1.0 - 自动配置系统
+# renAIssance Deep Learning Framework - 自动配置系统
 
 ## 概述
 
-本文档详细描述了 renAIssance 深度学习框架 V3.1.0 的自动配置系统设计思路、实现方案和技术特性。该系统支持6大场景和16个依赖项的智能管理，旨在解决深度学习框架部署中的复杂依赖管理和环境配置问题。
+技术觉醒深度学习框架V3.5.1实现了一套完整的跨平台自动配置系统，支持**6大场景**和**16个依赖项**的智能管理。
 
-**版本**: V3.3.4
-**更新日期**: 2025-12-23
-**核心特性**: 6大场景自动配置 + 16依赖项智能管理 + 完整编译宏生成 + Hello World验证系统 + 一键编译完善
+**版本**: V3.5.1
+**更新日期**: 2025-12-24
+**核心特性**: 6大场景自动配置 + 16依赖项智能管理 + 一键编译 + Hello World验证
 
-## 问题背景
+## 六大使用场景
 
-### 核心问题
-1. **依赖复杂性**：深度学习框架依赖众多第三方库（CUDA、cuDNN、oneDNN、XNNPACK、mimalloc、编译器等）
-2. **跨平台差异**：Windows/Linux/ARM/RISC-V不同平台下依赖安装路径和版本要求各异
-3. **场景多样性**：PC端、云服务器、嵌入式设备的不同需求
-4. **配置繁杂性**：手动配置CMake、编译脚本、环境变量容易出错
-5. **版本兼容性**：不同版本的工具链可能存在兼容性问题
+| 场景 | 名称 | 平台 | GPU | 编译器 |
+|------|------|------|-----|--------|
+| **PC_CUDA** | Windows + NVIDIA GPU | Windows 11 | RTX系列 | MSVC |
+| **GPU_CLOUD** | Linux + Multi-NVIDIA GPU | Ubuntu 24.04 | RTX 5090×2 | GCC |
+| **PC_MUSA** | Linux + 摩尔线程GPU | Ubuntu 22.04 | MTT S80 | GCC |
+| **CPU_CLOUD** | CPU云服务器 | Windows/Linux | - | MSVC/GCC |
+| **EDGE_ARM** | ARM嵌入式 | Linux | - | GCC |
+| **EDGE_RISCV** | RISC-V嵌入式 | Linux | - | GCC |
 
-### 传统方案缺陷
-- 手动配置易出错、耗时长
-- 缺乏智能环境检测能力
-- 依赖版本管理混乱
-- 跨平台配置不统一
-- 场景适配不完善
+## 16个核心依赖项
 
-## 解决方案
+### 构建工具
+- **CMake** (≥3.20) - 跨平台构建系统
+- **Ninja** (≥1.10) - 快速构建工具
+- **编译器** - MSVC (Windows) 或 GCC (Linux/ARM/RISC-V)
 
-### 设计目标
-1. **零配置启动**：用户只需运行一个命令即可完成所有配置
-2. **智能场景检测**：自动检测硬件、操作系统，智能确定使用场景
-3. **智能依赖搜索**：多策略查找依赖，优先使用vcpkg等包管理器
-4. **跨平台统一**：Windows/Linux/ARM/RISC-V使用统一的配置逻辑
-5. **用户友好界面**：清晰的彩色输出和错误提示
+### GPU加速库
+- **CUDA Toolkit** (≥13.0) - NVIDIA GPU计算平台
+- **cuDNN** (≥9.17) - NVIDIA深度学习加速库
+- **MUSA Toolkit** (≥3.0) - 摩尔线程GPU计算平台
+- **muDNN** (≥2.8) - 摩尔线程深度学习库
+- **NCCL** (≥2.28) - NVIDIA多卡通信库(GPU_CLOUD专用)
 
-### 技术方案
-采用分层检测策略：
-```
-架构检测 → 场景判断 → 依赖搜索 → 版本检测 → 配置生成
-```
+### 深度学习库
+- **oneDNN** (Intel oneAPI) - x86 CPU神经网络优化
+- **XNNPACK** - ARM/移动端神经网络加速
+- **Simd** - CPU图像预处理库(除RISC-V外)
+- **STB** - 图像处理fallback库(RISC-V专用)
 
-## 功能特性
+### 系统库
+- **zlib** - 压缩库
+- **libcurl** - 网络库
+- **libjpeg-turbo** - 高性能JPEG编解码
+- **mimalloc** - 微软高性能内存池
 
-### 六大场景支持
-1. **PC_CUDA** - Windows + NVIDIA GPU + MSVC
-2. **GPU_CLOUD** - Linux + Multi-NVIDIA GPU + GCC
-3. **PC_MUSA** - Linux + 摩尔线程GPU + GCC
-4. **CPU_CLOUD** - Windows/Linux x86 CPU服务器
-5. **EDGE_ARM** - ARM嵌入式Linux + GCC
-6. **EDGE_RISCV** - RISC-V嵌入式Linux + GCC
+### Python生态
+- **Python** (≥3.12) - Python解释器
+- **NumPy** (≥1.24) - 数值计算库
 
-### 平台支持
-- **Windows**: x86_64 架构，支持 Visual Studio MSVC 编译器
-- **Linux**: x86_64 架构，支持 GCC 编译器
-- **ARM**: arm64、aarch64 架构，支持 GCC 编译器
-- **RISC-V**: riscv64 架构，支持 GCC 编译器
-- **GPU加速**: NVIDIA CUDA/cuDNN, 摩尔线程 MUSA/muDNN
+## 快速开始
 
-### 依赖管理 (16个依赖项)
-#### 构建工具
-- **CMake** (≥3.20.0), **Ninja** (≥1.10.0)
-- **编译器**: MSVC (Windows), GCC (Linux/ARM/RISC-V)
+### ⚠️ 重要：自动配置是编译的前提！
 
-#### GPU加速
-- **CUDA Toolkit** (≥13.0), **cuDNN** (≥9.17)
-- **MUSA Toolkit** (≥3.0), **muDNN** (≥2.8)
-- **NCCL** (≥2.28) - GPU_CLOUD专用多卡通信
+**首次编译前必须先运行自动配置脚本，否则编译会失败！**
 
-#### 深度学习库
-- **oneDNN** (Intel oneAPI Deep Neural Network Library)
-- **XNNPACK** (Google的移动端优化神经网络库)
-- **STB** (RISC-V图像预处理fallback库，全平台支持)
-- **libjpeg-turbo** (高性能JPEG解码库)
+#### 检查是否已配置
 
-#### 系统库
-- **zlib** (压缩库), **libcurl** (网络库)
-- **mimalloc** (微软高性能内存池)
-- **Python** (≥3.12.0), **NumPy** (≥1.24.0)
-- **内存池**: mimalloc (微软高性能内存池)
+在项目根目录下检查：
+```bash
+# Windows下检查
+dir config
+dir build.bat   # Windows
+dir build.sh    # Linux
 
-### 编译宏系统（V3.2.0增强版）
-生成的编译宏支持完整的功能控制和路径管理：
-```cmake
-### 场景宏（互斥，只能有一个为1）
-TR_SCENE_PC_CUDA
-TR_SCENE_GPU_CLOUD
-TR_SCENE_PC_MUSA
-TR_SCENE_CPU_CLOUD
-TR_SCENE_EDGE_ARM
-TR_SCENE_EDGE_RISCV
-
-### 功能宏（完整依赖项支持）
-TR_USE_CUDA          ### 是否使用CUDA/cuDNN
-TR_USE_MUSA          ### 是否使用MUSA/muDNN
-TR_USE_ONEDNN        ### 是否使用oneDNN（x86专用）
-TR_USE_XNNPACK       ### 是否使用XNNPACK
-TR_USE_STB           ### 是否使用STB库
-TR_USE_LIBJPEG       ### 是否使用libjpeg-turbo
-TR_USE_ZLIB          ### 是否使用zlib压缩库
-TR_USE_LIBCURL       ### 是否使用libcurl网络库
-TR_USE_MIMALLOC      ### 是否使用mimalloc内存池
-TR_USE_SIMD          ### 是否使用SIMD指令集
-TR_USE_MULTI_GPU     ### 是否启用多GPU支持
-TR_USE_NCCL          ### 是否使用NCCL（仅GPU_CLOUD）
-
-### 系统宏
-TR_NUM_GPUS          ### 检测到的GPU数量
-TR_IS_EDGE_DEVICE    ### EDGE_ARM 或 EDGE_RISCV 时为 1
-
-### 全局路径宏（V3.2.0新增）
-TR_PROJECT_ROOT      ### 项目根目录的绝对路径
-TR_WORKSPACE         ### 默认工作目录（项目根目录/workspace）
+# Linux下检查
+ls -la config/
+ls -la build.sh
 ```
 
-### Hello World验证系统（V3.2.0新增）
-
-#### 系统概述
-V3.2.0引入了完整的依赖项验证系统，通过`unit_tests/dependence/`目录下的Hello World示例程序验证所有第三方库的正确安装和链接。
-
-#### 智能构建机制
-- **场景感知构建**：根据配置宏动态决定编译哪些测试
-- **依赖项映射**：每个场景只构建相关依赖项的Hello World
-- **统一管理**：单个CMakeLists.txt管理所有测试程序
-
-#### 支持的验证程序
-1. **hello_cuda.cpp** - CUDA/cuDNN矩阵乘法性能测试
-2. **hello_musa.mu** - 摩尔线程GPU基础测试
-3. **hello_onednn.cpp** - Intel oneDNN ReLU操作测试
-4. **hello_xnnpack.cpp** - XNNPACK向量加法运算测试
-5. **hello_mimalloc.cpp** - mimalloc内存分配测试
-6. **hello_stb.cpp** - STB图像处理完整流程测试
-7. **hello_zlib.cpp** - zlib压缩解压缩测试
-8. **hello_libcurl.cpp** - libcurl HTTP请求测试
-9. **hello_libjpeg.cpp** - libjpeg-turbo图像编解码测试
-10. **hello_nccl.cpp** - NCCL多GPU通信测试（仅GPU_CLOUD）
-11. **hello_simd.cpp** - Simd图像处理测试
-
-#### 场景构建矩阵
-| 场景 | CUDA | MUSA | oneDNN | XNNPACK | STB | zlib | libcurl | libjpeg | NCCL | mimalloc | Simd |
-|------|------|------|---------|----------|-----|------|---------|----------|------|----------|------|
-| **PC_CUDA** | ✅ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ |
-| **GPU_CLOUD** | ✅ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| **PC_MUSA** | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ |
-| **CPU_CLOUD** | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ |
-| **EDGE_ARM** | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ❌ |
-| **EDGE_RISCV** | ❌ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ❌ |
-
-详细说明请参考：`docs/hello_dependence.md`
-
-## 技术架构
-
-### 系统架构
+**如果看到以下错误，说明还没有配置：**
 ```
-configure.py (入口点)
-├── smart_config.py (核心逻辑)
-│   ├── 系统检测 (CPU/OS/GPU)
-│   ├── 场景判断 (6大场景)
-│   ├── 依赖搜索 (16个依赖项)
-│   ├── 版本检测 (智能版本提取)
-│   └── 配置生成 (CMake/JSON/脚本)
-└── dependency_data.py (配置数据)
-    ├── 场景定义 (SCENE_DEPS)
-    ├── 依赖配置 (DEP_CONFIG)
-    └── 安装建议 (INSTALL_SUGGESTIONS)
+系统找不到指定的文件 - Windows
+No such file or directory - Linux
 ```
 
-### 检测流程 (6步GPU检测)
-1. **CPU架构判断**: ARM→EDGE_ARM, RISC-V→EDGE_RISCV, x86→继续
-2. **GPU使用询问**: ([Y]/N) 默认为Y，直接回车使用
-3. **GPU类型判断**: 检测到则直接使用，未检测到则询问并提供驱动安装建议
-4. **操作系统判断**: Windows→PC_CUDA, Linux→继续
-5. **GPU数量判断**: 多卡→GPU_CLOUD, 单卡→PC_CUDA
-6. **默认场景**: CPU_CLOUD
+**解决方法：必须先运行自动配置（见下文）**
 
-### 版本检测策略
-- **cuDNN**: Windows路径推导 + Linux头文件解析
-- **vcpkg包**: 全字匹配 + 版本格式验证
-- **可执行文件**: 标准命令行版本检测
-- **头文件**: 文件内容解析
+---
 
-### 场景化配置 (V3.1.0)
-根据硬件环境自动确定6大使用场景：
-- **PC_CUDA**: Windows + NVIDIA GPU + MSVC
-- **GPU_CLOUD**: Linux + Multi-NVIDIA GPU + GCC
-- **PC_MUSA**: Linux + 摩尔线程GPU + GCC
-- **CPU_CLOUD**: Windows/Linux x86 CPU云服务器
-- **EDGE_ARM**: ARM嵌入式Linux + GCC
-- **EDGE_RISCV**: RISC-V嵌入式Linux + GCC
+### 一键配置与编译
 
-### 智能特性
-- **硬件自动检测**: CPU架构、GPU型号、数量、驱动版本
-- **智能GPU检测**: 6步GPU检测流程，自动判断场景并提供驱动安装建议
-- **vcpkg集成**: 优先通过vcpkg查找依赖，精确包匹配
-- **版本检测**: 智能版本提取（路径推导、头文件解析、命令检测）
-- **用户交互**: 优化默认选择，减少用户输入，统一格式输出
-
-### 用户体验优化
-- **统一输出格式**: 14字符依赖项名 + 15字符版本号 + 路径
-- **智能默认选项**: GPU使用默认为Y，减少用户输入
-- **颜色编码**: 不同类型信息使用不同颜色标识
-- **错误处理**: 详细的错误提示和安装建议
-
-## 使用方法
-
-### 快速启动
 ```bash
 # 1. 进入项目根目录
 cd R:/renaissance
 
-# 2. 运行自动配置
-python configure.py
+# 2. 运行自动配置（必需！）
+python configure.py           # Windows
+python3 configure.py          # Linux (或python3.14 configure.py)
 
-# 3. 选择使用GPU加速（直接回车即可）
-# 询问GPU类型：检测到则直接使用，未检测到则提供安装建议
+# 3. 验证配置成功
+# Windows下应该看到：
+#   config/          目录
+#   build.bat        文件
+# Linux下应该看到：
+#   config/          目录
+#   build.sh         文件
 
-# 4. 选择Python安装（非交互模式自动选择第一个）
+# 4. 一键编译
+.\build.bat        # Windows
+./build.sh        # Linux
 ```
 
-### 输出示例
+### 🎯 配置成功的标志
+
+**Windows下必须生成**:
+- ✅ `config/` 目录（包含cmake_paths.cmake和project_config.json）
+- ✅ `build.bat` 文件
+
+**Linux下必须生成**:
+- ✅ `config/` 目录（包含cmake_paths.cmake和project_config.json）
+- ✅ `build.sh` 文件
+
+**如果缺少任何一个，说明配置失败，必须重新运行 `python configure.py`！**
+
+---
+
+### 配置流程示例（实测输出）
+
 ```
 [Step 1/8] Checking CPU architecture...
 [OK] Architecture: x86_64
@@ -228,7 +129,7 @@ python configure.py
 [OK] GPU: NVIDIA GeForce RTX 4060 Laptop GPU (x1), Driver: 591.44
 
 [Step 4/8] Checking vcpkg package manager...
-[OK] vcpkg: T:\Softwares\vcpkg
+[OK] vcpkg                         - T:/Softwares/vcpkg
 
 [Step 5/8] Checking C++ toolchain...
 [OK] MSVC          [v14.44.35207]  - C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/bin/Hostx64
@@ -236,7 +137,7 @@ python configure.py
 [OK] Ninja         [v1.12.1]       - B:/Softwares/JetBrains/CLion 2025.2/bin/ninja/win/x64
 
 [Step 6/8] Determining usage scenario...
-Do you want to use GPU acceleration? ([Y]/N): [用户直接回车]
+Do you want to use GPU acceleration? ([Y]/N): [Enter]
 
 [Step 7/8] Checking GPU acceleration libraries...
 [OK] CUDA Toolkit  [v13.0]         - C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.0
@@ -249,759 +150,283 @@ Do you want to use GPU acceleration? ([Y]/N): [用户直接回车]
 [INFO] Selected: Python        [v3.14.0]       - C:/Python314
 
 [Step 8/8] Generating configuration files...
-[OK] Build Directory: build/cmake-build-release
 [OK] Generated: config\cmake_paths.cmake
 [OK] Generated: config\project_config.json
 [OK] Generated: build.bat
 ```
 
-### 生成文件
-运行配置后自动生成：
-- **config/cmake_paths.cmake** - CMake路径配置和编译宏
-- **config/project_config.json** - 完整的项目和依赖信息
-- **build.bat** - Windows一键构建脚本
+## 核心技术实现
 
-## 系统架构
+### 1. 智能场景判断(6步流程)
 
-### 脚本组织 (V3.1.0)
-```
-renAIssance/
-├── configure.py              # V3.1.0 配置入口，支持6大场景
-├── python/scripts/
-│   ├── smart_config.py      # V3.1.0 核心配置逻辑，6步GPU检测
-│   └── dependency_data.py    # V3.1.0 6大场景+16依赖项配置
-├── config/                   # 生成的配置文件
-│   ├── cmake_paths.cmake     # CMake配置+完整编译宏
-│   └── project_config.json   # 项目配置+GPU信息+版本详情
-└── build.bat                 # Windows构建脚本，支持CUDA/OpenMP
-```
+1. **CPU架构判断** - ARM→EDGE_ARM, RISC-V→EDGE_RISCV, x86→继续
+2. **GPU使用询问** - 默认为Y,直接回车即可
+3. **GPU类型检测** - 自动检测并提供驱动安装建议
+4. **操作系统判断** - Windows→PC_CUDA, Linux→继续
+5. **GPU数量判断** - 多卡→GPU_CLOUD, 单卡→PC_CUDA
+6. **默认场景** - CPU_CLOUD
 
-### 核心组件
+### 2. 全平台统一vcpkg算法
 
-#### 1. configure.py (配置入口)
-- 定义可配置变量 (VCPKG_ROOT, BUILD_DIR, PARALLEL_JOBS)
-- 调用智能配置模块
-- 处理用户交互和最终输出
+**核心创新**: 字符串搜索算法,性能提升87.0%
 
-#### 2. smart_config.py (核心引擎)
-- **系统检测模块**: detect_system(), detect_gpu()
-- **场景判断模块**: determine_scene()
-- **依赖搜索模块**: search_dependency(), find_all_dependency_versions()
-- **配置生成模块**: generate_config_files()
-- **用户选择模块**: get_user_choice()
-
-#### 3. dependency_data.py (数据定义)
-- **场景定义**: SCENE_DEPS - 五大核心场景配置（包含嵌入式和MUSA）
-- **依赖配置**: DEP_CONFIG - 详细依赖搜索策略（支持MUSA/mudnn）
-- **安装建议**: INSTALL_SUGGESTIONS - 依赖安装指引
-
-## 实现细节
-
-### 核心函数API和实现原理
-
-#### 1. 系统检测函数
-
-##### `detect_system()` - 系统信息检测
 ```python
-def detect_system() -> Dict
-```
-**功能**: 检测操作系统和CPU架构信息
-**返回**: 包含`os`、`arch`、`is_windows`、`is_linux`的字典
-**实现原理**:
-- 使用`platform.system()`获取操作系统
-- 使用`platform.machine()`获取CPU架构
-- 标准化架构名称（如`amd64`→`x86_64`）
+def get_vcpkg_package_version(package_name: str):
+    # 执行一次vcpkg list并缓存
+    full_output = get_vcpkg_full_output()
 
-##### `detect_gpu()` - GPU硬件检测
-```python
-def detect_gpu() -> Dict
-```
-**功能**: 检测GPU类型、型号和数量
-**返回**: 包含`type`、`name`、`count`的字典
-**实现原理**:
-- 执行`nvidia-smi`命令检测NVIDIA GPU
-- 执行`mthreads-gmi`命令检测摩尔线程GPU
-- 解析输出获取GPU数量和型号
-
-##### `determine_scene(sys_info, gpu_info)` - 场景判断
-```python
-def determine_scene(sys_info: Dict, gpu_info: Dict) -> str
-```
-**功能**: 根据系统信息判断使用场景
-**返回**: 场景标识符（如`pc_cuda_win`、`gpu_cloud`、`pc_musa`、`embedded`）
-**实现逻辑**:
-1. ARM/RISC-V架构 → 嵌入式场景（已实现）
-2. Windows → PC-CUDA场景
-3. Linux + GPU检测：
-   - NVIDIA GPU → PC-CUDA或GPU云场景
-   - 摩尔线程GPU → PC-MUSA场景（已实现）
-4. GPU数量决定单卡或多卡云场景
-5. 无GPU → CPU云场景
-
-#### 2. 依赖搜索函数
-
-##### `search_dependency(name, sys_info)` - 单依赖搜索
-```python
-def search_dependency(name: str, sys_info: Dict) -> Dict
-```
-**功能**: 搜索单个依赖的安装信息
-**返回**: 包含`found`、`path`、`version`、`from_vcpkg`的字典
-**搜索策略**（按优先级）:
-1. **vcpkg搜索**: 调用`search_in_vcpkg()`
-2. **环境变量**: 检查配置的`env`列表
-3. **系统PATH**: 使用`shutil.which()`查找
-4. **固定路径**: 遍历`paths_win`/`paths_linux`
-5. **通配符搜索**: 使用`glob.glob()`展开路径模式
-
-##### `find_all_dependency_versions(name, sys_info)` - 多版本查找
-```python
-def find_all_dependency_versions(name: str, sys_info: Dict) -> List[Dict]
-```
-**功能**: 找到所有符合版本要求的依赖版本
-**返回**: 版本信息列表，供用户选择
-**特殊处理**:
-- Python包使用`check_cmd`直接检测，优先使用当前运行的Python解释器
-- 可执行文件使用`extract_version_from_path()`获取精确版本
-- 支持多版本用户选择界面，单个版本时自动选择无需询问（已实现）
-- 智能重复检测，避免相同Python安装的重复添加
-
-##### `search_in_vcpkg(name, config, is_win)` - vcpkg专用搜索
-```python
-def search_in_vcpkg(name: str, config: Dict, is_win: bool) -> Dict
-```
-**功能**: 在vcpkg安装目录中查找依赖
-**实现原理**:
-- 根据系统架构智能选择triplet：
-  - Windows: `x64-windows`
-  - Linux x86_64: `x64-linux`
-  - Linux ARM64: `arm64-linux`
-  - Linux ARM: `arm-linux`
-  - Linux RISC-V: `riscv64-linux`（已实现）
-- 构建vcpkg安装路径：`{VCPKG_ROOT}/installed/{triplet}`
-- 检查`include`子目录下的头文件存在性
-
-##### `find_msvc()` - MSVC专用查找
-```python
-def find_msvc() -> Dict
-```
-**功能**: 专门查找MSVC编译器
-**实现步骤**:
-1. 检查技术觉醒2确认的已知路径
-2. 使用glob模式搜索Visual Studio安装目录
-3. 在系统PATH中查找cl.exe
-4. 返回包含完整路径和版本信息的结构化结果
-
-#### 3. 版本处理函数
-
-##### `extract_version_from_path(path, dep_name)` - 精确版本提取
-```python
-def extract_version_from_path(path: str, dep_name: str) -> str
-```
-**功能**: 通过执行版本命令获取准确的版本信息
-**实现流程**:
-1. 从`DEP_CONFIG`获取依赖配置
-2. 构建`version_cmd`命令
-3. 查找可执行文件路径（支持bin子目录）
-4. 执行命令并使用正则表达式解析版本号
-5. 支持多种常见版本模式匹配
-
-##### `compare_version(v1, v2)` - 版本比较
-```python
-def compare_version(v1: str, v2: str) -> int
-```
-**功能**: 语义化版本号比较
-**返回**: -1(v1<v2)、0(v1=v2)、1(v1>v2)
-**实现**: 将版本号解析为数字数组并逐位比较
-
-#### 4. 用户交互函数
-
-##### `get_user_choice(options, prompt)` - 用户选择界面
-```python
-def get_user_choice(options: List[Dict], prompt: str) -> Dict
-```
-**功能**: 为多版本依赖提供用户选择界面
-**特性**:
-- 显示版本号和路径信息
-- 支持自定义路径输入
-- 验证路径存在性
-- 处理键盘中断和无效输入
-
-#### 5. 配置文件生成函数
-
-##### `generate_cmake_config(scene, deps, sys_info)` - CMake配置生成
-```python
-def generate_cmake_config(scene: str, deps: Dict, sys_info: Dict) -> str
-```
-**功能**: 生成CMake路径配置文件内容
-**生成内容**:
-- vcpkg工具链路径
-- CUDA和cuDNN根目录
-- MUSA和muDNN根目录
-- Python可执行文件路径
-- MSVC编译器路径和vcvars64.bat路径
-- 场景特定的CMake选项
-- **V3.2.0新增**: 全局路径宏（TR_PROJECT_ROOT和TR_WORKSPACE）
-- **V3.2.0新增**: GPU数量宏（TR_NUM_GPUS）
-
-**V3.2.0新增功能**:
-```python
-# 添加项目路径宏
-project_root = os.path.abspath(os.getcwd()).replace("\\", "/")
-workspace_root = os.path.join(project_root, "workspace").replace("\\", "/")
-
-lines.append("# Project path macros")
-lines.append(f'set(TR_PROJECT_ROOT "{project_root}")')
-lines.append(f'set(TR_WORKSPACE "{workspace_root}")')
+    # 直接在字符串中搜索"包名:"模式
+    for line in full_output.split('\n'):
+        if f"{package_name}:" in line:
+            return extract_version(line)
 ```
 
-##### `generate_build_script(scene, deps, sys_info)` - 构建脚本生成
-```python
-def generate_build_script(scene: str, deps: Dict, sys_info: Dict) -> Tuple[str, str]
-```
-**功能**: 生成平台特定的构建脚本
-**返回**: (脚本文件名, 脚本内容)
-**实现细节**:
-- **Windows**: 生成build.bat，设置MSVC环境变量，使用Alpha编译优化
-- **Linux**: 生成build.sh，设置GCC编译器，支持并行编译
+**技术优势**:
+- ✅ 全平台统一 - Windows/Linux/ARM/RISC-V相同逻辑
+- ✅ 性能最优 - 只执行一次vcpkg list,后续零延迟
+- ✅ triplet无关 - 自动适配任意编译器triplet
+- ✅ 代码简洁 - 从200+行复杂逻辑简化为20行核心代码
 
-##### `generate_config_files(scene, found_deps, sys_info)` - 配置文件生成主函数
-```python
-def generate_config_files(scene: str, found_deps: Dict, sys_info: Dict) -> None
-```
-**功能**: 生成所有配置文件的统一入口
-**生成文件**:
-- `config/cmake_paths.cmake` - CMake路径配置
-- `config/project_config.json` - 完整项目配置JSON
-- `build.bat` / `build.sh` - 平台特定构建脚本
+### 3. 编译宏系统
 
-#### 6. 主执行函数
+自动生成完整的编译宏控制:
 
-##### `run_smart_config()` - 智能配置主函数
-```python
-def run_smart_config() -> bool
-```
-**功能**: 执行完整的8步智能配置流程
-**返回**: 配置成功返回True，失败返回False
-**执行流程**:
-1. **Step 1**: 检查CPU架构 (`detect_system()`)
-2. **Step 2**: 检查操作系统 (从sys_info获取)
-3. **Step 3**: 检测GPU硬件 (`detect_gpu()`)
-4. **Step 4**: 检查vcpkg包管理器 (`check_vcpkg()`)
-5. **Step 5**: 检查C++工具链 (MSVC/GCC + CMake/Ninja)
-6. **Step 6**: 检查CUDA和cuDNN (如果需要GPU)
-7. **Step 7**: 检查其他库 (oneDNN, XNNPACK, zlib等)
-8. **Step 8**: 生成配置文件 (`generate_config_files()`)
-
-**错误处理**:
-- 任何步骤失败都会显示详细错误信息
-- 必需依赖缺失时提供安装建议
-- 支持用户键盘中断退出
-
-##### `check_vcpkg()` - vcpkg可用性检查
-```python
-def check_vcpkg() -> bool
-```
-**功能**: 检查vcpkg包管理器是否可用
-**检查内容**:
-- VCPKG_ROOT环境变量是否设置
-- vcpkg.exe可执行文件是否存在
-- 返回检查结果
-
-### 搜索策略设计
-
-#### 依赖搜索优先级
-1. **vcpkg最高优先级**：通过vcpkg安装的库 (oneDNN, XNNPACK, zlib, libcurl等)
-2. **环境变量次优先级**：CUDA_ROOT, CUDNN_ROOT等
-3. **系统PATH第三优先级**：全局PATH中的可执行文件
-4. **固定路径第四优先级**：常见安装目录
-
-#### 多版本选择机制
-- **用户选择依赖**: CMake、Ninja、编译器、Python支持多版本选择
-- **自动选择依赖**: 其他依赖自动选择最新版本
-- **版本比较算法**: 语义化版本号比较
-
-#### 错误处理和用户友好性
-- **分层错误处理**: 检测层、依赖层、配置层分别处理错误
-- **详细错误信息**: 提供具体的缺失原因和安装建议
-- **进度可视化**: 8步骤清晰进度显示
-- **彩色输出**: 支持ANSI颜色代码和Windows UTF-8编码
-
-### 配置文件生成
-
-#### CMake 配置
-- **cmake_paths.cmake**: CMake路径和工具链配置
-- **project_config.json**: 完整的项目配置信息
-- **build脚本**: 平台特定的构建脚本
-
-#### 场景化CMake选项
+**场景宏**(互斥):
 ```cmake
-# PC-CUDA场景
--DTR_USE_CUDA=ON -DTR_USE_MUSA=OFF
-
-# ARM嵌入式场景
--DTR_USE_CUDA=OFF -DTR_USE_MUSA=ON
+TR_SCENE_PC_CUDA       # Windows + NVIDIA GPU
+TR_SCENE_GPU_CLOUD     # Linux + Multi-NVIDIA GPU
+TR_SCENE_PC_MUSA       # Linux + 摩尔线程GPU
+TR_SCENE_CPU_CLOUD     # CPU服务器
+TR_SCENE_EDGE_ARM      # ARM嵌入式
+TR_SCENE_EDGE_RISCV    # RISC-V嵌入式
 ```
 
-### 错误处理和用户体验
-
-#### 分层错误处理
-1. **检测层错误**: 硬件不支持、系统不兼容
-2. **依赖层错误**: 依赖缺失、版本不符
-3. **配置层错误**: 文件写入权限、路径无效
-
-#### 用户友好的输出
-- **彩色终端**: 支持 ANSI 颜色代码
-- **进度显示**: 8步骤清晰进度提示
-- **详细错误信息**: 具体的安装建议和版本要求
-- **成功确认**: 配置完成确认信息
-
-## 技术优势
-
-### 相比传统方案的优势
-
-#### 1. 智能化程度
-- **传统方案**: 手动配置，易出错
-- **本方案**: 零配置启动，智能适配
-
-#### 2. 可靠性
-- **传统方案**: 依赖版本混乱，兼容性问题
-- **本方案**: 严格版本检查，依赖隔离
-
-#### 3. 跨平台一致性
-- **传统方案**: Windows/Linux配置方式不统一
-- **本方案**: 统一的配置逻辑和界面
-
-#### 4. 用户体验
-- **传统方案**: 黑盒操作，错误难以定位
-- **本方案**: 透明过程，清晰错误提示
-
-#### 5. 可维护性
-- **传统方案**: 硬编码路径，维护困难
-- **本方案**: 配置驱动，易于扩展
-
-### 架构优势
-
-#### 1. 模块化设计
-- 功能模块独立，易于测试和维护
-- 数据与逻辑分离，配置灵活
-- 插件化架构，易于扩展
-
-#### 2. 数据驱动配置
-- 场景和依赖通过配置文件定义
-- 新增场景/依赖只需修改配置文件
-- 支持配置模板和继承
-
-#### 3. 渐进式搜索
-- 多层次搜索策略，提高找到依赖的概率
-- 用户选择与自动选择结合
-- 失败优雅降级，提供明确指引
-
-## 部署和使用
-
-### 系统要求
-- **Python 3.11+**: Python解释器
-- **基本编译工具**: 用于编译配置脚本
-- **目标依赖**: 根据场景需要的相应依赖
-
-### 使用方法
-```bash
-# 基本使用
-python configure.py
-
-# 自动化使用
-python configure.py && ./build.bat  # Windows
-python configure.py && ./build.sh  # Linux/ARM/Debian
+**功能宏**:
+```cmake
+TR_USE_CUDA            # 使用CUDA/cuDNN
+TR_USE_MUSA            # 使用MUSA/muDNN
+TR_USE_ONEDNN          # 使用oneDNN(仅x86)
+TR_USE_XNNPACK         # 使用XNNPACK
+TR_USE_NCCL            # 使用NCCL多卡通信
+TR_USE_SIMD            # 使用Simd库
 ```
 
-### 平台兼容性（已验证）
-- **Windows 11**: ✅ x86_64 + MSVC + CUDA
-- **Ubuntu 24.04 LTS**: ✅ x86_64 + GCC + CUDA
-- **树莓派5 (Debian)**: ✅ ARM64 + GCC（嵌入式场景）
-- **摩尔线程GPU**: ✅ Linux + MUSA + muDNN
-
-### 配置结果
-- **config/cmake_paths.cmake**: CMake路径配置
-- **config/project_config.json**: 完整项目配置
-- **build.bat / build.sh**: 平台特定构建脚本
-
-## 扩展性和未来发展
-
-### 短期扩展计划
-1. ✅ **更多平台支持**: ARM, RISC-V 已实现，macOS 预留接口
-2. ✅ **更多依赖支持**: MUSA/muDNN 已实现，NCCL, MPI 预留接口
-3. **自动化安装**: 自动安装缺失依赖
-4. **配置验证**: 配置正确性检查和测试
-
-### 接口设计
-- **插件化场景定义**: 支持自定义场景配置
-- **依赖检测扩展**: 支持新的依赖类型检测
-- **配置后端扩展**: 支持不同的配置文件格式
-
-## 最新优化成果（V3.1.0）
-
-### 性能优化突破
-- **Linux vcpkg性能提升85.6%**: 从14秒优化到1.967秒
-- **批量查询缓存**: 一次性vcpkg list + 内存缓存，避免重复命令调用
-- **平台差异化策略**:
-  - Linux: 批量查询缓存（`vcpkg list`一次性获取所有包版本）
-  - Windows: 精确查询（`vcpkg list package_name`，Windows下vcpkg速度快）
-
-### NumPy路径检测优化
-- **准确site-packages路径**: 现在正确显示为真实site-packages目录
-  - Linux: `/home/ubuntu/venv/py314/lib/python3.14/site-packages`
-  - Windows: `C:/Python314/Lib/site-packages`
-- **智能路径解析**: 自动查找并定位到site-packages目录
-- **版本和路径双输出**: 同时获取NumPy版本号和安装路径
-
-### 用户体验改进
-- **统一输出格式**: 14字符依赖项名 + 15字符版本号 + 路径，完美对齐
-- **vcpkg显示优化**: vcpkg本身也按照统一格式显示
-- **NCCL检测修复**: 正确检测Linux系统中的NCCL安装
-- **libcurl版本修复**: 修复Linux下libcurl版本号显示问题
-
-### 技术实现细节
-
-#### vcpkg性能优化算法
-```python
-# Linux优化：批量查询缓存
-def get_all_vcpkg_versions() -> Dict[str, str]:
-    # 一次性执行: vcpkg list
-    # 解析所有包版本: {"onednn": "3.7", "xnnpack": "2024-08-20", ...}
-    # 缓存到全局变量: vcpkg_all_packages_cache
-    pass
-
-def get_vcpkg_package_version(package_name: str) -> Optional[str]:
-    if sys.platform == "win32":
-        # Windows: 精确查询（Windows下vcpkg list很快）
-        return query_single_package(package_name)
-    else:
-        # Linux: 从批量缓存中获取
-        all_versions = get_all_vcpkg_versions()
-        return all_versions.get(package_name)
+**系统宏**:
+```cmake
+TR_NUM_GPUS            # GPU数量
+TR_IS_EDGE_DEVICE      # 边缘设备标识
+TR_PROJECT_ROOT        # 项目根目录绝对路径
+TR_WORKSPACE           # 工作目录路径
 ```
 
-#### NumPy路径检测算法
-```python
-# 修改检查命令：同时获取版本和文件路径
-"check_cmd": ["python", "-c", "import numpy; print(numpy.__version__); print(numpy.__file__)"]
+### 4. 依赖项智能搜索
 
-# 智能路径解析
-def parse_numpy_output(output: str):
-    lines = output.strip().split('\n')
-    version = lines[0].strip()
-    numpy_file = lines[1].strip()
-    # 获取NumPy的site-packages路径
-    site_packages_path = find_site_packages(numpy_file)
-    return version, site_packages_path
-```
+**搜索优先级**:
+1. **vcpkg包管理器** - 最高优先级
+2. **环境变量** - CUDA_ROOT, CUDNN_ROOT等
+3. **系统PATH** - 全局可执行文件搜索
+4. **固定路径** - 常见安装目录通配符展开
 
-### 配置示例对比
+**版本检测策略**:
+- **cuDNN** - Windows路径推导, Linux头文件解析
+- **vcpkg包** - 全字匹配 + 版本格式验证
+- **可执行文件** - 标准命令行版本检测
+- **Python包** - NumPy自动定位site-packages目录
 
-#### 优化前 (Linux)
-```
-[OK] NumPy         [v2.3.5]        - /home/ubuntu/venv/py314/bin  # 错误路径
-耗时: 14.132秒 (vcpkg多次调用)
-```
+### 5. Windows一键编译(V3.3.5完善)
 
-#### 优化后 (Linux)
-```
-[OK] vcpkg                         - /home/ubuntu/R/vcpkg
-[OK] NumPy         [v2.3.5]        - /home/ubuntu/venv/py314/lib/python3.14/site-packages  # 正确路径
-耗时: 1.967秒 (vcpkg批量缓存)
-```
+**核心技术点**:
 
-### 全平台统一字符串搜索算法突破
-
-#### 最终优化：算法简化与统一
-经过多轮迭代优化，最终采用**全平台统一的字符串搜索算法**，完美解决了所有平台的vcpkg性能问题。
-
-#### 核心算法原理
-**极简设计思路**：
-1. **执行一次**：`vcpkg list` 并缓存完整输出字符串
-2. **字符串搜索**：直接在缓存字符串中搜索 `{包名}:` 模式
-3. **triplet无关**：不管冒号后面是什么triplet，只要包名匹配即可
-
-#### 算法实现
-```python
-# 统一的全平台字符串搜索算法
-def get_vcpkg_package_version(package_name: str) -> Optional[str]:
-    # 获取完整的vcpkg list输出（带缓存）
-    full_output = get_vcpkg_full_output()  # 只执行一次，全平台统一
-
-    # 在输出字符串中搜索包含包名的行
-    for line in full_output.strip().split('\n'):
-        if f"{package_name}:" in line:  # 直接字符串搜索，不管triplet
-            # 提取版本号...
-            return version
-```
-
-#### 技术优势
-1. **算法统一**: Windows、Linux、ARM、RISC-V使用完全相同的逻辑
-2. **性能最优**: 只执行一次`vcpkg list`，后续零延迟
-3. **代码简洁**: 删除所有平台特定的复杂逻辑
-4. **triplet无关**: 自动适配任意编译器triplet，无需特殊处理
-
-#### RISC-V支持机制
-采用**智能fallback**策略：
-1. **优先默认triplet**：如`riscv64-linux-clang`
-2. **自动备用搜索**：如果默认triplet找不到，自动搜索其他`riscv*`目录
-3. **版本号统一**：所有triplet的包都能通过字符串搜索正确获取版本
-
-#### 验证结果
-**硬件环境**: OrangePi RV2 (RISC-V) + Ubuntu
-**vcpkg分布**:
-- `xnnpack:riscv64-linux-clang`: 找到 ✅
-- `zlib:riscv64-linux`: 找到 ✅
-- `libjpeg-turbo:riscv64-linux`: 找到 ✅
-- `mimalloc:riscv64-linux`: 找到 ✅
-- `stb:riscv64-linux`: 找到 ✅
-
-**配置输出**:
-```
-[OK] XNNPACK       [v2024-08-20]   - /home/orangepi/R/vcpkg/installed/riscv64-linux-clang
-[OK] zlib          [v1.3.1]        - /home/orangepi/R/vcpkg/installed/riscv64-linux
-[OK] libjpeg-turbo [v3.1.3]        - /home/orangepi/R/vcpkg/installed/riscv64-linux
-[OK] mimalloc      [v2.2.4]        - /home/orangepi/R/vcpkg/installed/riscv64-linux
-[OK] STB           [v2024-07-29]   - /home/orangepi/R/vcpkg/installed/riscv64-linux
-```
-
-#### 性能对比
-- **优化前**: 14.132秒 → 多次vcpkg命令调用
-- **批量缓存优化**: 1.967秒 → 一次vcpkg list + 复杂数据结构
-- **最终字符串优化**: 1.837秒 → 一次vcpkg list + 字符串搜索
-- **总提升**: **87.0%** ⬆️
-
-## 总结
-
-renAIssance 自动配置系统通过智能检测、多策略搜索、用户友好的界面设计，彻底解决了深度学习框架部署中的依赖管理难题。系统采用模块化架构、数据驱动配置，具有良好的可扩展性和可维护性。
-
-### 核心成就（V3.2.0）
-- ✅ **跨平台支持**: Windows、Linux、ARM/RISC-V全面实现
-- ✅ **多GPU支持**: NVIDIA CUDA、摩尔线程MUSA完整支持
-- ✅ **智能检测**: 自动场景判断、依赖版本管理
-- ✅ **用户体验**: 单版本自动选择、多版本友好交互
-- ✅ **平台验证**: Windows 11、Ubuntu 24.04、树莓派5、OrangePi RV2实际测试通过
-- ✅ **性能优化**: vcpkg性能提升87.0%，NumPy路径检测准确性100%
-- ✅ **统一输出**: 完美对齐的依赖信息显示格式
-- ✅ **算法统一**: 全平台统一的字符串搜索算法，极致简洁高效
-- ✅ **V3.2.0新增**: **完整编译宏生成** - 支持所有16个依赖项的精确控制
-- ✅ **V3.2.0新增**: **全局路径宏** - TR_PROJECT_ROOT和TR_WORKSPACE自动生成
-- ✅ **V3.2.0新增**: **Hello World验证系统** - 11个依赖项的完整验证体系
-- ✅ **V3.2.0新增**: **智能构建控制** - 场景感知的依赖项测试构建机制
-
-### 技术突破
-- **字符串搜索算法**: 全平台统一vcpkg版本查询，87.0%性能提升
-- **智能路径解析**: NumPy等Python包路径检测从解释器目录优化为真实site-packages目录
-- **零平台差异**: 删除所有平台特定逻辑，实现真正的全平台统一
-- **智能fallback**: RISC-V多triplet自动适配，无需复杂搜索算法
-- **极致简洁**: 从复杂的数据结构缓存简化为字符串搜索，代码量减少60%
-- **统一格式化**: 所有依赖项信息按照统一格式显示，完美对齐
-- **V3.2.0新增**: **宏生成完善** - 实现所有依赖项宏和全局路径宏的完整生成
-- **V3.2.0新增**: **依赖验证系统** - 从配置检测扩展到功能验证的完整体系
-- **V3.2.0新增**: **场景感知构建** - 根据场景智能选择构建目标的创新机制
-
-### 平台兼容性全面验证
-- **Windows 11**: ✅ x86_64 + MSVC + CUDA (PC_CUDA场景)
-- **Ubuntu 24.04**: ✅ x86_64 + GCC + Multi-GPU (GPU_CLOUD场景)
-- **树莓派5**: ✅ ARM64 + GCC (EDGE_ARM场景)
-- **OrangePi RV2**: ✅ RISC-V + GCC + Clang (EDGE_RISCV场景)
-
-配置系统现已实现真正的全平台、全架构、全编译器兼容支持！
-
----
-
-## V3.3.4 更新 (2025-12-23)
-
-### 一键编译系统完善
-
-#### Windows 平台完美一键编译
-
-**核心成就**：实现零错误、零警告的完美一键编译
-
-**使用方法**：
-```cmd
-# 步骤1：自动配置
-python configure.py
-
-# 步骤2：一键编译
-./build.bat
-```
-
-**输出位置**：`build/windows-msvc-release/bin/dependency/`
-
-#### 关键技术突破
-
-##### 1. build.bat 脚本生成优化
-
-**修复的问题**：
-- ❌ 旧版：路径混乱、编译器配置冗余、cuDNN 检测失败
-- ✅ 新版：路径规范、零警告、cuDNN 完美支持
-
-**核心改进**：
+#### Alpha编译方法
 ```batch
-REM 现代化 CMake 参数
+REM 必须先初始化Visual Studio Developer Command Prompt
+call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"
+```
+
+#### 现代CMake参数
+```batch
 cmake -G Ninja ^
     -S "%PROJECT_ROOT%" ^
     -B build/windows-msvc-release ^
     -DCMAKE_BUILD_TYPE=Release ^
     -DCMAKE_CXX_COMPILER=cl ^
-    -DCMAKE_TOOLCHAIN_FILE=T:/Softwares/vcpkg/scripts/buildsystems/vcpkg.cmake ^
-    -DTR_SCENE_PC_CUDA=ON -DTR_USE_CUDA=ON ...
-
-REM 一键编译
-cmake --build build/windows-msvc-release --parallel 30
+    -DCMAKE_TOOLCHAIN_FILE=T:/Softwares/vcpkg/scripts/buildsystems/vcpkg.cmake
 ```
 
-**关键技术点**：
-- ✅ 使用 `-S` 和 `-B` 参数明确源码和构建目录
-- ✅ 所有路径统一使用正斜杠 `/`（CMake 兼容）
-- ✅ 使用 `%~dp0` 动态获取项目根目录
-- ✅ 移除 `-DCMAKE_C_COMPILER=cl`（消除未使用警告）
-- ✅ 直接使用 `cmake` 命令（vcvars64.bat 初始化后自动可用）
-
-##### 2. cuDNN 9.17 版本子目录支持
-
-**问题背景**：cuDNN 9.x 采用新的目录结构
-
-**新目录结构**：
+#### cuDNN 9.x版本子目录支持
 ```
 C:/Program Files/NVIDIA/CUDNN/v9.17/
-├── lib/
-│   └── 12.9/          # 版本子目录
-│       └── x64/       # 架构子目录
-│           └── cudnn.lib
-└── include/
-    └── 12.9/          # 版本子目录
-        └── cudnn.h
+├── lib/12.9/x64/cudnn.lib    # 递归搜索
+└── include/12.9/cudnn.h
 ```
 
-**解决方案**：CMakeLists.txt 中实现递归搜索逻辑
+CMakeLists.txt中实现递归搜索逻辑,自动适配cuDNN 9.x新目录结构。
 
-```cmake
-# 库查找：lib → lib/12.9 → lib/12.9/x64
-if(NOT CUDNN_LIBRARY)
-    file(GLOB CUDNN_VERSION_SUBDIRS "${CUDNN_ROOT}/lib/*")
-    foreach(CUDNN_VER_DIR ${CUDNN_VERSION_SUBDIRS})
-        file(GLOB CUDNN_ARCH_DIRS "${CUDNN_VER_DIR}/*")
-        foreach(CUDNN_ARCH_DIR ${CUDNN_ARCH_DIRS})
-            find_library(CUDNN_LIBRARY cudnn PATHS ${CUDNN_ARCH_DIR})
-            if(CUDNN_LIBRARY)
-                break()
-            endif()
-        endforeach()
-    endforeach()
-endif()
+## Hello World验证系统
 
-# 头文件查找：include → include/12.9
-if(NOT CUDNN_INCLUDE_DIR)
-    file(GLOB CUDNN_INCLUDE_VERSION_DIRS "${CUDNN_ROOT}/include/*")
-    foreach(CUDNN_VER_DIR ${CUDNN_INCLUDE_VERSION_DIRS})
-        find_path(CUDNN_INCLUDE_DIR cudnn.h PATHS ${CUDNN_VER_DIR})
-        if(CUDNN_INCLUDE_DIR)
-            break()
-        endif()
-    endforeach()
-endif()
+V3.3.5实现了完整的依赖项验证系统:
+
+| 测试程序 | 功能 | 状态 |
+|---------|------|------|
+| **hello_cuda** | CUDA/cuDNN矩阵乘法 | ✅ 15.2 TFLOPS (Windows) / 50.1 TFLOPS (Linux) |
+| **hello_xnnpack** | XNNPACK向量运算 | ✅ 85.82 GFLOPS |
+| **hello_zlib** | 压缩解压缩 | ✅ |
+| **hello_mimalloc** | 内存分配测试 | ✅ |
+| **hello_libcurl** | HTTP请求 | ✅ |
+| **hello_libjpeg** | 图像编解码 | ✅ |
+| **hello_world** | 基础功能 | ✅ |
+
+输出位置: `build/{platform}-{compiler}-release/bin/dependency/`
+
+## 平台兼容性验证
+
+✅ **全平台测试通过**:
+
+| 平台 | 架构 | 场景 | GPU | 状态 |
+|------|------|------|-----|------|
+| **Windows 11** | x86_64 | PC_CUDA | RTX 4060 | ✅ 15.2 TFLOPS |
+| **Ubuntu 24.04** | x86_64 | GPU_CLOUD | RTX 5090×2 | ✅ 50.1 TFLOPS |
+| **树莓派5** | ARM64 | EDGE_ARM | - | ✅ |
+| **香橙派RV2** | RISC-V | EDGE_RISCV | - | ✅ |
+
+## 文件组织结构
+
+```
+renaissance/
+├── configure.py              # 配置入口
+├── python/scripts/
+│   ├── smart_config.py      # 智能配置核心引擎
+│   └── dependency_data.py    # 场景和依赖配置数据
+├── config/                   # 生成的配置文件（运行configure.py后生成）
+│   ├── cmake_paths.cmake     # CMake路径和编译宏
+│   └── project_config.json   # 完整项目配置
+├── build.bat                 # Windows一键编译脚本（运行configure.py后生成）
+└── build.sh                  # Linux一键编译脚本（运行configure.py后生成）
 ```
 
-**检测结果**：
-```
--- Found cuDNN in subdirectory: C:/Program Files/NVIDIA/CUDNN/v9.17/lib/12.9/x64/cudnn.lib
--- Found cuDNN headers in subdirectory: C:/Program Files/NVIDIA/CUDNN/v9.17/include/12.9
--- cuDNN found: C:/Program Files/NVIDIA/CUDNN/v9.17/lib/12.9/x64/cudnn.lib
--- cuDNN include: C:/Program Files/NVIDIA/CUDNN/v9.17/include/12.9
-```
+## 🔧 常见问题与解决方案
 
-#### 测试验证
+### Q1: 提示"找不到build.bat"或"找不到build.sh"
 
-##### 编译测试
+**原因**: 没有运行自动配置脚本
+
+**解决**:
 ```bash
-./build.bat
+# Windows
+python configure.py
+
+# Linux
+python3 configure.py   # 或 python3.14 configure.py
 ```
 
-**结果**：
-- ✅ **零错误**
-- ✅ **零警告**
-- ✅ 编译时间：~3秒（增量编译）
-- ✅ 输出位置正确
-
-##### 性能测试
-```bash
-./build/windows-msvc-release/bin/dependency/hello_cuda.exe
-```
-
-**性能指标**：
-- 矩阵规模：C(4096, 4096) = A(4096, 8192) × B(8192, 4096)
-- 算法：IMPLICIT_PRECOMP_GEMM (cuDNN 1x1 卷积自动优选)
-- 平均执行时间：**18.08 ms**
-- 性能：**15,203 GFLOPS** (15.2 TFLOPS)
-- 数值精度：相对误差 **0.0069%**
-
-#### 技术要点总结
-
-##### 1. Alpha 编译方法（MSVC 环境）
-
-**核心原则**：必须先初始化 Visual Studio Developer Command Prompt
-
-```batch
-REM 初始化 MSVC 环境
-call "C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"
-```
-
-**为什么必须这样做**：
-- 设置 INCLUDE 环境变量（MSVC 标准库头文件路径）
-- 设置 LIB 环境变量（MSVC 库文件路径）
-- 设置 PATH（包含所有 MSVC 工具链）
-- 初始化 Windows SDK 环境
-
-##### 2. 现代 CMake 参数规范
-
-**推荐参数组合**：
-```bash
-cmake -G Ninja \
-    -S <源码目录> \
-    -B <构建目录> \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_CXX_COMPILER=cl \
-    -DCMAKE_TOOLCHAIN_FILE=<vcpkg.cmake路径>
-```
-
-**注意事项**：
-- ✅ 使用 `-S` 和 `-B` 避免路径混乱
-- ✅ 只指定 C++ 编译器（项目纯 C++）
-- ✅ 所有路径使用正斜杠
-- ❌ 不要使用 `../..` 相对路径（容易出错）
-
-##### 3. 路径处理规范
-
-**CMake 参数路径**：
-- ✅ 统一使用正斜杠 `/`
-- ✅ 使用 `-S` 和 `-B` 明确指定目录
-- ✅ 使用绝对路径或 `%~dp0` 相对路径
-
-**批处理脚本路径**：
-- vcvars64.bat 路径：正斜杠 `/`
-- 环境变量路径：反斜杠 `\`
-- 动态路径：使用 `%~dp0` 获取脚本目录
-
-#### V3.3.4 核心成就
-
-- ✅ **零警告编译**：消除 CMAKE_C_COMPILER 和 cuDNN 警告
-- ✅ **完美一键编译**：`python configure.py && ./build.bat`
-- ✅ **cuDNN 9.x 支持**：自动识别版本子目录结构
-- ✅ **输出位置规范**：统一使用 `build/windows-msvc-release/`
-- ✅ **性能验证通过**：15.2 TFLOPS，精度误差 <0.01%
-
-#### 技术文档更新
-
-- **docs/omega_build.md**：Windows 平台完整编译指南
-- **docs/diary/diary_2025-12-23.md**：今日开发日志
+**验证成功**: 运行后应该看到 `config/` 目录和 `build.bat`/`build.sh` 文件
 
 ---
 
-**文档版本**: V3.3.4
-**最后更新**: 2025-12-23
-**状态**: ✅ Windows 一键编译完美完成（零错误、零警告）
+### Q2: 配置过程中卡在"Please select"选择界面
 
+**原因**: 需要用户选择（比如多个Python版本）
 
-通过vcpkg集成、版本控制、跨平台支持、性能优化等特性，为深度学习框架的快速部署和广泛使用奠定了坚实基础。该系统不仅提高了部署效率，更重要的是降低了用户使用门槛，让开发者能够专注于算法和模型开发，而不是环境配置的繁琐工作。这对于推动深度学习技术的普及和应用具有重要的实际意义。
+**解决**:
+- 直接输入数字 `1`、`2`、`3` 选择
+- 或者直接按回车使用默认选项（通常是第一个）
+- 非交互模式下会自动选择默认选项
+
+---
+
+### Q3: 配置失败，提示"vcpkg is required but not found"
+
+**原因**: vcpkg路径不正确或未安装
+
+**解决**:
+1. 检查环境变量: `echo %VCPKG_ROOT%` (Windows) 或 `echo $VCPKG_ROOT` (Linux)
+2. 或修改 `configure.py` 中的 `VCPKG_ROOT` 变量
+3. 或安装vcpkg: https://github.com/microsoft/vcpkg
+
+---
+
+### Q4: Python选择时应该选哪个？
+
+**经验之谈**:
+- **Windows**: 通常选择 `C:/Python314` （标准Python安装）
+- **Linux**: 通常选择虚拟环境，如 `/home/ubuntu/venv/py314/bin`
+- 如果有多个Python版本，选择带有NumPy的那个
+
+**查看是否安装了NumPy**:
+```bash
+python -c "import numpy; print(numpy.__version__)"
+```
+
+---
+
+### Q5: 配置成功但编译失败
+
+**检查清单**:
+1. ✅ 确认 `config/` 目录存在
+2. ✅ 确认 `build.bat` 或 `build.sh` 存在
+3. ✅ Windows下检查是否正确调用了vcvars64.bat
+4. ✅ 查看编译错误信息，是否缺少依赖库
+
+**解决**: 参考编译指南 `docs/alpha_build.md`
+
+---
+
+### Q6: 如何重新配置？
+
+**方法**: 直接重新运行配置脚本，会覆盖旧配置
+```bash
+# Windows
+python configure.py
+
+# Linux
+python3 configure.py
+```
+
+**注意**: 如果场景没变（比如都是PC_CUDA），会使用相同配置；如果想改变场景，需要删除config目录后重新配置
+
+---
+
+## 技术亮点总结
+
+### 1. 性能优化突破
+- **vcpkg性能提升87.0%** - 从14秒优化到1.8秒
+- **全平台统一算法** - 删除所有平台特定逻辑
+- **批量缓存查询** - 一次vcpkg list + 字符串搜索
+
+### 2. 用户体验优化
+- **智能GPU检测** - 6步流程,自动判断场景
+- **统一输出格式** - 14字符依赖名 + 15字符版本 + 路径
+- **零配置启动** - 默认选项优化,减少用户输入
+
+### 3. 跨平台兼容性
+- **6大场景全覆盖** - Windows/Linux + x86/ARM/RISC-V
+- **多编译器支持** - MSVC/GCC/Clang
+- **多GPU平台** - NVIDIA/摩尔线程
+
+### 4. 完善的验证体系
+- **Hello World测试** - 每个依赖项都有验证程序
+- **性能基准测试** - 实测FLOPS性能数据
+- **零警告编译** - Windows平台完全无警告
+
+## 总结
+
+renAIssance自动配置系统通过智能检测、多策略搜索、用户友好的界面设计,彻底解决了深度学习框架部署中的依赖管理难题。系统采用模块化架构、数据驱动配置,具有良好的可扩展性和可维护性。
+
+**核心成就**:
+- ✅ **真正的跨平台** - Windows/Linux/ARM/RISC-V全部验证通过
+- ✅ **极致性能** - vcpkg查询性能提升87.0%
+- ✅ **一键启动** - 用户只需运行`python configure.py && ./build.bat`
+- ✅ **完善验证** - Hello World测试程序覆盖所有依赖项
+
+**重要提醒**:
+1. ⚠️ **编译前必须先配置** - 没有config目录无法编译
+2. ✅ **配置成功的标志** - Windows: config/ + build.bat, Linux: config/ + build.sh
+3. 📖 **遇到问题查文档** - auto_config.md(本档) + alpha_build.md(编译指南)
+
+**这是深度学习框架部署的最佳实践案例！**
+
+---
+
+**文档版本**: V3.5.1
+**最后更新**: 2025-12-24
+**状态**: ✅ 全平台自动配置与一键编译系统完成

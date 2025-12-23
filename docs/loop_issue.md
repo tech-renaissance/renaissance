@@ -1,5 +1,15 @@
 # CMake无限循环问题解决方案
 
+## 省流摘要
+
+无限循环问题很可能是CMakeLists.txt的时间戳导致。主要是因为修改了系统时间、或者是代码移动到了系统时间不同的另一台机器。如果是在Linux碰到无限循环，以下一行命令就可解决：
+
+```shell
+find ~/R/renaissance -name "CMakeLists.txt" -exec touch {} \; 
+```
+
+
+
 ## 问题描述
 
 在使用CLion进行项目清理时，出现CMake无限循环问题。具体表现为：
