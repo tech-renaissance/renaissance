@@ -64,6 +64,18 @@ else()
 endif()
 
 # ============================================================================
+# 包含data子目录（Shape类测试）
+# ============================================================================
+
+# 注意：data测试当前已开启。如果需要暂时关闭，请注释掉下面第3-4行
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/data AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/data)
+    add_subdirectory(data)
+    message(STATUS "Including data tests")
+else()
+    message(STATUS "Data tests directory not found")
+endif()
+
+# ============================================================================
 # 输出单元测试信息
 # ============================================================================
 

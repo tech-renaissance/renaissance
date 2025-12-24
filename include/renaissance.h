@@ -19,29 +19,16 @@
 #include <chrono>
 #include <vector>
 
-// ============================================================================
-// 基础设施（最先包含，其他类依赖它们）
-// ============================================================================
 
-// 日志器：提供日志输出功能
 #include "renaissance/base/logger.h"
-
-// 异常类：提供统一的异常处理体系
 #include "renaissance/base/tr_exception.h"
+#include "renaissance/base/dtype.h"
+#include "renaissance/base/device_type.h"
+#include "renaissance/data/shape.h"
 
-// ============================================================================
-// 命名空间
-// ============================================================================
 
-/**
- * @namespace tr
- * @brief 技术觉醒框架的命名空间
- * @details 所有公共API都在tr命名空间下
- */
 namespace tr {
-
-// 未来会在这里添加更多全局函数和类...
-
 } // namespace tr
+
 
 #endif // RENAISSANCE_H

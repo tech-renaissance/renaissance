@@ -99,6 +99,8 @@ endif()
 if(CMAKE_BUILD_TYPE STREQUAL "Release")
     # MSVC Release优化
     if(MSVC)
+        # 添加UTF-8编译标志以支持中文注释（避免C4819警告）
+        add_compile_options(/utf-8)
         set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /O2 /Ob2 /DNDEBUG /arch:AVX2")
         set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} /INCREMENTAL:NO")
     endif()
@@ -120,6 +122,8 @@ endif()
 # 调试模式
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     if(MSVC)
+        # 添加UTF-8编译标志以支持中文注释（避免C4819警告）
+        add_compile_options(/utf-8)
         set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /Zi /Ob0 /Od /RTC1")
     endif()
 
@@ -273,6 +277,18 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/base AND IS_DIRECTORY ${CMAKE_CURRENT_
     endif()
 else()
     message(STATUS "Framework base components disabled - src/base directory not found")
+endif()
+
+# 包含数据组件目录
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/data AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/data)
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/data/CMakeLists.txt)
+        add_subdirectory(src/data)
+        message(STATUS "Framework data components enabled")
+    else()
+        message(STATUS "Framework data components disabled - src/data/CMakeLists.txt not found")
+    endif()
+else()
+    message(STATUS "Framework data components disabled - src/data directory not found")
 endif()
 
 # ============================================================================

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * @file tr_exception.cpp
  * @brief 框架异常类实现
  * @details 实现TRException基类的方法，包括自动日志记录功能
