@@ -1,5 +1,6 @@
 add_subdirectory(base)
 add_subdirectory(data)
+add_subdirectory(device)
 
 
 add_library(renaissance INTERFACE)
@@ -7,6 +8,7 @@ add_library(renaissance INTERFACE)
 target_link_libraries(renaissance INTERFACE
     base
     data
+    device
 )
 
 target_include_directories(renaissance INTERFACE

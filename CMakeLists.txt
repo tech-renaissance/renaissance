@@ -91,6 +91,114 @@ if(DEFINED TR_WORKSPACE)
     message(STATUS "Global macro TR_WORKSPACE defined: ${TR_WORKSPACE}")
 endif()
 
+# 定义CPU架构宏，使所有源文件可见
+if(DEFINED TR_CPU_ARCH_X86_64)
+    add_compile_definitions(TR_CPU_ARCH_X86_64=1)
+    message(STATUS "Global macro TR_CPU_ARCH_X86_64 defined")
+endif()
+
+if(DEFINED TR_CPU_ARCH_ARM64)
+    add_compile_definitions(TR_CPU_ARCH_ARM64=1)
+    message(STATUS "Global macro TR_CPU_ARCH_ARM64 defined")
+endif()
+
+if(DEFINED TR_CPU_ARCH_RISCV64)
+    add_compile_definitions(TR_CPU_ARCH_RISCV64=1)
+    message(STATUS "Global macro TR_CPU_ARCH_RISCV64 defined")
+endif()
+
+# 定义场景宏，使所有源文件可见（只当值为ON时才定义）
+if(TR_SCENE_PC_CUDA)
+    add_compile_definitions(TR_SCENE_PC_CUDA=1)
+    message(STATUS "Global macro TR_SCENE_PC_CUDA defined")
+endif()
+
+if(TR_SCENE_PC_MUSA)
+    add_compile_definitions(TR_SCENE_PC_MUSA=1)
+    message(STATUS "Global macro TR_SCENE_PC_MUSA defined")
+endif()
+
+if(TR_SCENE_CPU_CLOUD)
+    add_compile_definitions(TR_SCENE_CPU_CLOUD=1)
+    message(STATUS "Global macro TR_SCENE_CPU_CLOUD defined")
+endif()
+
+if(TR_SCENE_GPU_CLOUD)
+    add_compile_definitions(TR_SCENE_GPU_CLOUD=1)
+    message(STATUS "Global macro TR_SCENE_GPU_CLOUD defined")
+endif()
+
+if(TR_SCENE_EDGE_ARM)
+    add_compile_definitions(TR_SCENE_EDGE_ARM=1)
+    message(STATUS "Global macro TR_SCENE_EDGE_ARM defined")
+endif()
+
+if(TR_SCENE_EDGE_RISCV)
+    add_compile_definitions(TR_SCENE_EDGE_RISCV=1)
+    message(STATUS "Global macro TR_SCENE_EDGE_RISCV defined")
+endif()
+
+if(TR_IS_EDGE_DEVICE)
+    add_compile_definitions(TR_IS_EDGE_DEVICE=${TR_IS_EDGE_DEVICE})
+    message(STATUS "Global macro TR_IS_EDGE_DEVICE defined: ${TR_IS_EDGE_DEVICE}")
+endif()
+
+# 定义特性宏，使所有源文件可见（只当值为ON时才定义）
+if(TR_USE_CUDA)
+    add_compile_definitions(TR_USE_CUDA=1)
+    message(STATUS "Global macro TR_USE_CUDA defined: 1")
+endif()
+
+if(TR_USE_MUSA)
+    add_compile_definitions(TR_USE_MUSA=1)
+    message(STATUS "Global macro TR_USE_MUSA defined: 1")
+endif()
+
+if(TR_USE_ONEDNN)
+    add_compile_definitions(TR_USE_ONEDNN=1)
+    message(STATUS "Global macro TR_USE_ONEDNN defined: 1")
+endif()
+
+if(TR_USE_XNNPACK)
+    add_compile_definitions(TR_USE_XNNPACK=1)
+    message(STATUS "Global macro TR_USE_XNNPACK defined: 1")
+endif()
+
+if(TR_USE_STB)
+    add_compile_definitions(TR_USE_STB=1)
+    message(STATUS "Global macro TR_USE_STB defined: 1")
+endif()
+
+if(TR_USE_LIBJPEG)
+    add_compile_definitions(TR_USE_LIBJPEG=1)
+    message(STATUS "Global macro TR_USE_LIBJPEG defined: 1")
+endif()
+
+if(TR_USE_ZLIB)
+    add_compile_definitions(TR_USE_ZLIB=1)
+    message(STATUS "Global macro TR_USE_ZLIB defined: 1")
+endif()
+
+if(TR_USE_LIBCURL)
+    add_compile_definitions(TR_USE_LIBCURL=1)
+    message(STATUS "Global macro TR_USE_LIBCURL defined: 1")
+endif()
+
+if(TR_USE_MIMALLOC)
+    add_compile_definitions(TR_USE_MIMALLOC=1)
+    message(STATUS "Global macro TR_USE_MIMALLOC defined: 1")
+endif()
+
+if(TR_USE_SIMD)
+    add_compile_definitions(TR_USE_SIMD=1)
+    message(STATUS "Global macro TR_USE_SIMD defined: 1")
+endif()
+
+if(DEFINED TR_NUM_GPUS)
+    add_compile_definitions(TR_NUM_GPUS=${TR_NUM_GPUS})
+    message(STATUS "Global macro TR_NUM_GPUS defined: ${TR_NUM_GPUS}")
+endif()
+
 # ============================================================================
 # 构建选项配置
 # ============================================================================

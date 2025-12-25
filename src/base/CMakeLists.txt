@@ -41,6 +41,15 @@ if(TR_USE_MIMALLOC)
     endif()
 endif()
 
+# 添加CUDA支持（cuda_arena.cpp需要）
+if(TR_USE_CUDA)
+    if(DEFINED TR_CUDA_PATH)
+        # CUDA头文件目录
+        target_include_directories(base PRIVATE ${TR_CUDA_PATH}/include)
+        message(STATUS "Base library: Using CUDA headers from ${TR_CUDA_PATH}/include")
+    endif()
+endif()
+
 # 添加MUSA支持（musa_arena.cpp需要）
 # 使用cmake_paths.cmake中定义的TR_MUSA_PATH宏
 if(TR_USE_MUSA)

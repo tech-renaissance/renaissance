@@ -76,6 +76,18 @@ else()
 endif()
 
 # ============================================================================
+# 包含device子目录（Device类测试）
+# ============================================================================
+
+# 注意：device测试当前已开启。如果需要暂时关闭，请注释掉下面第3-4行
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/device AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/device)
+    add_subdirectory(device)
+    message(STATUS "Including device tests")
+else()
+    message(STATUS "Device tests directory not found")
+endif()
+
+# ============================================================================
 # 输出单元测试信息
 # ============================================================================
 

@@ -37,6 +37,10 @@
 #include "renaissance/data/storage.h"
 #include "renaissance/data/tensor.h"
 
+#include "renaissance/device/device.h"
+#include "renaissance/device/device_manager.h"
+#include "renaissance/device/cpu_device.h"
+
 
 namespace tr {
 } // namespace tr

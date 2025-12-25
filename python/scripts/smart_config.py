@@ -1543,6 +1543,15 @@ def generate_cmake_config(scene: str, deps: Dict, sys_info: Dict) -> str:
     else:
         lines.append('set(TR_NUM_GPUS 0)')
 
+    # 添加CPU架构宏
+    arch = sys_info["arch"]
+    if arch == "x86_64":
+        lines.append('set(TR_CPU_ARCH_X86_64 ON)')
+    elif arch == "arm64":
+        lines.append('set(TR_CPU_ARCH_ARM64 ON)')
+    elif arch == "riscv":
+        lines.append('set(TR_CPU_ARCH_RISCV64 ON)')
+
     # 添加所有依赖项的具体路径配置（V3.2.0新增）
     lines.append("")
     lines.append("# Dependency library paths (V3.2.0 enhancement)")

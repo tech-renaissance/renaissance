@@ -98,7 +98,6 @@ constexpr inline const char* dtype_name(DType dt) noexcept {
  * - 提供转换函数在FP32和BF16之间转换
  * - 提供批量转换函数，优化数组转换性能
  */
-namespace bf16_utils {
 
 /**
  * @brief FP32转BF16（截断模式）
@@ -214,7 +213,5 @@ inline void convert_bf16_array_to_fp32(float* dst, const uint16_t* src, size_t c
         dst[i] = bf16_to_fp32(src[i]);
     }
 }
-
-} // namespace bf16_utils
 
 } // namespace tr
