@@ -76,7 +76,9 @@ public:
         : kind_(static_cast<uint8_t>(DeviceKind::CPU)),
           arch_(static_cast<uint8_t>(Arch::UNKNOWN)),
           reserved_(0),
-          index_(0) {}
+          index_(0) {
+        static_assert(sizeof(DeviceType) == 8, "DeviceType must be exactly 8 bytes");
+    }
 
     /**
      * @brief 构造函数（指定设备类型）
@@ -90,7 +92,9 @@ public:
         : kind_(static_cast<uint8_t>(kind)),
           arch_(static_cast<uint8_t>(arch)),
           reserved_(0),
-          index_(index) {}
+          index_(index) {
+        static_assert(sizeof(DeviceType) == 8, "DeviceType must be exactly 8 bytes");
+    }
 
     /**
      * @brief 获取设备类型
@@ -236,11 +240,11 @@ public:
     }
 
 private:
-    uint32_t kind_      : 8;  ///< 设备类型（1字节位域）
-    uint32_t arch_      : 8;  ///< CPU架构（1字节位域）
-    uint32_t reserved_  : 16; ///< 保留字段（2字节位域）
-    uint32_t index_;         ///< 设备索引（4字节）
-    // 总计：8字节
+    uint8_t kind_;       ///< 设备类型（1字节）
+    uint8_t arch_;       ///< CPU架构（1字节）
+    uint16_t reserved_;  ///< 保留字段（2字节）
+    uint32_t index_;     ///< 设备索引（4字节）
+    // 总计：8字节（无padding）
 };
 
 /**

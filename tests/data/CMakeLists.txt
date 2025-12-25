@@ -1,6 +1,7 @@
 # 收集数据测试源文件
 set(DATA_TEST_SOURCES
     test_shape.cpp
+    test_storage_ownership.cpp
 )
 
 # 创建data测试可执行文件

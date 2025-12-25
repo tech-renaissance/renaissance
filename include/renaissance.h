@@ -34,6 +34,8 @@
 #endif
 
 #include "renaissance/data/shape.h"
+#include "renaissance/data/storage.h"
+#include "renaissance/data/tensor.h"
 
 
 namespace tr {

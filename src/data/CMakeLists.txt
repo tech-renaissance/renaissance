@@ -2,6 +2,8 @@
 # 收集数据源文件
 set(DATA_SOURCES
     shape.cpp
+    storage.cpp
+    tensor.cpp
 )
 
 # 创建数据库静态库

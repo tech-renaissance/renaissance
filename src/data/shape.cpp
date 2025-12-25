@@ -3,6 +3,8 @@
 
 #include "renaissance/data/shape.h"
 
+#include <string>
+
 namespace tr {
 
 Shape Shape::conv_output_shape(const Shape& input, int32_t kernel_size,
@@ -198,6 +200,25 @@ Shape Shape::reshape_shape(const Shape& input, const std::array<int32_t, 4>& new
         result.ndim_ = new_ndim;
         return result;
     }
+}
+
+std::string Shape::to_string() const {
+    if (ndim_ == 0) {
+        return "()";  // 标量
+    }
+
+    // 找到第一个非零维度的索引
+    int32_t first_idx = 4 - ndim_;
+
+    std::string result = "(";
+    for (int32_t i = first_idx; i < 4; ++i) {
+        if (i != first_idx) {
+            result += ",";
+        }
+        result += std::to_string(dims_[i]);
+    }
+    result += ")";
+    return result;
 }
 
 } // namespace tr

@@ -867,6 +867,87 @@ MusaArena arena(0, size);
 
 ---
 
+## 代码质量改进（V3.8.1评审修正）
+
+### DeviceType位域问题修复
+
+**问题（V3.6.1）**：
+```cpp
+uint32_t kind_      : 8;  // 位域
+uint32_t arch_      : 8;  // 位域
+uint32_t reserved_  : 16; // 位域
+uint32_t index_;         // 独立成员
+```
+
+**专家评审意见**：
+- 位域 + 独立成员混用可能导致编译器padding不一致
+- 跨编译器/跨平台的内存布局可能不同
+- 违反标准布局类型的最佳实践
+
+**V3.8.1修复**：
+```cpp
+uint8_t kind_;       // 独立成员（1字节）
+uint8_t arch_;       // 独立成员（1字节）
+uint16_t reserved_;  // 独立成员（2字节）
+uint32_t index_;     // 独立成员（4字节）
+static_assert(sizeof(DeviceType) == 8, "DeviceType must be exactly 8 bytes");
+```
+
+**效果**：
+- ✅ 跨编译器内存布局完全一致
+- ✅ 满足标准布局类型（可安全memcpy）
+- ✅ 无padding风险，明确8字节
+- ✅ 性能无损失（编译器优化与位域相同）
+
+---
+
+### CudaArena析构函数同步问题修复
+
+**问题（V3.8.1初版）**：
+```cpp
+CudaArena::~CudaArena() {
+    if (base_ptr_) {
+        deallocate_impl(base_ptr_);  // cudaFreeAsync推入stream
+    }
+    if (stream_) {
+        cudaStreamDestroy(stream_);  // ⚠️ 此时stream可能还有pending操作
+    }
+}
+```
+
+**专家评审意见**：
+- 虽然cudaStreamDestroy会隐式同步，但CUDA文档建议显式同步
+- 依赖隐式行为不够明确，存在潜在风险
+- 如果base_ptr_释放失败，stream可能没有正确同步
+
+**V3.8.1修复**：
+```cpp
+CudaArena::~CudaArena() {
+    if (base_ptr_) {
+        deallocate_impl(base_ptr_);
+        base_ptr_ = nullptr;
+    }
+
+    if (stream_) {
+        // V3.8.1修正：显式同步stream，确保所有异步操作完成后再销毁
+        // 评审专家建议：CUDA文档推荐显式同步以确保资源释放顺序
+        cudaStreamSynchronize(static_cast<cudaStream_t>(stream_));
+        cudaStreamDestroy(static_cast<cudaStream_t>(stream_));
+        stream_ = nullptr;
+    }
+
+    TR_LOG_INFO("CudaArena") << "CudaArena destroyed on GPU " << device_id_;
+}
+```
+
+**对性能的影响**：
+- ✅ **仅影响析构时**：析构是资源清理阶段，同步是必要的
+- ✅ **不影响运行期性能**：运行期的deallocate_impl仍然完全异步
+- ✅ **更安全**：确保显存完全释放后再销毁stream
+- ✅ **符合最佳实践**：遵循CUDA官方建议
+
+---
+
 ## 版本历史
 
 | 版本 | 日期 | 主要变更 |

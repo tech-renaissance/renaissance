@@ -1,14 +1,18 @@
 # renAIssance框架编译指南
 
-**版本**: V3.5.1
-**更新日期**: 2025-12-24
+**版本**: V3.6.2
+**更新日期**: 2025-12-25
 **状态**: ✅ Windows + Linux 全平台验证通过
 
 ## 概述
 
-本文档提供renAIssance深度学习框架的编译指南，包含Windows和Linux两个平台的正确编译方法（统称**“Alpha编译”**）。
+本文档提供renAIssance深度学习框架的编译指南，包含Windows和Linux两个平台的正确编译方法（统称**"Alpha编译"**）。
 
 **前置条件**: 必须先运行 `python configure.py` 生成配置文件
+
+**构建模式说明**:
+- **Release模式**: 优化编译，日志关闭（除了LOG_WARN和LOG_ERROR），用于生产环境
+- **Debug模式**: 调试编译，所有日志开启（LOG_DEBUG/LOG_INFO/LOG_WARN/LOG_ERROR），用于开发和调试单元测试
 
 ---
 
@@ -16,9 +20,7 @@
 
 ### 方法一:一键编译(推荐)
 
-#### ✅ 正确的执行方法
-
-**在PowerShell或cmd中直接执行**（推荐）:
+**在PowerShell或cmd中直接执行**:
 ```cmd
 # 在PowerShell中
 .\build.bat
@@ -31,18 +33,27 @@ build.bat
 - build.bat**内部已经包含**了vcvars64.bat调用
 - 自动初始化Visual Studio环境
 - 自动清理旧的构建目录
-- 自动配置CMake并编译所有目标
+- 自动配置CMake并编译所有目标（**默认Release模式**）
 - 输出到 `build/windows-msvc-release/`
+- 日志级别：只显示LOG_WARN和LOG_ERROR
 
 **预期输出**:
 ```
 [INFO] renAIssance Framework Build (Windows)
+[INFO] Build Directory: build/windows-msvc-release
 [INFO] Initializing Visual Studio Developer Command Prompt...
 [vcvarsall.bat] Environment initialized for: 'x64'
 [INFO] Configuring with CMake...
 ...
 [OK] Build completed successfully!
 ```
+
+**何时使用一键编译？**
+- 日常开发完成后，构建Release版本
+- 不需要调试，直接看测试结果
+- 快速验证代码编译通过
+
+---
 
 #### ⚠️ 常见错误
 
@@ -58,15 +69,19 @@ build.bat
 - **原因**: build.bat中的vcvars64.bat调用失败
 - **解决**: 检查Visual Studio安装路径是否正确
 
+**错误4**: 想看详细日志但看不到
+- **原因**: build.bat是Release模式，日志被关闭
+- **解决**: 使用手动编译方法，选择Debug模式（见下文）
+
 ---
 
-### 方法二:PowerShell/CMake手动编译
+### 方法二:手动编译（支持Debug/Release模式）
 
 #### ⚠️ 重要说明
 
 **何时使用手动编译？**
 - 需要自定义CMake参数
-- 只编译特定目标（如只编译hello_cuda）
+- 只编译特定目标（如只编译test_storage_ownership）
 - 调试编译问题
 
 **关键**: 手动编译**必须先在VS环境**中执行，在Git Bash中无法直接执行！
@@ -79,10 +94,19 @@ build.bat
 - 开始菜单 → Visual Studio 2022 → Developer Command Prompt for VS 2022
 
 **步骤2**: 切换到项目目录并编译
+
+**Release模式**:
 ```cmd
 cd R:\renaissance
 cmake -G Ninja -S . -B build/windows-msvc-release -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=cl -DCMAKE_TOOLCHAIN_FILE=T:/Softwares/vcpkg/scripts/buildsystems/vcpkg.cmake
 cmake --build build/windows-msvc-release --parallel 30
+```
+
+**Debug模式**:
+```cmd
+cd R:\renaissance
+cmake -G Ninja -S . -B build/windows-msvc-debug -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_COMPILER=cl -DCMAKE_TOOLCHAIN_FILE=T:/Softwares/vcpkg/scripts/buildsystems/vcpkg.cmake
+cmake --build build/windows-msvc-debug --parallel 30
 ```
 
 **优点**: 环境已预初始化，命令简单直接
@@ -91,12 +115,19 @@ cmake --build build/windows-msvc-release --parallel 30
 
 #### 方法2B：在PowerShell中手动执行
 
-**一键配置+编译**:
+**Release模式 - 一键配置+编译**:
 ```powershell
 powershell.exe -Command "& { cmd /c 'call \"C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat\" && cd /d R:\renaissance && cmake -G Ninja -S . -B build/windows-msvc-release -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=cl -DCMAKE_TOOLCHAIN_FILE=T:/Softwares/vcpkg/scripts/buildsystems/vcpkg.cmake && cmake --build build/windows-msvc-release --parallel 30' }"
 ```
 
+**Debug模式 - 一键配置+编译**:
+```powershell
+powershell.exe -Command "& { cmd /c 'call \"C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat\" && cd /d R:\renaissance && cmake -G Ninja -S . -B build/windows-msvc-debug -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_COMPILER=cl -DCMAKE_TOOLCHAIN_FILE=T:/Softwares/vcpkg/scripts/buildsystems/vcpkg.cmake && cmake --build build/windows-msvc-debug --parallel 30' }"
+```
+
 **分步执行**（用于调试）:
+
+**Release模式**:
 
 步骤1 - 配置:
 ```powershell
@@ -108,18 +139,69 @@ powershell.exe -Command "& { cmd /c 'call \"C:\Program Files\Microsoft Visual St
 powershell.exe -Command "& { cmd /c 'call \"C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat\" && cd /d R:\renaissance && cmake --build build/windows-msvc-release --parallel 30' }"
 ```
 
+**Debug模式**:
+
+步骤1 - 配置:
+```powershell
+powershell.exe -Command "& { cmd /c 'call \"C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat\" && cd /d R:\renaissance && cmake -G Ninja -S . -B build/windows-msvc-debug -DCMAKE_BUILD_TYPE=Debug -DCMAKE_CXX_COMPILER=cl -DCMAKE_TOOLCHAIN_FILE=T:/Softwares/vcpkg/scripts/buildsystems/vcpkg.cmake' }"
+```
+
+步骤2 - 编译:
+```powershell
+powershell.exe -Command "& { cmd /c 'call \"C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat\" && cd /d R:\renaissance && cmake --build build/windows-msvc-debug --parallel 30' }"
+```
+
 ---
 
 #### 只编译特定目标
 
-在VS Developer Command Prompt中:
+**Release模式** - 在VS Developer Command Prompt中:
 ```cmd
-cmake --build build/windows-msvc-release --target hello_cuda
+cmake --build build/windows-msvc-release --target test_storage_ownership
 ```
 
-或在PowerShell中:
+**Debug模式** - 在VS Developer Command Prompt中（推荐，用于调试）:
+```cmd
+cmake --build build/windows-msvc-debug --target test_storage_ownership
+```
+
+或在PowerShell中（Debug模式）:
 ```powershell
-powershell.exe -Command "& { cmd /c 'call \"C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat\" && cd /d R:\renaissance && cmake --build build/windows-msvc-release --target hello_cuda' }"
+powershell.exe -Command "& { cmd /c 'call \"C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat\" && cd /d R:\renaissance && cmake --build build/windows-msvc-debug --target test_storage_ownership' }"
+```
+
+---
+
+#### 运行测试
+
+**Windows - Release模式**:
+```cmd
+.\build\windows-msvc-release\bin\tests\data\test_storage_ownership.exe
+```
+
+**Windows - Debug模式**（推荐，可以看到完整日志）:
+```cmd
+.\build\windows-msvc-debug\bin\tests\data\test_storage_ownership.exe
+```
+
+**预期输出（Debug模式）**:
+```
+[2025-12-25 10:30:45.123] [INFO ] [TR] === Storage Class Unit Tests ===
+[2025-12-25 10:30:45.124] [INFO ] [TR] Testing empty Storage...
+[2025-12-25 10:30:45.125] [INFO ] [TR] Empty Storage tests passed!
+[2025-12-25 10:30:45.126] [INFO ] [TR] Testing Storage ownership mode...
+...
+[2025-12-25 10:30:45.234] [INFO ] [TR] === All Storage Tests Passed! ===
+```
+
+**Linux - Release模式**:
+```bash
+./build/bin/tests/data/test_storage_ownership
+```
+
+**Linux - Debug模式**:
+```bash
+./build/linux-debug/bin/tests/data/test_storage_ownership
 ```
 
 ---
@@ -138,11 +220,55 @@ powershell.exe -Command "& { cmd /c 'call \"C:\Program Files\Microsoft Visual St
 
 #### 2. 目录命名规范
 
-推荐使用 `build/windows-msvc-release` 而不是 `build` 或 `cmake-build-release`,明确标识平台和编译器。
+推荐使用以下命名明确标识平台和编译模式:
+- `build/windows-msvc-release` - Windows Release模式
+- `build/windows-msvc-debug` - Windows Debug模式
+
+避免使用 `build` 或 `cmake-build-release`，不够明确。
 
 ---
 
 ## 🐧 Linux平台编译方法
+
+### 方法一:一键编译(推荐)
+
+#### ✅ Release模式（生产环境）
+
+```bash
+./build.sh
+```
+
+**说明**:
+- 自动清理旧的构建目录
+- 使用Ninja构建系统
+- 并行编译(30线程)
+- 输出到 `build/` 或 `build/linux-release/`
+- 日志级别：只显示LOG_WARN和LOG_ERROR
+
+---
+
+#### ✅ Debug模式（开发调试）
+
+```bash
+# 创建Debug构建目录
+mkdir -p build/linux-debug
+cd build/linux-debug
+
+# 配置CMake (Debug模式)
+cmake -G Ninja \
+    -DCMAKE_BUILD_TYPE=Debug \
+    -DCMAKE_CXX_COMPILER=g++ \
+    -DCMAKE_TOOLCHAIN_FILE=/path/to/vcpkg/scripts/buildsystems/vcpkg.cmake \
+    ../..
+
+# 编译
+cmake --build . --parallel $(nproc)
+```
+
+**说明**:
+- Debug模式需要手动创建构建目录
+- **日志级别：所有日志都开启（LOG_DEBUG/LOG_INFO/LOG_WARN/LOG_ERROR）**
+- 适合开发调试单元测试
 
 ### 方法一:一键编译(推荐)
 

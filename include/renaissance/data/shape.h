@@ -212,6 +212,20 @@ public:
         return !(*this == other);
     }
 
+    /**
+     * @brief 检查是否为标量
+     * @return true是标量（ndim=0），false不是
+     */
+    constexpr bool is_scalar() const noexcept {
+        return ndim_ == 0;
+    }
+
+    /**
+     * @brief 转换为字符串
+     * @return 如"(224,224,3)"或"()"（标量）
+     */
+    std::string to_string() const;
+
     // ==================== 形状推断工具函数 ====================
 
     /**
