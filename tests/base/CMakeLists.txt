@@ -151,6 +151,84 @@ else()
     message(STATUS "CudaArena test: CUDA support disabled (building stub version)")
 endif()
 
+# 创建MUSA Arena测试可执行文件
+if(TR_USE_MUSA)
+    # MUSA启用时：包含完整源文件（包括CpuArena、MusaArena等）
+    add_executable(test_musa_arena
+        test_musa_arena.cpp
+        ${BASE_TEST_SOURCES}
+        ${CMAKE_SOURCE_DIR}/src/base/musa_arena.cpp
+    )
+    set_target_properties(test_musa_arena PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/base
+    )
+    if(MSVC)
+        set_target_properties(test_musa_arena PROPERTIES
+            WIN32_EXECUTABLE FALSE
+        )
+        target_compile_options(test_musa_arena PRIVATE /W4 /utf-8)
+    else()
+        target_compile_options(test_musa_arena PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+    # 关键：定义TR_USE_MUSA宏，使test_musa_arena.cpp中的#ifdef TR_USE_MUSA生效
+    target_compile_definitions(test_musa_arena PRIVATE TR_LOG_LEVEL=0)
+    target_compile_definitions(test_musa_arena PRIVATE TR_WORKSPACE="${TR_WORKSPACE}")
+    target_compile_definitions(test_musa_arena PRIVATE TR_USE_MUSA)
+
+    # 添加MUSA头文件路径（使用cmake_paths.cmake中的宏）
+    if(DEFINED TR_MUSA_PATH)
+        target_include_directories(test_musa_arena PRIVATE ${TR_MUSA_PATH}/include)
+        message(STATUS "MusaArena test: MUSA include from ${TR_MUSA_PATH}/include")
+    endif()
+
+    # 链接MUSA库（仅Linux需要）
+    if(NOT WIN32)
+        # Linux: 使用cmake_paths.cmake中的TR_MUSA_PATH
+        # 注意：MUSA库在lib目录，不是lib64
+        if(DEFINED TR_MUSA_PATH)
+            # 优先尝试lib（MUSA实际安装位置）
+            if(EXISTS ${TR_MUSA_PATH}/lib)
+                target_link_directories(test_musa_arena PRIVATE ${TR_MUSA_PATH}/lib)
+                message(STATUS "MusaArena test: MUSA library dir from ${TR_MUSA_PATH}/lib")
+            elseif(EXISTS ${TR_MUSA_PATH}/lib64)
+                target_link_directories(test_musa_arena PRIVATE ${TR_MUSA_PATH}/lib64)
+                message(STATUS "MusaArena test: MUSA library dir from ${TR_MUSA_PATH}/lib64")
+            endif()
+        endif()
+
+        # 链接MUSA运行时库：libmusa.so 和 libmusart.so
+        # 根据实际库文件名链接
+        target_link_libraries(test_musa_arena PRIVATE musa musart)
+        message(STATUS "MusaArena test: Linked musa and musart libraries")
+    else()
+        # Windows: MUSA通常不需要手动链接（由musa_add_executable处理）
+        message(STATUS "MusaArena test: Windows platform, skipping manual MUSA library link")
+    endif()
+
+    message(STATUS "MusaArena test: MUSA support enabled")
+else()
+    # MUSA未启用时：只包含必要的源文件（不包括CpuArena等）
+    add_executable(test_musa_arena
+        test_musa_arena.cpp
+        ${CMAKE_SOURCE_DIR}/src/base/logger.cpp
+        ${CMAKE_SOURCE_DIR}/src/base/tr_exception.cpp
+    )
+    set_target_properties(test_musa_arena PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/base
+    )
+    if(MSVC)
+        set_target_properties(test_musa_arena PROPERTIES
+            WIN32_EXECUTABLE FALSE
+        )
+        target_compile_options(test_musa_arena PRIVATE /W4 /utf-8)
+    else()
+        target_compile_options(test_musa_arena PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+    target_compile_definitions(test_musa_arena PRIVATE TR_LOG_LEVEL=0)
+    target_compile_definitions(test_musa_arena PRIVATE TR_WORKSPACE="${TR_WORKSPACE}")
+    message(STATUS "MusaArena test: MUSA support disabled (building stub version)")
+endif()
+
 # 设置输出目录
 set_target_properties(test_logger PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/base
@@ -243,6 +321,7 @@ if(TR_USE_MIMALLOC)
             target_link_libraries(test_cpu_arena PRIVATE "${TR_MIMALLOC_LIBRARY_DIR}/mimalloc.dll.lib")
             target_link_libraries(test_memory_plan PRIVATE "${TR_MIMALLOC_LIBRARY_DIR}/mimalloc.dll.lib")
             target_link_libraries(test_cuda_arena PRIVATE "${TR_MIMALLOC_LIBRARY_DIR}/mimalloc.dll.lib")
+            target_link_libraries(test_musa_arena PRIVATE "${TR_MIMALLOC_LIBRARY_DIR}/mimalloc.dll.lib")
         else()
             # Linux/其他: 指定库搜索路径 + 库名
             target_link_directories(test_logger PRIVATE ${TR_MIMALLOC_LIBRARY_DIR})
@@ -252,6 +331,7 @@ if(TR_USE_MIMALLOC)
             target_link_directories(test_cpu_arena PRIVATE ${TR_MIMALLOC_LIBRARY_DIR})
             target_link_directories(test_memory_plan PRIVATE ${TR_MIMALLOC_LIBRARY_DIR})
             target_link_directories(test_cuda_arena PRIVATE ${TR_MIMALLOC_LIBRARY_DIR})
+            target_link_directories(test_musa_arena PRIVATE ${TR_MIMALLOC_LIBRARY_DIR})
 
             target_link_libraries(test_logger PRIVATE mimalloc)
             target_link_libraries(test_exception PRIVATE mimalloc)
@@ -260,6 +340,7 @@ if(TR_USE_MIMALLOC)
             target_link_libraries(test_cpu_arena PRIVATE mimalloc)
             target_link_libraries(test_memory_plan PRIVATE mimalloc)
             target_link_libraries(test_cuda_arena PRIVATE mimalloc)
+            target_link_libraries(test_musa_arena PRIVATE mimalloc)
         endif()
         message(STATUS "Base tests: Linking mimalloc from ${TR_MIMALLOC_LIBRARY_DIR}")
     endif()

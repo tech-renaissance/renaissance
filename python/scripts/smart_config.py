@@ -1571,12 +1571,20 @@ def generate_cmake_config(scene: str, deps: Dict, sys_info: Dict) -> str:
     if "mudnn" in deps and deps["mudnn"]["found"]:
         mudnn_path = deps["mudnn"]["path"].replace("\\", "/")
         lines.append(f'set(TR_MUDNN_PATH "{mudnn_path}")')
+        lines.append(f'set(TR_MUDNN_INCLUDE_DIR "{mudnn_path}/include")')
+
+        # 检测MUDNN库目录（MUSA使用lib，不是lib64）
         if sys_info["is_windows"]:
-            lines.append(f'set(TR_MUDNN_INCLUDE_DIR "{mudnn_path}/include")')
-            lines.append(f'set(TR_MUDNN_LIBRARY_DIR "{mudnn_path}/lib")')
+            # Windows: 使用lib
+            mudnn_lib_dir = f"{mudnn_path}/lib"
         else:
-            lines.append(f'set(TR_MUDNN_INCLUDE_DIR "{mudnn_path}/include")')
-            lines.append(f'set(TR_MUDNN_LIBRARY_DIR "{mudnn_path}/lib64")')
+            # Linux: MUSA平台实际使用lib目录，不是lib64
+            # 需要检测实际存在的目录
+            mudnn_lib_dir = f"{mudnn_path}/lib"  # MUSA默认使用lib
+            # 如果lib不存在，回退到lib64（兼容其他可能的MUSA安装）
+            # 注意：这里不进行实际文件系统检测，因为在配置阶段可能尚未安装MUSA
+
+        lines.append(f'set(TR_MUDNN_LIBRARY_DIR "{mudnn_lib_dir}")')
 
     # NCCL路径（仅Linux，GPU_CLOUD场景专用）
     if "nccl" in deps and deps["nccl"]["found"]:

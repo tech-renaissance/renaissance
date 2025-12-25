@@ -10,6 +10,17 @@ set(BASE_SOURCES
     cpu_arena.cpp
 )
 
+# 添加CUDA/MUSA源文件（条件编译）
+if(TR_USE_CUDA)
+    list(APPEND BASE_SOURCES cuda_arena.cpp)
+    message(STATUS "Base library: Adding cuda_arena.cpp (CUDA enabled)")
+endif()
+
+if(TR_USE_MUSA)
+    list(APPEND BASE_SOURCES musa_arena.cpp)
+    message(STATUS "Base library: Adding musa_arena.cpp (MUSA enabled)")
+endif()
+
 # 创建数据库静态库
 add_library(base STATIC ${BASE_SOURCES})
 
@@ -27,6 +38,16 @@ if(TR_USE_MIMALLOC)
     if(DEFINED TR_MIMALLOC_INCLUDE_DIR)
         target_include_directories(base PRIVATE ${TR_MIMALLOC_INCLUDE_DIR})
         message(STATUS "Base library: Using mimalloc headers from ${TR_MIMALLOC_INCLUDE_DIR}")
+    endif()
+endif()
+
+# 添加MUSA支持（musa_arena.cpp需要）
+# 使用cmake_paths.cmake中定义的TR_MUSA_PATH宏
+if(TR_USE_MUSA)
+    if(DEFINED TR_MUSA_PATH)
+        # MUSA头文件目录
+        target_include_directories(base PRIVATE ${TR_MUSA_PATH}/include)
+        message(STATUS "Base library: Using MUSA headers from ${TR_MUSA_PATH}/include")
     endif()
 endif()
 
