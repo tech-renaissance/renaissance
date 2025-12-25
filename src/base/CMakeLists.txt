@@ -5,6 +5,9 @@ set(BASE_SOURCES
     tr_exception.cpp
     device_type.cpp
     dtype.cpp
+    memory_arena.cpp
+    memory_plan.cpp
+    cpu_arena.cpp
 )
 
 # 创建数据库静态库
@@ -18,6 +21,14 @@ target_include_directories(base
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../../include>
         $<INSTALL_INTERFACE:include>
 )
+
+# 添加mimalloc支持（cpu_arena.cpp需要）
+if(TR_USE_MIMALLOC)
+    if(DEFINED TR_MIMALLOC_INCLUDE_DIR)
+        target_include_directories(base PRIVATE ${TR_MIMALLOC_INCLUDE_DIR})
+        message(STATUS "Base library: Using mimalloc headers from ${TR_MIMALLOC_INCLUDE_DIR}")
+    endif()
+endif()
 
 # 设置编译选项
 target_compile_definitions(base PRIVATE
