@@ -10,6 +10,8 @@
 
 #pragma once
 
+#ifdef TR_USE_MUSA
+
 #include <musa_runtime.h>
 
 namespace tr {
@@ -54,3 +56,5 @@ musaError_t launch_fill_bf16_kernel(int n, uint16_t* ptr, float value);
 musaError_t launch_add_bf16_kernel(int n, const uint16_t* a, const uint16_t* b, uint16_t* c);
 
 } // namespace tr
+
+#endif // TR_USE_MUSA

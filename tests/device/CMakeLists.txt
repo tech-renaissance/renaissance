@@ -71,14 +71,48 @@ target_link_libraries(test_cpu_device PRIVATE renaissance)
 
 message(STATUS "Device component unit tests configured successfully")
 
+# RNG测试（CPU随机数生成器）
+add_executable(test_cpu_rng
+    test_cpu_rng.cpp
+)
+
+target_include_directories(test_cpu_rng PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+)
+
+set_target_properties(test_cpu_rng PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/device
+)
+
+if(WIN32)
+    set_target_properties(test_cpu_rng PROPERTIES
+        WIN32_EXECUTABLE FALSE
+    )
+endif()
+
+if(MSVC)
+    target_compile_options(test_cpu_rng PRIVATE /W4 /utf-8)
+else()
+    target_compile_options(test_cpu_rng PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+target_compile_definitions(test_cpu_rng PRIVATE TR_LOG_LEVEL=0)
+target_link_libraries(test_cpu_rng PRIVATE renaissance)
+
 # CUDA Device测试（条件编译）
 if(TR_USE_CUDA)
     add_executable(test_cuda_device test_cuda_device.cpp)
+
+    # CUDA RNG测试
+    add_executable(test_cuda_rng test_cuda_rng.cpp)
 endif()
 
 # MUSA Device测试（条件编译）
 if(TR_USE_MUSA)
     add_executable(test_musa_device test_musa_device.cpp)
+
+    # MUSA RNG测试
+    add_executable(test_musa_rng test_musa_rng.cpp)
 endif()
 
 
@@ -101,6 +135,26 @@ if(TR_USE_CUDA)
 
     target_compile_definitions(test_cuda_device PRIVATE TR_LOG_LEVEL=0)
     target_link_libraries(test_cuda_device PRIVATE renaissance)
+
+    # ===== test_cuda_rng配置 =====
+    set_target_properties(test_cuda_rng PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/device
+    )
+
+    if(WIN32)
+        set_target_properties(test_cuda_rng PROPERTIES
+            WIN32_EXECUTABLE FALSE
+        )
+    endif()
+
+    if(MSVC)
+        target_compile_options(test_cuda_rng PRIVATE /W4 /utf-8)
+    else()
+        target_compile_options(test_cuda_rng PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+
+    target_compile_definitions(test_cuda_rng PRIVATE TR_LOG_LEVEL=0)
+    target_link_libraries(test_cuda_rng PRIVATE renaissance)
 
     # 为测试设置运行时PATH环境变量（合并所有DLL路径）
     if(WIN32)
@@ -127,14 +181,18 @@ if(TR_USE_CUDA)
             message(STATUS "CUDA device test: cuDNN bin: ${TR_CUDNN_BIN_DIR}")
         endif()
 
-        # 设置完整的PATH环境变量
+        # 设置完整的PATH环境变量（对test_cuda_device）
         if(DLL_PATHS)
             # 将列表转换为分号分隔的路径
             string(REPLACE ";" ";" DLL_PATH_STR "${DLL_PATHS}")
             set_target_properties(test_cuda_device PROPERTIES
                 ENVIRONMENT "PATH=${DLL_PATH_STR};$ENV{PATH}"
             )
-            message(STATUS "CUDA device test: All DLL paths added to environment")
+            # 为test_cuda_rng也设置相同的PATH
+            set_target_properties(test_cuda_rng PROPERTIES
+                ENVIRONMENT "PATH=${DLL_PATH_STR};$ENV{PATH}"
+            )
+            message(STATUS "CUDA device tests: All DLL paths added to environment")
         endif()
     endif()
 endif()
@@ -158,6 +216,26 @@ if(TR_USE_MUSA)
 
     target_compile_definitions(test_musa_device PRIVATE TR_LOG_LEVEL=0)
     target_link_libraries(test_musa_device PRIVATE renaissance)
+
+    # ===== test_musa_rng配置 =====
+    set_target_properties(test_musa_rng PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/device
+    )
+
+    if(WIN32)
+        set_target_properties(test_musa_rng PROPERTIES
+            WIN32_EXECUTABLE FALSE
+        )
+    endif()
+
+    if(MSVC)
+        target_compile_options(test_musa_rng PRIVATE /W4 /utf-8)
+    else()
+        target_compile_options(test_musa_rng PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+
+    target_compile_definitions(test_musa_rng PRIVATE TR_LOG_LEVEL=0)
+    target_link_libraries(test_musa_rng PRIVATE renaissance)
 endif()
 
 message(STATUS "Device tests: CUDA and MUSA device tests configured")

@@ -1,21 +1,19 @@
 /**
  * @file musa_device.cpp
  * @brief MUSA器件实现
- * @version 3.6.7
+ * @version 3.6.8
  * @date 2025-12-27
  * @author 技术觉醒团队
  * @note 依赖项: MUSA Runtime, muDNN
  * @note 所属系列: device
  */
 
-#include "renaissance/device/musa_device.h"
-#include "renaissance/device/musa_kernels.h"
-#include "renaissance/data/tensor.h"
-#include "renaissance/data/storage.h"
-#include "renaissance/base/dtype.h"
+#include "renaissance/base/rng.h"  // Generator类完整定义
 #include "renaissance/base/logger.h"
 #include "renaissance/base/tr_exception.h"
-#include "renaissance/base/musa_arena.h"
+#include "renaissance/base/dtype.h"
+#include "renaissance/data/storage.h"
+#include "renaissance/data/tensor.h"
 
 #ifdef TR_USE_MUSA
 
@@ -24,6 +22,11 @@
 #include <vector>
 #include <cstring>
 #include <memory>
+
+#include "renaissance/base/musa_arena.h"
+#include "renaissance/device/musa_kernels.h"
+#include "renaissance/device/musa_rng_kernels.h"
+#include "renaissance/device/musa_device.h"
 
 namespace tr {
 
@@ -373,6 +376,184 @@ void MusaDevice::add_into(const Tensor& a, const Tensor& b, Tensor& result) {
 
     // 同步确保计算完成
     synchronize();
+}
+
+// =============================================================================
+// MusaDevice随机数生成方法（与CPU API完全一致）
+// =============================================================================
+
+void MusaDevice::rand_uint64(uint64_t* ptr, size_t count, Generator& gen) {
+    if (count == 0) return;
+    if (!ptr) {
+        TR_THROW(ValueError, "Null pointer in rand_uint64");
+    }
+
+    // 原子预留offset（与CPU使用相同的Generator！）
+    uint64_t base_offset = gen.next_offset(count);
+    uint64_t seed = gen.seed();
+
+    musaSetDevice(device_id_);
+
+    musaError_t err = launch_philox_uint64_kernel(
+        static_cast<int>(count), seed, base_offset, ptr
+    );
+
+    if (err != musaSuccess) {
+        TR_THROW(DeviceError, "MUSA rand_uint64 kernel failed: ",
+                 musaGetErrorString(err));
+    }
+}
+
+void MusaDevice::rand_bernoulli_int8(int8_t* ptr, size_t count, float prob_one,
+                                      Generator& gen) {
+    if (count == 0) return;
+    if (!ptr) {
+        TR_THROW(ValueError, "Null pointer in rand_bernoulli_int8");
+    }
+    if (prob_one < 0.0f || prob_one > 1.0f) {
+        TR_THROW(ValueError, "prob_one must be in [0, 1], got ", prob_one);
+    }
+
+    uint64_t base_offset = gen.next_offset(count);
+    uint64_t seed = gen.seed();
+
+    musaSetDevice(device_id_);
+
+    musaError_t err = launch_philox_bernoulli_int8_kernel(
+        static_cast<int>(count), seed, base_offset, prob_one, ptr
+    );
+
+    if (err != musaSuccess) {
+        TR_THROW(DeviceError, "MUSA rand_bernoulli_int8 kernel failed: ",
+                 musaGetErrorString(err));
+    }
+}
+
+void MusaDevice::rand_uniform_int8(int8_t* ptr, size_t count, int8_t low,
+                                    int8_t high, Generator& gen) {
+    if (count == 0) return;
+    if (!ptr) {
+        TR_THROW(ValueError, "Null pointer in rand_uniform_int8");
+    }
+    if (low > high) {
+        TR_THROW(ValueError, "low must be <= high");
+    }
+
+    uint64_t base_offset = gen.next_offset(count);
+    uint64_t seed = gen.seed();
+
+    musaSetDevice(device_id_);
+
+    musaError_t err = launch_philox_uniform_int8_kernel(
+        static_cast<int>(count), seed, base_offset, low, high, ptr
+    );
+
+    if (err != musaSuccess) {
+        TR_THROW(DeviceError, "MUSA rand_uniform_int8 kernel failed: ",
+                 musaGetErrorString(err));
+    }
+}
+
+void MusaDevice::rand_bernoulli_int32(int32_t* ptr, size_t count, float prob_one,
+                                       Generator& gen) {
+    if (count == 0) return;
+    if (!ptr) {
+        TR_THROW(ValueError, "Null pointer in rand_bernoulli_int32");
+    }
+    if (prob_one < 0.0f || prob_one > 1.0f) {
+        TR_THROW(ValueError, "prob_one must be in [0, 1], got ", prob_one);
+    }
+
+    uint64_t base_offset = gen.next_offset(count);
+    uint64_t seed = gen.seed();
+
+    musaSetDevice(device_id_);
+
+    musaError_t err = launch_philox_bernoulli_int32_kernel(
+        static_cast<int>(count), seed, base_offset, prob_one, ptr
+    );
+
+    if (err != musaSuccess) {
+        TR_THROW(DeviceError, "MUSA rand_bernoulli_int32 kernel failed: ",
+                 musaGetErrorString(err));
+    }
+}
+
+void MusaDevice::rand_uniform_int32(int32_t* ptr, size_t count, int32_t low,
+                                     int32_t high, Generator& gen) {
+    if (count == 0) return;
+    if (!ptr) {
+        TR_THROW(ValueError, "Null pointer in rand_uniform_int32");
+    }
+    if (low > high) {
+        TR_THROW(ValueError, "low must be <= high");
+    }
+
+    uint64_t base_offset = gen.next_offset(count);
+    uint64_t seed = gen.seed();
+
+    musaSetDevice(device_id_);
+
+    musaError_t err = launch_philox_uniform_int32_kernel(
+        static_cast<int>(count), seed, base_offset, low, high, ptr
+    );
+
+    if (err != musaSuccess) {
+        TR_THROW(DeviceError, "MUSA rand_uniform_int32 kernel failed: ",
+                 musaGetErrorString(err));
+    }
+}
+
+void MusaDevice::rand_uniform_float(float* ptr, size_t count, float low,
+                                     float high, Generator& gen) {
+    if (count == 0) return;
+    if (!ptr) {
+        TR_THROW(ValueError, "Null pointer in rand_uniform_float");
+    }
+    if (low > high) {
+        TR_THROW(ValueError, "low must be <= high");
+    }
+
+    uint64_t base_offset = gen.next_offset(count);
+    uint64_t seed = gen.seed();
+
+    musaSetDevice(device_id_);
+
+    musaError_t err = launch_philox_uniform_float_kernel(
+        static_cast<int>(count), seed, base_offset, low, high, ptr
+    );
+
+    if (err != musaSuccess) {
+        TR_THROW(DeviceError, "MUSA rand_uniform_float kernel failed: ",
+                 musaGetErrorString(err));
+    }
+}
+
+void MusaDevice::rand_normal_float(float* ptr, size_t count, float mean,
+                                    float std, Generator& gen) {
+    if (count == 0) return;
+    if (!ptr) {
+        TR_THROW(ValueError, "Null pointer in rand_normal_float");
+    }
+    if (std < 0.0f) {
+        TR_THROW(ValueError, "std must be >= 0, got ", std);
+    }
+
+    // Box-Muller消耗的offset：(count + 1) / 2
+    uint64_t pairs_needed = (count + 1) / 2;
+    uint64_t base_offset = gen.next_offset(pairs_needed);
+    uint64_t seed = gen.seed();
+
+    musaSetDevice(device_id_);
+
+    musaError_t err = launch_philox_normal_float_kernel(
+        static_cast<int>(count), seed, base_offset, mean, std, ptr
+    );
+
+    if (err != musaSuccess) {
+        TR_THROW(DeviceError, "MUSA rand_normal_float kernel failed: ",
+                 musaGetErrorString(err));
+    }
 }
 
 } // namespace tr

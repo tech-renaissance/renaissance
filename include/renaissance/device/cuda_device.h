@@ -1,8 +1,8 @@
 /**
  * @file cuda_device.h
  * @brief CUDA器件实现
- * @version 3.6.5
- * @date 2025-12-26
+ * @version 3.6.8
+ * @date 2025-12-27
  * @author 技术觉醒团队
  * @note 依赖项: CUDA Runtime
  * @note 所属系列: device
@@ -17,6 +17,9 @@
 #include <cuda_runtime.h>
 
 namespace tr {
+
+// 前置声明Generator类（避免在头文件中包含rng.h）
+class Generator;
 
 /**
  * @class CudaDevice
@@ -62,6 +65,46 @@ public:
 
     // ===== 张量运算（仅加法）=====
     void add_into(const Tensor& a, const Tensor& b, Tensor& result) override;
+
+    // ===== 随机数生成（与CPU API完全一致）=====
+
+    /**
+     * @brief GPU生成uint64随机数
+     * @param ptr 设备内存指针
+     * @param count 元素数量
+     * @param gen 生成器引用
+     */
+    void rand_uint64(uint64_t* ptr, size_t count, Generator& gen);
+
+    /**
+     * @brief GPU生成伯努利INT8
+     */
+    void rand_bernoulli_int8(int8_t* ptr, size_t count, float prob_one, Generator& gen);
+
+    /**
+     * @brief GPU生成均匀分布INT8
+     */
+    void rand_uniform_int8(int8_t* ptr, size_t count, int8_t low, int8_t high, Generator& gen);
+
+    /**
+     * @brief GPU生成伯努利INT32
+     */
+    void rand_bernoulli_int32(int32_t* ptr, size_t count, float prob_one, Generator& gen);
+
+    /**
+     * @brief GPU生成均匀分布INT32
+     */
+    void rand_uniform_int32(int32_t* ptr, size_t count, int32_t low, int32_t high, Generator& gen);
+
+    /**
+     * @brief GPU生成均匀分布FP32
+     */
+    void rand_uniform_float(float* ptr, size_t count, float low, float high, Generator& gen);
+
+    /**
+     * @brief GPU生成正态分布FP32
+     */
+    void rand_normal_float(float* ptr, size_t count, float mean, float std, Generator& gen);
 
 private:
     int device_id_;  ///< GPU设备索引

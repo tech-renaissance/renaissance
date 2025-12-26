@@ -10,10 +10,10 @@
 
 #pragma once
 
+#include "renaissance/base/logger.h"
+#include "renaissance/base/tr_exception.h"
 #include "renaissance/base/device_type.h"
 #include "renaissance/base/dtype.h"
-#include "renaissance/base/tr_exception.h"
-#include "renaissance/base/logger.h"
 #include "renaissance/data/shape.h"
 #include <memory>
 #include <string>

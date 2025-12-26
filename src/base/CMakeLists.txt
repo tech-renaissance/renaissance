@@ -8,6 +8,7 @@ set(BASE_SOURCES
     memory_arena.cpp
     memory_plan.cpp
     cpu_arena.cpp
+    rng.cpp
 )
 
 # 添加CUDA/MUSA源文件（条件编译）

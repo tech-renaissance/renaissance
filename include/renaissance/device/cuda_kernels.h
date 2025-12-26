@@ -11,6 +11,8 @@
 
 #pragma once
 
+#ifdef TR_USE_CUDA
+
 #include <cuda_runtime.h>
 
 namespace tr {
@@ -41,5 +43,4 @@ cudaError_t launch_add_int8_kernel(int n, const int8_t* a, const int8_t* b, int8
 
 } // namespace tr
 
-
-
+#endif // TR_USE_CUDA
