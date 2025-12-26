@@ -222,7 +222,7 @@ void test_resnet50_simulation() {
     std::cout << "\n=== Test 6: ResNet-50 GPU Memory Simulation ===" << std::endl;
 
     int device_id = 0;
-    size_t pool_size = 500 * 1024 * 1024;  // 500MB
+    size_t pool_size = 1024 * 1024 * 1024;  // 1GB
 
     try {
         MusaArena arena(device_id, pool_size);

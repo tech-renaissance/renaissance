@@ -29,41 +29,17 @@ endif()
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# 定义源文件（需要包含base、data、device的所有源文件）
-set(DEVICE_TEST_SOURCES
-    ${CMAKE_SOURCE_DIR}/src/base/logger.cpp
-    ${CMAKE_SOURCE_DIR}/src/base/tr_exception.cpp
-    ${CMAKE_SOURCE_DIR}/src/base/memory_arena.cpp
-    ${CMAKE_SOURCE_DIR}/src/base/memory_plan.cpp
-    ${CMAKE_SOURCE_DIR}/src/base/cpu_arena.cpp
-    ${CMAKE_SOURCE_DIR}/src/data/shape.cpp
-    ${CMAKE_SOURCE_DIR}/src/data/storage.cpp
-    ${CMAKE_SOURCE_DIR}/src/data/tensor.cpp
-    ${CMAKE_SOURCE_DIR}/src/device/device.cpp
-    ${CMAKE_SOURCE_DIR}/src/device/device_manager.cpp
-    ${CMAKE_SOURCE_DIR}/src/device/cpu_device.cpp
-)
-
 # 定义头文件路径
 include_directories(
     ${CMAKE_SOURCE_DIR}/include
 )
 
-# 添加mimalloc支持
-if(TR_USE_MIMALLOC)
-    if(DEFINED TR_MIMALLOC_INCLUDE_DIR)
-        include_directories(${TR_MIMALLOC_INCLUDE_DIR})
-        message(STATUS "Device tests: Using mimalloc headers from ${TR_MIMALLOC_INCLUDE_DIR}")
-    endif()
-endif()
-
 # 创建CpuDevice测试可执行文件
 add_executable(test_cpu_device
     test_cpu_device.cpp
-    ${DEVICE_TEST_SOURCES}
 )
 
-# 为测试目标单独设置头文件路径（确保#include "renaissance/renaissance.h"能找到）
+# 为测试目标单独设置头文件路径
 target_include_directories(test_cpu_device PRIVATE
     ${CMAKE_CURRENT_SOURCE_DIR}/../../include
 )
@@ -88,23 +64,100 @@ else()
 endif()
 
 # 设置日志级别
-# 注意：TR_WORKSPACE已在主CMakeLists.txt中全局定义，此处无需重复传递
 target_compile_definitions(test_cpu_device PRIVATE TR_LOG_LEVEL=0)
 
-# 链接mimalloc库
-if(TR_USE_MIMALLOC)
-    if(DEFINED TR_MIMALLOC_LIBRARY_DIR)
-        if(WIN32)
-            # Windows: 使用完整路径
-            target_link_libraries(test_cpu_device PRIVATE "${TR_MIMALLOC_LIBRARY_DIR}/mimalloc.dll.lib")
-        else()
-            # Linux/其他: 指定库搜索路径 + 库名
-            target_link_directories(test_cpu_device PRIVATE ${TR_MIMALLOC_LIBRARY_DIR})
-            target_link_libraries(test_cpu_device PRIVATE mimalloc)
+# 链接renaissance统一库（包含base、data、device及所有依赖）
+target_link_libraries(test_cpu_device PRIVATE renaissance)
+
+message(STATUS "Device component unit tests configured successfully")
+
+# CUDA Device测试（条件编译）
+if(TR_USE_CUDA)
+    add_executable(test_cuda_device test_cuda_device.cpp)
+endif()
+
+# MUSA Device测试（条件编译）
+if(TR_USE_MUSA)
+    add_executable(test_musa_device test_musa_device.cpp)
+endif()
+
+
+if(TR_USE_CUDA)
+    set_target_properties(test_cuda_device PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/device
+    )
+
+    if(WIN32)
+        set_target_properties(test_cuda_device PROPERTIES
+            WIN32_EXECUTABLE FALSE
+        )
+    endif()
+
+    if(MSVC)
+        target_compile_options(test_cuda_device PRIVATE /W4 /utf-8)
+    else()
+        target_compile_options(test_cuda_device PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+
+    target_compile_definitions(test_cuda_device PRIVATE TR_LOG_LEVEL=0)
+    target_link_libraries(test_cuda_device PRIVATE renaissance)
+
+    # 为测试设置运行时PATH环境变量（合并所有DLL路径）
+    if(WIN32)
+        set(DLL_PATHS "")
+
+        # 添加mimalloc.dll目录
+        if(TR_USE_MIMALLOC AND DEFINED TR_MIMALLOC_LIBRARY_DIR)
+            get_filename_component(MIMALLOC_DLL_DIR "${TR_MIMALLOC_LIBRARY_DIR}" DIRECTORY)
+            get_filename_component(MIMALLOC_DLL_DIR "${MIMALLOC_DLL_DIR}" DIRECTORY)
+            set(MIMALLOC_DLL_DIR "${MIMALLOC_DLL_DIR}/bin")
+            list(APPEND DLL_PATHS "${MIMALLOC_DLL_DIR}")
+            message(STATUS "CUDA device test: mimalloc.dll directory: ${MIMALLOC_DLL_DIR}")
         endif()
-        message(STATUS "Device tests: Linking mimalloc from ${TR_MIMALLOC_LIBRARY_DIR}")
+
+        # 添加CUDA DLL目录
+        if(DEFINED TR_CUDA_BIN_DIR)
+            list(APPEND DLL_PATHS "${TR_CUDA_BIN_DIR}/x64")
+            message(STATUS "CUDA device test: CUDA Toolkit bin: ${TR_CUDA_BIN_DIR}/x64")
+        endif()
+
+        # 添加cuDNN DLL目录
+        if(DEFINED TR_CUDNN_BIN_DIR)
+            list(APPEND DLL_PATHS "${TR_CUDNN_BIN_DIR}")
+            message(STATUS "CUDA device test: cuDNN bin: ${TR_CUDNN_BIN_DIR}")
+        endif()
+
+        # 设置完整的PATH环境变量
+        if(DLL_PATHS)
+            # 将列表转换为分号分隔的路径
+            string(REPLACE ";" ";" DLL_PATH_STR "${DLL_PATHS}")
+            set_target_properties(test_cuda_device PROPERTIES
+                ENVIRONMENT "PATH=${DLL_PATH_STR};$ENV{PATH}"
+            )
+            message(STATUS "CUDA device test: All DLL paths added to environment")
+        endif()
     endif()
 endif()
 
-message(STATUS "TR_WORKSPACE propagated to device tests: ${TR_WORKSPACE}")
-message(STATUS "Device component unit tests configured successfully")
+if(TR_USE_MUSA)
+    set_target_properties(test_musa_device PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/device
+    )
+
+    if(WIN32)
+        set_target_properties(test_musa_device PROPERTIES
+            WIN32_EXECUTABLE FALSE
+        )
+    endif()
+
+    if(MSVC)
+        target_compile_options(test_musa_device PRIVATE /W4 /utf-8)
+    else()
+        target_compile_options(test_musa_device PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+
+    target_compile_definitions(test_musa_device PRIVATE TR_LOG_LEVEL=0)
+    target_link_libraries(test_musa_device PRIVATE renaissance)
+endif()
+
+message(STATUS "Device tests: CUDA and MUSA device tests configured")

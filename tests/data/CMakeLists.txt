@@ -10,11 +10,10 @@ foreach(test_source ${DATA_TEST_SOURCES})
 
     add_executable(${test_name} ${test_source})
 
-    # 链接data库
+    # 链接renaissance统一库（包含base、data、device及所有依赖）
     target_link_libraries(${test_name}
         PRIVATE
-            data
-            base
+            renaissance
     )
 
     # 包含头文件目录

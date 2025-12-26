@@ -225,7 +225,7 @@ void test_large_memory_pool() {
     std::cout << "\n=== Test 7: Large Memory Pool (ResNet-50) ===" << std::endl;
 
     // 模拟ResNet-50的内存需求
-    size_t pool_size = 200 * 1024 * 1024;  // 200MB
+    size_t pool_size = 1024 * 1024 * 1024;  // 1GB
     CpuArena arena(pool_size);
 
     MemoryPlan plan;

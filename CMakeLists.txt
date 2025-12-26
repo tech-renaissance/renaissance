@@ -8,7 +8,7 @@ cmake_minimum_required(VERSION 3.22)
 project(renAIssance VERSION 3.0.4 LANGUAGES CXX)
 
 # 设置C++标准
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # 默认构建类型
@@ -208,7 +208,8 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
     # MSVC Release优化
     if(MSVC)
         # 添加UTF-8编译标志以支持中文注释（避免C4819警告）
-        add_compile_options(/utf-8)
+        # 使用生成器表达式，只应用于C++，不应用于CUDA
+        add_compile_options($<$<COMPILE_LANGUAGE:CXX>:/utf-8>)
         set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /O2 /Ob2 /DNDEBUG /arch:AVX2")
         set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} /INCREMENTAL:NO")
     endif()
@@ -231,8 +232,13 @@ endif()
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     if(MSVC)
         # 添加UTF-8编译标志以支持中文注释（避免C4819警告）
-        add_compile_options(/utf-8)
-        set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} /Zi /Ob0 /Od /RTC1")
+        # 使用生成器表达式，只应用于C++，不应用于CUDA
+        add_compile_options($<$<COMPILE_LANGUAGE:CXX>:/utf-8>)
+        # 注意：不使用/RTC1，因为它与OpenMP和mimalloc不兼容
+        # MSVC文档明确说明：/RTC（运行时错误检查）不能与/openmp同时使用
+        # 添加/arch:AVX2以与Release模式保持一致
+        # 清空默认的debug标志，重新设置（避免/RTC1）
+        set(CMAKE_CXX_FLAGS_DEBUG "/Zi /Ob0 /Od /arch:AVX2")
     endif()
 
     if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
@@ -247,8 +253,16 @@ endif()
 # CUDA支持 - V3.2.0简化版本（跳过编译器测试）
 option(TR_USE_CUDA "Enable CUDA support" OFF)  # 默认关闭，由配置脚本控制
 if(TR_USE_CUDA)
-    # 查找CUDA Toolkit
+    # 如果已经定义了CUDAToolkit_ROOT，直接启用CUDA语言，跳过find_package
     if(DEFINED CUDAToolkit_ROOT)
+        enable_language(CUDA)
+        set(CMAKE_CUDA_STANDARD 17)
+        set(CMAKE_CUDA_STANDARD_REQUIRED ON)
+        # 设置CUDA为静默模式（减少nvcc的冗余输出）
+        set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --disable-warnings" CACHE STRING "CUDA compile flags" FORCE)
+        message(STATUS "CUDA language enabled for .cu files")
+
+        # 查找CUDA Toolkit
         set(CMAKE_CUDA_TOOLKIT_ROOT ${CUDAToolkit_ROOT})
         set(CUDA_INCLUDE_DIRS ${CUDAToolkit_ROOT}/include)
         set(CUDA_LIBRARIES ${CUDAToolkit_ROOT}/lib/x64)
@@ -260,14 +274,16 @@ if(TR_USE_CUDA)
             set(CUDA_cudart_LIBRARY ${CUDAToolkit_ROOT}/lib64/libcudart.so)
             set(CUDA_cublas_LIBRARY ${CUDAToolkit_ROOT}/lib64/libcublas.so)
         endif()
+
+        # 设置CUDA架构
+        set(CMAKE_CUDA_ARCHITECTURES "75;80;86;89;90" CACHE STRING "CUDA Architecture")
+
+        message(STATUS "CUDA support enabled (library-only mode)")
+        message(STATUS "CUDA Toolkit: ${CUDAToolkit_ROOT}")
+        message(STATUS "CUDA architectures: ${CMAKE_CUDA_ARCHITECTURES}")
+    else()
+        message(WARNING "TR_USE_CUDA=ON but CUDAToolkit_ROOT not defined")
     endif()
-
-    # 设置CUDA架构（不启用CUDA语言，仅用于库链接）
-    set(CMAKE_CUDA_ARCHITECTURES "75;80;86;89;90" CACHE STRING "CUDA Architecture")
-
-    message(STATUS "CUDA support enabled (library-only mode)")
-    message(STATUS "CUDA Toolkit: ${CUDAToolkit_ROOT}")
-    message(STATUS "CUDA architectures: ${CMAKE_CUDA_ARCHITECTURES}")
 
     # 检查cuDNN - 支持Windows和Linux的不同路径
     if(DEFINED CUDNN_ROOT)
@@ -375,28 +391,16 @@ endif()
 # 框架核心组件配置
 # ============================================================================
 
-# 包含基础组件目录
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/base AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/base)
-    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/base/CMakeLists.txt)
-        add_subdirectory(src/base)
-        message(STATUS "Framework base components enabled")
+# 包含src目录（统一的renaissance库在src/CMakeLists.txt中创建）
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src)
+    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/CMakeLists.txt)
+        add_subdirectory(src)
+        message(STATUS "Framework renaissance library enabled")
     else()
-        message(STATUS "Framework base components disabled - src/base/CMakeLists.txt not found")
+        message(STATUS "Framework disabled - src/CMakeLists.txt not found")
     endif()
 else()
-    message(STATUS "Framework base components disabled - src/base directory not found")
-endif()
-
-# 包含数据组件目录
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/data AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src/data)
-    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/data/CMakeLists.txt)
-        add_subdirectory(src/data)
-        message(STATUS "Framework data components enabled")
-    else()
-        message(STATUS "Framework data components disabled - src/data/CMakeLists.txt not found")
-    endif()
-else()
-    message(STATUS "Framework data components disabled - src/data directory not found")
+    message(STATUS "Framework disabled - src directory not found")
 endif()
 
 # ============================================================================

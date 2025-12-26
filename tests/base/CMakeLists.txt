@@ -29,164 +29,34 @@ endif()
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# 定义源文件
-set(BASE_TEST_SOURCES
-    ${CMAKE_SOURCE_DIR}/src/base/logger.cpp
-    ${CMAKE_SOURCE_DIR}/src/base/tr_exception.cpp
-    ${CMAKE_SOURCE_DIR}/src/base/memory_arena.cpp
-    ${CMAKE_SOURCE_DIR}/src/base/memory_plan.cpp
-    ${CMAKE_SOURCE_DIR}/src/base/cpu_arena.cpp
-)
-
 # 定义头文件路径
 include_directories(
     ${CMAKE_SOURCE_DIR}/include
 )
 
-# 添加mimalloc支持
-if(TR_USE_MIMALLOC)
-    if(DEFINED TR_MIMALLOC_INCLUDE_DIR)
-        include_directories(${TR_MIMALLOC_INCLUDE_DIR})
-        message(STATUS "Base tests: Using mimalloc headers from ${TR_MIMALLOC_INCLUDE_DIR}")
-    endif()
-endif()
-
 # 创建Logger测试可执行文件
-add_executable(test_logger
-    test_logger.cpp
-    ${BASE_TEST_SOURCES}
-)
+add_executable(test_logger test_logger.cpp)
 
 # 创建Exception测试可执行文件
-add_executable(test_exception
-    test_exception.cpp
-    ${BASE_TEST_SOURCES}
-)
+add_executable(test_exception test_exception.cpp)
 
 # 创建内存池测试可执行文件
-add_executable(test_memory_alignment
-    test_memory_alignment.cpp
-    ${BASE_TEST_SOURCES}
-)
+add_executable(test_memory_alignment test_memory_alignment.cpp)
 
-add_executable(test_arena
-    test_arena.cpp
-    ${BASE_TEST_SOURCES}
-)
+add_executable(test_arena test_arena.cpp)
 
-add_executable(test_cpu_arena
-    test_cpu_arena.cpp
-    ${BASE_TEST_SOURCES}
-)
+add_executable(test_cpu_arena test_cpu_arena.cpp)
 
-add_executable(test_memory_plan
-    test_memory_plan.cpp
-    ${BASE_TEST_SOURCES}
-)
+add_executable(test_memory_plan test_memory_plan.cpp)
 
-# 创建CUDA Arena测试可执行文件
+# CUDA Arena测试（条件编译）
 if(TR_USE_CUDA)
-    # CUDA启用时：包含完整源文件（包括CpuArena、CudaArena等）
-    add_executable(test_cuda_arena
-        test_cuda_arena.cpp
-        ${BASE_TEST_SOURCES}
-        ${CMAKE_SOURCE_DIR}/src/base/cuda_arena.cpp
-    )
-    set_target_properties(test_cuda_arena PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/base
-    )
-    if(MSVC)
-        set_target_properties(test_cuda_arena PROPERTIES
-            WIN32_EXECUTABLE FALSE
-        )
-        target_compile_options(test_cuda_arena PRIVATE /W4 /utf-8)
-    else()
-        target_compile_options(test_cuda_arena PRIVATE -Wall -Wextra -Wpedantic)
-    endif()
-    # 注意：TR_USE_CUDA已在主CMakeLists.txt中全局定义，此处无需重复定义
-    target_compile_definitions(test_cuda_arena PRIVATE TR_LOG_LEVEL=0)
-    target_compile_definitions(test_cuda_arena PRIVATE TR_WORKSPACE="${TR_WORKSPACE}")
-
-    # 添加CUDA头文件路径
-    if(DEFINED TR_CUDA_PATH)
-        target_include_directories(test_cuda_arena PRIVATE ${TR_CUDA_PATH}/include)
-    endif()
-    if(DEFINED TR_CUDNN_INCLUDE_DIR)
-        target_include_directories(test_cuda_arena PRIVATE ${TR_CUDNN_INCLUDE_DIR})
-    endif()
-
-    # 链接CUDA库
-    if(WIN32)
-        target_link_libraries(test_cuda_arena PRIVATE
-            ${CUDA_cudart_LIBRARY}
-        )
-    else()
-        target_link_libraries(test_cuda_arena PRIVATE
-            ${CUDA_cudart_LIBRARY}
-        )
-    endif()
-
-    message(STATUS "CudaArena test: CUDA support enabled")
-else()
-    message(STATUS "CudaArena test: CUDA support disabled (TR_USE_CUDA=OFF), skipping")
+    add_executable(test_cuda_arena test_cuda_arena.cpp)
 endif()
 
-# 创建MUSA Arena测试可执行文件
+# MUSA Arena测试（条件编译）
 if(TR_USE_MUSA)
-    # MUSA启用时：包含完整源文件（包括CpuArena、MusaArena等）
-    add_executable(test_musa_arena
-        test_musa_arena.cpp
-        ${BASE_TEST_SOURCES}
-        ${CMAKE_SOURCE_DIR}/src/base/musa_arena.cpp
-    )
-    set_target_properties(test_musa_arena PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/base
-    )
-    if(MSVC)
-        set_target_properties(test_musa_arena PROPERTIES
-            WIN32_EXECUTABLE FALSE
-        )
-        target_compile_options(test_musa_arena PRIVATE /W4 /utf-8)
-    else()
-        target_compile_options(test_musa_arena PRIVATE -Wall -Wextra -Wpedantic)
-    endif()
-    # 注意：TR_USE_MUSA已在主CMakeLists.txt中全局定义，此处无需重复定义
-    target_compile_definitions(test_musa_arena PRIVATE TR_LOG_LEVEL=0)
-    target_compile_definitions(test_musa_arena PRIVATE TR_WORKSPACE="${TR_WORKSPACE}")
-
-    # 添加MUSA头文件路径（使用cmake_paths.cmake中的宏）
-    if(DEFINED TR_MUSA_PATH)
-        target_include_directories(test_musa_arena PRIVATE ${TR_MUSA_PATH}/include)
-        message(STATUS "MusaArena test: MUSA include from ${TR_MUSA_PATH}/include")
-    endif()
-
-    # 链接MUSA库（仅Linux需要）
-    if(NOT WIN32)
-        # Linux: 使用cmake_paths.cmake中的TR_MUSA_PATH
-        # 注意：MUSA库在lib目录，不是lib64
-        if(DEFINED TR_MUSA_PATH)
-            # 优先尝试lib（MUSA实际安装位置）
-            if(EXISTS ${TR_MUSA_PATH}/lib)
-                target_link_directories(test_musa_arena PRIVATE ${TR_MUSA_PATH}/lib)
-                message(STATUS "MusaArena test: MUSA library dir from ${TR_MUSA_PATH}/lib")
-            elseif(EXISTS ${TR_MUSA_PATH}/lib64)
-                target_link_directories(test_musa_arena PRIVATE ${TR_MUSA_PATH}/lib64)
-                message(STATUS "MusaArena test: MUSA library dir from ${TR_MUSA_PATH}/lib64")
-            endif()
-        endif()
-
-        # 链接MUSA运行时库：libmusa.so 和 libmusart.so
-        # 根据实际库文件名链接
-        target_link_libraries(test_musa_arena PRIVATE musa musart)
-        message(STATUS "MusaArena test: Linked musa and musart libraries")
-    else()
-        # Windows: MUSA通常不需要手动链接（由musa_add_executable处理）
-        message(STATUS "MusaArena test: Windows platform, skipping manual MUSA library link")
-    endif()
-
-    message(STATUS "MusaArena test: MUSA support enabled")
-else()
-    message(STATUS "MusaArena test: MUSA support disabled (TR_USE_MUSA=OFF), skipping")
+    add_executable(test_musa_arena test_musa_arena.cpp)
 endif()
 
 # 设置输出目录
@@ -214,6 +84,18 @@ set_target_properties(test_memory_plan PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/base
 )
 
+if(TR_USE_CUDA)
+    set_target_properties(test_cuda_arena PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/base
+    )
+endif()
+
+if(TR_USE_MUSA)
+    set_target_properties(test_musa_arena PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/base
+    )
+endif()
+
 # Windows下为控制台程序设置子系统
 if(WIN32)
     set_target_properties(test_logger PROPERTIES
@@ -234,6 +116,16 @@ if(WIN32)
     set_target_properties(test_memory_plan PROPERTIES
         WIN32_EXECUTABLE FALSE
     )
+    if(TR_USE_CUDA)
+        set_target_properties(test_cuda_arena PROPERTIES
+            WIN32_EXECUTABLE FALSE
+        )
+    endif()
+    if(TR_USE_MUSA)
+        set_target_properties(test_musa_arena PROPERTIES
+            WIN32_EXECUTABLE FALSE
+        )
+    endif()
 endif()
 
 # 编译选项
@@ -244,6 +136,12 @@ if(MSVC)
     target_compile_options(test_arena PRIVATE /W4 /utf-8)
     target_compile_options(test_cpu_arena PRIVATE /W4 /utf-8)
     target_compile_options(test_memory_plan PRIVATE /W4 /utf-8)
+    if(TR_USE_CUDA)
+        target_compile_options(test_cuda_arena PRIVATE /W4 /utf-8)
+    endif()
+    if(TR_USE_MUSA)
+        target_compile_options(test_musa_arena PRIVATE /W4 /utf-8)
+    endif()
 else()
     target_compile_options(test_logger PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(test_exception PRIVATE -Wall -Wextra -Wpedantic)
@@ -251,6 +149,12 @@ else()
     target_compile_options(test_arena PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(test_cpu_arena PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(test_memory_plan PRIVATE -Wall -Wextra -Wpedantic)
+    if(TR_USE_CUDA)
+        target_compile_options(test_cuda_arena PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+    if(TR_USE_MUSA)
+        target_compile_options(test_musa_arena PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
 endif()
 
 # 设置日志级别（Debug模式全开，Release模式只保留WARN/ERROR）
@@ -261,57 +165,25 @@ target_compile_definitions(test_memory_alignment PRIVATE TR_LOG_LEVEL=0)
 target_compile_definitions(test_arena PRIVATE TR_LOG_LEVEL=0)
 target_compile_definitions(test_cpu_arena PRIVATE TR_LOG_LEVEL=0)
 target_compile_definitions(test_memory_plan PRIVATE TR_LOG_LEVEL=0)
+if(TR_USE_CUDA)
+    target_compile_definitions(test_cuda_arena PRIVATE TR_LOG_LEVEL=0)
+endif()
+if(TR_USE_MUSA)
+    target_compile_definitions(test_musa_arena PRIVATE TR_LOG_LEVEL=0)
+endif()
 
-# 链接mimalloc库
-if(TR_USE_MIMALLOC)
-    if(DEFINED TR_MIMALLOC_LIBRARY_DIR)
-        if(WIN32)
-            # Windows: 使用完整路径
-            target_link_libraries(test_logger PRIVATE "${TR_MIMALLOC_LIBRARY_DIR}/mimalloc.dll.lib")
-            target_link_libraries(test_exception PRIVATE "${TR_MIMALLOC_LIBRARY_DIR}/mimalloc.dll.lib")
-            target_link_libraries(test_memory_alignment PRIVATE "${TR_MIMALLOC_LIBRARY_DIR}/mimalloc.dll.lib")
-            target_link_libraries(test_arena PRIVATE "${TR_MIMALLOC_LIBRARY_DIR}/mimalloc.dll.lib")
-            target_link_libraries(test_cpu_arena PRIVATE "${TR_MIMALLOC_LIBRARY_DIR}/mimalloc.dll.lib")
-            target_link_libraries(test_memory_plan PRIVATE "${TR_MIMALLOC_LIBRARY_DIR}/mimalloc.dll.lib")
-            # 只在启用时才链接CUDA/MUSA测试
-            if(TR_USE_CUDA)
-                target_link_libraries(test_cuda_arena PRIVATE "${TR_MIMALLOC_LIBRARY_DIR}/mimalloc.dll.lib")
-            endif()
-            if(TR_USE_MUSA)
-                target_link_libraries(test_musa_arena PRIVATE "${TR_MIMALLOC_LIBRARY_DIR}/mimalloc.dll.lib")
-            endif()
-        else()
-            # Linux/其他: 指定库搜索路径 + 库名
-            target_link_directories(test_logger PRIVATE ${TR_MIMALLOC_LIBRARY_DIR})
-            target_link_directories(test_exception PRIVATE ${TR_MIMALLOC_LIBRARY_DIR})
-            target_link_directories(test_memory_alignment PRIVATE ${TR_MIMALLOC_LIBRARY_DIR})
-            target_link_directories(test_arena PRIVATE ${TR_MIMALLOC_LIBRARY_DIR})
-            target_link_directories(test_cpu_arena PRIVATE ${TR_MIMALLOC_LIBRARY_DIR})
-            target_link_directories(test_memory_plan PRIVATE ${TR_MIMALLOC_LIBRARY_DIR})
-            # 只在启用时才链接CUDA/MUSA测试
-            if(TR_USE_CUDA)
-                target_link_directories(test_cuda_arena PRIVATE ${TR_MIMALLOC_LIBRARY_DIR})
-            endif()
-            if(TR_USE_MUSA)
-                target_link_directories(test_musa_arena PRIVATE ${TR_MIMALLOC_LIBRARY_DIR})
-            endif()
-
-            target_link_libraries(test_logger PRIVATE mimalloc)
-            target_link_libraries(test_exception PRIVATE mimalloc)
-            target_link_libraries(test_memory_alignment PRIVATE mimalloc)
-            target_link_libraries(test_arena PRIVATE mimalloc)
-            target_link_libraries(test_cpu_arena PRIVATE mimalloc)
-            target_link_libraries(test_memory_plan PRIVATE mimalloc)
-            # 只在启用时才链接CUDA/MUSA测试
-            if(TR_USE_CUDA)
-                target_link_libraries(test_cuda_arena PRIVATE mimalloc)
-            endif()
-            if(TR_USE_MUSA)
-                target_link_libraries(test_musa_arena PRIVATE mimalloc)
-            endif()
-        endif()
-        message(STATUS "Base tests: Linking mimalloc from ${TR_MIMALLOC_LIBRARY_DIR}")
-    endif()
+# 链接renaissance统一库（包含base、data、device及所有依赖）
+target_link_libraries(test_logger PRIVATE renaissance)
+target_link_libraries(test_exception PRIVATE renaissance)
+target_link_libraries(test_memory_alignment PRIVATE renaissance)
+target_link_libraries(test_arena PRIVATE renaissance)
+target_link_libraries(test_cpu_arena PRIVATE renaissance)
+target_link_libraries(test_memory_plan PRIVATE renaissance)
+if(TR_USE_CUDA)
+    target_link_libraries(test_cuda_arena PRIVATE renaissance)
+endif()
+if(TR_USE_MUSA)
+    target_link_libraries(test_musa_arena PRIVATE renaissance)
 endif()
 
 message(STATUS "TR_WORKSPACE propagated to base tests: ${TR_WORKSPACE}")

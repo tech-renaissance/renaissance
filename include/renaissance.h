@@ -40,6 +40,12 @@
 #include "renaissance/device/device.h"
 #include "renaissance/device/device_manager.h"
 #include "renaissance/device/cpu_device.h"
+#ifdef TR_USE_CUDA
+#include "renaissance/device/cuda_device.h"
+#endif
+#ifdef TR_USE_MUSA
+#include "renaissance/device/musa_device.h"
+#endif
 
 
 namespace tr {

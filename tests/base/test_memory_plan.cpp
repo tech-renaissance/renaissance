@@ -41,10 +41,21 @@ void test_handle_mechanism() {
     std::cout << "layer2.weight handle=" << h_weight2 << " offset=" << offset3 << std::endl;
     std::cout << "layer2.bias handle=" << h_bias2 << " offset=" << offset4 << std::endl;
 
-    // 验证256字节对齐
-    assert(offset2 == 256);
-    assert(offset3 == 512);
-    assert(offset4 == 768);
+    // 验证256字节对齐和正确的偏移值
+    // layer1.weight: 1024字节, offset=0
+    assert(offset1 == 0);
+    // layer1.bias: 256字节, offset=1024 (layer1.weight之后，已对齐)
+    assert(offset2 == 1024);
+    // layer2.weight: 2048字节, offset=1280 (layer1.bias之后，对齐到1280)
+    assert(offset3 == 1280);
+    // layer2.bias: 512字节, offset=3328 (layer2.weight之后，对齐到3328)
+    assert(offset4 == 3328);
+
+    // 验证所有offset都是256的倍数
+    assert(offset1 % 256 == 0);
+    assert(offset2 % 256 == 0);
+    assert(offset3 % 256 == 0);
+    assert(offset4 % 256 == 0);
 
     std::cout << "[PASS] Test 1 passed: Handle mechanism works correctly" << std::endl;
 }
@@ -148,16 +159,21 @@ void test_size_tracking() {
     MemoryPlan plan;
 
     // 注册参数
-    plan.register_tensor("param1", 1024, true);
-    plan.register_tensor("param2", 2048, true);
+    plan.register_tensor("param1", 1024, true);  // offset=0,   param_size=1024
+    plan.register_tensor("param2", 2048, true);  // offset=1024 (已对齐), param_size=3072
 
-    assert(plan.param_size() == 3072 + 256);  // 1024 + 2048 + alignment
+    // 参数大小：1024 + 2048 = 3072 (恰好是256的倍数，无需额外对齐)
+    assert(plan.param_size() == 3072);
 
     // 注册临时张量
-    plan.register_tensor("temp1", 4096, false);
-    plan.register_tensor("temp2", 8192, false);
+    // 注意：临时张量的offset会累加！
+    plan.register_tensor("temp1", 4096, false);  // offset=3072 (param_size后), temp_end=4096, temp_size=4096
+    plan.register_tensor("temp2", 8192, false);  // offset=7168 (3072+4096), temp_end=12288, temp_size=12288
 
-    assert(plan.temp_size() == 8192 + 256);  // 取最大值 + alignment
+    // 临时大小累加：4096 + 8192 = 12288
+    // 因为temp2的offset = param_size + temp_size(temp1之后) = 3072 + 4096 = 7168
+    // temp_end = (7168 - 3072) + 8192 = 4096 + 8192 = 12288
+    assert(plan.temp_size() == 12288);
 
     [[maybe_unused]] size_t expected_total = plan.param_size() + plan.temp_size();
     assert(plan.total_size() == expected_total);

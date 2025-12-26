@@ -21,6 +21,14 @@ namespace tr {
 class Device;
 class CpuDevice;
 
+#ifdef TR_USE_CUDA
+class CudaDevice;
+#endif
+
+#ifdef TR_USE_MUSA
+class MusaDevice;
+#endif
+
 /**
  * @class DeviceManager
  * @brief 器件管理器（Meyers单例 + 静态数组优化）
@@ -59,27 +67,55 @@ public:
      */
     CpuDevice& cpu() noexcept;
 
-    // ===== 设备查询API（本阶段简化）=====
+#ifdef TR_USE_CUDA
+    /**
+     * @brief 获取CUDA器件
+     * @param index 设备索引（0~7）
+     * @throws ValueError 如果索引无效或设备不可用
+     */
+    CudaDevice& cuda(int index = 0);
+#endif
+
+#ifdef TR_USE_MUSA
+    /**
+     * @brief 获取MUSA器件
+     * @param index 设备索引（0~7）
+     * @throws ValueError 如果索引无效或设备不可用
+     */
+    MusaDevice& musa(int index = 0);
+#endif
+
+    // ===== 设备查询API =====
+
+#ifdef TR_USE_CUDA
+    /**
+     * @brief 检查CUDA是否可用
+     */
+    bool cuda_is_available() const noexcept { return cuda_count_ > 0; }
 
     /**
-     * @brief 检查CUDA是否可用（本阶段返回false）
+     * @brief 获取CUDA设备数量
      */
+    int cuda_count() const noexcept { return cuda_count_; }
+#else
     bool cuda_is_available() const noexcept { return false; }
-
-    /**
-     * @brief 检查MUSA是否可用（本阶段返回false）
-     */
-    bool musa_is_available() const noexcept { return false; }
-
-    /**
-     * @brief 获取CUDA设备数量（本阶段返回0）
-     */
     int cuda_count() const noexcept { return 0; }
+#endif
+
+#ifdef TR_USE_MUSA
+    /**
+     * @brief 检查MUSA是否可用
+     */
+    bool musa_is_available() const noexcept { return musa_count_ > 0; }
 
     /**
-     * @brief 获取MUSA设备数量（本阶段返回0）
+     * @brief 获取MUSA设备数量
      */
+    int musa_count() const noexcept { return musa_count_; }
+#else
+    bool musa_is_available() const noexcept { return false; }
     int musa_count() const noexcept { return 0; }
+#endif
 
     // ===== 默认设备管理 =====
 
@@ -119,19 +155,26 @@ private:
     void initialize();
 
     /**
-     * @brief 计算设备在数组中的索引（本阶段仅CPU）
+     * @brief 计算设备在数组中的索引
      */
-    static constexpr int device_index(const DeviceType& type) noexcept {
-        if (type.is_cpu()) return 0;
-        return -1;  // 本阶段不支持其他设备
-    }
+    static int device_index(const DeviceType& type) noexcept;
 
-    // ===== 数据成员（本阶段简化：仅CPU）=====
+    /**
+     * @brief 检测CUDA设备
+     */
+    int detect_cuda();
 
-    // 静态数组（本阶段仅1个槽位：CPU）
-    std::array<std::unique_ptr<Device>, 1> devices_;
+    /**
+     * @brief 检测MUSA设备
+     */
+    int detect_musa();
 
-    // 设备计数（本阶段固定为0）
+    // ===== 数据成员 =====
+
+    // 静态数组（CPU + 8个CUDA + 8个MUSA = 17个槽位）
+    std::array<std::unique_ptr<Device>, 17> devices_;
+
+    // 设备计数
     int cuda_count_ = 0;
     int musa_count_ = 0;
 

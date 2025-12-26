@@ -1,0 +1,48 @@
+/**
+ * @file cuda_kernels.h
+ * @brief CUDA kernels for integer operations
+ * @version 3.6.5
+ * @date 2025-12-26
+ * @author renAIssance Team
+ * @note Dependencies: CUDA Runtime
+ * @note Series: device
+ * @note Reference: INFO7.md - Using wrapper functions to bridge .cpp and .cu
+ */
+
+#ifndef TR_CUDA_KERNELS_H
+#define TR_CUDA_KERNELS_H
+
+#include <cuda_runtime.h>
+
+namespace tr {
+
+/**
+ * @brief Wrapper function: Fill INT32 array (implemented in .cu)
+ * @param n Number of elements
+ * @param ptr Device pointer
+ * @param value Fill value
+ * @return cudaError_t Error code
+ */
+cudaError_t launch_fill_int32_kernel(int n, int32_t* ptr, int32_t value);
+
+/**
+ * @brief Wrapper function: Fill INT8 array (implemented in .cu)
+ */
+cudaError_t launch_fill_int8_kernel(int n, int8_t* ptr, int8_t value);
+
+/**
+ * @brief Wrapper function: INT32 addition (implemented in .cu)
+ */
+cudaError_t launch_add_int32_kernel(int n, const int32_t* a, const int32_t* b, int32_t* c);
+
+/**
+ * @brief Wrapper function: INT8 addition (implemented in .cu)
+ */
+cudaError_t launch_add_int8_kernel(int n, const int8_t* a, const int8_t* b, int8_t* c);
+
+} // namespace tr
+
+#endif // TR_CUDA_KERNELS_H
+
+
+

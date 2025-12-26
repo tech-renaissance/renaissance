@@ -34,6 +34,37 @@ endif()
 # 设置单元测试的输出目录
 set(TESTS_OUTPUT_DIR ${CMAKE_BINARY_DIR}/bin/tests)
 
+# 为所有单元测试添加CUDA/MUSA头文件路径（因为renaissance.h可能包含它们）
+if(TR_USE_CUDA)
+    if(DEFINED TR_CUDA_PATH)
+        include_directories(${TR_CUDA_PATH}/include)
+    endif()
+    if(DEFINED TR_CUDNN_INCLUDE_DIR)
+        include_directories(${TR_CUDNN_INCLUDE_DIR})
+        file(GLOB CUDNN_VERSION_DIRS "${TR_CUDNN_INCLUDE_DIR}/*")
+        foreach(CUDNN_VER_DIR ${CUDNN_VERSION_DIRS})
+            if(IS_DIRECTORY ${CUDNN_VER_DIR})
+                include_directories(${CUDNN_VER_DIR})
+            endif()
+        endforeach()
+    endif()
+endif()
+
+if(TR_USE_MUSA)
+    if(DEFINED TR_MUSA_PATH)
+        include_directories(${TR_MUSA_PATH}/include)
+    endif()
+    if(DEFINED TR_MUDNN_INCLUDE_DIR)
+        include_directories(${TR_MUDNN_INCLUDE_DIR})
+        file(GLOB MUDNN_VERSION_DIRS "${TR_MUDNN_INCLUDE_DIR}/*")
+        foreach(MUDNN_VER_DIR ${MUDNN_VERSION_DIRS})
+            if(IS_DIRECTORY ${MUDNN_VER_DIR})
+                include_directories(${MUDNN_VER_DIR})
+            endif()
+        endforeach()
+    endif()
+endif()
+
 message(STATUS "=== Unit Tests Configuration ===")
 message(STATUS "Unit tests will be built in: ${TESTS_OUTPUT_DIR}")
 
@@ -79,13 +110,14 @@ endif()
 # 包含device子目录（Device类测试）
 # ============================================================================
 
-# 注意：device测试当前已开启。如果需要暂时关闭，请注释掉下面第3-4行
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/device AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/device)
-    add_subdirectory(device)
-    message(STATUS "Including device tests")
-else()
-    message(STATUS "Device tests directory not found")
-endif()
+# 注意：device测试已禁用
+# if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/device AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/device)
+#     add_subdirectory(device)
+#     message(STATUS "Including device tests")
+# else()
+#     message(STATUS "Device tests directory not found")
+# endif()
+message(STATUS "Device tests are disabled")
 
 # ============================================================================
 # 输出单元测试信息

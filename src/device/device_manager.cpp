@@ -10,6 +10,16 @@
 #include "renaissance/device/device_manager.h"
 #include "renaissance/device/cpu_device.h"
 
+#ifdef TR_USE_CUDA
+#include "renaissance/device/cuda_device.h"
+#include <cuda_runtime.h>
+#endif
+
+#ifdef TR_USE_MUSA
+#include "renaissance/device/musa_device.h"
+#include <musa_runtime.h>
+#endif
+
 namespace tr {
 
 DeviceManager& DeviceManager::instance() noexcept {
@@ -33,11 +43,29 @@ void DeviceManager::initialize() {
     devices_[0] = std::make_unique<CpuDevice>();
     LOG_INFO << "CPU device created: " << devices_[0]->hardware_name();
 
-    // 2. 设置默认器件为CPU
-    default_device_ = DeviceType::cpu();
-    LOG_INFO << "Default device: CPU";
+    // 2. 检测并创建CUDA器件（索引1~8）
+#ifdef TR_USE_CUDA
+    cuda_count_ = detect_cuda();
+#endif
 
-    // 3. 打印器件信息
+    // 3. 检测并创建MUSA器件（索引9~16）
+#ifdef TR_USE_MUSA
+    musa_count_ = detect_musa();
+#endif
+
+    // 4. 设置默认器件
+    if (cuda_count_ > 0) {
+        default_device_ = DeviceType::cuda(0);
+        LOG_INFO << "Default device: CUDA:0";
+    } else if (musa_count_ > 0) {
+        default_device_ = DeviceType::musa(0);
+        LOG_INFO << "Default device: MUSA:0";
+    } else {
+        default_device_ = DeviceType::cpu();
+        LOG_INFO << "Default device: CPU";
+    }
+
+    // 5. 打印器件信息
     print_devices();
 
     initialized_ = true;
@@ -48,7 +76,8 @@ void DeviceManager::initialize() {
 Device& DeviceManager::get(const DeviceType& type) {
     int idx = device_index(type);
 
-    if (idx < 0 || idx >= 1) {
+    int max_devices = 1 + cuda_count_ + musa_count_;
+    if (idx < 0 || idx >= max_devices) {
         TR_THROW(ValueError, "Invalid device type: ", type.to_string());
     }
 
@@ -100,7 +129,146 @@ void DeviceManager::print_devices() const {
         LOG_INFO << "[0] CPU - " << devices_[0]->hardware_name();
     }
 
+#ifdef TR_USE_CUDA
+    // CUDA
+    if (cuda_count_ > 0) {
+        LOG_INFO << "[CUDA] " << cuda_count_ << " device(s):";
+        for (int i = 0; i < cuda_count_; ++i) {
+            if (devices_[1 + i]) {
+                LOG_INFO << "  [" << i << "] " << devices_[1 + i]->hardware_name();
+            }
+        }
+    }
+#endif
+
+#ifdef TR_USE_MUSA
+    // MUSA
+    if (musa_count_ > 0) {
+        LOG_INFO << "[MUSA] " << musa_count_ << " device(s):";
+        for (int i = 0; i < musa_count_; ++i) {
+            if (devices_[9 + i]) {
+                LOG_INFO << "  [" << i << "] " << devices_[9 + i]->hardware_name();
+            }
+        }
+    }
+#endif
+
     LOG_INFO << "Default: " << default_device_.to_string();
 }
+
+// ===== 设备索引计算 =====
+
+int DeviceManager::device_index(const DeviceType& type) noexcept {
+    if (type.is_cpu()) return 0;
+    if (type.is_cuda()) return 1 + type.index();
+    if (type.is_musa()) return 9 + type.index();
+    return -1;
+}
+
+#ifdef TR_USE_CUDA
+int DeviceManager::detect_cuda() {
+    int count = 0;
+    cudaError_t err = cudaGetDeviceCount(&count);
+
+    if (err != cudaSuccess) {
+        LOG_WARN << "CUDA not available: " << cudaGetErrorString(err);
+        return 0;
+    }
+
+    if (count > 8) {
+        LOG_WARN << "Found " << count << " CUDA devices, limiting to 8";
+        count = 8;
+    }
+
+    LOG_INFO << "Detected " << count << " CUDA device(s)";
+
+    // 创建设备实例
+    for (int i = 0; i < count; ++i) {
+        try {
+            int slot_index = 1 + i;  // CUDA[0]在索引1
+            devices_[slot_index] = std::make_unique<CudaDevice>(i);
+
+            cudaDeviceProp prop;
+            cudaGetDeviceProperties(&prop, i);
+            LOG_INFO << "  CUDA:" << i << " - " << prop.name
+                     << " (" << prop.totalGlobalMem / (1024*1024) << " MB)";
+        } catch (const std::exception& e) {
+            LOG_ERROR << "Failed to initialize CUDA device " << i
+                      << ": " << e.what();
+            return i;  // 返回成功初始化的数量
+        }
+    }
+
+    return count;
+}
+#else
+int DeviceManager::detect_cuda() {
+    LOG_INFO << "CUDA support not compiled (TR_USE_CUDA=OFF)";
+    return 0;
+}
+#endif
+
+#ifdef TR_USE_MUSA
+int DeviceManager::detect_musa() {
+    int count = 0;
+    musaError_t err = musaGetDeviceCount(&count);
+
+    if (err != musaSuccess) {
+        LOG_WARN << "MUSA not available";
+        return 0;
+    }
+
+    if (count > 8) {
+        LOG_WARN << "Found " << count << " MUSA devices, limiting to 8";
+        count = 8;
+    }
+
+    LOG_INFO << "Detected " << count << " MUSA device(s)";
+
+    for (int i = 0; i < count; ++i) {
+        try {
+            int slot_index = 9 + i;  // MUSA[0]在索引9
+            devices_[slot_index] = std::make_unique<MusaDevice>(i);
+
+            musaDeviceProp prop;
+            musaGetDeviceProperties(&prop, i);
+            LOG_INFO << "  MUSA:" << i << " - " << prop.name
+                     << " (" << prop.totalGlobalMem / (1024*1024) << " MB)";
+        } catch (const std::exception& e) {
+            LOG_ERROR << "Failed to initialize MUSA device " << i;
+            return i;
+        }
+    }
+
+    return count;
+}
+#else
+int DeviceManager::detect_musa() {
+    LOG_INFO << "MUSA support not compiled (TR_USE_MUSA=OFF)";
+    return 0;
+}
+#endif
+
+#ifdef TR_USE_CUDA
+CudaDevice& DeviceManager::cuda(int index) {
+    if (index < 0 || index >= cuda_count_) {
+        TR_THROW(ValueError, "CUDA device index out of range: ", index,
+                        " (available: ", cuda_count_, ")");
+    }
+
+    return *static_cast<CudaDevice*>(devices_[1 + index].get());
+}
+#endif
+
+#ifdef TR_USE_MUSA
+MusaDevice& DeviceManager::musa(int index) {
+    if (index < 0 || index >= musa_count_) {
+        TR_THROW(ValueError, "MUSA device index out of range: ", index,
+                        " (available: ", musa_count_, ")");
+    }
+
+    return *static_cast<MusaDevice*>(devices_[9 + index].get());
+}
+#endif
 
 } // namespace tr
