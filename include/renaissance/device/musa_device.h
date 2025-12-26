@@ -15,6 +15,7 @@
 #ifdef TR_USE_MUSA
 
 #include <musa_runtime.h>
+#include <mudnn.h>
 
 namespace tr {
 

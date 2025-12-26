@@ -36,7 +36,7 @@ public:
                 int line = 0,
                 const char* func = "");
 
-    virtual ~TRException() noexcept = default;
+    virtual ~TRException() noexcept;
 
     /**
      * @brief 获取异常描述

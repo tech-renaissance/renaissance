@@ -224,7 +224,9 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
             # 其他场景：可以使用-march=native
             set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -march=native")
         endif()
-        set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} -flto")
+        # 注意：不使用-flto（链接时优化），因为会导致静态库链接问题
+        # LTO要求所有编译单元在链接时可见，对于包含多个静态库的项目会增加复杂度
+        # 如果需要启用LTO，需要在每个静态库target中使用-ffat-lto-objects
     endif()
 endif()
 
@@ -370,6 +372,29 @@ if(TR_USE_CUDA)
     endif()
 else()
     message(STATUS "CUDA support disabled")
+endif()
+
+# MUSA支持 - V3.6.5 MUSA kernel编译支持
+if(TR_USE_MUSA)
+    # 查找MUSA包
+    if(DEFINED TR_MUSA_PATH)
+        set(MUSA_ROOT ${TR_MUSA_PATH})
+    elseif(DEFINED ENV{MUSA_ROOT})
+        set(MUSA_ROOT $ENV{MUSA_ROOT})
+    elseif(EXISTS /usr/local/musa)
+        set(MUSA_ROOT /usr/local/musa)
+    endif()
+
+    if(MUSA_ROOT)
+        # 添加MUSA CMake模块路径
+        list(APPEND CMAKE_MODULE_PATH ${MUSA_ROOT}/cmake)
+        find_package(MUSA REQUIRED)
+
+        message(STATUS "MUSA package found: ${MUSA_ROOT}")
+        message(STATUS "MUSA CMake modules added to CMAKE_MODULE_PATH")
+    else()
+        message(WARNING "TR_USE_MUSA=ON but MUSA_ROOT not found")
+    endif()
 endif()
 
 # OpenMP支持
