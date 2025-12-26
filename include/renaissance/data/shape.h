@@ -226,6 +226,14 @@ public:
      */
     std::string to_string() const;
 
+    /**
+     * @brief 验证形状的合法性
+     * @throws ValueError 如果维度为0或负数
+     *
+     * 检查所有维度是否为正数，标量跳过验证。
+     */
+    void validate() const;
+
     // ==================== 形状推断工具函数 ====================
 
     /**

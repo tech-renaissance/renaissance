@@ -25,6 +25,9 @@ target_compile_definitions(data PRIVATE
     TR_DATA_VERSION_PATCH=0
 )
 
+# 链接base模块（data依赖base的tr_exception等）
+target_link_libraries(data PUBLIC base)
+
 # 设置C++标准
 set_target_properties(data PROPERTIES
     CXX_STANDARD 17

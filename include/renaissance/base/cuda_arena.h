@@ -2,8 +2,8 @@
  * @file cuda_arena.h
  * @brief CUDA显存竞技场（基于cudaMallocAsync）
  * @details 使用cudaMallocAsync实现异步流水线
- * @version 3.8.1
- * @date 2025-12-25
+ * @version 3.6.7
+ * @date 2025-12-27
  * @author 技术觉醒团队
  * @note 依赖项: CUDA Runtime
  * @note 所属系列: base/memory

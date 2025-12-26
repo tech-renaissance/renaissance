@@ -2,8 +2,8 @@
  * @file memory_plan.h
  * @brief 内存规划表（静态图编译期生成）
  * @details 使用整数句柄机制消除热路径字符串查找
- * @version 3.8.1
- * @date 2025-12-25
+ * @version 3.6.7
+ * @date 2025-12-27
  * @author 技术觉醒团队
  * @note 依赖项: 无
  * @note 所属系列: base/memory

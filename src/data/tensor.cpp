@@ -1,8 +1,9 @@
 /**
  * @file tensor.cpp
  * @brief Tensor类实现
- * @version 3.6.2
- * @date 2025-12-25
+ * @version 3.6.7
+ * @date 2025-12-27
+ * @author 技术觉醒团队
  */
 
 #include "renaissance/data/tensor.h"
@@ -51,7 +52,7 @@ Tensor::Tensor() noexcept
 
 Tensor::Tensor(const Shape& shape, DType dtype, DeviceType device_type,
                  std::shared_ptr<Storage> storage,
-                 size_t offset, bool is_view) noexcept
+                 size_t offset, bool is_view)
     : shape_(shape)
     , dtype_(dtype)
     , padding1_{0}
@@ -77,6 +78,9 @@ size_t Tensor::nbytes() const noexcept {
 // ============================================================================
 
 void* Tensor::data_ptr() {
+    if (dtype_ == DType::INVALID) {
+        TR_VALUE_ERROR("Cannot access data of invalid Tensor");
+    }
     if (!is_bound()) {
         TR_DEVICE_ERROR("Tensor not bound to storage");
     }
@@ -84,6 +88,9 @@ void* Tensor::data_ptr() {
 }
 
 const void* Tensor::data_ptr() const {
+    if (dtype_ == DType::INVALID) {
+        TR_VALUE_ERROR("Cannot access data of invalid Tensor");
+    }
     if (!is_bound()) {
         TR_DEVICE_ERROR("Tensor not bound to storage");
     }
@@ -197,6 +204,11 @@ Tensor Tensor::view(const Shape& new_shape) const {
 
     if (new_shape.numel() != numel()) {
         TR_SHAPE_ERROR("view numel mismatch: ", numel(), " -> ", new_shape.numel());
+    }
+
+    // 禁止view-of-view以防止offset计算错误
+    if (is_view_) {
+        TR_NOT_IMPLEMENTED("Viewing a view is not supported in MVP (to avoid offset errors).");
     }
 
     // 创建视图（共享Storage）

@@ -1,9 +1,9 @@
 /**
  * @file musa_device.cpp
  * @brief MUSA器件实现
- * @version 3.6.5
- * @date 2025-12-26
- * @author renAIssance Team
+ * @version 3.6.7
+ * @date 2025-12-27
+ * @author 技术觉醒团队
  * @note 依赖项: MUSA Runtime, muDNN
  * @note 所属系列: device
  */
@@ -20,9 +20,10 @@
 #ifdef TR_USE_MUSA
 
 #include <musa_runtime.h>
-#include <cudnn.h>
+#include <mudnn.h>
 #include <vector>
 #include <cstring>
+#include <memory>
 
 namespace tr {
 
@@ -32,31 +33,58 @@ namespace {
     /**
      * @brief 获取线程局部的muDNN句柄
      * @note 使用thread_local确保每个线程有独立的句柄
+     * @note 使用unique_ptr<Handle>因为Handle的拷贝赋值被删除
      */
-    cudnnHandle_t get_cudnn_handle(int device_id) {
-        static thread_local cudnnHandle_t handles[8] = {nullptr};
+    musa::dnn::Handle& get_mudnn_handle(int device_id) {
+        static thread_local std::unique_ptr<musa::dnn::Handle> handles[8];
         static thread_local bool initialized[8] = {false};
 
         if (!initialized[device_id]) {
             musaSetDevice(device_id);
-            cudnnStatus_t status = cudnnCreate(&handles[device_id]);
-            if (status != CUDNN_STATUS_SUCCESS) {
-                TR_THROW(DeviceError, "Failed to create muDNN handle for device ",
-                         device_id, ": ", cudnnGetErrorString(status));
-            }
+            handles[device_id] = std::make_unique<musa::dnn::Handle>(device_id);
             initialized[device_id] = true;
         }
-        return handles[device_id];
+        return *handles[device_id];
+    }
+
+    /**
+     * @brief 将tr::DType转换为muDNN的Tensor::Type
+     */
+    musa::dnn::Tensor::Type dtype_to_mudnn(DType dtype) {
+        switch (dtype) {
+            case DType::INT8:   return musa::dnn::Tensor::Type::INT8;
+            case DType::INT32:  return musa::dnn::Tensor::Type::INT32;
+            case DType::BF16:   return musa::dnn::Tensor::Type::BFLOAT16;
+            case DType::FP32:   return musa::dnn::Tensor::Type::FLOAT;
+            default:
+                TR_THROW(TypeError, "Unsupported dtype for muDNN: ", dtype_name(dtype));
+        }
+    }
+
+    /**
+     * @brief 创建muDNN Tensor包装器
+     * @param ptr 数据指针
+     * @param count 元素数量
+     * @param dtype 数据类型
+     * @return muDNN Tensor对象
+     */
+    musa::dnn::Tensor wrap_tensor(void* ptr, size_t count, DType dtype) {
+        musa::dnn::Tensor tensor;
+        tensor.SetType(dtype_to_mudnn(dtype));
+        tensor.SetFormat(musa::dnn::Tensor::Format::NCHW);  // 使用NCHW格式
+        tensor.SetNdInfo({1, static_cast<int64_t>(count), 1, 1});  // [1, count, 1, 1]
+        tensor.SetAddr(ptr);
+        return tensor;
     }
 }
 
-// ===== 构造/析构 =====
+// ===== MusaDevice实现 =====
 
 MusaDevice::MusaDevice(int device_id) : device_id_(device_id) {
     // 设置当前设备
     musaError_t err = musaSetDevice(device_id_);
     if (err != musaSuccess) {
-        TR_THROW(DeviceError, "Failed to set CUDA device ", device_id_,
+        TR_THROW(DeviceError, "Failed to set MUSA device ", device_id_,
                  ": ", musaGetErrorString(err));
     }
 
@@ -64,7 +92,7 @@ MusaDevice::MusaDevice(int device_id) : device_id_(device_id) {
     musaDeviceProp prop;
     err = musaGetDeviceProperties(&prop, device_id_);
     if (err != musaSuccess) {
-        TR_THROW(DeviceError, "Failed to get CUDA device properties for device ",
+        TR_THROW(DeviceError, "Failed to get MUSA device properties for device ",
                  device_id_, ": ", musaGetErrorString(err));
     }
 
@@ -88,7 +116,7 @@ std::string MusaDevice::hardware_name() const {
     musaDeviceProp prop;
     musaError_t err = musaGetDeviceProperties(&prop, device_id_);
     if (err != musaSuccess) {
-        return "Unknown CUDA Device";
+        return "Unknown MUSA Device";
     }
     return prop.name;
 }
@@ -117,28 +145,32 @@ std::shared_ptr<void> MusaDevice::allocate(size_t size) {
     musaSetDevice(device_id_);
 
     void* ptr = nullptr;
-    musaError_t err = musaMalloc(&ptr, size, musaStreamDefault);
+    musaError_t err = musaMalloc(&ptr, size);
     if (err != musaSuccess) {
-        TR_THROW(MemoryError, "CUDA allocation failed on device ", device_id_,
-                 ": ", musaGetErrorString(err));
+        TR_THROW(DeviceError, "MUSA malloc failed: ", musaGetErrorString(err));
     }
 
-    // 同步确保分配完成
-    musaStreamSynchronize(musaStreamDefault);
-
-    // 返回shared_ptr，自定义删除器
+    // 使用自定义删除器，自动调用musaFree
     return std::shared_ptr<void>(ptr, [this](void* p) {
-        musaSetDevice(device_id_);
-        musaFree(p, musaStreamDefault);
-        musaStreamSynchronize(musaStreamDefault);
+        if (p) {
+            musaSetDevice(device_id_);
+            musaError_t err = musaFree(p);
+            if (err != musaSuccess) {
+                LOG_WARN << "Failed to free MUSA memory: " << musaGetErrorString(err);
+            }
+        }
     });
 }
 
 void MusaDevice::deallocate(void* ptr) {
-    if (ptr) {
-        musaSetDevice(device_id_);
-        musaFree(ptr, musaStreamDefault);
-        musaStreamSynchronize(musaStreamDefault);
+    if (!ptr) {
+        return;
+    }
+
+    musaSetDevice(device_id_);
+    musaError_t err = musaFree(ptr);
+    if (err != musaSuccess) {
+        TR_THROW(DeviceError, "MUSA free failed: ", musaGetErrorString(err));
     }
 }
 
@@ -150,7 +182,7 @@ void MusaDevice::memcpy_internal(void* dst, const void* src, size_t size) {
     musaSetDevice(device_id_);
     musaError_t err = musaMemcpy(dst, src, size, musaMemcpyDeviceToDevice);
     if (err != musaSuccess) {
-        TR_THROW(DeviceError, "CUDA memcpy failed: ", musaGetErrorString(err));
+        TR_THROW(DeviceError, "MUSA memcpy failed: ", musaGetErrorString(err));
     }
 }
 
@@ -162,7 +194,7 @@ void MusaDevice::memset_internal(void* ptr, int value, size_t size) {
     musaSetDevice(device_id_);
     musaError_t err = musaMemset(ptr, value, size);
     if (err != musaSuccess) {
-        TR_THROW(DeviceError, "CUDA memset failed: ", musaGetErrorString(err));
+        TR_THROW(DeviceError, "MUSA memset failed: ", musaGetErrorString(err));
     }
 }
 
@@ -170,7 +202,7 @@ void MusaDevice::synchronize() {
     musaSetDevice(device_id_);
     musaError_t err = musaDeviceSynchronize();
     if (err != musaSuccess) {
-        TR_THROW(DeviceError, "CUDA synchronize failed: ", musaGetErrorString(err));
+        TR_THROW(DeviceError, "MUSA synchronize failed: ", musaGetErrorString(err));
     }
 }
 
@@ -191,7 +223,7 @@ Tensor MusaDevice::zeros(const Shape& shape, DType dtype) {
     musaSetDevice(device_id_);
     musaError_t err = musaMemset(tensor.data_ptr(), 0, nbytes);
     if (err != musaSuccess) {
-        TR_THROW(DeviceError, "CUDA memset failed in zeros: ", musaGetErrorString(err));
+        TR_THROW(DeviceError, "MUSA memset failed in zeros: ", musaGetErrorString(err));
     }
 
     return tensor;
@@ -214,69 +246,60 @@ Tensor MusaDevice::ones(const Shape& shape, DType dtype) {
     if (dtype == DType::INT8) {
         musaError_t err = musaMemset(tensor.data_ptr(), 1, nbytes);
         if (err != musaSuccess) {
-            TR_THROW(DeviceError, "CUDA memset failed in ones: ", musaGetErrorString(err));
+            TR_THROW(DeviceError, "MUSA memset failed in ones: ", musaGetErrorString(err));
         }
         return tensor;
     }
 
-    // 策略2：INT32 - 使用手写fill_kernel（纯GPU，无Host参与）
+    // 策略2：INT32 - 使用手写fill_kernel
     if (dtype == DType::INT32) {
         musaError_t err = launch_fill_int32_kernel(
             static_cast<int>(count),
             static_cast<int32_t*>(tensor.data_ptr()),
             static_cast<int32_t>(1)
         );
-
         if (err != musaSuccess) {
-            TR_THROW(DeviceError, "CUDA fill kernel failed in ones: ", musaGetErrorString(err));
+            TR_THROW(DeviceError, "MUSA fill kernel failed in ones: ", musaGetErrorString(err));
         }
         return tensor;
     }
 
-    // 策略3：FP32/BF16 - 使用muDNN SetTensor
-    cudnnHandle_t mudnn_handle = get_cudnn_handle(device_id_);
+    // 策略3：BF16 - 使用优化的填充策略
+    if (dtype == DType::BF16) {
+        // 方法1：对于小张量，使用kernel
+        // 方法2：对于大张量，在Host端准备填充数据，然后一次性复制
 
-    cudnnTensorDescriptor_t desc;
-    cudnnStatus_t status = cudnnCreateTensorDescriptor(&desc);
-    if (status != CUDNN_STATUS_SUCCESS) {
-        TR_THROW(DeviceError, "Failed to create tensor descriptor: ", cudnnGetErrorString(status));
+        // BF16的1.0表示：0x3F80 (float 1.0的高16位)
+        const uint16_t bf16_one = 0x3F80;
+
+        // 在Host端创建填充缓冲区
+        std::vector<uint16_t> host_buffer(count, bf16_one);
+
+        // 一次性复制到Device
+        musaError_t err = musaMemcpy(tensor.data_ptr(), host_buffer.data(),
+                                     count * sizeof(uint16_t), musaMemcpyHostToDevice);
+        if (err != musaSuccess) {
+            TR_THROW(DeviceError, "MUSA memcpy failed in ones (BF16): ", musaGetErrorString(err));
+        }
+
+        return tensor;
     }
 
-    int dims[4] = {1, static_cast<int>(count), 1, 1};
-    int strides[4] = {static_cast<int>(count), 1, 1, 1};
+    // 策略4：FP32 - 使用muDNN Fill操作
+    musa::dnn::Handle& mudnn_handle = get_mudnn_handle(device_id_);
 
-    cudnnDataType_t mudnn_dtype;
-    float value_f = 1.0f;
+    musa::dnn::Tensor mudnn_tensor = wrap_tensor(tensor.data_ptr(), count, dtype);
 
-    switch (dtype) {
-        case DType::FP32:
-            mudnn_dtype = CUDNN_DATA_FLOAT;
-            break;
-        case DType::BF16:
-            mudnn_dtype = CUDNN_DATA_BFLOAT16;
-            break;
-        default:
-            cudnnDestroyTensorDescriptor(desc);
-            TR_THROW(TypeError, "Unsupported dtype in ones: ", dtype_name(dtype));
-    }
+    musa::dnn::Fill fill_op;
+    fill_op.SetValue(1.0);
 
-    status = cudnnSetTensorNdDescriptor(desc, mudnn_dtype, 4, dims, strides);
-    if (status != CUDNN_STATUS_SUCCESS) {
-        cudnnDestroyTensorDescriptor(desc);
-        TR_THROW(DeviceError, "Failed to set tensor descriptor: ", cudnnGetErrorString(status));
-    }
-
-    status = cudnnSetTensor(mudnn_handle, desc, tensor.data_ptr(), &value_f);
-    cudnnDestroyTensorDescriptor(desc);
-
-    if (status != CUDNN_STATUS_SUCCESS) {
-        TR_THROW(DeviceError, "muDNN set tensor failed: ", cudnnGetErrorString(status));
+    musa::dnn::Status status = fill_op.Run(mudnn_handle, mudnn_tensor);
+    if (status != musa::dnn::Status::SUCCESS) {
+        TR_THROW(DeviceError, "muDNN Fill operation failed in ones");
     }
 
     return tensor;
 }
-
-// ===== 加法运算（使用muDNN）=====
 
 void MusaDevice::add_into(const Tensor& a, const Tensor& b, Tensor& result) {
     // 1. 验证
@@ -296,9 +319,9 @@ void MusaDevice::add_into(const Tensor& a, const Tensor& b, Tensor& result) {
     // 3. 计算元素数量
     size_t count = static_cast<size_t>(a.shape().numel());
 
-    // 4. 策略分支：INT8/INT32使用手写Kernel，FP32/BF16使用muDNN
-    if (a.dtype() == DType::INT8 || a.dtype() == DType::INT32) {
-        // 策略A：INT8/INT32 - 使用手写add_kernel（纯GPU，无Host参与）
+    // 4. 策略分支：INT8/INT32/BF16使用手写Kernel，FP32使用muDNN Binary操作
+    if (a.dtype() == DType::INT8 || a.dtype() == DType::INT32 || a.dtype() == DType::BF16) {
+        // 策略A：INT8/INT32/BF16 - 使用手写add_kernel（纯GPU，无Host参与）
         musaError_t err;
 
         if (a.dtype() == DType::INT8) {
@@ -308,142 +331,47 @@ void MusaDevice::add_into(const Tensor& a, const Tensor& b, Tensor& result) {
                 static_cast<const int8_t*>(b.data_ptr()),
                 static_cast<int8_t*>(result.data_ptr())
             );
-        } else {  // INT32
+        } else if (a.dtype() == DType::INT32) {
             err = launch_add_int32_kernel(
                 static_cast<int>(count),
                 static_cast<const int32_t*>(a.data_ptr()),
                 static_cast<const int32_t*>(b.data_ptr()),
                 static_cast<int32_t*>(result.data_ptr())
             );
+        } else {  // BF16
+            // BF16使用手写kernel - 已经是最优方案，避免额外内存分配
+            err = launch_add_bf16_kernel(
+                static_cast<int>(count),
+                static_cast<const uint16_t*>(a.data_ptr()),
+                static_cast<const uint16_t*>(b.data_ptr()),
+                static_cast<uint16_t*>(result.data_ptr())
+            );
         }
 
         if (err != musaSuccess) {
-            TR_THROW(DeviceError, "CUDA add kernel failed in add_into: ", musaGetErrorString(err));
+            TR_THROW(DeviceError, "MUSA add kernel failed in add_into: ", musaGetErrorString(err));
         }
         return;
     }
 
-    // 策略B：FP32/BF16 - 使用muDNN OpTensor（原有逻辑）
-    // 5. 获取muDNN句柄
-    cudnnHandle_t mudnn_handle = get_cudnn_handle(device_id_);
+    // 策略B：FP32 - 使用muDNN Binary操作
+    musa::dnn::Handle& mudnn_handle = get_mudnn_handle(device_id_);
 
-    // 6. 创建Tensor描述符
-    cudnnTensorDescriptor_t a_desc, b_desc, r_desc;
-    cudnnStatus_t status;
+    // 创建muDNN Tensor包装器
+    musa::dnn::Tensor mudnn_a = wrap_tensor(const_cast<void*>(a.data_ptr()), count, a.dtype());
+    musa::dnn::Tensor mudnn_b = wrap_tensor(const_cast<void*>(b.data_ptr()), count, b.dtype());
+    musa::dnn::Tensor mudnn_result = wrap_tensor(result.data_ptr(), count, result.dtype());
 
-    status = cudnnCreateTensorDescriptor(&a_desc);
-    if (status != CUDNN_STATUS_SUCCESS) {
-        TR_THROW(DeviceError, "Failed to create tensor descriptor: ", cudnnGetErrorString(status));
-    }
-    status = cudnnCreateTensorDescriptor(&b_desc);
-    if (status != CUDNN_STATUS_SUCCESS) {
-        cudnnDestroyTensorDescriptor(a_desc);
-        TR_THROW(DeviceError, "Failed to create tensor descriptor: ", cudnnGetErrorString(status));
-    }
-    status = cudnnCreateTensorDescriptor(&r_desc);
-    if (status != CUDNN_STATUS_SUCCESS) {
-        cudnnDestroyTensorDescriptor(a_desc);
-        cudnnDestroyTensorDescriptor(b_desc);
-        TR_THROW(DeviceError, "Failed to create tensor descriptor: ", cudnnGetErrorString(status));
+    // 创建Binary操作
+    musa::dnn::Binary binary_op;
+    binary_op.SetMode(musa::dnn::Binary::Mode::ADD);
+
+    musa::dnn::Status status = binary_op.Run(mudnn_handle, mudnn_result, mudnn_a, mudnn_b);
+    if (status != musa::dnn::Status::SUCCESS) {
+        TR_THROW(DeviceError, "muDNN Binary operation failed in add_into");
     }
 
-    // 7. 设置Tensor描述符（使用NCHW格式，将1D张量看作[1, count, 1, 1]）
-    cudnnDataType_t mudnn_dtype;
-    switch (a.dtype()) {
-        case DType::FP32: mudnn_dtype = CUDNN_DATA_FLOAT; break;
-        case DType::BF16: mudnn_dtype = CUDNN_DATA_BFLOAT16; break;
-        default:
-            cudnnDestroyTensorDescriptor(a_desc);
-            cudnnDestroyTensorDescriptor(b_desc);
-            cudnnDestroyTensorDescriptor(r_desc);
-            TR_THROW(TypeError, "Unsupported dtype in add_into: ", dtype_name(a.dtype()));
-    }
-
-    // 设置描述符：[batch, channels, height, width] = [1, count, 1, 1]
-    int dims[4] = {1, static_cast<int>(count), 1, 1};
-    int strides[4] = {static_cast<int>(count), 1, 1, 1};
-
-    status = cudnnSetTensorNdDescriptor(a_desc, mudnn_dtype, 4, dims, strides);
-    if (status != CUDNN_STATUS_SUCCESS) {
-        cudnnDestroyTensorDescriptor(a_desc);
-        cudnnDestroyTensorDescriptor(b_desc);
-        cudnnDestroyTensorDescriptor(r_desc);
-        TR_THROW(DeviceError, "Failed to set tensor descriptor: ", cudnnGetErrorString(status));
-    }
-
-    status = cudnnSetTensorNdDescriptor(b_desc, mudnn_dtype, 4, dims, strides);
-    if (status != CUDNN_STATUS_SUCCESS) {
-        cudnnDestroyTensorDescriptor(a_desc);
-        cudnnDestroyTensorDescriptor(b_desc);
-        cudnnDestroyTensorDescriptor(r_desc);
-        TR_THROW(DeviceError, "Failed to set tensor descriptor: ", cudnnGetErrorString(status));
-    }
-
-    status = cudnnSetTensorNdDescriptor(r_desc, mudnn_dtype, 4, dims, strides);
-    if (status != CUDNN_STATUS_SUCCESS) {
-        cudnnDestroyTensorDescriptor(a_desc);
-        cudnnDestroyTensorDescriptor(b_desc);
-        cudnnDestroyTensorDescriptor(r_desc);
-        TR_THROW(DeviceError, "Failed to set tensor descriptor: ", cudnnGetErrorString(status));
-    }
-
-    // 8. 创建OpTensor描述符
-    cudnnOpTensorDescriptor_t op_desc;
-    status = cudnnCreateOpTensorDescriptor(&op_desc);
-    if (status != CUDNN_STATUS_SUCCESS) {
-        cudnnDestroyTensorDescriptor(a_desc);
-        cudnnDestroyTensorDescriptor(b_desc);
-        cudnnDestroyTensorDescriptor(r_desc);
-        TR_THROW(DeviceError, "Failed to create op tensor descriptor: ", cudnnGetErrorString(status));
-    }
-
-    // 设置运算类型：ADD
-    // 计算精度：根据INFO2.md和INFO5.md
-    // - FP32: 使用FLOAT计算
-    // - BF16: 使用FLOAT计算（内部计算用FP32以防溢出，INFO5.md推荐）
-    cudnnDataType_t compute_type = CUDNN_DATA_FLOAT;  // FP32/BF16用FLOAT计算
-
-    // 对于浮点类型，使用PROPAGATE_NAN
-    mudnnNanPropagation_t nan_propagation = CUDNN_PROPAGATE_NAN;
-
-    status = cudnnSetOpTensorDescriptor(op_desc, CUDNN_OP_TENSOR_ADD,
-                                        compute_type, nan_propagation);
-    if (status != CUDNN_STATUS_SUCCESS) {
-        cudnnDestroyOpTensorDescriptor(op_desc);
-        cudnnDestroyTensorDescriptor(a_desc);
-        cudnnDestroyTensorDescriptor(b_desc);
-        cudnnDestroyTensorDescriptor(r_desc);
-        TR_THROW(DeviceError, "Failed to set op tensor descriptor: ", cudnnGetErrorString(status));
-    }
-
-    // 9. 准备缩放因子（浮点类型）
-    // 公式：result = alpha1 * a + alpha2 * b + beta * result
-    std::vector<float> alpha_f(2, 1.0f);  // [alpha1, alpha2]
-    std::vector<float> beta_f(1, 0.0f);   // [beta]
-
-    const void* alpha1_ptr = &alpha_f[0];
-    const void* alpha2_ptr = &alpha_f[1];
-    const void* beta_ptr = &beta_f[0];
-
-    // 10. 调用muDNN的OpTensor执行加法
-    status = mudnnOpTensor(mudnn_handle,
-                          op_desc,
-                          alpha1_ptr, a_desc, a.data_ptr(),
-                          alpha2_ptr, b_desc, b.data_ptr(),
-                          beta_ptr, r_desc, result.data_ptr());
-
-    // 11. 清理描述符
-    cudnnDestroyOpTensorDescriptor(op_desc);
-    cudnnDestroyTensorDescriptor(a_desc);
-    cudnnDestroyTensorDescriptor(b_desc);
-    cudnnDestroyTensorDescriptor(r_desc);
-
-    // 12. 检查错误
-    if (status != CUDNN_STATUS_SUCCESS) {
-        TR_THROW(DeviceError, "muDNN op tensor failed: ", cudnnGetErrorString(status));
-    }
-
-    // 13. 同步确保计算完成
+    // 同步确保计算完成
     synchronize();
 }
 

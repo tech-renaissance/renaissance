@@ -2,8 +2,8 @@
  * @file memory_arena.h
  * @brief 内存竞技场抽象基类
  * @details 提供单块连续内存管理，支持CPU/CUDA不同后端
- * @version 3.8.1
- * @date 2025-12-25
+ * @version 3.6.7
+ * @date 2025-12-27
  * @author 技术觉醒团队
  * @note 依赖项: 无（基类）
  * @note 所属系列: base/memory

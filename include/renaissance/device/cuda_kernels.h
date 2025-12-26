@@ -1,16 +1,15 @@
 /**
  * @file cuda_kernels.h
  * @brief CUDA kernels for integer operations
- * @version 3.6.5
- * @date 2025-12-26
- * @author renAIssance Team
+ * @version 3.6.7
+ * @date 2025-12-27
+ * @author 技术觉醒团队
  * @note Dependencies: CUDA Runtime
  * @note Series: device
  * @note Reference: INFO7.md - Using wrapper functions to bridge .cpp and .cu
  */
 
-#ifndef TR_CUDA_KERNELS_H
-#define TR_CUDA_KERNELS_H
+#pragma once
 
 #include <cuda_runtime.h>
 
@@ -41,8 +40,6 @@ cudaError_t launch_add_int32_kernel(int n, const int32_t* a, const int32_t* b, i
 cudaError_t launch_add_int8_kernel(int n, const int8_t* a, const int8_t* b, int8_t* c);
 
 } // namespace tr
-
-#endif // TR_CUDA_KERNELS_H
 
 
 

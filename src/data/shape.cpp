@@ -1,4 +1,12 @@
-﻿#include "renaissance/base/logger.h"
+/**
+ * @file shape.cpp
+ * @brief Shape实现
+ * @version 3.6.7
+ * @date 2025-12-27
+ * @author 技术觉醒团队
+ */
+
+#include "renaissance/base/logger.h"
 #include "renaissance/base/tr_exception.h"
 
 #include "renaissance/data/shape.h"
@@ -199,6 +207,17 @@ Shape Shape::reshape_shape(const Shape& input, const std::array<int32_t, 4>& new
         result.dims_ = right_aligned;
         result.ndim_ = new_ndim;
         return result;
+    }
+}
+
+void Shape::validate() const {
+    if (ndim_ == 0) return;  // 标量跳过验证
+
+    for (int32_t i = 4 - ndim_; i < 4; ++i) {
+        if (dims_[i] <= 0) {
+            TR_THROW(ValueError, "Invalid shape dimension at index ", i - (4 - ndim_),
+                     ": ", dims_[i], ". Dimensions must be positive.");
+        }
     }
 }
 

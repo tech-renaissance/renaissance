@@ -56,4 +56,6 @@ void TRException::auto_log() const {
                            file_, line_, message_);
 }
 
+TRException::~TRException() noexcept = default;
+
 } // namespace tr

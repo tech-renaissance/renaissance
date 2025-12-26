@@ -2,19 +2,19 @@
 # Renaissance统一库 - 包含base、data组件（device已禁用）
 # ============================================================================
 
-# 添加子目录：创建base、data库
+# 添加子目录：创建base、data、device库
 add_subdirectory(base)
 add_subdirectory(data)
-# device模块已禁用
-# add_subdirectory(device)
+add_subdirectory(device)
 
 # 创建renaissance统一静态库（INTERFACE库，仅用于聚合）
 add_library(renaissance INTERFACE)
 
-# 链接base、data库（device已禁用）
+# 链接base、data、device库
 target_link_libraries(renaissance INTERFACE
     base
     data
+    device
 )
 
 # 添加头文件路径
@@ -71,8 +71,15 @@ if(TR_USE_CUDA)
         target_include_directories(renaissance INTERFACE ${TR_CUDA_PATH}/include)
         message(STATUS "Renaissance library: Using CUDA headers from ${TR_CUDA_PATH}/include")
     endif()
+    # 链接CUDA Runtime（用于cuda_arena）
     target_link_libraries(renaissance INTERFACE ${CUDA_cudart_LIBRARY})
     message(STATUS "Renaissance library: CUDA Runtime linked (for cuda_arena)")
+
+    # 链接cuDNN（用于device模块的CudaDevice）
+    if(CUDNN_LIBRARY)
+        target_link_libraries(renaissance INTERFACE ${CUDNN_LIBRARY})
+        message(STATUS "Renaissance library: cuDNN linked (for cuda_device)")
+    endif()
 endif()
 
 # 添加MUSA支持（base模块的musa_arena需要）
@@ -81,6 +88,7 @@ if(TR_USE_MUSA)
         target_include_directories(renaissance INTERFACE ${TR_MUSA_PATH}/include)
         message(STATUS "Renaissance library: Using MUSA headers from ${TR_MUSA_PATH}/include")
     endif()
+
     # 参照旧版本的方式链接MUSA Runtime
     # 注意：MUSA库在lib目录，不是lib64
     if(WIN32)
@@ -104,7 +112,14 @@ if(TR_USE_MUSA)
         # 链接MUSA运行时库：musa 和 musart
         target_link_libraries(renaissance INTERFACE musa musart)
         message(STATUS "Renaissance library: MUSA Runtime linked (for musa_arena)")
+
+        # 链接muDNN库（用于MusaDevice）
+        if(DEFINED TR_MUDNN_LIBRARY_DIR)
+            target_link_directories(renaissance INTERFACE ${TR_MUDNN_LIBRARY_DIR})
+            target_link_libraries(renaissance INTERFACE mudnn)
+            message(STATUS "Renaissance library: muDNN linked (for musa_device)")
+        endif()
     endif()
 endif()
 
-message(STATUS "Renaissance unified library created successfully (device module disabled, CUDA/MUSA for base only)")
+message(STATUS "Renaissance unified library created successfully (base + data + device modules)")

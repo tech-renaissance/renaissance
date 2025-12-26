@@ -1,8 +1,8 @@
 /**
  * @file cpu_arena.cpp
  * @brief CpuArena实现（mimalloc + 256字节对齐）
- * @version 3.8.1
- * @date 2025-12-25
+ * @version 3.6.7
+ * @date 2025-12-27
  */
 
 #include "renaissance/base/cpu_arena.h"

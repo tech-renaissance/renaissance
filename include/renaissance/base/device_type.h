@@ -1,4 +1,12 @@
-﻿#pragma once
+/**
+ * @file device_type.h
+ * @brief 设备类型枚举
+ * @version 3.6.7
+ * @date 2025-12-27
+ * @author 技术觉醒团队
+ */
+
+#pragma once
 
 #include <cstdint>
 #include <string>

@@ -2,15 +2,14 @@
  * @file renaissance.h
  * @brief renAIssance深度学习框架主头文件
  * @details 统一对外接口，包含所有必要的头文件，用户只需包含此文件即可使用框架
- * @version 3.8.1
- * @date 2025-12-25
+ * @version 3.6.7
+ * @date 2025-12-27
  * @author 技术觉醒团队
  * @note 依赖项:
  * @note 所属系列: root
  */
 
-#ifndef RENAISSANCE_H
-#define RENAISSANCE_H
+#pragma once
 
 // 标准库包含
 #include <iostream>
@@ -51,5 +50,3 @@
 namespace tr {
 } // namespace tr
 
-
-#endif // RENAISSANCE_H

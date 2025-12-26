@@ -1,8 +1,8 @@
 /**
  * @file memory_arena.cpp
  * @brief MemoryArena基类实现
- * @version 3.8.1
- * @date 2025-12-25
+ * @version 3.6.7
+ * @date 2025-12-27
  */
 
 #include "renaissance/base/memory_arena.h"

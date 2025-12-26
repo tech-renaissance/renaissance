@@ -216,6 +216,7 @@ Tensor CudaDevice::ones(const Shape& shape, DType dtype) {
         if (err != cudaSuccess) {
             TR_THROW(DeviceError, "CUDA memset failed in ones: ", cudaGetErrorString(err));
         }
+        synchronize();  // 确保内核执行完成（未来可优化为按需同步）
         return tensor;
     }
 
@@ -230,6 +231,7 @@ Tensor CudaDevice::ones(const Shape& shape, DType dtype) {
         if (err != cudaSuccess) {
             TR_THROW(DeviceError, "CUDA fill kernel failed in ones: ", cudaGetErrorString(err));
         }
+        synchronize();  // 确保内核执行完成（未来可优化为按需同步）
         return tensor;
     }
 
@@ -273,6 +275,7 @@ Tensor CudaDevice::ones(const Shape& shape, DType dtype) {
         TR_THROW(DeviceError, "cuDNN set tensor failed: ", cudnnGetErrorString(status));
     }
 
+    synchronize();  // 确保内核执行完成（未来可优化为按需同步）
     return tensor;
 }
 

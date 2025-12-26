@@ -1,9 +1,9 @@
 /**
  * @file cuda_kernels.cu
  * @brief CUDA kernels for integer operations
- * @version 3.6.5
- * @date 2025-12-26
- * @author renAIssance Team
+ * @version 3.6.7
+ * @date 2025-12-27
+ * @author 技术觉醒团队
  * @note Reference: INFO7.md - Using wrapper functions to bridge .cpp and .cu
  */
 
@@ -26,6 +26,16 @@ __global__ void add_kernel(int n, const T* a, const T* b, T* c) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
     if (idx < n) {
         c[idx] = a[idx] + b[idx];
+    }
+}
+
+// INT8专用kernel：防止溢出（使用int16进行中间计算并钳制）
+__global__ void add_int8_clamped_kernel(int n, const int8_t* a, const int8_t* b, int8_t* c) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < n) {
+        int16_t val = static_cast<int16_t>(a[idx]) + static_cast<int16_t>(b[idx]);
+        int16_t clamped = max(static_cast<int16_t>(-128), min(val, static_cast<int16_t>(127)));
+        c[idx] = static_cast<int8_t>(clamped);
     }
 }
 
@@ -59,7 +69,7 @@ cudaError_t launch_add_int8_kernel(int n, const int8_t* a, const int8_t* b, int8
     const int block_size = 256;
     const int grid_size = (n + block_size - 1) / block_size;
 
-    add_kernel<int8_t><<<grid_size, block_size, 0, cudaStreamDefault>>>(n, a, b, c);
+    add_int8_clamped_kernel<<<grid_size, block_size, 0, cudaStreamDefault>>>(n, a, b, c);
     return cudaGetLastError();
 }
 

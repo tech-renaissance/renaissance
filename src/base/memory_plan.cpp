@@ -1,8 +1,8 @@
 /**
  * @file memory_plan.cpp
  * @brief MemoryPlan实现（整数句柄机制 + 256字节对齐）
- * @version 3.8.1
- * @date 2025-12-25
+ * @version 3.6.7
+ * @date 2025-12-27
  */
 
 #include "renaissance/base/memory_plan.h"
@@ -29,7 +29,7 @@ int MemoryPlan::register_tensor(const std::string& tensor_id, size_t size, bool 
     // 【临时内存的"复用"语义】
     //
     // 有评审专家误解了当前实现，认为：
-    //   "所有临时张量都从同一个偏移开始分配，产生内存重叠" ❌
+    //   "所有临时张量都从同一个偏移开始分配，产生内存重叠" [WRONG]
     //
     // 实际情况：
     //   1. 当前实现是"简化版"，每个临时张量有独立偏移（顺序累加）
@@ -135,8 +135,9 @@ void MemoryPlan::reserve_scratch_buffer(size_t size) {
     scratch_offset_ = aligned_total;
     scratch_size_ = size;
 
-    // 最终总显存/内存需求
-    total_size_ = scratch_offset_ + scratch_size_;
+    // 最终总显存/内存需求（需要再次对齐）
+    size_t final_end = scratch_offset_ + scratch_size_;
+    total_size_ = (final_end + MEMORY_ALIGNMENT - 1) & ~(MEMORY_ALIGNMENT - 1);
 
     TR_LOG_INFO("MemoryPlan") << "Reserved ScratchBuffer: "
                               << scratch_size_ / (1024.0 * 1024.0) << " MB"

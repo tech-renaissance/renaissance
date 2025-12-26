@@ -366,7 +366,7 @@ protected:
      */
     Tensor(const Shape& shape, DType dtype, DeviceType device_type,
            std::shared_ptr<Storage> storage,
-           size_t offset, bool is_view) noexcept;
+           size_t offset, bool is_view);
 
 private:
     Shape shape_;                      ///< 形状（20字节）

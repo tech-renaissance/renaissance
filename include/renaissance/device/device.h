@@ -2,8 +2,8 @@
  * @file device.h
  * @brief 器件抽象基类
  * @details 定义所有器件的统一接口，所有运算方法默认抛出NotImplementedError
- * @version 3.6.4
- * @date 2025-12-26
+ * @version 3.6.7
+ * @date 2025-12-27
  * @author 技术觉醒团队
  * @note 所属系列: device
  */
@@ -187,6 +187,16 @@ protected:
      * @brief 辅助方法：检查张量在当前设备上
      */
     void check_on_device(const Tensor& t) const;
+
+    /**
+     * @brief 辅助方法：批量检查张量兼容性（设备、形状、数据类型）
+     * @param tensors 张量列表
+     * @param require_same_dtype 是否要求相同数据类型
+     */
+    void check_tensors_compatible(
+        std::initializer_list<const Tensor*> tensors,
+        bool require_same_dtype = false
+    ) const;
 
     /**
      * @brief 抛出未实现错误

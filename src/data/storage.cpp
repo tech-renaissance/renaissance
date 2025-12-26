@@ -1,8 +1,9 @@
 /**
  * @file storage.cpp
  * @brief Storage类实现
- * @version 3.6.2
- * @date 2025-12-25
+ * @version 3.6.7
+ * @date 2025-12-27
+ * @author 技术觉醒团队
  */
 
 #include "renaissance/data/storage.h"

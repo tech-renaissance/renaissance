@@ -1,8 +1,8 @@
 /**
  * @file cuda_arena.cpp
  * @brief CudaArena实现（cudaMallocAsync + 异步流水线）
- * @version 3.8.1
- * @date 2025-12-25
+ * @version 3.6.7
+ * @date 2025-12-27
  */
 
 #ifdef TR_USE_CUDA
@@ -140,8 +140,8 @@ void CudaArena::deallocate_impl(void* ptr) {
     // 3. 内存安全保证：
     //    有人担心"异步释放会导致Use-After-Free"，这是对CUDA编程模型的误解：
     //
-    //    错误理解：调用cudaFreeAsync后，内存立即被释放 ❌
-    //    正确理解：调用cudaFreeAsync后，释放指令被推入队列，GPU会在合适时机执行 ✅
+    //    错误理解：调用cudaFreeAsync后，内存立即被释放 [WRONG]
+    //    正确理解：调用cudaFreeAsync后，释放指令被推入队列，GPU会在合适时机执行 [OK]
     //
     //    析构函数的正确流程：
     //    Step 1: deallocate_impl() → cudaFreeAsync(ptr)  [提交释放指令]

@@ -1,8 +1,8 @@
 /**
  * @file device.cpp
  * @brief 器件基类实现
- * @version 3.6.4
- * @date 2025-12-26
+ * @version 3.6.7
+ * @date 2025-12-27
  * @author 技术觉醒团队
  * @note 所属系列: device
  */
@@ -47,6 +47,13 @@ std::shared_ptr<Storage> Device::create_storage(size_t nbytes, int handle) {
         size_t offset = memory_plan_->get_offset(handle);
         ptr = arena_->ptr_at(offset);
 
+        // 验证对齐
+        size_t alignment = arena_->alignment();
+        if (reinterpret_cast<uintptr_t>(ptr) % alignment != 0) {
+            TR_THROW(MemoryError, "Arena returned unaligned pointer: ptr=", ptr,
+                     ", alignment=", alignment, ", offset=", offset);
+        }
+
         // holder为nullptr → Storage借用模式，不负责释放
         LOG_DEBUG << "Allocated from Arena: " << nbytes << " bytes, handle=" << handle;
     }
@@ -85,6 +92,28 @@ void Device::check_on_device(const Tensor& t) const {
     if (t.device_type() != type()) {
         TR_THROW(ValueError, "Tensor on ", t.device_type().to_string(),
                         " but operation on ", type().to_string());
+    }
+}
+
+void Device::check_tensors_compatible(
+    std::initializer_list<const Tensor*> tensors,
+    bool require_same_dtype
+) const {
+    if (tensors.size() == 0) return;
+
+    auto it = tensors.begin();
+    const Tensor* first = *it;
+    check_on_device(*first);
+    ++it;
+
+    for (; it != tensors.end(); ++it) {
+        const Tensor* t = *it;
+        check_on_device(*t);
+        check_same_shape(*first, *t);
+        if (require_same_dtype && t->dtype() != first->dtype()) {
+            TR_THROW(TypeError, "Dtype mismatch: expected ", dtype_name(first->dtype()),
+                     ", got ", dtype_name(t->dtype()));
+        }
     }
 }
 
