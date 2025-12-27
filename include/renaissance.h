@@ -57,6 +57,11 @@
 #include "renaissance/device/musa_device.h"
 #endif
 
+#include "renaissance/utils/profiler.h"
+
+#ifdef TR_USE_PYTHON_SESSION
+#include "renaissance/utils/python_session.h"
+#endif
 
 namespace tr {
 } // namespace tr

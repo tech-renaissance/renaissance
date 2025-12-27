@@ -194,6 +194,25 @@ if(TR_USE_SIMD)
     message(STATUS "Global macro TR_USE_SIMD defined: 1")
 endif()
 
+# ============================================================================
+# PythonSession支持（仅在特定场景下启用）
+# ============================================================================
+# 同时设置CMake变量和编译定义
+set(TR_USE_PYTHON_SESSION OFF)
+if(TR_SCENE_CPU_CLOUD OR TR_SCENE_GPU_CLOUD OR TR_SCENE_PC_CUDA)
+    set(TR_USE_PYTHON_SESSION ON)
+    add_compile_definitions(TR_USE_PYTHON_SESSION=1)
+    message(STATUS "Global macro TR_USE_PYTHON_SESSION defined: 1")
+
+    # 定义Python解释器路径
+    if(DEFINED Python3_EXECUTABLE)
+        add_compile_definitions(TR_PYTHON_EXECUTABLE="${Python3_EXECUTABLE}")
+        message(STATUS "Global macro TR_PYTHON_EXECUTABLE defined: ${Python3_EXECUTABLE}")
+    else()
+        message(WARNING "Python3_EXECUTABLE not defined, PythonSession may not work correctly")
+    endif()
+endif()
+
 if(DEFINED TR_NUM_GPUS)
     add_compile_definitions(TR_NUM_GPUS=${TR_NUM_GPUS})
     message(STATUS "Global macro TR_NUM_GPUS defined: ${TR_NUM_GPUS}")

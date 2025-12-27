@@ -354,6 +354,16 @@ public:
      */
     bool operator!=(const Tensor& other) const noexcept { return !(*this == other); }
 
+    /**
+     * @brief 检查两个Tensor形状是否相同
+     * @param a 第一个Tensor
+     * @param b 第二个Tensor
+     * @return true形状相同，false不同
+     */
+    static bool same_shape(const Tensor& a, const Tensor& b) {
+        return a.shape() == b.shape();
+    }
+
 protected:
     /**
      * @brief 完整构造（仅Device可调用）
@@ -396,4 +406,3 @@ private:
 static_assert(sizeof(Tensor) <= 88, "Tensor should be <= 88 bytes");
 
 } // namespace tr
-

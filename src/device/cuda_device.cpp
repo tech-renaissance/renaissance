@@ -846,6 +846,158 @@ void CudaDevice::randbool_inplace(Tensor& tensor_a, float rate_of_zeros, DType d
     }
 }
 
+// ===== 张量比较 =====
+
+bool CudaDevice::equal(const Tensor& a, const Tensor& b) {
+    // 检查设备
+    check_on_device(a);
+    check_on_device(b);
+
+    // 检查形状
+    check_same_shape(a, b);
+
+    // 检查dtype
+    if (a.dtype() != b.dtype()) {
+        TR_THROW(TypeError, "Cannot compare tensors with different dtypes: ",
+                 dtype_name(a.dtype()), " vs ", dtype_name(b.dtype()));
+    }
+
+    // 仅支持INT8和INT32
+    if (a.dtype() == DType::FP32 || a.dtype() == DType::BF16) {
+        TR_THROW(TypeError, "equal() only supports INT8 and INT32. ",
+                 "For FP32/BF16 comparison, use is_close() instead.");
+    }
+
+    // 处理空张量
+    int64_t numel = a.numel();
+    if (numel == 0) {
+        return b.numel() == 0;
+    }
+
+    // 创建一个mismatch标志（在GPU上）
+    Tensor mismatch_gpu = this->zeros(Shape(1), DType::INT32);
+    int* mismatch_flag = static_cast<int*>(mismatch_gpu.data_ptr());
+
+    // 初始化为0（表示相等）
+    cudaError_t err = cudaMemset(mismatch_flag, 0, sizeof(int));
+    if (err != cudaSuccess) {
+        TR_THROW(DeviceError, "CUDA memset failed: ", cudaGetErrorString(err));
+    }
+
+    // 调用相应的kernel
+    size_t count = static_cast<size_t>(numel);
+
+    if (a.dtype() == DType::INT32) {
+        const int32_t* a_data = static_cast<const int32_t*>(a.data_ptr());
+        const int32_t* b_data = static_cast<const int32_t*>(b.data_ptr());
+        err = launch_equal_int32_kernel(static_cast<int>(count), a_data, b_data, mismatch_flag);
+    }
+    else if (a.dtype() == DType::INT8) {
+        const int8_t* a_data = static_cast<const int8_t*>(a.data_ptr());
+        const int8_t* b_data = static_cast<const int8_t*>(b.data_ptr());
+        err = launch_equal_int8_kernel(static_cast<int>(count), a_data, b_data, mismatch_flag);
+    }
+    else {
+        TR_THROW(TypeError, "Unsupported dtype in equal: ", dtype_name(a.dtype()));
+    }
+
+    if (err != cudaSuccess) {
+        TR_THROW(DeviceError, "CUDA equal kernel failed: ", cudaGetErrorString(err));
+    }
+
+    // 同步并读取结果
+    this->synchronize();
+
+    int flag;
+    err = cudaMemcpy(&flag, mismatch_flag, sizeof(int), cudaMemcpyDeviceToHost);
+    if (err != cudaSuccess) {
+        TR_THROW(DeviceError, "CUDA memcpy failed: ", cudaGetErrorString(err));
+    }
+
+    // 如果flag仍为0，说明所有元素都相等
+    return flag == 0;
+}
+
+bool CudaDevice::is_close(const Tensor& a, const Tensor& b, float eps) {
+    // 检查设备
+    check_on_device(a);
+    check_on_device(b);
+
+    // 检查形状
+    check_same_shape(a, b);
+
+    // 检查dtype
+    if (a.dtype() != b.dtype()) {
+        TR_THROW(TypeError, "Cannot compare tensors with different dtypes: ",
+                 dtype_name(a.dtype()), " vs ", dtype_name(b.dtype()));
+    }
+
+    // 仅支持FP32和BF16
+    if (a.dtype() == DType::INT8 || a.dtype() == DType::INT32) {
+        TR_THROW(TypeError, "is_close() only supports FP32 and BF16. ",
+                 "For INT8/INT32 comparison, use equal() instead.");
+    }
+
+    // 处理空张量
+    int64_t numel = a.numel();
+    if (numel == 0) {
+        return b.numel() == 0;
+    }
+
+    // 确定容差
+    float tolerance;
+    if (eps < 0.0f) {
+        // 使用默认容差
+        tolerance = (a.dtype() == DType::FP32) ? 1e-6f : 1e-3f;
+    } else {
+        tolerance = eps;
+    }
+
+    // 创建一个mismatch标志（在GPU上）
+    Tensor mismatch_gpu = this->zeros(Shape(1), DType::INT32);
+    int* mismatch_flag = static_cast<int*>(mismatch_gpu.data_ptr());
+
+    // 初始化为0（表示相等）
+    cudaError_t err = cudaMemset(mismatch_flag, 0, sizeof(int));
+    if (err != cudaSuccess) {
+        TR_THROW(DeviceError, "CUDA memset failed: ", cudaGetErrorString(err));
+    }
+
+    // 调用相应的kernel
+    size_t count = static_cast<size_t>(numel);
+
+    if (a.dtype() == DType::FP32) {
+        const float* a_data = static_cast<const float*>(a.data_ptr());
+        const float* b_data = static_cast<const float*>(b.data_ptr());
+        err = launch_is_close_float_kernel(static_cast<int>(count), a_data, b_data, tolerance, mismatch_flag);
+    }
+    else if (a.dtype() == DType::BF16) {
+        // BF16存储为uint16，需要转换为FP32比较
+        const uint16_t* a_data = static_cast<const uint16_t*>(a.data_ptr());
+        const uint16_t* b_data = static_cast<const uint16_t*>(b.data_ptr());
+        err = launch_is_close_bf16_kernel(static_cast<int>(count), a_data, b_data, tolerance, mismatch_flag);
+    }
+    else {
+        TR_THROW(TypeError, "Unsupported dtype in is_close: ", dtype_name(a.dtype()));
+    }
+
+    if (err != cudaSuccess) {
+        TR_THROW(DeviceError, "CUDA is_close kernel failed: ", cudaGetErrorString(err));
+    }
+
+    // 同步并读取结果
+    this->synchronize();
+
+    int flag;
+    err = cudaMemcpy(&flag, mismatch_flag, sizeof(int), cudaMemcpyDeviceToHost);
+    if (err != cudaSuccess) {
+        TR_THROW(DeviceError, "CUDA memcpy failed: ", cudaGetErrorString(err));
+    }
+
+    // 如果flag仍为0，说明所有元素都在容差范围内
+    return flag == 0;
+}
+
 } // namespace tr
 
 #endif // TR_USE_CUDA

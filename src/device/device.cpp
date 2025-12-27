@@ -134,7 +134,7 @@ void Device::randbool_inplace([[maybe_unused]] Tensor& tensor_a,
 // ===== 辅助验证方法 =====
 
 void Device::check_same_shape(const Tensor& a, const Tensor& b) const {
-    if (a.shape() != b.shape()) {
+    if (!Tensor::same_shape(a, b)) {
         TR_THROW(ValueError, "Shape mismatch: ", a.shape().to_string(),
                        " vs ", b.shape().to_string());
     }
@@ -175,6 +175,16 @@ void Device::print_status() const {
     LOG_INFO << "Available: " << (is_available() ? "Yes" : "No");
     LOG_INFO << "Memory: " << memory_available() / (1024.0 * 1024.0) << " MB";
     LOG_INFO << "Arena: " << (has_arena() ? "Enabled" : "Disabled");
+}
+
+// ===== 张量比较 =====
+
+bool Device::equal(const Tensor& a, const Tensor& b) {
+    throw_not_impl("equal");
+}
+
+bool Device::is_close(const Tensor& a, const Tensor& b, float eps) {
+    throw_not_impl("is_close");
 }
 
 } // namespace tr

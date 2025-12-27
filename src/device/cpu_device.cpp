@@ -374,4 +374,128 @@ void CpuDevice::add_into(const Tensor& a, const Tensor& b, Tensor& result) {
     }
 }
 
+// ===== 张量比较 =====
+
+bool CpuDevice::equal(const Tensor& a, const Tensor& b) {
+    // 检查设备
+    check_on_device(a);
+    check_on_device(b);
+
+    // 检查形状
+    check_same_shape(a, b);
+
+    // 检查dtype
+    if (a.dtype() != b.dtype()) {
+        TR_THROW(TypeError, "Cannot compare tensors with different dtypes: ",
+                 dtype_name(a.dtype()), " vs ", dtype_name(b.dtype()));
+    }
+
+    // 仅支持INT8和INT32
+    if (a.dtype() == DType::FP32 || a.dtype() == DType::BF16) {
+        TR_THROW(TypeError, "equal() only supports INT8 and INT32. ",
+                 "For FP32/BF16 comparison, use is_close() instead.");
+    }
+
+    // 处理空张量
+    int64_t numel = a.numel();
+    if (numel == 0) {
+        return b.numel() == 0;
+    }
+
+    // 逐元素比较
+    size_t count = static_cast<size_t>(numel);
+
+    if (a.dtype() == DType::INT32) {
+        const int32_t* a_data = static_cast<const int32_t*>(a.data_ptr());
+        const int32_t* b_data = static_cast<const int32_t*>(b.data_ptr());
+        for (size_t i = 0; i < count; ++i) {
+            if (a_data[i] != b_data[i]) {
+                return false;
+            }
+        }
+        return true;
+    }
+    else if (a.dtype() == DType::INT8) {
+        const int8_t* a_data = static_cast<const int8_t*>(a.data_ptr());
+        const int8_t* b_data = static_cast<const int8_t*>(b.data_ptr());
+        for (size_t i = 0; i < count; ++i) {
+            if (a_data[i] != b_data[i]) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // 不应该到达这里
+    TR_THROW(TypeError, "Unsupported dtype in equal: ", dtype_name(a.dtype()));
+}
+
+bool CpuDevice::is_close(const Tensor& a, const Tensor& b, float eps) {
+    // 检查设备
+    check_on_device(a);
+    check_on_device(b);
+
+    // 检查形状
+    check_same_shape(a, b);
+
+    // 检查dtype
+    if (a.dtype() != b.dtype()) {
+        TR_THROW(TypeError, "Cannot compare tensors with different dtypes: ",
+                 dtype_name(a.dtype()), " vs ", dtype_name(b.dtype()));
+    }
+
+    // 仅支持FP32和BF16
+    if (a.dtype() == DType::INT8 || a.dtype() == DType::INT32) {
+        TR_THROW(TypeError, "is_close() only supports FP32 and BF16. ",
+                 "For INT8/INT32 comparison, use equal() instead.");
+    }
+
+    // 处理空张量
+    int64_t numel = a.numel();
+    if (numel == 0) {
+        return b.numel() == 0;
+    }
+
+    // 确定容差
+    float tolerance;
+    if (eps < 0.0f) {
+        // 使用默认容差
+        tolerance = (a.dtype() == DType::FP32) ? 1e-6f : 1e-3f;
+    } else {
+        tolerance = eps;
+    }
+
+    // 逐元素比较
+    size_t count = static_cast<size_t>(numel);
+
+    if (a.dtype() == DType::FP32) {
+        const float* a_data = static_cast<const float*>(a.data_ptr());
+        const float* b_data = static_cast<const float*>(b.data_ptr());
+        for (size_t i = 0; i < count; ++i) {
+            float diff = std::abs(a_data[i] - b_data[i]);
+            if (diff > tolerance) {
+                return false;
+            }
+        }
+        return true;
+    }
+    else if (a.dtype() == DType::BF16) {
+        // BF16存储为uint16，需要转换为FP32比较
+        const uint16_t* a_data = static_cast<const uint16_t*>(a.data_ptr());
+        const uint16_t* b_data = static_cast<const uint16_t*>(b.data_ptr());
+        for (size_t i = 0; i < count; ++i) {
+            float a_fp32 = bf16_to_fp32(a_data[i]);
+            float b_fp32 = bf16_to_fp32(b_data[i]);
+            float diff = std::abs(a_fp32 - b_fp32);
+            if (diff > tolerance) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    // 不应该到达这里
+    TR_THROW(TypeError, "Unsupported dtype in is_close: ", dtype_name(a.dtype()));
+}
+
 } // namespace tr

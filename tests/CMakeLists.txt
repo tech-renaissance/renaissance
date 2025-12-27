@@ -119,6 +119,18 @@ else()
 endif()
 
 # ============================================================================
+# 包含utils子目录（PythonSession测试）
+# ============================================================================
+
+# 注意：utils测试当前已开启
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/utils AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/utils)
+    add_subdirectory(utils)
+    message(STATUS "Including utils tests")
+else()
+    message(STATUS "Utils tests directory not found")
+endif()
+
+# ============================================================================
 # 输出单元测试信息
 # ============================================================================
 

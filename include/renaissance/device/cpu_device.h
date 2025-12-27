@@ -71,6 +71,10 @@ public:
     // ===== 张量运算（仅加法）=====
     void add_into(const Tensor& a, const Tensor& b, Tensor& result) override;
 
+    // ===== 张量比较 =====
+    bool equal(const Tensor& a, const Tensor& b) override;
+    bool is_close(const Tensor& a, const Tensor& b, float eps = -1.0f) override;
+
     // =========================================================================
     // TSR V3 文件导入导出
     // =========================================================================

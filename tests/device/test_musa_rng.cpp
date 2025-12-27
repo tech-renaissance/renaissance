@@ -126,10 +126,10 @@ void test_cpu_gpu_consistency() {
 }
 
 /**
- * @brief 测试2：GPU多次运行可复现性
+ * @brief 测试2：GPU多次运行可复现性（直接在GPU上比较）
  */
 void test_gpu_reproducibility() {
-    std::cout << "\n=== Test 2: GPU Reproducibility ===" << std::endl;
+    std::cout << "\n=== Test 2: GPU Reproducibility (On-Device Comparison) ===" << std::endl;
 
     auto& gpu = DeviceManager::instance().musa(0);
     const size_t count = 100000;
@@ -161,14 +161,9 @@ void test_gpu_reproducibility() {
         gpu.synchronize();
     }
 
-    // 拷贝到CPU验证
-    std::vector<float> data1(count), data2(count), data3(count);
-    musaMemcpy(data1.data(), t1.data_ptr(), count * sizeof(float), musaMemcpyDeviceToHost);
-    musaMemcpy(data2.data(), t2.data_ptr(), count * sizeof(float), musaMemcpyDeviceToHost);
-    musaMemcpy(data3.data(), t3.data_ptr(), count * sizeof(float), musaMemcpyDeviceToHost);
-
-    bool same_seed_match = float_arrays_equal(data1.data(), data2.data(), count);
-    bool diff_seed_differ = !float_arrays_equal(data1.data(), data3.data(), count);
+    // 直接在GPU上比较（无需拷贝到CPU）
+    bool same_seed_match = gpu.is_close(t1, t2);  // 使用默认容差
+    bool diff_seed_differ = !gpu.is_close(t1, t3);
 
     std::cout << "  Same seed produces same sequence: "
               << (same_seed_match ? "PASS" : "FAIL") << std::endl;

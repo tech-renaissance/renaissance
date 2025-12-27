@@ -13,6 +13,7 @@
 #ifdef TR_USE_MUSA
 
 #include <musa_runtime.h>
+#include <cstdint>  // For uint16_t
 
 namespace tr {
 
@@ -81,6 +82,31 @@ musaError_t launch_convert_int8_to_float_kernel(int n, const int8_t* src, float*
  * @return musaError_t Error code
  */
 musaError_t launch_convert_int8_to_int32_kernel(int n, const int8_t* src, int32_t* dst);
+
+// ===== Comparison Kernels =====
+
+/**
+ * @brief Wrapper function: INT8精确相等比较 (implemented in .cu)
+ * @param mismatch_flag 不匹配标志（0=相等，1=不等）
+ */
+musaError_t launch_equal_int8_kernel(int n, const int8_t* a, const int8_t* b, int* mismatch_flag);
+
+/**
+ * @brief Wrapper function: INT32精确相等比较 (implemented in .cu)
+ */
+musaError_t launch_equal_int32_kernel(int n, const int32_t* a, const int32_t* b, int* mismatch_flag);
+
+/**
+ * @brief Wrapper function: FP32近似相等比较 (implemented in .cu)
+ * @param tolerance 容差值
+ * @param mismatch_flag 不匹配标志（0=相等，1=不等）
+ */
+musaError_t launch_is_close_float_kernel(int n, const float* a, const float* b, float tolerance, int* mismatch_flag);
+
+/**
+ * @brief Wrapper function: BF16近似相等比较 (implemented in .cu)
+ */
+musaError_t launch_is_close_bf16_kernel(int n, const uint16_t* a, const uint16_t* b, float tolerance, int* mismatch_flag);
 
 } // namespace tr
 

@@ -2,19 +2,21 @@
 # Renaissance统一库 - 包含base、data组件（device已禁用）
 # ============================================================================
 
-# 添加子目录：创建base、data、device库
+# 添加子目录：创建base、data、device、utils库
 add_subdirectory(base)
 add_subdirectory(data)
 add_subdirectory(device)
+add_subdirectory(utils)
 
 # 创建renaissance统一静态库（INTERFACE库，仅用于聚合）
 add_library(renaissance INTERFACE)
 
-# 链接base、data、device库
+# 链接base、data、device、utils库
 target_link_libraries(renaissance INTERFACE
     base
     data
     device
+    utils
 )
 
 # 添加头文件路径

@@ -365,6 +365,7 @@ def import_tensor(filename: str):
     if not os.path.exists(filename):
         raise FileNotFoundError(f"TSR file not found: {filename}")
 
+    # 读取所有数据（在with块外，确保文件立即关闭）
     with open(filename, 'rb') as f:
         # ========== 读取头部 (128字节) ==========
         header_data = f.read(TSR_HEADER_SIZE)
@@ -428,21 +429,27 @@ def import_tensor(filename: str):
             if len(data_bytes) != raw_data_size:
                 raise ValueError(f"Decompression size mismatch: expected {raw_data_size}, got {len(data_bytes)}")
 
-        # ========== 转换为torch tensor ==========
-        if dtype == 2:  # BF16特殊处理 - 直接转为torch.bfloat16
-            # BF16存储为uint16
-            array = np.frombuffer(data_bytes, dtype=np.uint16).reshape(shape)
-            # 转换为torch tensor（uint16）
-            tensor = torch.from_numpy(array.copy())
-            # reinterpret为bfloat16
-            tensor = tensor.view(torch.bfloat16)
-        else:
-            # 其他dtype正常处理
-            np_dtype = DTYPE_MAP[dtype]
-            array = np.frombuffer(data_bytes, dtype=np_dtype).reshape(shape)
-            tensor = torch.from_numpy(array.copy())
+    # 文件已在此处关闭
 
-        return tensor
+    # ========== 转换为torch tensor ==========
+    if dtype == 2:  # BF16特殊处理 - 直接转为torch.bfloat16
+        # BF16存储为uint16
+        array = np.frombuffer(data_bytes, dtype=np.uint16).reshape(shape)
+        # 转换为torch tensor（uint16）
+        tensor = torch.from_numpy(array.copy())
+        # reinterpret为bfloat16
+        tensor = tensor.view(torch.bfloat16)
+    else:
+        # 其他dtype正常处理
+        np_dtype = DTYPE_MAP[dtype]
+        array = np.frombuffer(data_bytes, dtype=np_dtype).reshape(shape)
+        tensor = torch.from_numpy(array.copy())
+
+    # 显式删除data_bytes，释放内存
+    del data_bytes
+    del array
+
+    return tensor
 
 
 def export_tensor(tensor, filename: str, compress: bool = False) -> None:

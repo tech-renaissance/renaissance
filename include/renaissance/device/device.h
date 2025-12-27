@@ -266,6 +266,35 @@ public:
      */
     virtual void print_status() const;
 
+    // =========================================================================
+    // 张量比较
+    // =========================================================================
+
+    /**
+     * @brief 精确相等比较（仅支持INT8和INT32）
+     * @param a 第一个张量
+     * @param b 第二个张量
+     * @return true如果完全相等，false如果不等
+     * @throws TypeError 如果dtype是FP32或BF16（应使用is_close）
+     * @throws ValueError 如果形状不匹配或不在同一设备上
+     * @note 两个空张量（numel=0）比较返回true
+     * @note 基类实现：抛出NotImplementedError
+     */
+    virtual bool equal(const Tensor& a, const Tensor& b);
+
+    /**
+     * @brief 近似相等比较（仅支持FP32和BF16）
+     * @param a 第一个张量
+     * @param b 第二个张量
+     * @param eps 容差值（默认-1.0f，表示使用默认容差：FP32为1e-6，BF16为1e-3）
+     * @return true如果在容差范围内近似相等，false否则
+     * @throws TypeError 如果dtype是INT8或INT32（应使用equal）
+     * @throws ValueError 如果形状不匹配或不在同一设备上
+     * @note 两个空张量（numel=0）比较返回true
+     * @note 基类实现：抛出NotImplementedError
+     */
+    virtual bool is_close(const Tensor& a, const Tensor& b, float eps = -1.0f);
+
 protected:
     /**
      * @brief 受保护构造（仅派生类可调用）

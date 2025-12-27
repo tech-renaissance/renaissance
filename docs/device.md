@@ -1,6 +1,6 @@
 # Device器件系统设计文档
 
-**版本**: V3.6.7
+**版本**: V3.6.8
 **日期**: 2025-12-27
 **作者**: 技术觉醒团队
 **状态**: ✅ 全平台测试通过
@@ -18,10 +18,11 @@
 7. [MusaDevice实现](#musadevice实现)
 8. [内存管理策略](#内存管理策略)
 9. [张量运算实现](#张量运算实现)
-10. [使用指南](#使用指南)
-11. [性能优化](#性能优化)
-12. [对比分析](#对比分析)
-13. [版本历史](#版本历史)
+10. [张量比较](#张量比较)
+11. [使用指南](#使用指南)
+12. [性能优化](#性能优化)
+13. [对比分析](#对比分析)
+14. [版本历史](#版本历史)
 
 ---
 
@@ -812,6 +813,324 @@ Tensor MusaDevice::ones(const Shape& shape, DType dtype) {
 
 ---
 
+## 张量比较
+
+### 概述
+
+renAIssance V3.6.8 引入了高效张量比较功能，支持精确相等和近似相等比较，针对不同数据类型优化。
+
+### API设计
+
+**类型分离设计**:
+```cpp
+// 精确相等比较（仅整数类型）
+virtual bool equal(const Tensor& a, const Tensor& b);
+
+// 近似相等比较（仅浮点类型）
+virtual bool is_close(const Tensor& a, const Tensor& b, float eps = -1.0f);
+```
+
+**设计理念**:
+- `equal()`: 用于 INT8/INT32，要求每个元素完全相等
+- `is_close()`: 用于 FP32/BF16，允许容差范围内的浮点误差
+- 容差参数 `eps < 0.0f` 时使用默认容差（FP32: 1e-6, BF16: 1e-3）
+
+### 数据类型支持矩阵
+
+| 数据类型 | equal() | is_close() | CPU实现 | CUDA/MUSA实现 |
+|---------|---------|------------|---------|---------------|
+| FP32 | ❌ TypeError | ✅ 默认1e-6 | 逐元素循环 | GPU kernel + atomicExch |
+| BF16 | ❌ TypeError | ✅ 默认1e-3 | BF16转换比较 | GPU kernel + 位操作 |
+| INT32 | ✅ 精确比较 | ❌ TypeError | 逐元素循环 | GPU kernel + atomicExch |
+| INT8 | ✅ 精确比较 | ❌ TypeError | 逐元素循环 | GPU kernel + atomicExch |
+
+### 实现细节
+
+#### CpuDevice实现
+
+**equal() - 精确比较**:
+```cpp
+bool CpuDevice::equal(const Tensor& a, const Tensor& b) {
+    // 1. 验证设备和形状
+    check_on_device(a);
+    check_on_device(b);
+    check_same_shape(a, b);
+
+    // 2. 检查dtype
+    if (a.dtype() != b.dtype()) {
+        TR_THROW(TypeError, "Cannot compare tensors with different dtypes");
+    }
+
+    // 3. 仅支持INT8和INT32
+    if (a.dtype() == DType::FP32 || a.dtype() == DType::BF16) {
+        TR_THROW(TypeError, "equal() only supports INT8 and INT32. "
+                 "For FP32/BF16 comparison, use is_close() instead.");
+    }
+
+    // 4. 处理空张量
+    int64_t numel = a.numel();
+    if (numel == 0) {
+        return b.numel() == 0;
+    }
+
+    // 5. 逐元素比较
+    size_t count = static_cast<size_t>(numel);
+
+    if (a.dtype() == DType::INT32) {
+        const int32_t* a_data = static_cast<const int32_t*>(a.data_ptr());
+        const int32_t* b_data = static_cast<const int32_t*>(b.data_ptr());
+        for (size_t i = 0; i < count; ++i) {
+            if (a_data[i] != b_data[i]) {
+                return false;  // 发现不匹配立即返回
+            }
+        }
+        return true;
+    }
+    else if (a.dtype() == DType::INT8) {
+        // ... INT8实现类似
+    }
+}
+```
+
+**is_close() - 近似比较**:
+```cpp
+bool CpuDevice::is_close(const Tensor& a, const Tensor& b, float eps) {
+    // 1-3. 验证步骤同equal()
+    // ...
+
+    // 4. 仅支持FP32和BF16
+    if (a.dtype() == DType::INT8 || a.dtype() == DType::INT32) {
+        TR_THROW(TypeError, "is_close() only supports FP32 and BF16. "
+                 "For INT8/INT32 comparison, use equal() instead.");
+    }
+
+    // 5. 确定容差
+    float tolerance;
+    if (eps < 0.0f) {
+        tolerance = (a.dtype() == DType::FP32) ? 1e-6f : 1e-3f;
+    } else {
+        tolerance = eps;
+    }
+
+    // 6. 逐元素比较
+    if (a.dtype() == DType::FP32) {
+        const float* a_data = static_cast<const float*>(a.data_ptr());
+        const float* b_data = static_cast<const float*>(b.data_ptr());
+        for (size_t i = 0; i < count; ++i) {
+            float diff = std::abs(a_data[i] - b_data[i]);
+            if (diff > tolerance) {
+                return false;  // 超出容差立即返回
+            }
+        }
+        return true;
+    }
+    else if (a.dtype() == DType::BF16) {
+        // BF16转FP32比较
+        const uint16_t* a_data = static_cast<const uint16_t*>(a.data_ptr());
+        const uint16_t* b_data = static_cast<const uint16_t*>(b.data_ptr());
+        for (size_t i = 0; i < count; ++i) {
+            float a_fp32 = bf16_to_fp32(a_data[i]);
+            float b_fp32 = bf16_to_fp32(b_data[i]);
+            float diff = std::abs(a_fp32 - b_fp32);
+            if (diff > tolerance) {
+                return false;
+            }
+        }
+        return true;
+    }
+}
+```
+
+#### CudaDevice/MusaDevice实现
+
+**核心优化**: 使用 GPU kernel + `atomicExch` 标记不匹配
+
+**equal_int8_kernel** (示例):
+```cuda
+__global__ void equal_int8_kernel(
+    const int8_t* a, const int8_t* b, int n, int* mismatch_flag
+) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= n) return;
+
+    if (a[idx] != b[idx]) {
+        atomicExch(mismatch_flag, 1);  // 发现不匹配立即标记
+    }
+}
+```
+
+**CudaDevice::equal()实现**:
+```cpp
+bool CudaDevice::equal(const Tensor& a, const Tensor& b) {
+    // 1-5. 验证步骤与CPU相同
+    // ...
+
+    // 6. 创建mismatch标志（在GPU上）
+    Tensor mismatch_gpu = this->zeros(Shape(1), DType::INT32);
+    int* mismatch_flag = static_cast<int*>(mismatch_gpu.data_ptr());
+
+    // 7. 初始化为0（表示相等）
+    cudaError_t err = cudaMemset(mismatch_flag, 0, sizeof(int));
+    if (err != cudaSuccess) {
+        TR_THROW(DeviceError, "CUDA memset failed");
+    }
+
+    // 8. 调用kernel
+    if (a.dtype() == DType::INT32) {
+        const int32_t* a_data = static_cast<const int32_t*>(a.data_ptr());
+        const int32_t* b_data = static_cast<const int32_t*>(b.data_ptr());
+        err = launch_equal_int32_kernel(static_cast<int>(count), a_data, b_data, mismatch_flag);
+    }
+    else if (a.dtype() == DType::INT8) {
+        // ...
+    }
+
+    // 9. 同步并读取结果
+    this->synchronize();
+    int flag;
+    err = cudaMemcpy(&flag, mismatch_flag, sizeof(int), cudaMemcpyDeviceToHost);
+
+    // 10. 判断结果
+    return flag == 0;  // 0表示相等，1表示不等
+}
+```
+
+**is_close_float_kernel** (示例):
+```cuda
+__global__ void is_close_float_kernel(
+    const float* a, const float* b, int n, float tolerance, int* mismatch_flag
+) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= n) return;
+
+    float diff = fabsf(a[idx] - b[idx]);
+    if (diff > tolerance) {
+        atomicExch(mismatch_flag, 1);
+    }
+}
+```
+
+**is_close_bf16_kernel** (BF16特殊处理):
+```cuda
+__global__ void is_close_bf16_kernel(
+    const uint16_t* a, const uint16_t* b, int n, float tolerance, int* mismatch_flag
+) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx >= n) return;
+
+    // BF16转FP32比较（使用位操作）
+    uint32_t a_bits = a[idx];
+    uint32_t a_fp32_bits = (a_bits << 16);
+    const float* a_fp32_ptr = reinterpret_cast<const float*>(&a_fp32_bits);
+    float a_fp32 = *a_fp32_ptr;
+
+    uint32_t b_bits = b[idx];
+    uint32_t b_fp32_bits = (b_bits << 16);
+    const float* b_fp32_ptr = reinterpret_cast<const float*>(&b_fp32_bits);
+    float b_fp32 = *b_fp32_ptr;
+
+    float diff = fabsf(a_fp32 - b_fp32);
+    if (diff > tolerance) {
+        atomicExch(mismatch_flag, 1);
+    }
+}
+```
+
+### 性能优化
+
+**atomicExch vs atomicMin对比**:
+
+| 方案 | 优点 | 缺点 | 性能 |
+|------|------|------|------|
+| **atomicExch** (V3.6.8) | • 更快<br>• 可提前退出<br>• 代码简洁 | • 无法记录索引 | ⭐⭐⭐⭐⭐ |
+| atomicMin (旧方案) | • 可记录索引 | • 效率低<br>• 必须遍历所有元素 | ⭐⭐⭐ |
+
+**选择理由**: 实际使用中几乎不需要知道第一个不匹配的位置，`atomicExch` 提供了更好的性能和更简洁的语义。
+
+### 使用示例
+
+#### 基本用法
+
+```cpp
+auto& cuda = get_cuda(0);
+
+// 创建测试张量
+Tensor a = cuda.zeros(Shape(1000, 1000), DType::FP32);
+Tensor b = cuda.ones(Shape(1000, 1000), DType::FP32);
+
+// 浮点数近似比较
+bool close = cuda.is_close(a, b);  // 使用默认容差1e-6
+
+// 整数精确比较
+Tensor c = cuda.zeros(Shape(100), DType::INT32);
+Tensor d = cuda.zeros(Shape(100), DType::INT32);
+bool equal = cuda.equal(c, d);  // true
+
+// 自定义容差
+Tensor e = cuda.randn(Shape(1000), DType::BF16, 0.0f, 0.1f);
+Tensor f = cuda.randn(Shape(1000), DType::BF16, 0.0f, 0.1f);
+bool custom_close = cuda.is_close(e, f, 0.5f);  // 容差0.5
+```
+
+#### GPU直接比较（无需拷贝到CPU）
+
+**优化前** (V3.6.7):
+```cpp
+// 拷贝到CPU验证
+std::vector<float> data1(count), data2(count);
+cudaMemcpy(data1.data(), t1.data_ptr(), count * sizeof(float), cudaMemcpyDeviceToHost);
+cudaMemcpy(data2.data(), t2.data_ptr(), count * sizeof(float), cudaMemcpyDeviceToHost);
+
+bool same_seed_match = float_arrays_equal(data1.data(), data2.data(), count);
+```
+
+**优化后** (V3.6.8):
+```cpp
+// 直接在GPU上比较（无需拷贝）
+bool same_seed_match = cuda.is_close(t1, t2);  // GPU kernel完成
+```
+
+**优势**:
+- ✅ 代码更简洁（7行 → 1行）
+- ✅ 避免了 Device→Host 的内存拷贝（3 × 100000 × 4 bytes ≈ 1.2MB）
+- ✅ 利用GPU并行计算加速
+
+#### 类型错误处理
+
+```cpp
+auto& cpu = get_cpu();
+
+Tensor a = cpu.zeros(Shape(100), DType::FP32);
+Tensor b = cpu.zeros(Shape(100), DType::FP32);
+
+// ❌ 错误：FP32不能使用equal()
+try {
+    bool result = cpu.equal(a, b);
+} catch (const TypeError& e) {
+    // "equal() only supports INT8 and INT32.
+    //  For FP32/BF16 comparison, use is_close() instead."
+}
+
+// ✅ 正确：使用is_close()
+bool result = cpu.is_close(a, b);
+```
+
+### 全平台测试结果
+
+| 平台 | 测试覆盖 | 状态 |
+|------|---------|------|
+| Windows (MSVC) + CUDA | ✅ 全部通过 | 稳定 |
+| Linux (GCC) + CUDA | ✅ 全部通过 | 稳定 |
+| ARM + CUDA | ✅ 全部通过 | 稳定 |
+| RISC-V + CUDA | ✅ 全部通过 | 稳定 |
+| GPU Cloud + MUSA | ✅ 全部通过 | 稳定 |
+
+**测试文件**:
+- `tests/device/test_cuda_rng.cpp` - GPU可复现性测试（使用is_close）
+- `tests/device/test_musa_rng.cpp` - MUSA可复现性测试（使用is_close）
+
+---
+
 ## 使用指南
 
 ### 基本用法
@@ -937,6 +1256,46 @@ musaMemcpy(tensor.data_ptr(), host_buffer.data(),
 
 ## 版本历史
 
+### V3.6.8 (2025-12-27)
+
+**核心改进**:
+- ✅ **新增张量比较功能**: `equal()` 和 `is_close()` 方法
+- ✅ **类型分离设计**: 整数用精确比较，浮点用近似比较
+- ✅ **GPU优化**: CUDA/MUSA kernels + `atomicExch` 高效实现
+- ✅ **智能容差**: FP32默认1e-6，BF16默认1e-3，可自定义
+- ✅ **测试优化**: RNG可复现性测试改用GPU直接比较
+
+**详细变更**:
+
+1. **Device基类**:
+   - 新增 `virtual bool equal(const Tensor& a, const Tensor& b)` (抛出NotImplementedError)
+   - 新增 `virtual bool is_close(const Tensor& a, const Tensor& b, float eps = -1.0f)` (抛出NotImplementedError)
+
+2. **CpuDevice**:
+   - 实现 `equal()`: INT8/INT32逐元素精确比较
+   - 实现 `is_close()`: FP32/BF16逐元素近似比较（BF16转FP32）
+   - 提前退出优化：发现不匹配立即返回
+
+3. **CudaDevice**:
+   - 实现4个比较kernels: `equal_int8/32_kernel`, `is_close_float/bf16_kernel`
+   - 使用 `atomicExch` 标记不匹配（性能优于atomicMin）
+   - BF16使用位操作转换为FP32比较
+   - 只需拷贝1个int结果，避免Device→Host大数据拷贝
+
+4. **MusaDevice**:
+   - 与CudaDevice完全对称的实现
+   - 同样使用 `atomicExch` + 4个比较kernels
+
+5. **测试优化**:
+   - `test_cuda_rng.cpp`: Test 2改用`gpu.is_close()`直接GPU比较
+   - `test_musa_rng.cpp`: Test 2改用`gpu.is_close()`直接GPU比较
+   - 代码更简洁（7行 → 2行），性能更好（避免1.2MB拷贝）
+
+6. **头文件修复**:
+   - 添加 `#include <cstdint>` 到 `cuda_kernels.cu/.h`
+   - 添加 `#include <cstdint>` 到 `musa_kernels.cu/.h`
+   - 修复GPU_CLOUD编译错误
+
 ### V3.6.7 (2025-12-27)
 
 **核心改进**:
@@ -987,7 +1346,7 @@ musaMemcpy(tensor.data_ptr(), host_buffer.data(),
 
 ---
 
-**文档版本**: V3.6.7
+**文档版本**: V3.6.8
 **最后更新**: 2025-12-27
 **作者**: 技术觉醒团队
 **状态**: ✅ 全平台测试通过
