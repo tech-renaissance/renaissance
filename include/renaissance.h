@@ -39,6 +39,10 @@
 
 #include "renaissance/base/rng.h"
 
+#ifdef TR_USE_LIBCURL
+#include "renaissance/base/downloader.h"
+#endif
+
 // Data
 #include "renaissance/data/shape.h"
 #include "renaissance/data/storage.h"

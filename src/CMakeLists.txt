@@ -28,6 +28,33 @@ target_include_directories(renaissance INTERFACE
 # 外部库链接 - 统一在这里管理
 # ============================================================================
 
+# 添加libcurl支持（用于base模块的downloader）
+if(TR_USE_LIBCURL)
+    if(DEFINED TR_CURL_INCLUDE_DIR)
+        target_include_directories(renaissance INTERFACE ${TR_CURL_INCLUDE_DIR})
+        message(STATUS "Renaissance library: Using libcurl headers from ${TR_CURL_INCLUDE_DIR}")
+    endif()
+    if(DEFINED TR_CURL_LIBRARY_DIR)
+        if(WIN32)
+            # Windows下直接链接libcurl静态库
+            if(EXISTS "${TR_CURL_LIBRARY_DIR}/libcurl.a")
+                target_link_libraries(renaissance INTERFACE "${TR_CURL_LIBRARY_DIR}/libcurl.a")
+                message(STATUS "Renaissance library: Linking libcurl static library")
+            elseif(EXISTS "${TR_CURL_LIBRARY_DIR}/libcurl.lib")
+                target_link_libraries(renaissance INTERFACE "${TR_CURL_LIBRARY_DIR}/libcurl.lib")
+                message(STATUS "Renaissance library: Linking libcurl import library")
+            else()
+                message(FATAL_ERROR "Renaissance library: libcurl library not found in ${TR_CURL_LIBRARY_DIR}")
+            endif()
+        else()
+            # Linux/Unix下链接libcurl
+            target_link_directories(renaissance INTERFACE ${TR_CURL_LIBRARY_DIR})
+            target_link_libraries(renaissance INTERFACE curl)
+            message(STATUS "Renaissance library: libcurl linked (for downloader)")
+        endif()
+    endif()
+endif()
+
 # 添加mimalloc支持
 if(TR_USE_MIMALLOC)
     if(DEFINED TR_MIMALLOC_INCLUDE_DIR)
