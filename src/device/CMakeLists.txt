@@ -3,6 +3,7 @@ set(DEVICE_SOURCES
     device.cpp
     device_manager.cpp
     cpu_device.cpp
+    cpu_device_tsr.cpp
 )
 
 # CUDA支持
@@ -169,5 +170,10 @@ target_compile_features(device PUBLIC cxx_std_17)
 
 # 链接base和data模块（device依赖这两个模块）
 target_link_libraries(device PUBLIC base data)
+
+# 链接zlib（TSR格式压缩需要）
+find_package(ZLIB REQUIRED)
+target_link_libraries(device PUBLIC ZLIB::ZLIB)
+message(STATUS "Device library: zlib linked for TSR format support")
 
 message(STATUS "Device module configured: ${DEVICE_SOURCES}")

@@ -10,6 +10,9 @@
 #pragma once
 
 #include "renaissance/device/device.h"
+#include "renaissance/data/tsr_format.h"
+#include <vector>
+#include <string>
 
 namespace tr {
 
@@ -67,6 +70,80 @@ public:
 
     // ===== 张量运算（仅加法）=====
     void add_into(const Tensor& a, const Tensor& b, Tensor& result) override;
+
+    // =========================================================================
+    // TSR V3 文件导入导出
+    // =========================================================================
+
+    /**
+     * @brief 导出张量到TSR V3文件
+     * @param tensor 要导出的张量（必须在CPU上且已绑定存储）
+     * @param filename 目标文件路径
+     * @param compress true使用ZLIB压缩模式，false使用RAW快速模式
+     * @throws DeviceError 张量不在CPU上
+     * @throws ValueError 张量无效或未绑定
+     * @throws FileNotFoundError 无法创建文件
+     *
+     * 模式选择建议：
+     * - RAW模式：大模型权重、需要频繁加载的场景
+     * - ZLIB模式：稀疏张量、网络传输、磁盘空间受限
+     */
+    void export_tensor(const Tensor& tensor, const std::string& filename,
+                       bool compress = false) const;
+
+    /**
+     * @brief 从TSR V3文件导入张量
+     * @param filename 源文件路径
+     * @param using_mmap 是否使用mmap零拷贝加载（仅RAW模式，默认true）
+     * @return 加载到CPU的Tensor对象
+     * @throws FileNotFoundError 文件不存在
+     * @throws ValueError 文件格式无效或数据损坏
+     *
+     * 加载策略：
+     * - RAW模式：using_mmap=true时使用mmap零拷贝，false时使用常规读取
+     * - ZLIB模式：解压到新分配的内存（using_mmap参数无效）
+     */
+    Tensor import_tensor(const std::string& filename, bool using_mmap = true);
+
+private:
+    // =========================================================================
+    // TSR辅助方法
+    // =========================================================================
+
+    /**
+     * @brief 验证TSR文件头有效性
+     * @param header 文件头引用
+     * @throws ValueError 头部无效时
+     */
+    void validate_tsr_header(const TSRHeaderV3& header) const;
+
+    /**
+     * @brief 计算CRC32校验和
+     * @param data 数据指针
+     * @param size 数据字节数
+     * @return CRC32值
+     */
+    uint32_t calculate_crc32(const void* data, size_t size) const;
+
+    /**
+     * @brief zlib压缩数据
+     * @param data 原始数据指针
+     * @param size 原始数据大小
+     * @return 压缩后的数据向量
+     * @throws ValueError 压缩失败时
+     */
+    std::vector<uint8_t> compress_zlib(const void* data, size_t size) const;
+
+    /**
+     * @brief zlib解压数据
+     * @param src 压缩数据指针
+     * @param src_size 压缩数据大小
+     * @param dst 目标缓冲区指针
+     * @param dst_size 期望的解压后大小
+     * @throws ValueError 解压失败时
+     */
+    void decompress_zlib(const uint8_t* src, size_t src_size,
+                         void* dst, size_t dst_size) const;
 };
 
 } // namespace tr

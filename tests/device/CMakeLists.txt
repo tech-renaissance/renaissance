@@ -322,4 +322,67 @@ if(TR_USE_MUSA)
     target_link_libraries(test_musa_rand_tensor PRIVATE renaissance)
 endif()
 
+# ============================================================================
+# TSR V3 格式测试
+# ============================================================================
+add_executable(test_tsr_format
+    test_tsr_format.cpp
+)
+
+target_include_directories(test_tsr_format PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+)
+
+set_target_properties(test_tsr_format PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/device
+)
+
+if(WIN32)
+    set_target_properties(test_tsr_format PROPERTIES
+        WIN32_EXECUTABLE FALSE
+    )
+endif()
+
+if(MSVC)
+    target_compile_options(test_tsr_format PRIVATE /W4 /utf-8)
+else()
+    target_compile_options(test_tsr_format PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+target_compile_definitions(test_tsr_format PRIVATE TR_LOG_LEVEL=0)
+target_link_libraries(test_tsr_format PRIVATE renaissance)
+
+message(STATUS "Device tests: TSR V3 format test configured")
+
+# TSR Python互操作性测试（生成测试文件）
+add_executable(test_tsr_python
+    test_tsr_python.cpp
+)
+
+target_include_directories(test_tsr_python PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+)
+
+set_target_properties(test_tsr_python PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/device
+)
+
+if(WIN32)
+    set_target_properties(test_tsr_python PROPERTIES
+        WIN32_EXECUTABLE FALSE
+    )
+endif()
+
+if(MSVC)
+    target_compile_options(test_tsr_python PRIVATE /W4 /utf-8)
+else()
+    target_compile_options(test_tsr_python PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+target_compile_definitions(test_tsr_python PRIVATE TR_LOG_LEVEL=0)
+target_link_libraries(test_tsr_python PRIVATE renaissance)
+
+message(STATUS "Device tests: TSR Python interoperability test configured")
+
 message(STATUS "Device tests: CUDA and MUSA device tests configured")
+

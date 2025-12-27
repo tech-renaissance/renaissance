@@ -390,7 +390,7 @@ private:
      * @param oss 输出流
      * @param precision 浮点数精度
      */
-    void format_tensor_content(std::ostringstream& oss, int precision) const;
+    void format_tensor_content(std::ostream& os, int precision) const;
 };
 
 static_assert(sizeof(Tensor) <= 88, "Tensor should be <= 88 bytes");

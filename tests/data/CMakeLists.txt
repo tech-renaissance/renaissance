@@ -2,6 +2,7 @@
 set(DATA_TEST_SOURCES
     test_shape.cpp
     test_storage_ownership.cpp
+    test_print.cpp
 )
 
 # 创建data测试可执行文件
