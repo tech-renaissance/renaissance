@@ -44,6 +44,27 @@ public:
     Tensor zeros(const Shape& shape, DType dtype) override;
     Tensor ones(const Shape& shape, DType dtype) override;
 
+    // ===== 随机数生成（高级接口，调用默认Generator）=====
+    Tensor uniform(const Shape& shape, float min_val = 0.0f, float max_val = 1.0f,
+                  DType dtype = DType::FP32) override;
+    void uniform_inplace(Tensor& tensor_a, float min_val = 0.0f, float max_val = 1.0f,
+                         DType dtype = DType::FP32) override;
+
+    Tensor randn(const Shape& shape, float mean = 0.0f, float stddev = 1.0f,
+                 DType dtype = DType::FP32) override;
+    void randn_inplace(Tensor& tensor_a, float mean = 0.0f, float stddev = 1.0f,
+                       DType dtype = DType::FP32) override;
+
+    Tensor randint(const Shape& shape, int low = 0, int high = 10,
+                  DType dtype = DType::FP32) override;
+    void randint_inplace(Tensor& tensor_a, int low = 0, int high = 10,
+                         DType dtype = DType::FP32) override;
+
+    Tensor randbool(const Shape& shape, float rate_of_zeros = 0.5,
+                   DType dtype = DType::FP32) override;
+    void randbool_inplace(Tensor& tensor_a, float rate_of_zeros = 0.5,
+                          DType dtype = DType::FP32) override;
+
     // ===== 张量运算（仅加法）=====
     void add_into(const Tensor& a, const Tensor& b, Tensor& result) override;
 };

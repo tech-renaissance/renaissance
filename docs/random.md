@@ -275,7 +275,7 @@ void cpu_rand_bernoulli_int8(int8_t* ptr, size_t count,
                              float prob_one,
                              Generator& gen);
 
-// 均匀整数分布 [low, high]（包含两端）
+// 均匀整数分布 [low, high)（左闭右开）
 void cpu_rand_uniform_int32(int32_t* ptr, size_t count,
                             int32_t low, int32_t high,
                             Generator& gen);
@@ -705,9 +705,16 @@ n1 = r * sin(theta);
 均匀整数分布使用模运算：
 
 ```cpp
+// 注意：范围是 [low, high)（左闭右开），与Python randint语义一致
+uint64_t range = static_cast<uint64_t>(high) - static_cast<uint64_t>(low);
 uint32_t val = r[0] % range;  // r[0]是[0, 2^32)的随机数
 ptr[i] = low + val;
 ```
+
+**范围语义**：
+- `randint(ptr, count, 0, 10)` 生成 [0, 9] 范围内的整数
+- `randint(ptr, count, -5, 5)` 生成 [-5, 4] 范围内的整数
+- 与 Python 的 `random.randint(low, high)` 和 NumPy 的 `np.random.randint` 完全一致
 
 **潜在问题**：当range不是2的幂时，会产生模偏差。
 

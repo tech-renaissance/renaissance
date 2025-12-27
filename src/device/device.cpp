@@ -79,6 +79,58 @@ void Device::add_into([[maybe_unused]] const Tensor& a, [[maybe_unused]] const T
     throw_not_impl("add_into");
 }
 
+// =============================================================================
+// 随机数生成（基类实现：抛出NotImplementedError）
+// =============================================================================
+
+Tensor Device::uniform([[maybe_unused]] const Shape& shape,
+                       [[maybe_unused]] float min_val, [[maybe_unused]] float max_val,
+                       [[maybe_unused]] DType dtype) {
+    throw_not_impl("uniform");
+}
+
+void Device::uniform_inplace([[maybe_unused]] Tensor& tensor_a,
+                              [[maybe_unused]] float min_val, [[maybe_unused]] float max_val,
+                              [[maybe_unused]] DType dtype) {
+    throw_not_impl("uniform_inplace");
+}
+
+Tensor Device::randn([[maybe_unused]] const Shape& shape,
+                      [[maybe_unused]] float mean, [[maybe_unused]] float stddev,
+                      [[maybe_unused]] DType dtype) {
+    throw_not_impl("randn");
+}
+
+void Device::randn_inplace([[maybe_unused]] Tensor& tensor_a,
+                            [[maybe_unused]] float mean, [[maybe_unused]] float stddev,
+                            [[maybe_unused]] DType dtype) {
+    throw_not_impl("randn_inplace");
+}
+
+Tensor Device::randint([[maybe_unused]] const Shape& shape,
+                        [[maybe_unused]] int low, [[maybe_unused]] int high,
+                        [[maybe_unused]] DType dtype) {
+    throw_not_impl("randint");
+}
+
+void Device::randint_inplace([[maybe_unused]] Tensor& tensor_a,
+                              [[maybe_unused]] int low, [[maybe_unused]] int high,
+                              [[maybe_unused]] DType dtype) {
+    throw_not_impl("randint_inplace");
+}
+
+Tensor Device::randbool([[maybe_unused]] const Shape& shape,
+                         [[maybe_unused]] float rate_of_zeros,
+                         [[maybe_unused]] DType dtype) {
+    throw_not_impl("randbool");
+}
+
+void Device::randbool_inplace([[maybe_unused]] Tensor& tensor_a,
+                               [[maybe_unused]] float rate_of_zeros,
+                               [[maybe_unused]] DType dtype) {
+    throw_not_impl("randbool_inplace");
+}
+
 // ===== 辅助验证方法 =====
 
 void Device::check_same_shape(const Tensor& a, const Tensor& b) const {

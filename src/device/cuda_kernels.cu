@@ -73,5 +73,54 @@ cudaError_t launch_add_int8_kernel(int n, const int8_t* a, const int8_t* b, int8
     return cudaGetLastError();
 }
 
+// ===== Type Conversion Kernels =====
+
+__global__ void convert_int32_to_float_kernel(int n, const int32_t* src, float* dst) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < n) {
+        dst[idx] = static_cast<float>(src[idx]);
+    }
+}
+
+__global__ void convert_int8_to_float_kernel(int n, const int8_t* src, float* dst) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < n) {
+        dst[idx] = static_cast<float>(src[idx]);
+    }
+}
+
+__global__ void convert_int8_to_int32_kernel(int n, const int8_t* src, int32_t* dst) {
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    if (idx < n) {
+        dst[idx] = static_cast<int32_t>(src[idx]);
+    }
+}
+
+// ===== Type Conversion Wrapper Functions =====
+
+cudaError_t launch_convert_int32_to_float_kernel(int n, const int32_t* src, float* dst) {
+    const int block_size = 256;
+    const int grid_size = (n + block_size - 1) / block_size;
+
+    convert_int32_to_float_kernel<<<grid_size, block_size, 0, cudaStreamDefault>>>(n, src, dst);
+    return cudaGetLastError();
+}
+
+cudaError_t launch_convert_int8_to_float_kernel(int n, const int8_t* src, float* dst) {
+    const int block_size = 256;
+    const int grid_size = (n + block_size - 1) / block_size;
+
+    convert_int8_to_float_kernel<<<grid_size, block_size, 0, cudaStreamDefault>>>(n, src, dst);
+    return cudaGetLastError();
+}
+
+cudaError_t launch_convert_int8_to_int32_kernel(int n, const int8_t* src, int32_t* dst) {
+    const int block_size = 256;
+    const int grid_size = (n + block_size - 1) / block_size;
+
+    convert_int8_to_int32_kernel<<<grid_size, block_size, 0, cudaStreamDefault>>>(n, src, dst);
+    return cudaGetLastError();
+}
+
 } // namespace tr
 

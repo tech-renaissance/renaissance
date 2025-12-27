@@ -94,7 +94,8 @@ __global__ void philox_uniform_int32_kernel(
     if (idx >= n) return;
 
     // 使用64位防止溢出
-    uint64_t range = static_cast<uint64_t>(high) - static_cast<uint64_t>(low) + 1;
+    // 注意：范围是 [low, high)（左闭右开），与Python randint语义一致
+    uint64_t range = static_cast<uint64_t>(high) - static_cast<uint64_t>(low);
 
     uint32_t r[4];
     detail::philox_generate_4x32(seed, base_offset + idx, r);

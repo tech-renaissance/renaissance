@@ -55,6 +55,33 @@ musaError_t launch_fill_bf16_kernel(int n, uint16_t* ptr, float value);
  */
 musaError_t launch_add_bf16_kernel(int n, const uint16_t* a, const uint16_t* b, uint16_t* c);
 
+/**
+ * @brief Wrapper function: Convert INT32 array to FP32 (implemented in .cu)
+ * @param n Number of elements
+ * @param src Source device pointer (INT32)
+ * @param dst Destination device pointer (FP32)
+ * @return musaError_t Error code
+ */
+musaError_t launch_convert_int32_to_float_kernel(int n, const int32_t* src, float* dst);
+
+/**
+ * @brief Wrapper function: Convert INT8 array to FP32 (implemented in .cu)
+ * @param n Number of elements
+ * @param src Source device pointer (INT8)
+ * @param dst Destination device pointer (FP32)
+ * @return musaError_t Error code
+ */
+musaError_t launch_convert_int8_to_float_kernel(int n, const int8_t* src, float* dst);
+
+/**
+ * @brief Wrapper function: Convert INT8 array to INT32 (implemented in .cu)
+ * @param n Number of elements
+ * @param src Source device pointer (INT8)
+ * @param dst Destination device pointer (INT32)
+ * @return musaError_t Error code
+ */
+musaError_t launch_convert_int8_to_int32_kernel(int n, const int8_t* src, int32_t* dst);
+
 } // namespace tr
 
 #endif // TR_USE_MUSA

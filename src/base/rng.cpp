@@ -299,7 +299,8 @@ void cpu_rand_uniform_int32(int32_t* ptr, size_t count, int32_t low, int32_t hig
     uint64_t seed = gen.seed();
 
     // 使用64位计算避免溢出
-    uint64_t range = static_cast<uint64_t>(high) - static_cast<uint64_t>(low) + 1;
+    // 注意：范围是 [low, high)（左闭右开），与Python randint语义一致
+    uint64_t range = static_cast<uint64_t>(high) - static_cast<uint64_t>(low);
 
     int num_threads = get_num_threads(count);
 

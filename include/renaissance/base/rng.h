@@ -193,8 +193,9 @@ void cpu_rand_bernoulli_int32(int32_t* ptr, size_t count, float prob_one, Genera
  * @param ptr 目标内存指针
  * @param count 元素个数
  * @param low 最小值（包含）
- * @param high 最大值（包含）
+ * @param high 最大值（不包含）
  * @param gen 生成器引用
+ * @note 范围为 [low, high)，与Python randint语义一致
  */
 void cpu_rand_uniform_int32(int32_t* ptr, size_t count, int32_t low, int32_t high, Generator& gen);
 

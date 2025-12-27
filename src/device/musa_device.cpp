@@ -556,6 +556,219 @@ void MusaDevice::rand_normal_float(float* ptr, size_t count, float mean,
     }
 }
 
+// =============================================================================
+// 随机数生成（高级接口实现）
+// =============================================================================
+
+Tensor MusaDevice::uniform(const Shape& shape, float min_val, float max_val, DType dtype) {
+    if (dtype != DType::FP32) {
+        TR_THROW(TypeError, "uniform only supports FP32, got ", dtype_name(dtype));
+    }
+
+    Tensor tensor = zeros(shape, dtype);
+    size_t count = static_cast<size_t>(shape.numel());
+    float* data = static_cast<float*>(tensor.data_ptr());
+
+    // 使用默认Generator
+    rand_uniform_float(data, count, min_val, max_val, get_default_generator());
+    return tensor;
+}
+
+void MusaDevice::uniform_inplace(Tensor& tensor_a, float min_val, float max_val, DType dtype) {
+    if (dtype != DType::FP32) {
+        TR_THROW(TypeError, "uniform_inplace only supports FP32, got ", dtype_name(dtype));
+    }
+    check_on_device(tensor_a);
+
+    size_t count = static_cast<size_t>(tensor_a.shape().numel());
+    float* data = static_cast<float*>(tensor_a.data_ptr());
+
+    rand_uniform_float(data, count, min_val, max_val, get_default_generator());
+}
+
+Tensor MusaDevice::randn(const Shape& shape, float mean, float stddev, DType dtype) {
+    if (dtype != DType::FP32) {
+        TR_THROW(TypeError, "randn only supports FP32, got ", dtype_name(dtype));
+    }
+
+    Tensor tensor = zeros(shape, dtype);
+    size_t count = static_cast<size_t>(shape.numel());
+    float* data = static_cast<float*>(tensor.data_ptr());
+
+    // 使用默认Generator
+    rand_normal_float(data, count, mean, stddev, get_default_generator());
+    return tensor;
+}
+
+void MusaDevice::randn_inplace(Tensor& tensor_a, float mean, float stddev, DType dtype) {
+    if (dtype != DType::FP32) {
+        TR_THROW(TypeError, "randn_inplace only supports FP32, got ", dtype_name(dtype));
+    }
+    check_on_device(tensor_a);
+
+    size_t count = static_cast<size_t>(tensor_a.shape().numel());
+    float* data = static_cast<float*>(tensor_a.data_ptr());
+
+    rand_normal_float(data, count, mean, stddev, get_default_generator());
+}
+
+Tensor MusaDevice::randint(const Shape& shape, int low, int high, DType dtype) {
+    if (dtype != DType::FP32 && dtype != DType::INT32) {
+        TR_THROW(TypeError, "randint only supports FP32 and INT32, got ", dtype_name(dtype));
+    }
+
+    Tensor tensor = zeros(shape, dtype);
+    size_t count = static_cast<size_t>(shape.numel());
+
+    if (dtype == DType::FP32) {
+        float* data = static_cast<float*>(tensor.data_ptr());
+        // 生成INT32随机数，然后转换为FP32
+        // 先在GPU上生成INT32
+        Tensor temp_int = zeros(shape, DType::INT32);
+        int32_t* temp_data = static_cast<int32_t*>(temp_int.data_ptr());
+
+        rand_uniform_int32(temp_data, count, low, high, get_default_generator());
+
+        // 使用自定义kernel将INT32转换为FP32
+        musaSetDevice(device_id_);
+        musaError_t err = launch_convert_int32_to_float_kernel(
+            static_cast<int>(count), temp_data, data
+        );
+
+        if (err != musaSuccess) {
+            TR_THROW(DeviceError, "MUSA convert kernel failed: ", musaGetErrorString(err));
+        }
+    } else {  // INT32
+        int32_t* data = static_cast<int32_t*>(tensor.data_ptr());
+        rand_uniform_int32(data, count, low, high, get_default_generator());
+    }
+
+    return tensor;
+}
+
+void MusaDevice::randint_inplace(Tensor& tensor_a, int low, int high, DType dtype) {
+    if (dtype != DType::FP32 && dtype != DType::INT32) {
+        TR_THROW(TypeError, "randint_inplace only supports FP32 and INT32, got ", dtype_name(dtype));
+    }
+    check_on_device(tensor_a);
+
+    size_t count = static_cast<size_t>(tensor_a.shape().numel());
+
+    if (dtype == DType::FP32) {
+        float* data = static_cast<float*>(tensor_a.data_ptr());
+        // 生成INT32随机数，然后转换为FP32
+        Tensor temp_int = zeros(tensor_a.shape(), DType::INT32);
+        int32_t* temp_data = static_cast<int32_t*>(temp_int.data_ptr());
+
+        rand_uniform_int32(temp_data, count, low, high, get_default_generator());
+
+        // 使用自定义kernel将INT32转换为FP32
+        musaSetDevice(device_id_);
+        musaError_t err = launch_convert_int32_to_float_kernel(
+            static_cast<int>(count), temp_data, data
+        );
+
+        if (err != musaSuccess) {
+            TR_THROW(DeviceError, "MUSA convert kernel failed: ", musaGetErrorString(err));
+        }
+    } else {  // INT32
+        int32_t* data = static_cast<int32_t*>(tensor_a.data_ptr());
+        rand_uniform_int32(data, count, low, high, get_default_generator());
+    }
+}
+
+Tensor MusaDevice::randbool(const Shape& shape, float rate_of_zeros, DType dtype) {
+    if (dtype != DType::FP32 && dtype != DType::INT32) {
+        TR_THROW(TypeError, "randbool only supports FP32 and INT32, got ", dtype_name(dtype));
+    }
+
+    Tensor tensor = zeros(shape, dtype);
+    size_t count = static_cast<size_t>(shape.numel());
+
+    if (dtype == DType::FP32) {
+        float* data = static_cast<float*>(tensor.data_ptr());
+        // 生成INT8伯努利随机数，然后转换为FP32
+        Tensor temp_int8 = zeros(shape, DType::INT8);
+        int8_t* temp_data = static_cast<int8_t*>(temp_int8.data_ptr());
+
+        rand_bernoulli_int8(temp_data, count, 1.0f - rate_of_zeros, get_default_generator());
+
+        // 使用自定义kernel将INT8转换为FP32
+        musaSetDevice(device_id_);
+        musaError_t err = launch_convert_int8_to_float_kernel(
+            static_cast<int>(count), temp_data, data
+        );
+
+        if (err != musaSuccess) {
+            TR_THROW(DeviceError, "MUSA convert kernel failed: ", musaGetErrorString(err));
+        }
+    } else {  // INT32
+        int32_t* data = static_cast<int32_t*>(tensor.data_ptr());
+        // 生成INT8伯努利随机数，然后转换为INT32
+        Tensor temp_int8 = zeros(shape, DType::INT8);
+        int8_t* temp_data = static_cast<int8_t*>(temp_int8.data_ptr());
+
+        rand_bernoulli_int8(temp_data, count, 1.0f - rate_of_zeros, get_default_generator());
+
+        // 使用自定义kernel将INT8转换为INT32
+        musaSetDevice(device_id_);
+        musaError_t err = launch_convert_int8_to_int32_kernel(
+            static_cast<int>(count), temp_data, data
+        );
+
+        if (err != musaSuccess) {
+            TR_THROW(DeviceError, "MUSA convert kernel failed: ", musaGetErrorString(err));
+        }
+    }
+
+    return tensor;
+}
+
+void MusaDevice::randbool_inplace(Tensor& tensor_a, float rate_of_zeros, DType dtype) {
+    if (dtype != DType::FP32 && dtype != DType::INT32) {
+        TR_THROW(TypeError, "randbool_inplace only supports FP32 and INT32, got ", dtype_name(dtype));
+    }
+    check_on_device(tensor_a);
+
+    size_t count = static_cast<size_t>(tensor_a.shape().numel());
+
+    if (dtype == DType::FP32) {
+        float* data = static_cast<float*>(tensor_a.data_ptr());
+        // 生成INT8伯努利随机数，然后转换为FP32
+        Tensor temp_int8 = zeros(tensor_a.shape(), DType::INT8);
+        int8_t* temp_data = static_cast<int8_t*>(temp_int8.data_ptr());
+
+        rand_bernoulli_int8(temp_data, count, 1.0f - rate_of_zeros, get_default_generator());
+
+        // 使用自定义kernel将INT8转换为FP32
+        musaSetDevice(device_id_);
+        musaError_t err = launch_convert_int8_to_float_kernel(
+            static_cast<int>(count), temp_data, data
+        );
+
+        if (err != musaSuccess) {
+            TR_THROW(DeviceError, "MUSA convert kernel failed: ", musaGetErrorString(err));
+        }
+    } else {  // INT32
+        int32_t* data = static_cast<int32_t*>(tensor_a.data_ptr());
+        // 生成INT8伯努利随机数，然后转换为INT32
+        Tensor temp_int8 = zeros(tensor_a.shape(), DType::INT8);
+        int8_t* temp_data = static_cast<int8_t*>(temp_int8.data_ptr());
+
+        rand_bernoulli_int8(temp_data, count, 1.0f - rate_of_zeros, get_default_generator());
+
+        // 使用自定义kernel将INT8转换为INT32
+        musaSetDevice(device_id_);
+        musaError_t err = launch_convert_int8_to_int32_kernel(
+            static_cast<int>(count), temp_data, data
+        );
+
+        if (err != musaSuccess) {
+            TR_THROW(DeviceError, "MUSA convert kernel failed: ", musaGetErrorString(err));
+        }
+    }
+}
+
 } // namespace tr
 
 #endif // TR_USE_MUSA

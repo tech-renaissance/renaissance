@@ -99,12 +99,68 @@ endif()
 target_compile_definitions(test_cpu_rng PRIVATE TR_LOG_LEVEL=0)
 target_link_libraries(test_cpu_rng PRIVATE renaissance)
 
+# CpuDevice高级RNG接口测试
+add_executable(test_cpu_rand_tensor
+    test_cpu_rand_tensor.cpp
+)
+
+target_include_directories(test_cpu_rand_tensor PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+)
+
+set_target_properties(test_cpu_rand_tensor PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/device
+)
+
+if(WIN32)
+    set_target_properties(test_cpu_rand_tensor PROPERTIES
+        WIN32_EXECUTABLE FALSE
+    )
+endif()
+
+if(MSVC)
+    target_compile_options(test_cpu_rand_tensor PRIVATE /W4 /utf-8)
+else()
+    target_compile_options(test_cpu_rand_tensor PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+target_compile_definitions(test_cpu_rand_tensor PRIVATE TR_LOG_LEVEL=0)
+target_link_libraries(test_cpu_rand_tensor PRIVATE renaissance)
+
 # CUDA Device测试（条件编译）
 if(TR_USE_CUDA)
     add_executable(test_cuda_device test_cuda_device.cpp)
 
     # CUDA RNG测试
     add_executable(test_cuda_rng test_cuda_rng.cpp)
+
+    # CudaDevice高级RNG接口测试
+    add_executable(test_cuda_rand_tensor
+        test_cuda_rand_tensor.cpp
+    )
+
+    target_include_directories(test_cuda_rand_tensor PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    )
+
+    set_target_properties(test_cuda_rand_tensor PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/device
+    )
+
+    if(WIN32)
+        set_target_properties(test_cuda_rand_tensor PROPERTIES
+            WIN32_EXECUTABLE FALSE
+        )
+    endif()
+
+    if(MSVC)
+        target_compile_options(test_cuda_rand_tensor PRIVATE /W4 /utf-8)
+    else()
+        target_compile_options(test_cuda_rand_tensor PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+
+    target_compile_definitions(test_cuda_rand_tensor PRIVATE TR_LOG_LEVEL=0)
+    target_link_libraries(test_cuda_rand_tensor PRIVATE renaissance)
 endif()
 
 # MUSA Device测试（条件编译）
@@ -236,6 +292,34 @@ if(TR_USE_MUSA)
 
     target_compile_definitions(test_musa_rng PRIVATE TR_LOG_LEVEL=0)
     target_link_libraries(test_musa_rng PRIVATE renaissance)
+
+    # ===== test_musa_rand_tensor配置 =====
+    add_executable(test_musa_rand_tensor
+        test_musa_rand_tensor.cpp
+    )
+
+    target_include_directories(test_musa_rand_tensor PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    )
+
+    set_target_properties(test_musa_rand_tensor PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/device
+    )
+
+    if(WIN32)
+        set_target_properties(test_musa_rand_tensor PROPERTIES
+            WIN32_EXECUTABLE FALSE
+        )
+    endif()
+
+    if(MSVC)
+        target_compile_options(test_musa_rand_tensor PRIVATE /W4 /utf-8)
+    else()
+        target_compile_options(test_musa_rand_tensor PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+
+    target_compile_definitions(test_musa_rand_tensor PRIVATE TR_LOG_LEVEL=0)
+    target_link_libraries(test_musa_rand_tensor PRIVATE renaissance)
 endif()
 
 message(STATUS "Device tests: CUDA and MUSA device tests configured")

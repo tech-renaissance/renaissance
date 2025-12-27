@@ -41,6 +41,21 @@ cudaError_t launch_add_int32_kernel(int n, const int32_t* a, const int32_t* b, i
  */
 cudaError_t launch_add_int8_kernel(int n, const int8_t* a, const int8_t* b, int8_t* c);
 
+/**
+ * @brief Wrapper function: Convert INT32 to FP32 (implemented in .cu)
+ */
+cudaError_t launch_convert_int32_to_float_kernel(int n, const int32_t* src, float* dst);
+
+/**
+ * @brief Wrapper function: Convert INT8 to FP32 (implemented in .cu)
+ */
+cudaError_t launch_convert_int8_to_float_kernel(int n, const int8_t* src, float* dst);
+
+/**
+ * @brief Wrapper function: Convert INT8 to INT32 (implemented in .cu)
+ */
+cudaError_t launch_convert_int8_to_int32_kernel(int n, const int8_t* src, int32_t* dst);
+
 } // namespace tr
 
 #endif // TR_USE_CUDA
