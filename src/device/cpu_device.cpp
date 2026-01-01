@@ -96,6 +96,19 @@ void CpuDevice::memset_internal(void* ptr, int value, size_t size) {
 
 // ===== 张量创建 =====
 
+Tensor CpuDevice::empty(const Shape& shape, DType dtype) {
+    // 1. 计算所需字节（使用已有的dtype_size和Shape::numel）
+    size_t nbytes = static_cast<size_t>(shape.numel()) * dtype_size(dtype);
+
+    // 2. 创建Storage（使用Device::create_storage，自动处理Arena/持有模式）
+    auto storage = create_storage(nbytes, -1);  // -1表示野张量，不使用Arena
+
+    // 3. 创建Tensor（使用已有保护构造函数：offset=0, is_view=false）
+    Tensor tensor(shape, dtype, type(), storage, 0, false);
+
+    return tensor;
+}
+
 Tensor CpuDevice::zeros(const Shape& shape, DType dtype) {
     // 1. 计算所需字节（使用已有的dtype_size和Shape::numel）
     size_t nbytes = static_cast<size_t>(shape.numel()) * dtype_size(dtype);
@@ -113,7 +126,7 @@ Tensor CpuDevice::zeros(const Shape& shape, DType dtype) {
 }
 
 Tensor CpuDevice::ones(const Shape& shape, DType dtype) {
-    Tensor tensor = zeros(shape, dtype);
+    Tensor tensor = empty(shape, dtype);
 
     // 根据数据类型填充1（使用已有的Tensor::data_ptr()）
     size_t count = static_cast<size_t>(shape.numel());
@@ -164,7 +177,7 @@ Tensor CpuDevice::uniform(const Shape& shape, float min_val, float max_val, DTyp
         TR_TYPE_ERROR("uniform only supports FP32, got " << dtype_name(dtype));
     }
 
-    Tensor tensor = zeros(shape, dtype);
+    Tensor tensor = empty(shape, dtype);
     size_t count = static_cast<size_t>(shape.numel());
     float* data = static_cast<float*>(tensor.data_ptr());
 
@@ -190,7 +203,7 @@ Tensor CpuDevice::randn(const Shape& shape, float mean, float stddev, DType dtyp
         TR_TYPE_ERROR("randn only supports FP32, got " << dtype_name(dtype));
     }
 
-    Tensor tensor = zeros(shape, dtype);
+    Tensor tensor = empty(shape, dtype);
     size_t count = static_cast<size_t>(shape.numel());
     float* data = static_cast<float*>(tensor.data_ptr());
 
@@ -216,7 +229,7 @@ Tensor CpuDevice::randint(const Shape& shape, int low, int high, DType dtype) {
         TR_TYPE_ERROR("randint only supports FP32 and INT32, got " << dtype_name(dtype));
     }
 
-    Tensor tensor = zeros(shape, dtype);
+    Tensor tensor = empty(shape, dtype);
     size_t count = static_cast<size_t>(shape.numel());
 
     if (dtype == DType::FP32) {
@@ -261,7 +274,7 @@ Tensor CpuDevice::randbool(const Shape& shape, float rate_of_zeros, DType dtype)
         TR_TYPE_ERROR("randbool only supports FP32 and INT32, got " << dtype_name(dtype));
     }
 
-    Tensor tensor = zeros(shape, dtype);
+    Tensor tensor = empty(shape, dtype);
     size_t count = static_cast<size_t>(shape.numel());
 
     if (dtype == DType::FP32) {
@@ -309,7 +322,33 @@ void CpuDevice::randbool_inplace(Tensor& tensor_a, float rate_of_zeros, DType dt
     }
 }
 
-// ===== 加法运算 =====
+// ===== 加法和复制运算 =====
+
+void CpuDevice::copy_into(const Tensor& tensor_a, Tensor& tensor_b) {
+    // 1. 验证设备
+    check_on_device(tensor_a);
+    check_on_device(tensor_b);
+
+    // 2. 检查数据类型一致
+    if (tensor_a.dtype() != tensor_b.dtype()) {
+        TR_TYPE_ERROR("Dtype mismatch in copy_into: " << dtype_name(tensor_a.dtype())
+                     << " vs " << dtype_name(tensor_b.dtype()));
+    }
+
+    // 3. 检查形状一致
+    check_same_shape(tensor_a, tensor_b);
+
+    // 4. 处理空张量（numel=0）
+    int64_t numel = tensor_a.numel();
+    if (numel == 0) {
+        // 空张量不执行任何操作
+        return;
+    }
+
+    // 5. 执行内存复制（使用memcpy_internal，基于std::memcpy）
+    size_t nbytes = static_cast<size_t>(numel) * dtype_size(tensor_a.dtype());
+    memcpy_internal(tensor_b.data_ptr(), tensor_a.data_ptr(), nbytes);
+}
 
 void CpuDevice::add_into(const Tensor& a, const Tensor& b, Tensor& result) {
     // 1. 验证

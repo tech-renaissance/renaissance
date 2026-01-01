@@ -79,6 +79,10 @@ void Device::add_into([[maybe_unused]] const Tensor& a, [[maybe_unused]] const T
     throw_not_impl("add_into");
 }
 
+void Device::copy_into([[maybe_unused]] const Tensor& tensor_a, [[maybe_unused]] Tensor& tensor_b) {
+    throw_not_impl("copy_into");
+}
+
 // =============================================================================
 // 随机数生成（基类实现：抛出NotImplementedError）
 // =============================================================================

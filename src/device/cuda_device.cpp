@@ -181,6 +181,19 @@ void CudaDevice::synchronize() {
 
 // ===== 张量创建 =====
 
+Tensor CudaDevice::empty(const Shape& shape, DType dtype) {
+    // 1. 计算所需字节
+    size_t nbytes = static_cast<size_t>(shape.numel()) * dtype_size(dtype);
+
+    // 2. 创建Storage（使用Device::create_storage，自动处理Arena/持有模式）
+    auto storage = create_storage(nbytes, -1);  // -1表示野张量
+
+    // 3. 创建Tensor
+    Tensor tensor(shape, dtype, type(), storage, 0, false);
+
+    return tensor;
+}
+
 Tensor CudaDevice::zeros(const Shape& shape, DType dtype) {
     // 1. 计算所需字节
     size_t nbytes = static_cast<size_t>(shape.numel()) * dtype_size(dtype);
@@ -282,6 +295,39 @@ Tensor CudaDevice::ones(const Shape& shape, DType dtype) {
 
     synchronize();  // 确保内核执行完成（未来可优化为按需同步）
     return tensor;
+}
+
+// ===== 加法和复制运算 =====
+
+void CudaDevice::copy_into(const Tensor& tensor_a, Tensor& tensor_b) {
+    // 1. 验证设备
+    check_on_device(tensor_a);
+    check_on_device(tensor_b);
+
+    // 2. 检查数据类型一致
+    if (tensor_a.dtype() != tensor_b.dtype()) {
+        TR_TYPE_ERROR("Dtype mismatch in copy_into: " << dtype_name(tensor_a.dtype())
+                     << " vs " << dtype_name(tensor_b.dtype()));
+    }
+
+    // 3. 检查形状一致
+    check_same_shape(tensor_a, tensor_b);
+
+    // 4. 处理空张量（numel=0）
+    int64_t numel = tensor_a.numel();
+    if (numel == 0) {
+        // 空张量不执行任何操作
+        return;
+    }
+
+    // 5. 执行GPU内存复制（使用cudaMemcpy DeviceToDevice）
+    cudaSetDevice(device_id_);
+    size_t nbytes = static_cast<size_t>(numel) * dtype_size(tensor_a.dtype());
+    cudaError_t err = cudaMemcpy(tensor_b.data_ptr(), tensor_a.data_ptr(),
+                                nbytes, cudaMemcpyDeviceToDevice);
+    if (err != cudaSuccess) {
+        TR_DEVICE_ERROR("CUDA memcpy failed in copy_into: " << cudaGetErrorString(err));
+    }
 }
 
 // ===== 加法运算（使用cuDNN）=====
@@ -642,7 +688,7 @@ Tensor CudaDevice::uniform(const Shape& shape, float min_val, float max_val, DTy
         TR_TYPE_ERROR("uniform only supports FP32, got " << dtype_name(dtype));
     }
 
-    Tensor tensor = zeros(shape, dtype);
+    Tensor tensor = empty(shape, dtype);
     size_t count = static_cast<size_t>(shape.numel());
     float* data = static_cast<float*>(tensor.data_ptr());
 
@@ -668,7 +714,7 @@ Tensor CudaDevice::randn(const Shape& shape, float mean, float stddev, DType dty
         TR_TYPE_ERROR("randn only supports FP32, got " << dtype_name(dtype));
     }
 
-    Tensor tensor = zeros(shape, dtype);
+    Tensor tensor = empty(shape, dtype);
     size_t count = static_cast<size_t>(shape.numel());
     float* data = static_cast<float*>(tensor.data_ptr());
 
@@ -694,14 +740,14 @@ Tensor CudaDevice::randint(const Shape& shape, int low, int high, DType dtype) {
         TR_TYPE_ERROR("randint only supports FP32 and INT32, got " << dtype_name(dtype));
     }
 
-    Tensor tensor = zeros(shape, dtype);
+    Tensor tensor = empty(shape, dtype);
     size_t count = static_cast<size_t>(shape.numel());
 
     if (dtype == DType::FP32) {
         float* data = static_cast<float*>(tensor.data_ptr());
         // 生成INT32随机数，然后转换为FP32
         // 先在GPU上生成INT32
-        Tensor temp_int = zeros(shape, DType::INT32);
+        Tensor temp_int = empty(shape, DType::INT32);
         int32_t* temp_data = static_cast<int32_t*>(temp_int.data_ptr());
 
         rand_uniform_int32(temp_data, count, low, high, get_default_generator());
@@ -734,7 +780,7 @@ void CudaDevice::randint_inplace(Tensor& tensor_a, int low, int high, DType dtyp
     if (dtype == DType::FP32) {
         float* data = static_cast<float*>(tensor_a.data_ptr());
         // 生成INT32随机数，然后转换为FP32
-        Tensor temp_int = zeros(tensor_a.shape(), DType::INT32);
+        Tensor temp_int = empty(tensor_a.shape(), DType::INT32);
         int32_t* temp_data = static_cast<int32_t*>(temp_int.data_ptr());
 
         rand_uniform_int32(temp_data, count, low, high, get_default_generator());
@@ -759,13 +805,13 @@ Tensor CudaDevice::randbool(const Shape& shape, float rate_of_zeros, DType dtype
         TR_TYPE_ERROR("randbool only supports FP32 and INT32, got " << dtype_name(dtype));
     }
 
-    Tensor tensor = zeros(shape, dtype);
+    Tensor tensor = empty(shape, dtype);
     size_t count = static_cast<size_t>(shape.numel());
 
     if (dtype == DType::FP32) {
         float* data = static_cast<float*>(tensor.data_ptr());
         // 生成INT8伯努利随机数，然后转换为FP32
-        Tensor temp_int8 = zeros(shape, DType::INT8);
+        Tensor temp_int8 = empty(shape, DType::INT8);
         int8_t* temp_data = static_cast<int8_t*>(temp_int8.data_ptr());
 
         rand_bernoulli_int8(temp_data, count, 1.0f - rate_of_zeros, get_default_generator());
@@ -782,7 +828,7 @@ Tensor CudaDevice::randbool(const Shape& shape, float rate_of_zeros, DType dtype
     } else {  // INT32
         int32_t* data = static_cast<int32_t*>(tensor.data_ptr());
         // 生成INT8伯努利随机数，然后转换为INT32
-        Tensor temp_int8 = zeros(shape, DType::INT8);
+        Tensor temp_int8 = empty(shape, DType::INT8);
         int8_t* temp_data = static_cast<int8_t*>(temp_int8.data_ptr());
 
         rand_bernoulli_int8(temp_data, count, 1.0f - rate_of_zeros, get_default_generator());
@@ -812,7 +858,7 @@ void CudaDevice::randbool_inplace(Tensor& tensor_a, float rate_of_zeros, DType d
     if (dtype == DType::FP32) {
         float* data = static_cast<float*>(tensor_a.data_ptr());
         // 生成INT8伯努利随机数，然后转换为FP32
-        Tensor temp_int8 = zeros(tensor_a.shape(), DType::INT8);
+        Tensor temp_int8 = empty(tensor_a.shape(), DType::INT8);
         int8_t* temp_data = static_cast<int8_t*>(temp_int8.data_ptr());
 
         rand_bernoulli_int8(temp_data, count, 1.0f - rate_of_zeros, get_default_generator());
@@ -829,7 +875,7 @@ void CudaDevice::randbool_inplace(Tensor& tensor_a, float rate_of_zeros, DType d
     } else {  // INT32
         int32_t* data = static_cast<int32_t*>(tensor_a.data_ptr());
         // 生成INT8伯努利随机数，然后转换为INT32
-        Tensor temp_int8 = zeros(tensor_a.shape(), DType::INT8);
+        Tensor temp_int8 = empty(tensor_a.shape(), DType::INT8);
         int8_t* temp_data = static_cast<int8_t*>(temp_int8.data_ptr());
 
         rand_bernoulli_int8(temp_data, count, 1.0f - rate_of_zeros, get_default_generator());

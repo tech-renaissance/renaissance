@@ -52,9 +52,6 @@ void test_context_chain() {
     std::cout << "Starting call chain..." << std::endl;
 
     top_function();
-
-    // 下面不会执行
-    std::cout << "This line should never be printed!" << std::endl;
 }
 
 // 测试3：有try-catch的情况

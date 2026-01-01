@@ -127,12 +127,43 @@ endif()
 target_compile_definitions(test_cpu_rand_tensor PRIVATE TR_LOG_LEVEL=0)
 target_link_libraries(test_cpu_rand_tensor PRIVATE renaissance)
 
+# CPU张量复制测试
+add_executable(test_cpu_copy
+    test_cpu_copy.cpp
+)
+
+target_include_directories(test_cpu_copy PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+)
+
+set_target_properties(test_cpu_copy PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/device
+)
+
+if(WIN32)
+    set_target_properties(test_cpu_copy PROPERTIES
+        WIN32_EXECUTABLE FALSE
+    )
+endif()
+
+if(MSVC)
+    target_compile_options(test_cpu_copy PRIVATE /W4 /utf-8)
+else()
+    target_compile_options(test_cpu_copy PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+target_compile_definitions(test_cpu_copy PRIVATE TR_LOG_LEVEL=0)
+target_link_libraries(test_cpu_copy PRIVATE renaissance)
+
 # CUDA Device测试（条件编译）
 if(TR_USE_CUDA)
     add_executable(test_cuda_device test_cuda_device.cpp)
 
     # CUDA RNG测试
     add_executable(test_cuda_rng test_cuda_rng.cpp)
+
+    # CUDA张量复制测试
+    add_executable(test_cuda_copy test_cuda_copy.cpp)
 
     # CudaDevice高级RNG接口测试
     add_executable(test_cuda_rand_tensor
@@ -169,6 +200,9 @@ if(TR_USE_MUSA)
 
     # MUSA RNG测试
     add_executable(test_musa_rng test_musa_rng.cpp)
+
+    # MUSA张量复制测试
+    add_executable(test_musa_copy test_musa_copy.cpp)
 endif()
 
 
@@ -212,6 +246,30 @@ if(TR_USE_CUDA)
     target_compile_definitions(test_cuda_rng PRIVATE TR_LOG_LEVEL=0)
     target_link_libraries(test_cuda_rng PRIVATE renaissance)
 
+    # ===== test_cuda_copy配置 =====
+    target_include_directories(test_cuda_copy PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    )
+
+    set_target_properties(test_cuda_copy PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/device
+    )
+
+    if(WIN32)
+        set_target_properties(test_cuda_copy PROPERTIES
+            WIN32_EXECUTABLE FALSE
+        )
+    endif()
+
+    if(MSVC)
+        target_compile_options(test_cuda_copy PRIVATE /W4 /utf-8)
+    else()
+        target_compile_options(test_cuda_copy PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+
+    target_compile_definitions(test_cuda_copy PRIVATE TR_LOG_LEVEL=0)
+    target_link_libraries(test_cuda_copy PRIVATE renaissance)
+
     # 为测试设置运行时PATH环境变量（合并所有DLL路径）
     if(WIN32)
         set(DLL_PATHS "")
@@ -246,6 +304,10 @@ if(TR_USE_CUDA)
             )
             # 为test_cuda_rng也设置相同的PATH
             set_target_properties(test_cuda_rng PROPERTIES
+                ENVIRONMENT "PATH=${DLL_PATH_STR};$ENV{PATH}"
+            )
+            # 为test_cuda_copy也设置相同的PATH
+            set_target_properties(test_cuda_copy PROPERTIES
                 ENVIRONMENT "PATH=${DLL_PATH_STR};$ENV{PATH}"
             )
             message(STATUS "CUDA device tests: All DLL paths added to environment")
@@ -292,6 +354,30 @@ if(TR_USE_MUSA)
 
     target_compile_definitions(test_musa_rng PRIVATE TR_LOG_LEVEL=0)
     target_link_libraries(test_musa_rng PRIVATE renaissance)
+
+    # ===== test_musa_copy配置 =====
+    target_include_directories(test_musa_copy PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    )
+
+    set_target_properties(test_musa_copy PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/device
+    )
+
+    if(WIN32)
+        set_target_properties(test_musa_copy PROPERTIES
+            WIN32_EXECUTABLE FALSE
+        )
+    endif()
+
+    if(MSVC)
+        target_compile_options(test_musa_copy PRIVATE /W4 /utf-8)
+    else()
+        target_compile_options(test_musa_copy PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+
+    target_compile_definitions(test_musa_copy PRIVATE TR_LOG_LEVEL=0)
+    target_link_libraries(test_musa_copy PRIVATE renaissance)
 
     # ===== test_musa_rand_tensor配置 =====
     add_executable(test_musa_rand_tensor

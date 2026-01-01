@@ -43,7 +43,8 @@ public:
     void memcpy_internal(void* dst, const void* src, size_t size) override;
     void memset_internal(void* ptr, int value, size_t size) override;
 
-    // ===== 张量创建（仅zeros和ones）=====
+    // ===== 张量创建 =====
+    Tensor empty(const Shape& shape, DType dtype) override;
     Tensor zeros(const Shape& shape, DType dtype) override;
     Tensor ones(const Shape& shape, DType dtype) override;
 
@@ -68,8 +69,9 @@ public:
     void randbool_inplace(Tensor& tensor_a, float rate_of_zeros = 0.5,
                           DType dtype = DType::FP32) override;
 
-    // ===== 张量运算（仅加法）=====
+    // ===== 张量运算（加法和复制）=====
     void add_into(const Tensor& a, const Tensor& b, Tensor& result) override;
+    void copy_into(const Tensor& tensor_a, Tensor& tensor_b) override;
 
     // ===== 张量比较 =====
     bool equal(const Tensor& a, const Tensor& b) override;

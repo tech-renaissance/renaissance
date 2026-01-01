@@ -125,8 +125,13 @@ public:
     bool has_arena() const noexcept { return arena_ != nullptr; }
 
     // =========================================================================
-    // 张量创建（纯虚函数 - 本阶段仅zeros和ones）
+    // 张量创建（纯虚函数）
     // =========================================================================
+
+    /**
+     * @brief 创建未初始化张量
+     */
+    virtual Tensor empty(const Shape& shape, DType dtype) = 0;
 
     /**
      * @brief 创建零张量
@@ -241,7 +246,7 @@ public:
                                   DType dtype = DType::FP32);
 
     // =========================================================================
-    // 张量运算（本阶段仅加法）
+    // 张量运算（本阶段仅加法和复制）
     // =========================================================================
 
     /**
@@ -251,6 +256,22 @@ public:
      * @param result 输出张量（预分配，NHWC）
      */
     virtual void add_into(const Tensor& a, const Tensor& b, Tensor& result);
+
+    /**
+     * @brief 张量复制（指定输出，核心方法！）
+     * @param tensor_a 源张量（从该张量复制）
+     * @param tensor_b 目标张量（复制到该张量）
+     * @throws ShapeError 形状不匹配时
+     * @throws TypeError 数据类型不匹配时
+     * @throws DeviceError 设备不匹配时
+     *
+     * @note 要求:
+     *  - tensor_a和tensor_b必须在同一设备上
+     *  - 数据类型必须相同
+     *  - 形状必须相同
+     *  - 空张量(numel=0)允许,不执行任何操作
+     */
+    virtual void copy_into(const Tensor& tensor_a, Tensor& tensor_b);
 
     // =========================================================================
     // 同步与调试
