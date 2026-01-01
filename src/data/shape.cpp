@@ -27,9 +27,9 @@ Shape Shape::conv_output_shape(const Shape& input, int32_t kernel_size,
 
     // 验证输出形状的有效性
     if (out_h <= 0 || out_w <= 0) {
-        TR_THROW(ValueError, "Invalid convolution output shape: input=(", h, ",", w, "), "
-                       "kernel=", kernel_size, ", padding=", padding, ", stride=", stride,
-                       ", output=(", out_h, ",", out_w, ")");
+        TR_VALUE_ERROR("Invalid convolution output shape: input=(" << h << "," << w << "), "
+                       "kernel=" << kernel_size << ", padding=" << padding << ", stride=" << stride
+                       << ", output=(" << out_h << "," << out_w << ")");
     }
 
     // 根据输入维度决定输出维度（保持语义一致性）
@@ -54,9 +54,9 @@ Shape Shape::pool_output_shape(const Shape& input, int32_t kernel_size, int32_t 
 
     // 验证输出形状的有效性
     if (out_h <= 0 || out_w <= 0) {
-        TR_THROW(ValueError, "Invalid pooling output shape: input=(", h, ",", w, "), "
-                       "kernel=", kernel_size, ", stride=", stride,
-                       ", output=(", out_h, ",", out_w, ")");
+        TR_VALUE_ERROR("Invalid pooling output shape: input=(" << h << "," << w << "), "
+                       "kernel=" << kernel_size << ", stride=" << stride
+                       << ", output=(" << out_h << "," << out_w << ")");
     }
 
     // 根据输入维度决定输出维度（保持语义一致性）
@@ -98,8 +98,8 @@ Shape Shape::linear_output_shape(const Shape& input, int32_t out_features) {
 
 Shape Shape::flatten_shape(const Shape& input, int32_t start_dim) {
     if (start_dim < 0 || start_dim >= input.ndim_) {
-        TR_THROW(ValueError, "Invalid start_dim for flatten: start_dim=", start_dim,
-                       ", ndim=", input.ndim_);
+        TR_VALUE_ERROR("Invalid start_dim for flatten: start_dim=" << start_dim
+                       << ", ndim=" << input.ndim_);
     }
 
     // 默认保留batch维度（start_dim=1），展平HWC为一维
@@ -151,7 +151,7 @@ Shape Shape::reshape_shape(const Shape& input, const std::array<int32_t, 4>& new
         } else if (new_shape[i] == -1) {
             // -1表示自动推导
             if (inferred_dim != -1) {
-                TR_THROW(ValueError, "Reshape can only infer one dimension, but found multiple -1");
+                TR_VALUE_ERROR("Reshape can only infer one dimension, but found multiple -1");
             }
             inferred_dim = i;
             new_ndim = i + 1;
@@ -165,15 +165,15 @@ Shape Shape::reshape_shape(const Shape& input, const std::array<int32_t, 4>& new
     // 推导-1维度的值
     if (inferred_dim != -1) {
         if (known_product == 0) {
-            TR_THROW(ValueError, "Cannot infer dimension when known product is 0");
+            TR_VALUE_ERROR("Cannot infer dimension when known product is 0");
         }
         int64_t inferred_size = total_elements / known_product;
         if (inferred_size * known_product != total_elements) {
-            TR_THROW(ValueError, "Cannot reshape tensor of size ", total_elements,
-                           " to shape with incompatible dimensions");
+            TR_VALUE_ERROR("Cannot reshape tensor of size " << total_elements
+                           << " to shape with incompatible dimensions");
         }
         if (inferred_size > INT32_MAX) {
-            TR_THROW(ValueError, "Inferred dimension size exceeds INT32_MAX: ", inferred_size);
+            TR_VALUE_ERROR("Inferred dimension size exceeds INT32_MAX: " << inferred_size);
         }
 
         // 构造最终的形状
@@ -193,8 +193,8 @@ Shape Shape::reshape_shape(const Shape& input, const std::array<int32_t, 4>& new
     } else {
         // 无需推导，直接验证
         if (known_product != total_elements) {
-            TR_THROW(ValueError, "Cannot reshape tensor of size ", total_elements,
-                           " to shape with size ", known_product);
+            TR_VALUE_ERROR("Cannot reshape tensor of size " << total_elements
+                           << " to shape with size " << known_product);
         }
 
         // 右对齐存储
@@ -215,8 +215,8 @@ void Shape::validate() const {
 
     for (int32_t i = 4 - ndim_; i < 4; ++i) {
         if (dims_[i] <= 0) {
-            TR_THROW(ValueError, "Invalid shape dimension at index ", i - (4 - ndim_),
-                     ": ", dims_[i], ". Dimensions must be positive.");
+            TR_VALUE_ERROR("Invalid shape dimension at index " << (i - (4 - ndim_))
+                     << ": " << dims_[i] << ". Dimensions must be positive.");
         }
     }
 }

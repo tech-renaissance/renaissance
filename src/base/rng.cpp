@@ -170,7 +170,7 @@ inline int get_num_threads(size_t count) {
 void cpu_rand_uint64(uint64_t* ptr, size_t count, Generator& gen) {
     if (count == 0) return;
     if (!ptr) {
-        TR_THROW(ValueError, "Null pointer in cpu_rand_uint64");
+        TR_VALUE_ERROR("Null pointer in cpu_rand_uint64");
     }
 
     // 预留偏移量区间
@@ -194,10 +194,10 @@ void cpu_rand_uint64(uint64_t* ptr, size_t count, Generator& gen) {
 void cpu_rand_bernoulli_int8(int8_t* ptr, size_t count, float prob_one, Generator& gen) {
     if (count == 0) return;
     if (!ptr) {
-        TR_THROW(ValueError, "Null pointer in cpu_rand_bernoulli_int8");
+        TR_VALUE_ERROR("Null pointer in cpu_rand_bernoulli_int8");
     }
     if (prob_one < 0.0f || prob_one > 1.0f) {
-        TR_THROW(ValueError, "prob_one must be in [0, 1], got ", prob_one);
+        TR_VALUE_ERROR("prob_one must be in [0, 1], got " << prob_one);
     }
 
     uint64_t base_offset = gen.next_offset(count);
@@ -225,11 +225,11 @@ void cpu_rand_bernoulli_int8(int8_t* ptr, size_t count, float prob_one, Generato
 void cpu_rand_uniform_int8(int8_t* ptr, size_t count, int8_t low, int8_t high, Generator& gen) {
     if (count == 0) return;
     if (!ptr) {
-        TR_THROW(ValueError, "Null pointer in cpu_rand_uniform_int8");
+        TR_VALUE_ERROR("Null pointer in cpu_rand_uniform_int8");
     }
     if (low > high) {
-        TR_THROW(ValueError, "low (", static_cast<int>(low),
-                 ") must be <= high (", static_cast<int>(high), ")");
+        TR_VALUE_ERROR("low (" << static_cast<int>(low)
+                 << ") must be <= high (" << static_cast<int>(high) << ")");
     }
 
     uint64_t base_offset = gen.next_offset(count);
@@ -259,10 +259,10 @@ void cpu_rand_uniform_int8(int8_t* ptr, size_t count, int8_t low, int8_t high, G
 void cpu_rand_bernoulli_int32(int32_t* ptr, size_t count, float prob_one, Generator& gen) {
     if (count == 0) return;
     if (!ptr) {
-        TR_THROW(ValueError, "Null pointer in cpu_rand_bernoulli_int32");
+        TR_VALUE_ERROR("Null pointer in cpu_rand_bernoulli_int32");
     }
     if (prob_one < 0.0f || prob_one > 1.0f) {
-        TR_THROW(ValueError, "prob_one must be in [0, 1], got ", prob_one);
+        TR_VALUE_ERROR("prob_one must be in [0, 1], got " << prob_one);
     }
 
     uint64_t base_offset = gen.next_offset(count);
@@ -289,10 +289,10 @@ void cpu_rand_bernoulli_int32(int32_t* ptr, size_t count, float prob_one, Genera
 void cpu_rand_uniform_int32(int32_t* ptr, size_t count, int32_t low, int32_t high, Generator& gen) {
     if (count == 0) return;
     if (!ptr) {
-        TR_THROW(ValueError, "Null pointer in cpu_rand_uniform_int32");
+        TR_VALUE_ERROR("Null pointer in cpu_rand_uniform_int32");
     }
     if (low > high) {
-        TR_THROW(ValueError, "low (", low, ") must be <= high (", high, ")");
+        TR_VALUE_ERROR("low (" << low << ") must be <= high (" << high << ")");
     }
 
     uint64_t base_offset = gen.next_offset(count);
@@ -324,10 +324,10 @@ void cpu_rand_uniform_int32(int32_t* ptr, size_t count, int32_t low, int32_t hig
 void cpu_rand_uniform_float(float* ptr, size_t count, float low, float high, Generator& gen) {
     if (count == 0) return;
     if (!ptr) {
-        TR_THROW(ValueError, "Null pointer in cpu_rand_uniform_float");
+        TR_VALUE_ERROR("Null pointer in cpu_rand_uniform_float");
     }
     if (low > high) {
-        TR_THROW(ValueError, "low (", low, ") must be <= high (", high, ")");
+        TR_VALUE_ERROR("low (" << low << ") must be <= high (" << high << ")");
     }
 
     uint64_t base_offset = gen.next_offset(count);
@@ -353,10 +353,10 @@ void cpu_rand_uniform_float(float* ptr, size_t count, float low, float high, Gen
 void cpu_rand_normal_float(float* ptr, size_t count, float mean, float std, Generator& gen) {
     if (count == 0) return;
     if (!ptr) {
-        TR_THROW(ValueError, "Null pointer in cpu_rand_normal_float");
+        TR_VALUE_ERROR("Null pointer in cpu_rand_normal_float");
     }
     if (std < 0.0f) {
-        TR_THROW(ValueError, "std must be >= 0, got ", std);
+        TR_VALUE_ERROR("std must be >= 0, got " << std);
     }
 
     // Box-Muller每次生成2个数，所以消耗的offset是(count + 1) / 2

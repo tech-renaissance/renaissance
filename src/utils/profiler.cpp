@@ -27,7 +27,7 @@ Profiler::~Profiler() {
 
 void Profiler::start() {
     if (timer_started_) {
-        TR_THROW(ValueError, "[Profiler::start] Timer has already started");
+        TR_VALUE_ERROR("Timer has already started");
     } else {
         timer_started_ = true;
         start_time_ = std::chrono::steady_clock::now();
@@ -39,7 +39,7 @@ void Profiler::stop() {
         timer_started_ = false;
         end_time_ = std::chrono::steady_clock::now();
     } else {
-        TR_THROW(ValueError, "[Profiler::stop] Timer has not yet started");
+        TR_VALUE_ERROR("Timer has not yet started");
     }
 
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end_time_ - start_time_);
@@ -48,10 +48,10 @@ void Profiler::stop() {
 
 double Profiler::avg_time() const {
     if (timer_started_) {
-        TR_THROW(ValueError, "[Profiler::avg_time] Timer is still running");
+        TR_VALUE_ERROR("Timer is still running");
     }
     if (iterations_ <= 0) {
-        TR_THROW(ValueError, "[Profiler::avg_time] Invalid iteration count: ", iterations_);
+        TR_VALUE_ERROR("Invalid iteration count: " << iterations_);
     }
 
     double elapsed = total_ / iterations_;
@@ -60,14 +60,14 @@ double Profiler::avg_time() const {
 
 void Profiler::set_iterations(int iterations) {
     if (iterations <= 0) {
-        TR_THROW(ValueError, "[Profiler::set_iterations] Invalid iteration count: ", iterations);
+        TR_VALUE_ERROR("Invalid iteration count: " << iterations);
     }
     iterations_ = iterations;
 }
 
 double Profiler::total_time() const {
     if (timer_started_) {
-        TR_THROW(ValueError, "[Profiler::total_time] Timer is still running");
+        TR_VALUE_ERROR("Timer is still running");
     }
     return total_;
 }
@@ -103,10 +103,10 @@ void Profiler::describe_operation(const std::string& operation_type, Shape shape
         const int64_t kernel_n = shape_b.n();
 
         if (kernel_h != 3 || kernel_w != 3) {
-            TR_THROW(ValueError, "[Profiler::describe_operation] Unsupported kernel size");
+            TR_VALUE_ERROR("Unsupported kernel size");
         }
         if (input_c != kernel_c) {
-            TR_THROW(ValueError, "[Profiler::describe_operation] Invalid kernel channel");
+            TR_VALUE_ERROR("Invalid kernel channel");
         }
 
         flops_ = 2LL * input_n * kernel_n * kernel_c * input_h * input_w * kernel_h * kernel_w;
@@ -121,25 +121,25 @@ void Profiler::describe_operation(const std::string& operation_type, Shape shape
         const int64_t kernel_n = shape_b.n();
 
         if (kernel_h != 1 || kernel_w != 1) {
-            TR_THROW(ValueError, "[Profiler::describe_operation] Unsupported kernel size");
+            TR_VALUE_ERROR("Unsupported kernel size");
         }
         if (input_c != kernel_c) {
-            TR_THROW(ValueError, "[Profiler::describe_operation] Invalid kernel channel");
+            TR_VALUE_ERROR("Invalid kernel channel");
         }
 
         flops_ = 2LL * input_n * kernel_n * kernel_c * input_h * input_w * kernel_h * kernel_w;
     } else {
-        TR_THROW(ValueError, "[Profiler::describe_operation] Unsupported operation type: ", operation_type);
+        TR_VALUE_ERROR("Unsupported operation type: " << operation_type);
     }
 }
 
 double Profiler::get_performance() const {
     if (flops_ <= 0) {
-        TR_THROW(ValueError, "[Profiler::get_performance] Operation type not specified");
+        TR_VALUE_ERROR("Operation type not specified");
     } else if (iterations_ <= 0) {
-        TR_THROW(ValueError, "[Profiler::get_performance] Invalid iteration count: ", iterations_);
+        TR_VALUE_ERROR("Invalid iteration count: " << iterations_);
     } else if (total_ < 0) {
-        TR_THROW(ValueError, "[Profiler::get_performance] Timer has not yet started");
+        TR_VALUE_ERROR("Timer has not yet started");
     } else {
         double gflops = flops_ / (total_ / iterations_ * 1e6);
         return gflops;

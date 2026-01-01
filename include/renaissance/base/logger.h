@@ -20,6 +20,9 @@
 
 namespace tr {
 
+// 前向声明
+class TRException;
+
 // 日志等级枚举
 enum class LogLevel {
     DEBUG = 0,
@@ -75,6 +78,17 @@ public:
      * @return 当前日志级别
      */
     LogLevel level() const noexcept { return current_level_; }
+
+    /**
+     * @brief 记录异常（便捷方法，用于catch块）
+     * @param e TRException异常对象
+     *
+     * @note 此方法可在catch块中手动调用，用于记录已捕获的异常
+     *       terminate handler会自动处理未捕获的异常，无需手动调用
+     *
+     * @deprecated V3.7.0后，异常不再自动记录Logger。此方法仅用于特殊场景。
+     */
+    void log_exception(const TRException& e);
 
 private:
     Logger();

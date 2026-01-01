@@ -103,7 +103,7 @@ const void* Tensor::data_ptr() const {
 template<>
 float* Tensor::typed_data<float>() {
     if (dtype_ != DType::FP32) {
-        TR_TYPE_ERROR("Expected fp32, got ", dtype_name(dtype_));
+        TR_TYPE_ERROR("Expected fp32, got " << dtype_name(dtype_));
     }
     return static_cast<float*>(data_ptr());
 }
@@ -111,7 +111,7 @@ float* Tensor::typed_data<float>() {
 template<>
 const float* Tensor::typed_data<float>() const {
     if (dtype_ != DType::FP32) {
-        TR_TYPE_ERROR("Expected fp32, got ", dtype_name(dtype_));
+        TR_TYPE_ERROR("Expected fp32, got " << dtype_name(dtype_));
     }
     return static_cast<const float*>(data_ptr());
 }
@@ -120,7 +120,7 @@ const float* Tensor::typed_data<float>() const {
 template<>
 uint16_t* Tensor::typed_data<uint16_t>() {
     if (dtype_ != DType::BF16) {
-        TR_TYPE_ERROR("Expected bf16, got ", dtype_name(dtype_));
+        TR_TYPE_ERROR("Expected bf16, got " << dtype_name(dtype_));
     }
     return static_cast<uint16_t*>(data_ptr());
 }
@@ -128,7 +128,7 @@ uint16_t* Tensor::typed_data<uint16_t>() {
 template<>
 const uint16_t* Tensor::typed_data<uint16_t>() const {
     if (dtype_ != DType::BF16) {
-        TR_TYPE_ERROR("Expected bf16, got ", dtype_name(dtype_));
+        TR_TYPE_ERROR("Expected bf16, got " << dtype_name(dtype_));
     }
     return static_cast<const uint16_t*>(data_ptr());
 }
@@ -137,7 +137,7 @@ const uint16_t* Tensor::typed_data<uint16_t>() const {
 template<>
 int32_t* Tensor::typed_data<int32_t>() {
     if (dtype_ != DType::INT32) {
-        TR_TYPE_ERROR("Expected int32, got ", dtype_name(dtype_));
+        TR_TYPE_ERROR("Expected int32, got " << dtype_name(dtype_));
     }
     return static_cast<int32_t*>(data_ptr());
 }
@@ -145,7 +145,7 @@ int32_t* Tensor::typed_data<int32_t>() {
 template<>
 const int32_t* Tensor::typed_data<int32_t>() const {
     if (dtype_ != DType::INT32) {
-        TR_TYPE_ERROR("Expected int32, got ", dtype_name(dtype_));
+        TR_TYPE_ERROR("Expected int32, got " << dtype_name(dtype_));
     }
     return static_cast<const int32_t*>(data_ptr());
 }
@@ -154,7 +154,7 @@ const int32_t* Tensor::typed_data<int32_t>() const {
 template<>
 int8_t* Tensor::typed_data<int8_t>() {
     if (dtype_ != DType::INT8) {
-        TR_TYPE_ERROR("Expected int8, got ", dtype_name(dtype_));
+        TR_TYPE_ERROR("Expected int8, got " << dtype_name(dtype_));
     }
     return static_cast<int8_t*>(data_ptr());
 }
@@ -162,7 +162,7 @@ int8_t* Tensor::typed_data<int8_t>() {
 template<>
 const int8_t* Tensor::typed_data<int8_t>() const {
     if (dtype_ != DType::INT8) {
-        TR_TYPE_ERROR("Expected int8, got ", dtype_name(dtype_));
+        TR_TYPE_ERROR("Expected int8, got " << dtype_name(dtype_));
     }
     return static_cast<const int8_t*>(data_ptr());
 }
@@ -183,8 +183,8 @@ void Tensor::bind_storage(std::shared_ptr<Storage> storage, size_t offset) {
 
     size_t required = offset + nbytes();
     if (storage->capacity() < required) {
-        TR_VALUE_ERROR("Storage too small: ", storage->capacity(),
-                       " bytes, need ", required, " bytes");
+        TR_VALUE_ERROR("Storage too small: " << storage->capacity()
+                       << " bytes, need " << required << " bytes");
     }
 
     storage_ = std::move(storage);
@@ -205,7 +205,7 @@ Tensor Tensor::view(const Shape& new_shape) const {
     }
 
     if (new_shape.numel() != numel()) {
-        TR_SHAPE_ERROR("view numel mismatch: ", numel(), " -> ", new_shape.numel());
+        TR_SHAPE_ERROR("view numel mismatch: " << numel() << " -> " << new_shape.numel());
     }
 
     // 禁止view-of-view以防止offset计算错误
@@ -231,7 +231,7 @@ Tensor Tensor::flatten() const {
 
     // 检查是否可以安全转换
     if (total_elements != static_cast<int64_t>(size)) {
-        TR_SHAPE_ERROR("Cannot flatten: too many elements (", total_elements, ")");
+        TR_SHAPE_ERROR("Cannot flatten: too many elements (" << total_elements << ")");
     }
 
     return view(Shape(size));

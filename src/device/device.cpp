@@ -50,8 +50,8 @@ std::shared_ptr<Storage> Device::create_storage(size_t nbytes, int handle) {
         // 验证对齐
         size_t alignment = arena_->alignment();
         if (reinterpret_cast<uintptr_t>(ptr) % alignment != 0) {
-            TR_THROW(MemoryError, "Arena returned unaligned pointer: ptr=", ptr,
-                     ", alignment=", alignment, ", offset=", offset);
+            TR_MEMORY_ERROR("Arena returned unaligned pointer: ptr=" << ptr
+                     << ", alignment=" << alignment << ", offset=" << offset);
         }
 
         // holder为nullptr → Storage借用模式，不负责释放
@@ -72,7 +72,7 @@ std::shared_ptr<Storage> Device::create_storage(size_t nbytes, int handle) {
 // ===== 默认运算实现（抛出未实现）=====
 
 void Device::throw_not_impl(const char* func_name) const {
-    TR_THROW(NotImplementedError, type().to_string(), "::", func_name, " not implemented");
+    TR_NOT_IMPLEMENTED(type().to_string() << "::" << func_name << " not implemented");
 }
 
 void Device::add_into([[maybe_unused]] const Tensor& a, [[maybe_unused]] const Tensor& b, [[maybe_unused]] Tensor& result) {
@@ -135,15 +135,15 @@ void Device::randbool_inplace([[maybe_unused]] Tensor& tensor_a,
 
 void Device::check_same_shape(const Tensor& a, const Tensor& b) const {
     if (!Tensor::same_shape(a, b)) {
-        TR_THROW(ValueError, "Shape mismatch: ", a.shape().to_string(),
-                       " vs ", b.shape().to_string());
+        TR_SHAPE_ERROR("Shape mismatch: " << a.shape().to_string()
+                       << " vs " << b.shape().to_string());
     }
 }
 
 void Device::check_on_device(const Tensor& t) const {
     if (t.device_type() != type()) {
-        TR_THROW(ValueError, "Tensor on ", t.device_type().to_string(),
-                        " but operation on ", type().to_string());
+        TR_VALUE_ERROR("Tensor on " << t.device_type().to_string()
+                        << " but operation on " << type().to_string());
     }
 }
 
@@ -163,8 +163,8 @@ void Device::check_tensors_compatible(
         check_on_device(*t);
         check_same_shape(*first, *t);
         if (require_same_dtype && t->dtype() != first->dtype()) {
-            TR_THROW(TypeError, "Dtype mismatch: expected ", dtype_name(first->dtype()),
-                     ", got ", dtype_name(t->dtype()));
+            TR_TYPE_ERROR("Dtype mismatch: expected " << dtype_name(first->dtype())
+                     << ", got " << dtype_name(t->dtype()));
         }
     }
 }

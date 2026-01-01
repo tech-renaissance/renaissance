@@ -78,17 +78,17 @@ Device& DeviceManager::get(const DeviceType& type) {
 
     int max_devices = 1 + cuda_count_ + musa_count_;
     if (idx < 0 || idx >= max_devices) {
-        TR_THROW(ValueError, "Invalid device type: ", type.to_string());
+        TR_VALUE_ERROR("Invalid device type: " << type.to_string());
     }
 
     auto& device_ptr = devices_[idx];
 
     if (!device_ptr) {
-        TR_THROW(ValueError, "Device not available: ", type.to_string());
+        TR_VALUE_ERROR("Device not available: " << type.to_string());
     }
 
     if (!device_ptr->is_available()) {
-        TR_THROW(ValueError, "Device offline at runtime: ", type.to_string());
+        TR_VALUE_ERROR("Device offline at runtime: " << type.to_string());
     }
 
     return *device_ptr;
@@ -252,8 +252,8 @@ int DeviceManager::detect_musa() {
 #ifdef TR_USE_CUDA
 CudaDevice& DeviceManager::cuda(int index) {
     if (index < 0 || index >= cuda_count_) {
-        TR_THROW(ValueError, "CUDA device index out of range: ", index,
-                        " (available: ", cuda_count_, ")");
+        TR_VALUE_ERROR("CUDA device index out of range: " << index
+                        << " (available: " << cuda_count_ << ")");
     }
 
     return *static_cast<CudaDevice*>(devices_[1 + index].get());
@@ -263,8 +263,8 @@ CudaDevice& DeviceManager::cuda(int index) {
 #ifdef TR_USE_MUSA
 MusaDevice& DeviceManager::musa(int index) {
     if (index < 0 || index >= musa_count_) {
-        TR_THROW(ValueError, "MUSA device index out of range: ", index,
-                        " (available: ", musa_count_, ")");
+        TR_VALUE_ERROR("MUSA device index out of range: " << index
+                        << " (available: " << musa_count_ << ")");
     }
 
     return *static_cast<MusaDevice*>(devices_[9 + index].get());

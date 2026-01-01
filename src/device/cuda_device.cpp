@@ -46,8 +46,8 @@ namespace {
             cudaSetDevice(device_id);
             cudnnStatus_t status = cudnnCreate(&handles[device_id]);
             if (status != CUDNN_STATUS_SUCCESS) {
-                TR_THROW(DeviceError, "Failed to create cuDNN handle for device ",
-                         device_id, ": ", cudnnGetErrorString(status));
+                TR_DEVICE_ERROR("Failed to create cuDNN handle for device "
+                         << device_id << ": " << cudnnGetErrorString(status));
             }
             initialized[device_id] = true;
         }
@@ -61,16 +61,16 @@ CudaDevice::CudaDevice(int device_id) : device_id_(device_id) {
     // 设置当前设备
     cudaError_t err = cudaSetDevice(device_id_);
     if (err != cudaSuccess) {
-        TR_THROW(DeviceError, "Failed to set CUDA device ", device_id_,
-                 ": ", cudaGetErrorString(err));
+        TR_DEVICE_ERROR("Failed to set CUDA device " << device_id_
+                 << ": " << cudaGetErrorString(err));
     }
 
     // 获取设备属性
     cudaDeviceProp prop;
     err = cudaGetDeviceProperties(&prop, device_id_);
     if (err != cudaSuccess) {
-        TR_THROW(DeviceError, "Failed to get CUDA device properties for device ",
-                 device_id_, ": ", cudaGetErrorString(err));
+        TR_DEVICE_ERROR("Failed to get CUDA device properties for device "
+                 << device_id_ << ": " << cudaGetErrorString(err));
     }
 
     LOG_INFO << "CudaDevice[" << device_id_ << "] initialized: " << prop.name;
@@ -116,7 +116,7 @@ size_t CudaDevice::memory_available() const {
 
 std::shared_ptr<void> CudaDevice::allocate(size_t size) {
     if (size == 0) {
-        TR_THROW(ValueError, "Cannot allocate 0 bytes");
+        TR_VALUE_ERROR("Cannot allocate 0 bytes");
     }
 
     cudaSetDevice(device_id_);
@@ -124,8 +124,8 @@ std::shared_ptr<void> CudaDevice::allocate(size_t size) {
     void* ptr = nullptr;
     cudaError_t err = cudaMallocAsync(&ptr, size, cudaStreamDefault);
     if (err != cudaSuccess) {
-        TR_THROW(MemoryError, "CUDA allocation failed on device ", device_id_,
-                 ": ", cudaGetErrorString(err));
+        TR_MEMORY_ERROR("CUDA allocation failed on device " << device_id_
+                 << ": " << cudaGetErrorString(err));
     }
 
     // 同步确保分配完成
@@ -149,25 +149,25 @@ void CudaDevice::deallocate(void* ptr) {
 
 void CudaDevice::memcpy_internal(void* dst, const void* src, size_t size) {
     if (!dst || !src) {
-        TR_THROW(ValueError, "Null pointer in memcpy");
+        TR_VALUE_ERROR("Null pointer in memcpy");
     }
 
     cudaSetDevice(device_id_);
     cudaError_t err = cudaMemcpy(dst, src, size, cudaMemcpyDeviceToDevice);
     if (err != cudaSuccess) {
-        TR_THROW(DeviceError, "CUDA memcpy failed: ", cudaGetErrorString(err));
+        TR_DEVICE_ERROR("CUDA memcpy failed: " << cudaGetErrorString(err));
     }
 }
 
 void CudaDevice::memset_internal(void* ptr, int value, size_t size) {
     if (!ptr) {
-        TR_THROW(ValueError, "Null pointer in memset");
+        TR_VALUE_ERROR("Null pointer in memset");
     }
 
     cudaSetDevice(device_id_);
     cudaError_t err = cudaMemset(ptr, value, size);
     if (err != cudaSuccess) {
-        TR_THROW(DeviceError, "CUDA memset failed: ", cudaGetErrorString(err));
+        TR_DEVICE_ERROR("CUDA memset failed: " << cudaGetErrorString(err));
     }
 }
 
@@ -175,7 +175,7 @@ void CudaDevice::synchronize() {
     cudaSetDevice(device_id_);
     cudaError_t err = cudaDeviceSynchronize();
     if (err != cudaSuccess) {
-        TR_THROW(DeviceError, "CUDA synchronize failed: ", cudaGetErrorString(err));
+        TR_DEVICE_ERROR("CUDA synchronize failed: " << cudaGetErrorString(err));
     }
 }
 
@@ -196,7 +196,7 @@ Tensor CudaDevice::zeros(const Shape& shape, DType dtype) {
     cudaSetDevice(device_id_);
     cudaError_t err = cudaMemset(tensor.data_ptr(), 0, nbytes);
     if (err != cudaSuccess) {
-        TR_THROW(DeviceError, "CUDA memset failed in zeros: ", cudaGetErrorString(err));
+        TR_DEVICE_ERROR("CUDA memset failed in zeros: " << cudaGetErrorString(err));
     }
 
     return tensor;
@@ -219,7 +219,7 @@ Tensor CudaDevice::ones(const Shape& shape, DType dtype) {
     if (dtype == DType::INT8) {
         cudaError_t err = cudaMemset(tensor.data_ptr(), 1, nbytes);
         if (err != cudaSuccess) {
-            TR_THROW(DeviceError, "CUDA memset failed in ones: ", cudaGetErrorString(err));
+            TR_DEVICE_ERROR("CUDA memset failed in ones: " << cudaGetErrorString(err));
         }
         synchronize();  // 确保内核执行完成（未来可优化为按需同步）
         return tensor;
@@ -234,7 +234,7 @@ Tensor CudaDevice::ones(const Shape& shape, DType dtype) {
         );
 
         if (err != cudaSuccess) {
-            TR_THROW(DeviceError, "CUDA fill kernel failed in ones: ", cudaGetErrorString(err));
+            TR_DEVICE_ERROR("CUDA fill kernel failed in ones: " << cudaGetErrorString(err));
         }
         synchronize();  // 确保内核执行完成（未来可优化为按需同步）
         return tensor;
@@ -246,7 +246,7 @@ Tensor CudaDevice::ones(const Shape& shape, DType dtype) {
     cudnnTensorDescriptor_t desc;
     cudnnStatus_t status = cudnnCreateTensorDescriptor(&desc);
     if (status != CUDNN_STATUS_SUCCESS) {
-        TR_THROW(DeviceError, "Failed to create tensor descriptor: ", cudnnGetErrorString(status));
+        TR_DEVICE_ERROR("Failed to create tensor descriptor: " << cudnnGetErrorString(status));
     }
 
     int dims[4] = {1, static_cast<int>(count), 1, 1};
@@ -264,20 +264,20 @@ Tensor CudaDevice::ones(const Shape& shape, DType dtype) {
             break;
         default:
             cudnnDestroyTensorDescriptor(desc);
-            TR_THROW(TypeError, "Unsupported dtype in ones: ", dtype_name(dtype));
+            TR_TYPE_ERROR("Unsupported dtype in ones: " << dtype_name(dtype));
     }
 
     status = cudnnSetTensorNdDescriptor(desc, cudnn_dtype, 4, dims, strides);
     if (status != CUDNN_STATUS_SUCCESS) {
         cudnnDestroyTensorDescriptor(desc);
-        TR_THROW(DeviceError, "Failed to set tensor descriptor: ", cudnnGetErrorString(status));
+        TR_DEVICE_ERROR("Failed to set tensor descriptor: " << cudnnGetErrorString(status));
     }
 
     status = cudnnSetTensor(cudnn_handle, desc, tensor.data_ptr(), &value_f);
     cudnnDestroyTensorDescriptor(desc);
 
     if (status != CUDNN_STATUS_SUCCESS) {
-        TR_THROW(DeviceError, "cuDNN set tensor failed: ", cudnnGetErrorString(status));
+        TR_DEVICE_ERROR("cuDNN set tensor failed: " << cudnnGetErrorString(status));
     }
 
     synchronize();  // 确保内核执行完成（未来可优化为按需同步）
@@ -296,7 +296,7 @@ void CudaDevice::add_into(const Tensor& a, const Tensor& b, Tensor& result) {
 
     // 2. 检查数据类型一致
     if (a.dtype() != b.dtype() || a.dtype() != result.dtype()) {
-        TR_THROW(TypeError, "Dtype mismatch in add_into");
+        TR_TYPE_ERROR("Dtype mismatch in add_into");
     }
 
     cudaSetDevice(device_id_);
@@ -326,7 +326,7 @@ void CudaDevice::add_into(const Tensor& a, const Tensor& b, Tensor& result) {
         }
 
         if (err != cudaSuccess) {
-            TR_THROW(DeviceError, "CUDA add kernel failed in add_into: ", cudaGetErrorString(err));
+            TR_DEVICE_ERROR("CUDA add kernel failed in add_into: " << cudaGetErrorString(err));
         }
         return;
     }
@@ -341,18 +341,18 @@ void CudaDevice::add_into(const Tensor& a, const Tensor& b, Tensor& result) {
 
     status = cudnnCreateTensorDescriptor(&a_desc);
     if (status != CUDNN_STATUS_SUCCESS) {
-        TR_THROW(DeviceError, "Failed to create tensor descriptor: ", cudnnGetErrorString(status));
+        TR_DEVICE_ERROR("Failed to create tensor descriptor: " << cudnnGetErrorString(status));
     }
     status = cudnnCreateTensorDescriptor(&b_desc);
     if (status != CUDNN_STATUS_SUCCESS) {
         cudnnDestroyTensorDescriptor(a_desc);
-        TR_THROW(DeviceError, "Failed to create tensor descriptor: ", cudnnGetErrorString(status));
+        TR_DEVICE_ERROR("Failed to create tensor descriptor: " << cudnnGetErrorString(status));
     }
     status = cudnnCreateTensorDescriptor(&r_desc);
     if (status != CUDNN_STATUS_SUCCESS) {
         cudnnDestroyTensorDescriptor(a_desc);
         cudnnDestroyTensorDescriptor(b_desc);
-        TR_THROW(DeviceError, "Failed to create tensor descriptor: ", cudnnGetErrorString(status));
+        TR_DEVICE_ERROR("Failed to create tensor descriptor: " << cudnnGetErrorString(status));
     }
 
     // 7. 设置Tensor描述符（使用NCHW格式，将1D张量看作[1, count, 1, 1]）
@@ -364,7 +364,7 @@ void CudaDevice::add_into(const Tensor& a, const Tensor& b, Tensor& result) {
             cudnnDestroyTensorDescriptor(a_desc);
             cudnnDestroyTensorDescriptor(b_desc);
             cudnnDestroyTensorDescriptor(r_desc);
-            TR_THROW(TypeError, "Unsupported dtype in add_into: ", dtype_name(a.dtype()));
+            TR_TYPE_ERROR("Unsupported dtype in add_into: " << dtype_name(a.dtype()));
     }
 
     // 设置描述符：[batch, channels, height, width] = [1, count, 1, 1]
@@ -376,7 +376,7 @@ void CudaDevice::add_into(const Tensor& a, const Tensor& b, Tensor& result) {
         cudnnDestroyTensorDescriptor(a_desc);
         cudnnDestroyTensorDescriptor(b_desc);
         cudnnDestroyTensorDescriptor(r_desc);
-        TR_THROW(DeviceError, "Failed to set tensor descriptor: ", cudnnGetErrorString(status));
+        TR_DEVICE_ERROR("Failed to set tensor descriptor: " << cudnnGetErrorString(status));
     }
 
     status = cudnnSetTensorNdDescriptor(b_desc, cudnn_dtype, 4, dims, strides);
@@ -384,7 +384,7 @@ void CudaDevice::add_into(const Tensor& a, const Tensor& b, Tensor& result) {
         cudnnDestroyTensorDescriptor(a_desc);
         cudnnDestroyTensorDescriptor(b_desc);
         cudnnDestroyTensorDescriptor(r_desc);
-        TR_THROW(DeviceError, "Failed to set tensor descriptor: ", cudnnGetErrorString(status));
+        TR_DEVICE_ERROR("Failed to set tensor descriptor: " << cudnnGetErrorString(status));
     }
 
     status = cudnnSetTensorNdDescriptor(r_desc, cudnn_dtype, 4, dims, strides);
@@ -392,7 +392,7 @@ void CudaDevice::add_into(const Tensor& a, const Tensor& b, Tensor& result) {
         cudnnDestroyTensorDescriptor(a_desc);
         cudnnDestroyTensorDescriptor(b_desc);
         cudnnDestroyTensorDescriptor(r_desc);
-        TR_THROW(DeviceError, "Failed to set tensor descriptor: ", cudnnGetErrorString(status));
+        TR_DEVICE_ERROR("Failed to set tensor descriptor: " << cudnnGetErrorString(status));
     }
 
     // 8. 创建OpTensor描述符
@@ -402,7 +402,7 @@ void CudaDevice::add_into(const Tensor& a, const Tensor& b, Tensor& result) {
         cudnnDestroyTensorDescriptor(a_desc);
         cudnnDestroyTensorDescriptor(b_desc);
         cudnnDestroyTensorDescriptor(r_desc);
-        TR_THROW(DeviceError, "Failed to create op tensor descriptor: ", cudnnGetErrorString(status));
+        TR_DEVICE_ERROR("Failed to create op tensor descriptor: " << cudnnGetErrorString(status));
     }
 
     // 设置运算类型：ADD
@@ -421,7 +421,7 @@ void CudaDevice::add_into(const Tensor& a, const Tensor& b, Tensor& result) {
         cudnnDestroyTensorDescriptor(a_desc);
         cudnnDestroyTensorDescriptor(b_desc);
         cudnnDestroyTensorDescriptor(r_desc);
-        TR_THROW(DeviceError, "Failed to set op tensor descriptor: ", cudnnGetErrorString(status));
+        TR_DEVICE_ERROR("Failed to set op tensor descriptor: " << cudnnGetErrorString(status));
     }
 
     // 9. 准备缩放因子（浮点类型）
@@ -448,7 +448,7 @@ void CudaDevice::add_into(const Tensor& a, const Tensor& b, Tensor& result) {
 
     // 12. 检查错误
     if (status != CUDNN_STATUS_SUCCESS) {
-        TR_THROW(DeviceError, "cuDNN op tensor failed: ", cudnnGetErrorString(status));
+        TR_DEVICE_ERROR("cuDNN op tensor failed: " << cudnnGetErrorString(status));
     }
 
     // 13. 同步确保计算完成
@@ -462,7 +462,7 @@ void CudaDevice::add_into(const Tensor& a, const Tensor& b, Tensor& result) {
 void CudaDevice::rand_uint64(uint64_t* ptr, size_t count, Generator& gen) {
     if (count == 0) return;
     if (!ptr) {
-        TR_THROW(ValueError, "Null pointer in rand_uint64");
+        TR_VALUE_ERROR("Null pointer in rand_uint64");
     }
 
     // 原子预留offset（与CPU使用相同的Generator！）
@@ -476,8 +476,8 @@ void CudaDevice::rand_uint64(uint64_t* ptr, size_t count, Generator& gen) {
     );
 
     if (err != cudaSuccess) {
-        TR_THROW(DeviceError, "CUDA rand_uint64 kernel failed: ",
-                 cudaGetErrorString(err));
+        TR_DEVICE_ERROR("CUDA rand_uint64 kernel failed: "
+                 << cudaGetErrorString(err));
     }
 }
 
@@ -485,10 +485,10 @@ void CudaDevice::rand_bernoulli_int8(int8_t* ptr, size_t count, float prob_one,
                                       Generator& gen) {
     if (count == 0) return;
     if (!ptr) {
-        TR_THROW(ValueError, "Null pointer in rand_bernoulli_int8");
+        TR_VALUE_ERROR("Null pointer in rand_bernoulli_int8");
     }
     if (prob_one < 0.0f || prob_one > 1.0f) {
-        TR_THROW(ValueError, "prob_one must be in [0, 1], got ", prob_one);
+        TR_VALUE_ERROR("prob_one must be in [0, 1], got " << prob_one);
     }
 
     uint64_t base_offset = gen.next_offset(count);
@@ -501,8 +501,8 @@ void CudaDevice::rand_bernoulli_int8(int8_t* ptr, size_t count, float prob_one,
     );
 
     if (err != cudaSuccess) {
-        TR_THROW(DeviceError, "CUDA rand_bernoulli_int8 kernel failed: ",
-                 cudaGetErrorString(err));
+        TR_DEVICE_ERROR("CUDA rand_bernoulli_int8 kernel failed: "
+                 << cudaGetErrorString(err));
     }
 }
 
@@ -510,10 +510,10 @@ void CudaDevice::rand_uniform_int8(int8_t* ptr, size_t count, int8_t low,
                                     int8_t high, Generator& gen) {
     if (count == 0) return;
     if (!ptr) {
-        TR_THROW(ValueError, "Null pointer in rand_uniform_int8");
+        TR_VALUE_ERROR("Null pointer in rand_uniform_int8");
     }
     if (low > high) {
-        TR_THROW(ValueError, "low must be <= high");
+        TR_VALUE_ERROR("low must be <= high");
     }
 
     uint64_t base_offset = gen.next_offset(count);
@@ -526,8 +526,8 @@ void CudaDevice::rand_uniform_int8(int8_t* ptr, size_t count, int8_t low,
     );
 
     if (err != cudaSuccess) {
-        TR_THROW(DeviceError, "CUDA rand_uniform_int8 kernel failed: ",
-                 cudaGetErrorString(err));
+        TR_DEVICE_ERROR("CUDA rand_uniform_int8 kernel failed: "
+                 << cudaGetErrorString(err));
     }
 }
 
@@ -535,10 +535,10 @@ void CudaDevice::rand_bernoulli_int32(int32_t* ptr, size_t count, float prob_one
                                        Generator& gen) {
     if (count == 0) return;
     if (!ptr) {
-        TR_THROW(ValueError, "Null pointer in rand_bernoulli_int32");
+        TR_VALUE_ERROR("Null pointer in rand_bernoulli_int32");
     }
     if (prob_one < 0.0f || prob_one > 1.0f) {
-        TR_THROW(ValueError, "prob_one must be in [0, 1], got ", prob_one);
+        TR_VALUE_ERROR("prob_one must be in [0, 1], got " << prob_one);
     }
 
     uint64_t base_offset = gen.next_offset(count);
@@ -551,8 +551,8 @@ void CudaDevice::rand_bernoulli_int32(int32_t* ptr, size_t count, float prob_one
     );
 
     if (err != cudaSuccess) {
-        TR_THROW(DeviceError, "CUDA rand_bernoulli_int32 kernel failed: ",
-                 cudaGetErrorString(err));
+        TR_DEVICE_ERROR("CUDA rand_bernoulli_int32 kernel failed: "
+                 << cudaGetErrorString(err));
     }
 }
 
@@ -560,10 +560,10 @@ void CudaDevice::rand_uniform_int32(int32_t* ptr, size_t count, int32_t low,
                                      int32_t high, Generator& gen) {
     if (count == 0) return;
     if (!ptr) {
-        TR_THROW(ValueError, "Null pointer in rand_uniform_int32");
+        TR_VALUE_ERROR("Null pointer in rand_uniform_int32");
     }
     if (low > high) {
-        TR_THROW(ValueError, "low must be <= high");
+        TR_VALUE_ERROR("low must be <= high");
     }
 
     uint64_t base_offset = gen.next_offset(count);
@@ -576,8 +576,8 @@ void CudaDevice::rand_uniform_int32(int32_t* ptr, size_t count, int32_t low,
     );
 
     if (err != cudaSuccess) {
-        TR_THROW(DeviceError, "CUDA rand_uniform_int32 kernel failed: ",
-                 cudaGetErrorString(err));
+        TR_DEVICE_ERROR("CUDA rand_uniform_int32 kernel failed: "
+                 << cudaGetErrorString(err));
     }
 }
 
@@ -585,10 +585,10 @@ void CudaDevice::rand_uniform_float(float* ptr, size_t count, float low,
                                      float high, Generator& gen) {
     if (count == 0) return;
     if (!ptr) {
-        TR_THROW(ValueError, "Null pointer in rand_uniform_float");
+        TR_VALUE_ERROR("Null pointer in rand_uniform_float");
     }
     if (low > high) {
-        TR_THROW(ValueError, "low must be <= high");
+        TR_VALUE_ERROR("low must be <= high");
     }
 
     uint64_t base_offset = gen.next_offset(count);
@@ -601,8 +601,8 @@ void CudaDevice::rand_uniform_float(float* ptr, size_t count, float low,
     );
 
     if (err != cudaSuccess) {
-        TR_THROW(DeviceError, "CUDA rand_uniform_float kernel failed: ",
-                 cudaGetErrorString(err));
+        TR_DEVICE_ERROR("CUDA rand_uniform_float kernel failed: "
+                 << cudaGetErrorString(err));
     }
 }
 
@@ -610,10 +610,10 @@ void CudaDevice::rand_normal_float(float* ptr, size_t count, float mean,
                                     float std, Generator& gen) {
     if (count == 0) return;
     if (!ptr) {
-        TR_THROW(ValueError, "Null pointer in rand_normal_float");
+        TR_VALUE_ERROR("Null pointer in rand_normal_float");
     }
     if (std < 0.0f) {
-        TR_THROW(ValueError, "std must be >= 0, got ", std);
+        TR_VALUE_ERROR("std must be >= 0, got " << std);
     }
 
     // Box-Muller消耗的offset：(count + 1) / 2
@@ -628,8 +628,8 @@ void CudaDevice::rand_normal_float(float* ptr, size_t count, float mean,
     );
 
     if (err != cudaSuccess) {
-        TR_THROW(DeviceError, "CUDA rand_normal_float kernel failed: ",
-                 cudaGetErrorString(err));
+        TR_DEVICE_ERROR("CUDA rand_normal_float kernel failed: "
+                 << cudaGetErrorString(err));
     }
 }
 
@@ -639,7 +639,7 @@ void CudaDevice::rand_normal_float(float* ptr, size_t count, float mean,
 
 Tensor CudaDevice::uniform(const Shape& shape, float min_val, float max_val, DType dtype) {
     if (dtype != DType::FP32) {
-        TR_THROW(TypeError, "uniform only supports FP32, got ", dtype_name(dtype));
+        TR_TYPE_ERROR("uniform only supports FP32, got " << dtype_name(dtype));
     }
 
     Tensor tensor = zeros(shape, dtype);
@@ -653,7 +653,7 @@ Tensor CudaDevice::uniform(const Shape& shape, float min_val, float max_val, DTy
 
 void CudaDevice::uniform_inplace(Tensor& tensor_a, float min_val, float max_val, DType dtype) {
     if (dtype != DType::FP32) {
-        TR_THROW(TypeError, "uniform_inplace only supports FP32, got ", dtype_name(dtype));
+        TR_TYPE_ERROR("uniform_inplace only supports FP32, got " << dtype_name(dtype));
     }
     check_on_device(tensor_a);
 
@@ -665,7 +665,7 @@ void CudaDevice::uniform_inplace(Tensor& tensor_a, float min_val, float max_val,
 
 Tensor CudaDevice::randn(const Shape& shape, float mean, float stddev, DType dtype) {
     if (dtype != DType::FP32) {
-        TR_THROW(TypeError, "randn only supports FP32, got ", dtype_name(dtype));
+        TR_TYPE_ERROR("randn only supports FP32, got " << dtype_name(dtype));
     }
 
     Tensor tensor = zeros(shape, dtype);
@@ -679,7 +679,7 @@ Tensor CudaDevice::randn(const Shape& shape, float mean, float stddev, DType dty
 
 void CudaDevice::randn_inplace(Tensor& tensor_a, float mean, float stddev, DType dtype) {
     if (dtype != DType::FP32) {
-        TR_THROW(TypeError, "randn_inplace only supports FP32, got ", dtype_name(dtype));
+        TR_TYPE_ERROR("randn_inplace only supports FP32, got " << dtype_name(dtype));
     }
     check_on_device(tensor_a);
 
@@ -691,7 +691,7 @@ void CudaDevice::randn_inplace(Tensor& tensor_a, float mean, float stddev, DType
 
 Tensor CudaDevice::randint(const Shape& shape, int low, int high, DType dtype) {
     if (dtype != DType::FP32 && dtype != DType::INT32) {
-        TR_THROW(TypeError, "randint only supports FP32 and INT32, got ", dtype_name(dtype));
+        TR_TYPE_ERROR("randint only supports FP32 and INT32, got " << dtype_name(dtype));
     }
 
     Tensor tensor = zeros(shape, dtype);
@@ -713,7 +713,7 @@ Tensor CudaDevice::randint(const Shape& shape, int low, int high, DType dtype) {
         );
 
         if (err != cudaSuccess) {
-            TR_THROW(DeviceError, "CUDA convert kernel failed: ", cudaGetErrorString(err));
+            TR_DEVICE_ERROR("CUDA convert kernel failed: " << cudaGetErrorString(err));
         }
     } else {  // INT32
         int32_t* data = static_cast<int32_t*>(tensor.data_ptr());
@@ -725,7 +725,7 @@ Tensor CudaDevice::randint(const Shape& shape, int low, int high, DType dtype) {
 
 void CudaDevice::randint_inplace(Tensor& tensor_a, int low, int high, DType dtype) {
     if (dtype != DType::FP32 && dtype != DType::INT32) {
-        TR_THROW(TypeError, "randint_inplace only supports FP32 and INT32, got ", dtype_name(dtype));
+        TR_TYPE_ERROR("randint_inplace only supports FP32 and INT32, got " << dtype_name(dtype));
     }
     check_on_device(tensor_a);
 
@@ -746,7 +746,7 @@ void CudaDevice::randint_inplace(Tensor& tensor_a, int low, int high, DType dtyp
         );
 
         if (err != cudaSuccess) {
-            TR_THROW(DeviceError, "CUDA convert kernel failed: ", cudaGetErrorString(err));
+            TR_DEVICE_ERROR("CUDA convert kernel failed: " << cudaGetErrorString(err));
         }
     } else {  // INT32
         int32_t* data = static_cast<int32_t*>(tensor_a.data_ptr());
@@ -756,7 +756,7 @@ void CudaDevice::randint_inplace(Tensor& tensor_a, int low, int high, DType dtyp
 
 Tensor CudaDevice::randbool(const Shape& shape, float rate_of_zeros, DType dtype) {
     if (dtype != DType::FP32 && dtype != DType::INT32) {
-        TR_THROW(TypeError, "randbool only supports FP32 and INT32, got ", dtype_name(dtype));
+        TR_TYPE_ERROR("randbool only supports FP32 and INT32, got " << dtype_name(dtype));
     }
 
     Tensor tensor = zeros(shape, dtype);
@@ -777,7 +777,7 @@ Tensor CudaDevice::randbool(const Shape& shape, float rate_of_zeros, DType dtype
         );
 
         if (err != cudaSuccess) {
-            TR_THROW(DeviceError, "CUDA convert kernel failed: ", cudaGetErrorString(err));
+            TR_DEVICE_ERROR("CUDA convert kernel failed: " << cudaGetErrorString(err));
         }
     } else {  // INT32
         int32_t* data = static_cast<int32_t*>(tensor.data_ptr());
@@ -794,7 +794,7 @@ Tensor CudaDevice::randbool(const Shape& shape, float rate_of_zeros, DType dtype
         );
 
         if (err != cudaSuccess) {
-            TR_THROW(DeviceError, "CUDA convert kernel failed: ", cudaGetErrorString(err));
+            TR_DEVICE_ERROR("CUDA convert kernel failed: " << cudaGetErrorString(err));
         }
     }
 
@@ -803,7 +803,7 @@ Tensor CudaDevice::randbool(const Shape& shape, float rate_of_zeros, DType dtype
 
 void CudaDevice::randbool_inplace(Tensor& tensor_a, float rate_of_zeros, DType dtype) {
     if (dtype != DType::FP32 && dtype != DType::INT32) {
-        TR_THROW(TypeError, "randbool_inplace only supports FP32 and INT32, got ", dtype_name(dtype));
+        TR_TYPE_ERROR("randbool_inplace only supports FP32 and INT32, got " << dtype_name(dtype));
     }
     check_on_device(tensor_a);
 
@@ -824,7 +824,7 @@ void CudaDevice::randbool_inplace(Tensor& tensor_a, float rate_of_zeros, DType d
         );
 
         if (err != cudaSuccess) {
-            TR_THROW(DeviceError, "CUDA convert kernel failed: ", cudaGetErrorString(err));
+            TR_DEVICE_ERROR("CUDA convert kernel failed: " << cudaGetErrorString(err));
         }
     } else {  // INT32
         int32_t* data = static_cast<int32_t*>(tensor_a.data_ptr());
@@ -841,7 +841,7 @@ void CudaDevice::randbool_inplace(Tensor& tensor_a, float rate_of_zeros, DType d
         );
 
         if (err != cudaSuccess) {
-            TR_THROW(DeviceError, "CUDA convert kernel failed: ", cudaGetErrorString(err));
+            TR_DEVICE_ERROR("CUDA convert kernel failed: " << cudaGetErrorString(err));
         }
     }
 }
@@ -858,13 +858,13 @@ bool CudaDevice::equal(const Tensor& a, const Tensor& b) {
 
     // 检查dtype
     if (a.dtype() != b.dtype()) {
-        TR_THROW(TypeError, "Cannot compare tensors with different dtypes: ",
-                 dtype_name(a.dtype()), " vs ", dtype_name(b.dtype()));
+        TR_TYPE_ERROR("Cannot compare tensors with different dtypes: "
+                 << dtype_name(a.dtype()) << " vs " << dtype_name(b.dtype()));
     }
 
     // 仅支持INT8和INT32
     if (a.dtype() == DType::FP32 || a.dtype() == DType::BF16) {
-        TR_THROW(TypeError, "equal() only supports INT8 and INT32. ",
+        TR_TYPE_ERROR("equal() only supports INT8 and INT32. "
                  "For FP32/BF16 comparison, use is_close() instead.");
     }
 
@@ -881,7 +881,7 @@ bool CudaDevice::equal(const Tensor& a, const Tensor& b) {
     // 初始化为0（表示相等）
     cudaError_t err = cudaMemset(mismatch_flag, 0, sizeof(int));
     if (err != cudaSuccess) {
-        TR_THROW(DeviceError, "CUDA memset failed: ", cudaGetErrorString(err));
+        TR_DEVICE_ERROR("CUDA memset failed: " << cudaGetErrorString(err));
     }
 
     // 调用相应的kernel
@@ -898,11 +898,11 @@ bool CudaDevice::equal(const Tensor& a, const Tensor& b) {
         err = launch_equal_int8_kernel(static_cast<int>(count), a_data, b_data, mismatch_flag);
     }
     else {
-        TR_THROW(TypeError, "Unsupported dtype in equal: ", dtype_name(a.dtype()));
+        TR_TYPE_ERROR("Unsupported dtype in equal: " << dtype_name(a.dtype()));
     }
 
     if (err != cudaSuccess) {
-        TR_THROW(DeviceError, "CUDA equal kernel failed: ", cudaGetErrorString(err));
+        TR_DEVICE_ERROR("CUDA equal kernel failed: " << cudaGetErrorString(err));
     }
 
     // 同步并读取结果
@@ -911,7 +911,7 @@ bool CudaDevice::equal(const Tensor& a, const Tensor& b) {
     int flag;
     err = cudaMemcpy(&flag, mismatch_flag, sizeof(int), cudaMemcpyDeviceToHost);
     if (err != cudaSuccess) {
-        TR_THROW(DeviceError, "CUDA memcpy failed: ", cudaGetErrorString(err));
+        TR_DEVICE_ERROR("CUDA memcpy failed: " << cudaGetErrorString(err));
     }
 
     // 如果flag仍为0，说明所有元素都相等
@@ -928,13 +928,13 @@ bool CudaDevice::is_close(const Tensor& a, const Tensor& b, float eps) {
 
     // 检查dtype
     if (a.dtype() != b.dtype()) {
-        TR_THROW(TypeError, "Cannot compare tensors with different dtypes: ",
-                 dtype_name(a.dtype()), " vs ", dtype_name(b.dtype()));
+        TR_TYPE_ERROR("Cannot compare tensors with different dtypes: "
+                 << dtype_name(a.dtype()) << " vs " << dtype_name(b.dtype()));
     }
 
     // 仅支持FP32和BF16
     if (a.dtype() == DType::INT8 || a.dtype() == DType::INT32) {
-        TR_THROW(TypeError, "is_close() only supports FP32 and BF16. ",
+        TR_TYPE_ERROR("is_close() only supports FP32 and BF16. "
                  "For INT8/INT32 comparison, use equal() instead.");
     }
 
@@ -960,7 +960,7 @@ bool CudaDevice::is_close(const Tensor& a, const Tensor& b, float eps) {
     // 初始化为0（表示相等）
     cudaError_t err = cudaMemset(mismatch_flag, 0, sizeof(int));
     if (err != cudaSuccess) {
-        TR_THROW(DeviceError, "CUDA memset failed: ", cudaGetErrorString(err));
+        TR_DEVICE_ERROR("CUDA memset failed: " << cudaGetErrorString(err));
     }
 
     // 调用相应的kernel
@@ -978,11 +978,11 @@ bool CudaDevice::is_close(const Tensor& a, const Tensor& b, float eps) {
         err = launch_is_close_bf16_kernel(static_cast<int>(count), a_data, b_data, tolerance, mismatch_flag);
     }
     else {
-        TR_THROW(TypeError, "Unsupported dtype in is_close: ", dtype_name(a.dtype()));
+        TR_TYPE_ERROR("Unsupported dtype in is_close: " << dtype_name(a.dtype()));
     }
 
     if (err != cudaSuccess) {
-        TR_THROW(DeviceError, "CUDA is_close kernel failed: ", cudaGetErrorString(err));
+        TR_DEVICE_ERROR("CUDA is_close kernel failed: " << cudaGetErrorString(err));
     }
 
     // 同步并读取结果
@@ -991,7 +991,7 @@ bool CudaDevice::is_close(const Tensor& a, const Tensor& b, float eps) {
     int flag;
     err = cudaMemcpy(&flag, mismatch_flag, sizeof(int), cudaMemcpyDeviceToHost);
     if (err != cudaSuccess) {
-        TR_THROW(DeviceError, "CUDA memcpy failed: ", cudaGetErrorString(err));
+        TR_DEVICE_ERROR("CUDA memcpy failed: " << cudaGetErrorString(err));
     }
 
     // 如果flag仍为0，说明所有元素都在容差范围内

@@ -60,13 +60,13 @@ size_t CpuDevice::memory_available() const {
 
 std::shared_ptr<void> CpuDevice::allocate(size_t size) {
     if (size == 0) {
-        TR_THROW(ValueError, "Cannot allocate 0 bytes");
+        TR_VALUE_ERROR("Cannot allocate 0 bytes");
     }
 
     // 调用mimalloc分配（CpuArena会处理对齐）
     void* ptr = mi_malloc(size);
     if (!ptr) {
-        TR_THROW(MemoryError, "CPU allocation failed: ", size, " bytes");
+        TR_MEMORY_ERROR("CPU allocation failed: " << size << " bytes");
     }
 
     return std::shared_ptr<void>(ptr, [](void* p) {
@@ -82,14 +82,14 @@ void CpuDevice::deallocate(void* ptr) {
 
 void CpuDevice::memcpy_internal(void* dst, const void* src, size_t size) {
     if (!dst || !src) {
-        TR_THROW(ValueError, "Null pointer in memcpy");
+        TR_VALUE_ERROR("Null pointer in memcpy");
     }
     std::memcpy(dst, src, size);
 }
 
 void CpuDevice::memset_internal(void* ptr, int value, size_t size) {
     if (!ptr) {
-        TR_THROW(ValueError, "Null pointer in memset");
+        TR_VALUE_ERROR("Null pointer in memset");
     }
     std::memset(ptr, value, size);
 }
@@ -149,7 +149,7 @@ Tensor CpuDevice::ones(const Shape& shape, DType dtype) {
             break;
         }
         default:
-            TR_THROW(TypeError, "Unsupported dtype in ones: ", dtype_name(dtype));
+            TR_TYPE_ERROR("Unsupported dtype in ones: " << dtype_name(dtype));
     }
 
     return tensor;
@@ -161,7 +161,7 @@ Tensor CpuDevice::ones(const Shape& shape, DType dtype) {
 
 Tensor CpuDevice::uniform(const Shape& shape, float min_val, float max_val, DType dtype) {
     if (dtype != DType::FP32) {
-        TR_THROW(TypeError, "uniform only supports FP32, got ", dtype_name(dtype));
+        TR_TYPE_ERROR("uniform only supports FP32, got " << dtype_name(dtype));
     }
 
     Tensor tensor = zeros(shape, dtype);
@@ -175,7 +175,7 @@ Tensor CpuDevice::uniform(const Shape& shape, float min_val, float max_val, DTyp
 
 void CpuDevice::uniform_inplace(Tensor& tensor_a, float min_val, float max_val, DType dtype) {
     if (dtype != DType::FP32) {
-        TR_THROW(TypeError, "uniform_inplace only supports FP32, got ", dtype_name(dtype));
+        TR_TYPE_ERROR("uniform_inplace only supports FP32, got " << dtype_name(dtype));
     }
     check_on_device(tensor_a);
 
@@ -187,7 +187,7 @@ void CpuDevice::uniform_inplace(Tensor& tensor_a, float min_val, float max_val, 
 
 Tensor CpuDevice::randn(const Shape& shape, float mean, float stddev, DType dtype) {
     if (dtype != DType::FP32) {
-        TR_THROW(TypeError, "randn only supports FP32, got ", dtype_name(dtype));
+        TR_TYPE_ERROR("randn only supports FP32, got " << dtype_name(dtype));
     }
 
     Tensor tensor = zeros(shape, dtype);
@@ -201,7 +201,7 @@ Tensor CpuDevice::randn(const Shape& shape, float mean, float stddev, DType dtyp
 
 void CpuDevice::randn_inplace(Tensor& tensor_a, float mean, float stddev, DType dtype) {
     if (dtype != DType::FP32) {
-        TR_THROW(TypeError, "randn_inplace only supports FP32, got ", dtype_name(dtype));
+        TR_TYPE_ERROR("randn_inplace only supports FP32, got " << dtype_name(dtype));
     }
     check_on_device(tensor_a);
 
@@ -213,7 +213,7 @@ void CpuDevice::randn_inplace(Tensor& tensor_a, float mean, float stddev, DType 
 
 Tensor CpuDevice::randint(const Shape& shape, int low, int high, DType dtype) {
     if (dtype != DType::FP32 && dtype != DType::INT32) {
-        TR_THROW(TypeError, "randint only supports FP32 and INT32, got ", dtype_name(dtype));
+        TR_TYPE_ERROR("randint only supports FP32 and INT32, got " << dtype_name(dtype));
     }
 
     Tensor tensor = zeros(shape, dtype);
@@ -237,7 +237,7 @@ Tensor CpuDevice::randint(const Shape& shape, int low, int high, DType dtype) {
 
 void CpuDevice::randint_inplace(Tensor& tensor_a, int low, int high, DType dtype) {
     if (dtype != DType::FP32 && dtype != DType::INT32) {
-        TR_THROW(TypeError, "randint_inplace only supports FP32 and INT32, got ", dtype_name(dtype));
+        TR_TYPE_ERROR("randint_inplace only supports FP32 and INT32, got " << dtype_name(dtype));
     }
     check_on_device(tensor_a);
 
@@ -258,7 +258,7 @@ void CpuDevice::randint_inplace(Tensor& tensor_a, int low, int high, DType dtype
 
 Tensor CpuDevice::randbool(const Shape& shape, float rate_of_zeros, DType dtype) {
     if (dtype != DType::FP32 && dtype != DType::INT32) {
-        TR_THROW(TypeError, "randbool only supports FP32 and INT32, got ", dtype_name(dtype));
+        TR_TYPE_ERROR("randbool only supports FP32 and INT32, got " << dtype_name(dtype));
     }
 
     Tensor tensor = zeros(shape, dtype);
@@ -286,7 +286,7 @@ Tensor CpuDevice::randbool(const Shape& shape, float rate_of_zeros, DType dtype)
 
 void CpuDevice::randbool_inplace(Tensor& tensor_a, float rate_of_zeros, DType dtype) {
     if (dtype != DType::FP32 && dtype != DType::INT32) {
-        TR_THROW(TypeError, "randbool_inplace only supports FP32 and INT32, got ", dtype_name(dtype));
+        TR_TYPE_ERROR("randbool_inplace only supports FP32 and INT32, got " << dtype_name(dtype));
     }
     check_on_device(tensor_a);
 
@@ -321,7 +321,7 @@ void CpuDevice::add_into(const Tensor& a, const Tensor& b, Tensor& result) {
 
     // 2. 检查数据类型一致
     if (a.dtype() != b.dtype() || a.dtype() != result.dtype()) {
-        TR_THROW(TypeError, "Dtype mismatch in add_into");
+        TR_TYPE_ERROR("Dtype mismatch in add_into");
     }
 
     // 3. 执行加法（根据数据类型）
@@ -370,7 +370,7 @@ void CpuDevice::add_into(const Tensor& a, const Tensor& b, Tensor& result) {
             break;
         }
         default:
-            TR_THROW(TypeError, "Unsupported dtype in add_into: ", dtype_name(a.dtype()));
+            TR_TYPE_ERROR("Unsupported dtype in add_into: " << dtype_name(a.dtype()));
     }
 }
 
@@ -386,13 +386,13 @@ bool CpuDevice::equal(const Tensor& a, const Tensor& b) {
 
     // 检查dtype
     if (a.dtype() != b.dtype()) {
-        TR_THROW(TypeError, "Cannot compare tensors with different dtypes: ",
-                 dtype_name(a.dtype()), " vs ", dtype_name(b.dtype()));
+        TR_TYPE_ERROR("Cannot compare tensors with different dtypes: "
+                 << dtype_name(a.dtype()) << " vs " << dtype_name(b.dtype()));
     }
 
     // 仅支持INT8和INT32
     if (a.dtype() == DType::FP32 || a.dtype() == DType::BF16) {
-        TR_THROW(TypeError, "equal() only supports INT8 and INT32. ",
+        TR_TYPE_ERROR("equal() only supports INT8 and INT32. "
                  "For FP32/BF16 comparison, use is_close() instead.");
     }
 
@@ -427,7 +427,7 @@ bool CpuDevice::equal(const Tensor& a, const Tensor& b) {
     }
 
     // 不应该到达这里
-    TR_THROW(TypeError, "Unsupported dtype in equal: ", dtype_name(a.dtype()));
+    TR_TYPE_ERROR("Unsupported dtype in equal: " << dtype_name(a.dtype()));
 }
 
 bool CpuDevice::is_close(const Tensor& a, const Tensor& b, float eps) {
@@ -440,13 +440,13 @@ bool CpuDevice::is_close(const Tensor& a, const Tensor& b, float eps) {
 
     // 检查dtype
     if (a.dtype() != b.dtype()) {
-        TR_THROW(TypeError, "Cannot compare tensors with different dtypes: ",
-                 dtype_name(a.dtype()), " vs ", dtype_name(b.dtype()));
+        TR_TYPE_ERROR("Cannot compare tensors with different dtypes: "
+                 << dtype_name(a.dtype()) << " vs " << dtype_name(b.dtype()));
     }
 
     // 仅支持FP32和BF16
     if (a.dtype() == DType::INT8 || a.dtype() == DType::INT32) {
-        TR_THROW(TypeError, "is_close() only supports FP32 and BF16. ",
+        TR_TYPE_ERROR("is_close() only supports FP32 and BF16. "
                  "For INT8/INT32 comparison, use equal() instead.");
     }
 
@@ -495,7 +495,7 @@ bool CpuDevice::is_close(const Tensor& a, const Tensor& b, float eps) {
     }
 
     // 不应该到达这里
-    TR_THROW(TypeError, "Unsupported dtype in is_close: ", dtype_name(a.dtype()));
+    TR_TYPE_ERROR("Unsupported dtype in is_close: " << dtype_name(a.dtype()));
 }
 
 } // namespace tr

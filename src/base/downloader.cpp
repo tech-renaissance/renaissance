@@ -51,7 +51,7 @@ Downloader::~Downloader() {
 
 void Downloader::set_url(const std::string& url, const std::string& spare_url) {
     if (url.empty()) {
-        TR_THROW(ValueError, "Primary URL cannot be empty");
+        TR_VALUE_ERROR("Primary URL cannot be empty");
     }
 
     url_ = url;
@@ -71,7 +71,7 @@ bool Downloader::download_to(const std::string& dir_name,
 
     // 检查URL是否已设置
     if (url_.empty()) {
-        TR_THROW(ValueError, "URL not set. Call set_url() first");
+        TR_VALUE_ERROR("URL not set. Call set_url() first");
     }
 
     // 确定文件名
@@ -89,8 +89,8 @@ bool Downloader::download_to(const std::string& dir_name,
         full_path = fs::absolute(full_path);
         dir_path = full_path.parent_path();
     } catch (const fs::filesystem_error& e) {
-        TR_THROW(ValueError, "Failed to resolve path: ", dir_name, "/", final_filename,
-                 ". Error: ", e.what());
+        TR_VALUE_ERROR("Failed to resolve path: " << dir_name << "/" << final_filename
+                 << ". Error: " << e.what());
     }
 
     // 创建目录（如果不存在）
@@ -100,8 +100,8 @@ bool Downloader::download_to(const std::string& dir_name,
             LOG_INFO << "Created directory: " << dir_path.string();
         }
     } catch (const fs::filesystem_error& e) {
-        TR_THROW(ValueError, "Failed to create directory: ", dir_path.string(),
-                 ". Error: ", e.what());
+        TR_VALUE_ERROR("Failed to create directory: " << dir_path.string()
+                 << ". Error: " << e.what());
     }
 
     // 检查文件是否已存在
@@ -136,11 +136,11 @@ bool Downloader::download_to(const std::string& dir_name,
                      << " (size: " << file_size << " bytes)";
             return true;
         } else {
-            TR_THROW(ValueError, "Download reported success but file not found: " + full_path.string());
+            TR_VALUE_ERROR("Download reported success but file not found: " << full_path.string());
             return false;
         }
     } else {
-        TR_THROW(ValueError, "All download attempts failed for: " + url_);
+        TR_VALUE_ERROR("All download attempts failed for: " << url_);
         return false;
     }
 }
@@ -171,21 +171,21 @@ std::string Downloader::extract_filename_from_url(const std::string& url) const 
         }
     }
 
-    TR_THROW(ValueError, "Cannot extract filename from URL: ", url,
-             ". URL does not contain a valid filename component");
+    TR_VALUE_ERROR("Cannot extract filename from URL: " << url
+             << ". URL does not contain a valid filename component");
 }
 
 bool Downloader::download_impl(const std::string& url, const std::string& full_path) {
     CURL* curl = curl_easy_init();
     if (!curl) {
-        TR_THROW(ValueError, "Failed to initialize libcurl easy handle");
+        TR_VALUE_ERROR("Failed to initialize libcurl easy handle");
         return false;
     }
 
     // 打开文件
     std::ofstream outfile(full_path, std::ios::binary);
     if (!outfile.is_open()) {
-        TR_THROW(ValueError, "Failed to open file for writing: " + full_path);
+        TR_VALUE_ERROR("Failed to open file for writing: " << full_path);
         curl_easy_cleanup(curl);
         return false;
     }

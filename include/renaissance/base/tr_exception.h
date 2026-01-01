@@ -1,9 +1,9 @@
-﻿/**
+/**
  * @file tr_exception.h
- * @brief 框架异常类声明（含子类）
- * @details 技术觉醒框架统一异常体系，支持错误类型分类，自动记录日志，完全向后兼容
- * @version 3.5.5
- * @date 2025-12-24
+ * @brief 框架异常系统（渐进式增强架构）
+ * @details 技术觉醒框架统一异常体系，支持Context Chain多层上下文，自动记录日志
+ * @version 3.7.0
+ * @date 2026-01-01
  * @author 技术觉醒团队
  * @note 依赖项:
  * @note 所属系列: base
@@ -14,94 +14,102 @@
 #include <exception>
 #include <string>
 #include <sstream>
+#include <vector>
 
 namespace tr {
 
+// ============================================================================
+// 异常上下文（Context Chain支持）
+// ============================================================================
+
+/**
+ * @struct ExceptionContext
+ * @brief 异常上下文信息
+ */
+struct ExceptionContext {
+    const char* file;      ///< 文件名（basename）
+    const char* func;      ///< 函数名
+    std::string message;   ///< 消息
+
+    std::string to_string() const {
+        std::ostringstream oss;
+        oss << message << " (at " << file << " :: " << func << "())";
+        return oss.str();
+    }
+};
+
+// ============================================================================
+// 核心异常类
+// ============================================================================
+
 /**
  * @class TRException
- * @brief 框架基础异常类
- * @details 继承自std::exception，提供统一的异常接口，支持自动日志记录
+ * @brief 框架统一异常基类
+ *
+ * 核心特性：
+ * - 支持Context Chain（多层上下文叠加）
+ * - 延迟构建what()（性能优化）
+ * - 不依赖Logger（解耦设计）
  */
 class TRException : public std::exception {
 public:
     /**
-     * @brief 构造异常对象
-     * @param message 异常消息
-     * @param file 源文件名（自动捕获）
-     * @param line 行号（自动捕获）
-     * @param func 函数名（自动捕获）
+     * @brief 构造异常
+     * @param type_name 异常类型名
+     * @param message 错误消息
+     * @param file 源文件名（__FILE__）
+     * @param func 函数名（__func__）
      */
-    TRException(const std::string& message,
-                const char* file = "",
-                int line = 0,
-                const char* func = "");
+    TRException(const char* type_name,
+                const std::string& message,
+                const char* file,
+                const char* func);
 
-    virtual ~TRException() noexcept;
+    virtual ~TRException() noexcept = default;
 
     /**
-     * @brief 获取异常描述
-     * @return 完整的异常描述字符串
+     * @brief 获取完整错误描述
+     * @return 包含Context Chain的完整消息
      */
     const char* what() const noexcept override;
 
     /**
-     * @brief 获取异常类型名称
-     * @return 类型名称字符串
+     * @brief 添加上下文信息（支持重新抛出）
+     * @param ctx_message 上下文消息
+     * @param file 文件名
+     * @param func 函数名
      */
-    virtual const char* type() const noexcept { return "TRException"; }
+    void add_context(const std::string& ctx_message,
+                     const char* file,
+                     const char* func);
 
-    /**
-     * @brief 获取异常消息
-     * @return 异常消息引用
-     */
-    const std::string& message() const noexcept { return message_; }
-
-    /**
-     * @brief 获取源文件名
-     * @return 文件名字符串
-     */
-    const char* file() const noexcept { return file_; }
-
-    /**
-     * @brief 获取行号
-     * @return 行号
-     */
-    int line() const noexcept { return line_; }
+    // 访问器
+    const char* type() const noexcept { return type_name_; }
+    const std::string& message() const noexcept { return root_message_; }
+    const std::vector<ExceptionContext>& contexts() const noexcept {
+        return contexts_;
+    }
 
 protected:
-    std::string message_;    // 异常消息
-    const char* file_;       // 源文件名
-    int line_;               // 行号
-    const char* func_;       // 函数名
-    mutable std::string what_; // 缓存的what()结果
+    const char* type_name_;           ///< 异常类型（静态字符串）
+    std::string root_message_;        ///< 根消息
+    std::vector<ExceptionContext> contexts_; ///< 上下文链（从底到顶）
+    mutable std::string what_cache_;  ///< what()缓存
 
-    /**
-     * @brief 构建完整的异常描述
-     */
-    void build_what() const;
-
-    /**
-     * @brief 自动记录到Logger
-     */
-    void auto_log() const;
+    static const char* basename(const char* path);
 };
 
 // ============================================================================
-// 异常类型定义（使用宏简化）
+// 具体异常类型
 // ============================================================================
 
-/**
- * @brief 定义异常类型的宏
- * @param ClassName 异常类名
- */
 #define TR_DEFINE_EXCEPTION(ClassName) \
     class ClassName : public TRException { \
     public: \
-        using TRException::TRException; \
-        const char* type() const noexcept override { return #ClassName; } \
+        ClassName(const std::string& msg, const char* file, const char* func) \
+            : TRException(#ClassName, msg, file, func) {} \
     }
 
-// 定义9种异常类型
 TR_DEFINE_EXCEPTION(NotImplementedError);
 TR_DEFINE_EXCEPTION(FileNotFoundError);
 TR_DEFINE_EXCEPTION(ValueError);
@@ -114,66 +122,86 @@ TR_DEFINE_EXCEPTION(MemoryError);
 
 #undef TR_DEFINE_EXCEPTION
 
-} // namespace tr
-
 // ============================================================================
-// 便捷宏（关键改进！）
+// 辅助工具
 // ============================================================================
 
-namespace tr {
 namespace detail {
 
 /**
- * @brief 简单的变参拼接器
- * @tparam Args 参数类型包
- * @param oss 输出字符串流
- * @param args 可变参数
+ * @class MessageBuilder
+ * @brief 支持流式语法的消息构建器
  */
-inline void append_to_stream(std::ostringstream&) {}
+class MessageBuilder {
+public:
+    template<typename T>
+    MessageBuilder& operator<<(const T& value) {
+        ss_ << value;
+        return *this;
+    }
 
-template<typename T, typename... Args>
-void append_to_stream(std::ostringstream& oss, const T& value, const Args&... args) {
-    oss << value;
-    append_to_stream(oss, args...);
-}
+    std::string str() const { return ss_.str(); }
 
-/**
- * @brief 格式化异常消息
- * @tparam Args 可变参数类型
- * @param args 格式化参数
- * @return 格式化后的字符串
- */
-template<typename... Args>
-std::string format_exception_message(const Args&... args) {
-    std::ostringstream oss;
-    append_to_stream(oss, args...);
-    return oss.str();
-}
+private:
+    std::ostringstream ss_;
+};
 
 } // namespace detail
+
 } // namespace tr
 
-// 基础抛出宏
-#define TR_THROW(ExceptionType, ...) \
-    throw tr::ExceptionType( \
-        ::tr::detail::format_exception_message(__VA_ARGS__), \
-        __FILE__, __LINE__, __func__)
+// ============================================================================
+// 宏定义（核心API）
+// ============================================================================
 
-// 条件抛出宏
-#define TR_CHECK(condition, ExceptionType, ...) \
+/**
+ * @brief 构建消息（内部辅助宏）
+ */
+#define TR_MSG(stream) \
+    (::tr::detail::MessageBuilder() << stream).str()
+
+/**
+ * @brief 抛出异常（核心宏）
+ *
+ * 用法：TR_THROW(ValueError, "Invalid size: " << size)
+ */
+#define TR_THROW(ExceptionType, msg_stream) \
+    throw ::tr::ExceptionType(TR_MSG(msg_stream), __FILE__, __func__)
+
+/**
+ * @brief 条件检查（最常用）
+ *
+ * 用法：TR_CHECK(x > 0, ValueError, "x must be positive, got " << x)
+ */
+#define TR_CHECK(condition, ExceptionType, msg_stream) \
     do { \
         if (!(condition)) { \
-            TR_THROW(ExceptionType, __VA_ARGS__); \
+            TR_THROW(ExceptionType, msg_stream); \
         } \
     } while(0)
 
-// 快捷宏（最常用场景）
-#define TR_NOT_IMPLEMENTED(...) TR_THROW(NotImplementedError, __VA_ARGS__)
-#define TR_VALUE_ERROR(...) TR_THROW(ValueError, __VA_ARGS__)
-#define TR_SHAPE_ERROR(...) TR_THROW(ShapeError, __VA_ARGS__)
-#define TR_TYPE_ERROR(...) TR_THROW(TypeError, __VA_ARGS__)
-#define TR_INDEX_ERROR(...) TR_THROW(IndexError, __VA_ARGS__)
-#define TR_DEVICE_ERROR(...) TR_THROW(DeviceError, __VA_ARGS__)
-#define TR_FILE_NOT_FOUND_ERROR(...) TR_THROW(FileNotFoundError, __VA_ARGS__)
-#define TR_ZERO_DIVISION_ERROR(...) TR_THROW(ZeroDivisionError, __VA_ARGS__)
-#define TR_MEMORY_ERROR(...) TR_THROW(MemoryError, __VA_ARGS__)
+/**
+ * @brief 重新抛出并添加上下文
+ *
+ * 用法：
+ *   try { ... }
+ *   catch (TRException& e) {
+ *       TR_RETHROW(e, "While loading model from " << path);
+ *   }
+ */
+#define TR_RETHROW(exception, ctx_stream) \
+    do { \
+        (exception).add_context(TR_MSG(ctx_stream), __FILE__, __func__); \
+        throw; \
+    } while(0)
+
+// 便捷宏
+#define TR_NOT_IMPLEMENTED(...) TR_THROW(NotImplementedError, TR_MSG(__VA_ARGS__))
+#define TR_VALUE_ERROR(...) TR_THROW(ValueError, TR_MSG(__VA_ARGS__))
+#define TR_SHAPE_ERROR(...) TR_THROW(ShapeError, TR_MSG(__VA_ARGS__))
+#define TR_TYPE_ERROR(...) TR_THROW(TypeError, TR_MSG(__VA_ARGS__))
+#define TR_INDEX_ERROR(...) TR_THROW(IndexError, TR_MSG(__VA_ARGS__))
+#define TR_DEVICE_ERROR(...) TR_THROW(DeviceError, TR_MSG(__VA_ARGS__))
+#define TR_FILE_NOT_FOUND(...) TR_THROW(FileNotFoundError, TR_MSG(__VA_ARGS__))
+#define TR_ZERO_DIVISION(...) TR_THROW(ZeroDivisionError, TR_MSG(__VA_ARGS__))
+#define TR_MEMORY_ERROR(...) TR_THROW(MemoryError, TR_MSG(__VA_ARGS__))

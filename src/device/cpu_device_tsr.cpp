@@ -121,17 +121,17 @@ void CpuDevice::export_tensor(const Tensor& tensor, const std::string& filename,
     // 1. 输入验证
     // -------------------------------------------------------------------------
     if (!tensor.is_valid()) {
-        TR_THROW(ValueError, "Cannot export invalid tensor (dtype=INVALID)");
+        TR_VALUE_ERROR("Cannot export invalid tensor (dtype=INVALID)");
     }
     if (!tensor.is_bound()) {
-        TR_THROW(ValueError, "Cannot export unbound tensor (storage not attached)");
+        TR_VALUE_ERROR("Cannot export unbound tensor (storage not attached)");
     }
     if (!tensor.is_cpu()) {
-        TR_THROW(DeviceError, "export_tensor only supports CPU tensors, got ",
-                 tensor.device_type().to_string());
+        TR_DEVICE_ERROR("export_tensor only supports CPU tensors, got "
+                 << tensor.device_type().to_string());
     }
     if (tensor.numel() == 0) {
-        TR_THROW(ValueError, "Cannot export empty tensor (numel=0)");
+        TR_VALUE_ERROR("Cannot export empty tensor (numel=0)");
     }
 
     // -------------------------------------------------------------------------
@@ -187,7 +187,7 @@ void CpuDevice::export_tensor(const Tensor& tensor, const std::string& filename,
             header.dims[3] = shape.c();
             break;
         default:
-            TR_THROW(ValueError, "Invalid tensor ndim: ", static_cast<int>(header.ndim));
+            TR_VALUE_ERROR("Invalid tensor ndim: " << static_cast<int>(header.ndim));
     }
 
     // 元素总数和数据大小
@@ -199,7 +199,7 @@ void CpuDevice::export_tensor(const Tensor& tensor, const std::string& filename,
     // -------------------------------------------------------------------------
     std::ofstream fs(filename, std::ios::binary | std::ios::trunc);
     if (!fs.is_open()) {
-        TR_THROW(FileNotFoundError, "Failed to create file: ", filename);
+        TR_FILE_NOT_FOUND("Failed to create file: " << filename);
     }
 
     // -------------------------------------------------------------------------
@@ -274,7 +274,7 @@ void CpuDevice::export_tensor(const Tensor& tensor, const std::string& filename,
         fs.flush();
 
         if (!fs.good()) {
-            TR_THROW(ValueError, "Write error occurred while exporting to: ", filename);
+            TR_VALUE_ERROR("Write error occurred while exporting to: " << filename);
         }
 
         fs.close();
@@ -285,7 +285,7 @@ void CpuDevice::export_tensor(const Tensor& tensor, const std::string& filename,
         throw;  // 重新抛出框架异常
     } catch (const std::exception& e) {
         fs.close();
-        TR_THROW(ValueError, "Export failed: ", e.what());
+        TR_VALUE_ERROR("Export failed: " << e.what());
     }
 }
 
@@ -299,7 +299,7 @@ Tensor CpuDevice::import_tensor(const std::string& filename, bool using_mmap) {
     // -------------------------------------------------------------------------
     std::ifstream fs(filename, std::ios::binary | std::ios::ate);
     if (!fs.is_open()) {
-        TR_THROW(FileNotFoundError, "File not found: ", filename);
+        TR_FILE_NOT_FOUND("File not found: " << filename);
     }
 
     // 获取文件大小
@@ -307,8 +307,8 @@ Tensor CpuDevice::import_tensor(const std::string& filename, bool using_mmap) {
     fs.seekg(0, std::ios::beg);
 
     if (file_size < static_cast<std::streamsize>(sizeof(TSRHeaderV3))) {
-        TR_THROW(ValueError, "File too small to be a valid TSR file: ", filename,
-                 " (size=", file_size, ", need at least ", sizeof(TSRHeaderV3), ")");
+        TR_VALUE_ERROR("File too small to be a valid TSR file: " << filename
+                 << " (size=" << file_size << ", need at least " << sizeof(TSRHeaderV3) << ")");
     }
 
     // 读取头部
@@ -319,7 +319,7 @@ Tensor CpuDevice::import_tensor(const std::string& filename, bool using_mmap) {
     LOG_DEBUG << "Data offset from header: " << header.data_offset << " bytes";
 
     if (fs.gcount() != sizeof(header)) {
-        TR_THROW(ValueError, "Failed to read TSR header from: ", filename);
+        TR_VALUE_ERROR("Failed to read TSR header from: " << filename);
     }
 
     // -------------------------------------------------------------------------
@@ -330,8 +330,8 @@ Tensor CpuDevice::import_tensor(const std::string& filename, bool using_mmap) {
     // 验证文件大小是否足够
     uint64_t required_size = header.data_offset + header.payload_size;
     if (static_cast<uint64_t>(file_size) < required_size) {
-        TR_THROW(ValueError, "TSR file truncated: ", filename,
-                 " (file_size=", file_size, ", required=", required_size, ")");
+        TR_VALUE_ERROR("TSR file truncated: " << filename
+                 << " (file_size=" << file_size << ", required=" << required_size << ")");
     }
 
     // -------------------------------------------------------------------------
@@ -358,8 +358,8 @@ Tensor CpuDevice::import_tensor(const std::string& filename, bool using_mmap) {
                          header.dims[2], header.dims[3]);  // 4D: (N,H,W,C)
             break;
         default:
-            TR_THROW(ValueError, "Invalid ndim in TSR file: ",
-                     static_cast<int>(header.ndim));
+            TR_VALUE_ERROR("Invalid ndim in TSR file: "
+                     << static_cast<int>(header.ndim));
     }
 
     LOG_INFO << "Importing tensor from " << filename
@@ -382,20 +382,20 @@ Tensor CpuDevice::import_tensor(const std::string& filename, bool using_mmap) {
         // Linux mmap
         int fd = open(filename.c_str(), O_RDONLY);
         if (fd == -1) {
-            TR_THROW(FileNotFoundError, "Failed to open file for mmap: ", filename);
+            TR_FILE_NOT_FOUND("Failed to open file for mmap: " << filename);
         }
 
         struct stat sb;
         if (fstat(fd, &sb) == -1) {
             close(fd);
-            TR_THROW(ValueError, "Failed to stat file: ", filename);
+            TR_VALUE_ERROR("Failed to stat file: " << filename);
         }
 
         // 映射整个文件（只读，私有映射）
         void* map_base = mmap(nullptr, sb.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
         if (map_base == MAP_FAILED) {
             close(fd);
-            TR_THROW(MemoryError, "mmap failed for file: ", filename);
+            TR_MEMORY_ERROR("mmap failed for file: " << filename);
         }
 
         // 创建MmapHandle（RAII管理）
@@ -414,13 +414,13 @@ Tensor CpuDevice::import_tensor(const std::string& filename, bool using_mmap) {
         );
 
         if (file_handle == INVALID_HANDLE_VALUE) {
-            TR_THROW(FileNotFoundError, "Failed to open file for mapping: ", filename);
+            TR_FILE_NOT_FOUND("Failed to open file for mapping: " << filename);
         }
 
         LARGE_INTEGER file_size_li;
         if (!GetFileSizeEx(file_handle, &file_size_li)) {
             CloseHandle(file_handle);
-            TR_THROW(ValueError, "Failed to get file size: ", filename);
+            TR_VALUE_ERROR("Failed to get file size: " << filename);
         }
 
         HANDLE mapping_handle = CreateFileMappingA(
@@ -433,7 +433,7 @@ Tensor CpuDevice::import_tensor(const std::string& filename, bool using_mmap) {
 
         if (!mapping_handle) {
             CloseHandle(file_handle);
-            TR_THROW(MemoryError, "CreateFileMapping failed for: ", filename);
+            TR_MEMORY_ERROR("CreateFileMapping failed for: " << filename);
         }
 
         void* map_base = MapViewOfFile(
@@ -445,7 +445,7 @@ Tensor CpuDevice::import_tensor(const std::string& filename, bool using_mmap) {
         if (!map_base) {
             CloseHandle(mapping_handle);
             CloseHandle(file_handle);
-            TR_THROW(MemoryError, "MapViewOfFile failed for: ", filename);
+            TR_MEMORY_ERROR("MapViewOfFile failed for: " << filename);
         }
 
         // 创建MmapHandle（RAII管理）
@@ -470,8 +470,8 @@ Tensor CpuDevice::import_tensor(const std::string& filename, bool using_mmap) {
         if (header.crc32 != 0) {
             uint32_t computed_crc = calculate_crc32(data_ptr, header.raw_data_size);
             if (computed_crc != header.crc32) {
-                TR_THROW(ValueError, "CRC32 mismatch in RAW mode: file may be corrupted "
-                         "(expected=", header.crc32, ", got=", computed_crc, ")");
+                TR_VALUE_ERROR("CRC32 mismatch in RAW mode: file may be corrupted "
+                         << "(expected=" << header.crc32 << ", got=" << computed_crc << ")");
             }
             LOG_DEBUG << "CRC32 verified: " << header.crc32;
         }
@@ -504,7 +504,7 @@ Tensor CpuDevice::import_tensor(const std::string& filename, bool using_mmap) {
         // ----- 方案B: 常规读取（不使用mmap或平台不支持） -----
         std::ifstream fs2(filename, std::ios::binary);
         if (!fs2.is_open()) {
-            TR_THROW(FileNotFoundError, "Failed to reopen file: ", filename);
+            TR_FILE_NOT_FOUND("Failed to reopen file: " << filename);
         }
 
         // 创建目标张量
@@ -517,7 +517,7 @@ Tensor CpuDevice::import_tensor(const std::string& filename, bool using_mmap) {
         fs2.read(reinterpret_cast<char*>(tensor.data_ptr()), header.raw_data_size);
 
         if (static_cast<size_t>(fs2.gcount()) != header.raw_data_size) {
-            TR_THROW(ValueError, "Failed to read complete data from TSR file");
+            TR_VALUE_ERROR("Failed to read complete data from TSR file");
         }
 
         fs2.close();
@@ -526,7 +526,7 @@ Tensor CpuDevice::import_tensor(const std::string& filename, bool using_mmap) {
         if (header.crc32 != 0) {
             uint32_t computed_crc = calculate_crc32(tensor.data_ptr(), header.raw_data_size);
             if (computed_crc != header.crc32) {
-                TR_THROW(ValueError, "CRC32 mismatch: file may be corrupted");
+                TR_VALUE_ERROR("CRC32 mismatch: file may be corrupted");
             }
         }
 
@@ -536,7 +536,7 @@ Tensor CpuDevice::import_tensor(const std::string& filename, bool using_mmap) {
         // ----- 方案C: 平台不支持mmap，使用常规读取 -----
         std::ifstream fs2(filename, std::ios::binary);
         if (!fs2.is_open()) {
-            TR_THROW(FileNotFoundError, "Failed to reopen file: ", filename);
+            TR_FILE_NOT_FOUND("Failed to reopen file: " << filename);
         }
 
         // 创建目标张量
@@ -549,7 +549,7 @@ Tensor CpuDevice::import_tensor(const std::string& filename, bool using_mmap) {
         fs2.read(reinterpret_cast<char*>(tensor.data_ptr()), header.raw_data_size);
 
         if (static_cast<size_t>(fs2.gcount()) != header.raw_data_size) {
-            TR_THROW(ValueError, "Failed to read complete data from TSR file");
+            TR_VALUE_ERROR("Failed to read complete data from TSR file");
         }
 
         fs2.close();
@@ -558,7 +558,7 @@ Tensor CpuDevice::import_tensor(const std::string& filename, bool using_mmap) {
         if (header.crc32 != 0) {
             uint32_t computed_crc = calculate_crc32(tensor.data_ptr(), header.raw_data_size);
             if (computed_crc != header.crc32) {
-                TR_THROW(ValueError, "CRC32 mismatch: file may be corrupted");
+                TR_VALUE_ERROR("CRC32 mismatch: file may be corrupted");
             }
         }
 
@@ -575,7 +575,7 @@ Tensor CpuDevice::import_tensor(const std::string& filename, bool using_mmap) {
         fs.read(reinterpret_cast<char*>(compressed.data()), header.payload_size);
 
         if (static_cast<size_t>(fs.gcount()) != header.payload_size) {
-            TR_THROW(ValueError, "Failed to read compressed data from TSR file: ", filename);
+            TR_VALUE_ERROR("Failed to read compressed data from TSR file: " << filename);
         }
         fs.close();
 
@@ -593,8 +593,8 @@ Tensor CpuDevice::import_tensor(const std::string& filename, bool using_mmap) {
         // CRC32校验（ZLIB模式必须验证）
         uint32_t computed_crc = calculate_crc32(tensor.data_ptr(), header.raw_data_size);
         if (computed_crc != header.crc32) {
-            TR_THROW(ValueError, "CRC32 mismatch: file corrupted or decompression error "
-                     "(expected=", header.crc32, ", got=", computed_crc, ")");
+            TR_VALUE_ERROR("CRC32 mismatch: file corrupted or decompression error "
+                     << "(expected=" << header.crc32 << ", got=" << computed_crc << ")");
         }
 
         LOG_INFO << "Loaded and decompressed: " << compressed.size()
@@ -603,7 +603,7 @@ Tensor CpuDevice::import_tensor(const std::string& filename, bool using_mmap) {
         return tensor;
 
     } else {
-        TR_THROW(ValueError, "Unknown TSR file mode: ", header.file_mode);
+        TR_VALUE_ERROR("Unknown TSR file mode: " << header.file_mode);
     }
 }
 
@@ -614,47 +614,47 @@ Tensor CpuDevice::import_tensor(const std::string& filename, bool using_mmap) {
 void CpuDevice::validate_tsr_header(const TSRHeaderV3& header) const {
     // 魔数校验
     if (!header.is_valid_magic()) {
-        TR_THROW(ValueError, "Invalid TSR magic number (expected 'TSR3')");
+        TR_VALUE_ERROR("Invalid TSR magic number (expected 'TSR3')");
     }
 
     // 版本校验
     if (header.version != 3) {
-        TR_THROW(ValueError, "Unsupported TSR version: ", header.version,
-                 " (this implementation supports version 3)");
+        TR_VALUE_ERROR("Unsupported TSR version: " << header.version
+                 << " (this implementation supports version 3)");
     }
 
     // 头部大小校验
     if (header.header_size != 128) {
-        TR_THROW(ValueError, "Invalid TSR header size: ", header.header_size,
-                 " (expected 128)");
+        TR_VALUE_ERROR("Invalid TSR header size: " << header.header_size
+                 << " (expected 128)");
     }
 
     // 模式校验
     if (header.file_mode != 0 && header.file_mode != 1) {
-        TR_THROW(ValueError, "Invalid TSR file mode: ", header.file_mode,
-                 " (expected 0=RAW or 1=ZLIB)");
+        TR_VALUE_ERROR("Invalid TSR file mode: " << header.file_mode
+                 << " (expected 0=RAW or 1=ZLIB)");
     }
 
     // 数据类型校验（必须是1-4）
     if (header.dtype < 1 || header.dtype > 4) {
-        TR_THROW(ValueError, "Invalid TSR dtype: ", static_cast<int>(header.dtype),
-                 " (expected 1=FP32, 2=BF16, 3=INT32, 4=INT8)");
+        TR_VALUE_ERROR("Invalid TSR dtype: " << static_cast<int>(header.dtype)
+                 << " (expected 1=FP32, 2=BF16, 3=INT32, 4=INT8)");
     }
 
     // 维度数校验
     if (header.ndim > 4) {
-        TR_THROW(ValueError, "Invalid TSR ndim: ", static_cast<int>(header.ndim),
-                 " (expected 0-4)");
+        TR_VALUE_ERROR("Invalid TSR ndim: " << static_cast<int>(header.ndim)
+                 << " (expected 0-4)");
     }
 
     // 数据偏移校验
     if (header.file_mode == 0 && header.data_offset != TSR_RAW_DATA_OFFSET) {
-        TR_THROW(ValueError, "Invalid data_offset for RAW mode: ", header.data_offset,
-                 " (expected ", TSR_RAW_DATA_OFFSET, ")");
+        TR_VALUE_ERROR("Invalid data_offset for RAW mode: " << header.data_offset
+                 << " (expected " << TSR_RAW_DATA_OFFSET << ")");
     }
     if (header.file_mode == 1 && header.data_offset != TSR_ZLIB_DATA_OFFSET) {
-        TR_THROW(ValueError, "Invalid data_offset for ZLIB mode: ", header.data_offset,
-                 " (expected ", TSR_ZLIB_DATA_OFFSET, ")");
+        TR_VALUE_ERROR("Invalid data_offset for ZLIB mode: " << header.data_offset
+                 << " (expected " << TSR_ZLIB_DATA_OFFSET << ")");
     }
 
     // 元素数量校验
@@ -665,8 +665,8 @@ void CpuDevice::validate_tsr_header(const TSRHeaderV3& header) const {
             expected_numel *= header.dims[i];
             has_dim = true;
         } else if (header.dims[i] < 0) {
-            TR_THROW(ValueError, "Negative dimension in TSR file: dims[", i, "]=",
-                     header.dims[i]);
+            TR_VALUE_ERROR("Negative dimension in TSR file: dims[" << i << "]="
+                     << header.dims[i]);
         }
     }
 
@@ -676,21 +676,21 @@ void CpuDevice::validate_tsr_header(const TSRHeaderV3& header) const {
     }
 
     if (expected_numel != static_cast<int64_t>(header.numel)) {
-        TR_THROW(ValueError, "TSR numel mismatch: dims product=", expected_numel,
-                 ", header.numel=", header.numel);
+        TR_VALUE_ERROR("TSR numel mismatch: dims product=" << expected_numel
+                 << ", header.numel=" << header.numel);
     }
 
     // 数据大小校验
     size_t elem_size = tsr_dtype_size(header.dtype);
     if (elem_size == 0) {
-        TR_THROW(ValueError, "Unknown dtype size for dtype=",
-                 static_cast<int>(header.dtype));
+        TR_VALUE_ERROR("Unknown dtype size for dtype="
+                 << static_cast<int>(header.dtype));
     }
 
     size_t expected_size = header.numel * elem_size;
     if (expected_size != header.raw_data_size) {
-        TR_THROW(ValueError, "TSR raw_data_size mismatch: expected=", expected_size,
-                 " (", header.numel, " * ", elem_size, "), got=", header.raw_data_size);
+        TR_VALUE_ERROR("TSR raw_data_size mismatch: expected=" << expected_size
+                 << " (" << header.numel << " * " << elem_size << "), got=" << header.raw_data_size);
     }
 
     // 保留字段校验（必须为0）
@@ -741,7 +741,7 @@ std::vector<uint8_t> CpuDevice::compress_zlib(const void* data, size_t size) con
             case Z_BUF_ERROR: err_msg = "buffer too small"; break;
             case Z_STREAM_ERROR: err_msg = "invalid compression level"; break;
         }
-        TR_THROW(ValueError, "zlib compression failed: ", err_msg, " (code=", ret, ")");
+        TR_VALUE_ERROR("zlib compression failed: " << err_msg << " (code=" << ret << ")");
     }
 
     // 调整到实际压缩后的大小
@@ -756,8 +756,8 @@ void CpuDevice::decompress_zlib(const uint8_t* src, size_t src_size,
         if (src_size == 0 && dst_size == 0) {
             return;  // 空数据，无需处理
         }
-        TR_THROW(ValueError, "Invalid decompression parameters: src_size=", src_size,
-                 ", dst_size=", dst_size);
+        TR_VALUE_ERROR("Invalid decompression parameters: src_size=" << src_size
+                 << ", dst_size=" << dst_size);
     }
 
     uLongf uncompressed_size = static_cast<uLongf>(dst_size);
@@ -776,12 +776,12 @@ void CpuDevice::decompress_zlib(const uint8_t* src, size_t src_size,
             case Z_BUF_ERROR: err_msg = "output buffer too small"; break;
             case Z_DATA_ERROR: err_msg = "compressed data corrupted"; break;
         }
-        TR_THROW(ValueError, "zlib decompression failed: ", err_msg, " (code=", ret, ")");
+        TR_VALUE_ERROR("zlib decompression failed: " << err_msg << " (code=" << ret << ")");
     }
 
     if (uncompressed_size != dst_size) {
-        TR_THROW(ValueError, "Decompressed size mismatch: expected=", dst_size,
-                 ", actual=", uncompressed_size);
+        TR_VALUE_ERROR("Decompressed size mismatch: expected=" << dst_size
+                 << ", actual=" << uncompressed_size);
     }
 }
 

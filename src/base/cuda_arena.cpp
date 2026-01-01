@@ -20,14 +20,14 @@ CudaArena::CudaArena(int device_id, size_t size, size_t alignment)
     // 设置GPU设备
     cudaError_t err = cudaSetDevice(device_id_);
     if (err != cudaSuccess) {
-        TR_THROW(DeviceError, "CudaArena: cudaSetDevice failed: ", cudaGetErrorString(err));
+        TR_DEVICE_ERROR("cudaSetDevice failed: " << cudaGetErrorString(err));
     }
 
     // 创建专用stream
     cudaStream_t stream;
     err = cudaStreamCreate(&stream);
     if (err != cudaSuccess) {
-        TR_THROW(DeviceError, "CudaArena: cudaStreamCreate failed: ", cudaGetErrorString(err));
+        TR_DEVICE_ERROR("cudaStreamCreate failed: " << cudaGetErrorString(err));
     }
     stream_ = stream;
 
@@ -111,7 +111,7 @@ void* CudaArena::allocate_impl(size_t size, size_t alignment) {
     );
 
     if (err != cudaSuccess) {
-        TR_THROW(DeviceError, "CudaArena: cudaMallocAsync failed: ", cudaGetErrorString(err));
+        TR_DEVICE_ERROR("cudaMallocAsync failed: " << cudaGetErrorString(err));
     }
 
     // 分配时同步确保可用

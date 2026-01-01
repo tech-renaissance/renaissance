@@ -16,7 +16,7 @@
 
 ## （八）src/CMakeLists.txt统一处理第三方库的链接，src下面的子目录的CMakeLists.txt一律不链接第三方库。tests/CMakeLists.txt统一链接主库，原则上不链接第三方库。tests下面的子目录的CMakeLists.txt一律不链接任何库（dependency目录除外）。
 
-## （九）你接下来马上要做的四件事是：第一，打开根目录下的version.txt，看第一行了解我们当前的版本号。第二，打开docs/diary目录，阅读目录下的最新的两篇日志，了解最新进展；第三，阅读docs/logger_exception.md，了解日志器类和异常类的用法；第四，阅读docs/alpha_build.md，了解本项目推荐的编译方法。马上去做！！！
+## （九）你接下来马上要做的四件事是：第一，打开根目录下的version.txt，看第一行了解我们当前的版本号。第二，打开docs/diary目录，阅读目录下的最新的两篇日志，了解最新进展；第三，阅读docs/logger_exception_handbook.md，了解日志器类和异常类的用法；第四，阅读docs/alpha_build.md，了解本项目推荐的编译方法。马上去做！！！
 
 
 

@@ -29,7 +29,7 @@ MusaArena::MusaArena(int device_id, size_t size, size_t alignment)
     // 设置MUSA设备
     musaError_t err = musaSetDevice(device_id_);
     if (err != musaSuccess) {
-        TR_THROW(DeviceError, "MusaArena: musaSetDevice failed: ", musaGetErrorString(err));
+        TR_DEVICE_ERROR("musaSetDevice failed: " << musaGetErrorString(err));
     }
 
     // 注：Fallback版本不使用stream，stream_设为nullptr
@@ -68,12 +68,11 @@ void* MusaArena::allocate_impl(size_t size, size_t alignment) {
     musaError_t err = musaMalloc(&ptr, size);
 
     if (err != musaSuccess) {
-        TR_THROW(DeviceError, "MusaArena: musaMalloc failed (",
-                 static_cast<int>(err), "): ", musaGetErrorString(err));
+        TR_DEVICE_ERROR("musaMalloc failed (" << static_cast<int>(err) << "): " << musaGetErrorString(err));
     }
 
     if (ptr == nullptr) {
-        TR_THROW(DeviceError, "MusaArena: musaMalloc returned nullptr");
+        TR_DEVICE_ERROR("musaMalloc returned nullptr");
     }
 
     // musaMalloc是同步的，分配完成后立即可用

@@ -36,7 +36,7 @@ void* CpuArena::allocate_impl(size_t size, size_t alignment) {
     // mimalloc 的对齐分配
     void* ptr = mi_malloc_aligned(size, alignment);
     if (!ptr) {
-        TR_MEMORY_ERROR("CpuArena: mi_malloc_aligned failed for ", size, " bytes");
+        TR_MEMORY_ERROR("mi_malloc_aligned failed for " << size << " bytes");
     }
     return ptr;
 }

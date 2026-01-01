@@ -60,7 +60,7 @@ namespace {
             case DType::BF16:   return musa::dnn::Tensor::Type::BFLOAT16;
             case DType::FP32:   return musa::dnn::Tensor::Type::FLOAT;
             default:
-                TR_THROW(TypeError, "Unsupported dtype for muDNN: ", dtype_name(dtype));
+                TR_TYPE_ERROR("Unsupported dtype for muDNN: " << dtype_name(dtype));
         }
     }
 
@@ -87,16 +87,16 @@ MusaDevice::MusaDevice(int device_id) : device_id_(device_id) {
     // 设置当前设备
     musaError_t err = musaSetDevice(device_id_);
     if (err != musaSuccess) {
-        TR_THROW(DeviceError, "Failed to set MUSA device ", device_id_,
-                 ": ", musaGetErrorString(err));
+        TR_DEVICE_ERROR("Failed to set MUSA device " << device_id_
+                 << ": " << musaGetErrorString(err));
     }
 
     // 获取设备属性
     musaDeviceProp prop;
     err = musaGetDeviceProperties(&prop, device_id_);
     if (err != musaSuccess) {
-        TR_THROW(DeviceError, "Failed to get MUSA device properties for device ",
-                 device_id_, ": ", musaGetErrorString(err));
+        TR_DEVICE_ERROR("Failed to get MUSA device properties for device "
+                 << device_id_ << ": " << musaGetErrorString(err));
     }
 
     LOG_INFO << "MusaDevice[" << device_id_ << "] initialized: " << prop.name;
@@ -142,7 +142,7 @@ size_t MusaDevice::memory_available() const {
 
 std::shared_ptr<void> MusaDevice::allocate(size_t size) {
     if (size == 0) {
-        TR_THROW(ValueError, "Cannot allocate 0 bytes");
+        TR_VALUE_ERROR("Cannot allocate 0 bytes");
     }
 
     musaSetDevice(device_id_);
@@ -150,7 +150,7 @@ std::shared_ptr<void> MusaDevice::allocate(size_t size) {
     void* ptr = nullptr;
     musaError_t err = musaMalloc(&ptr, size);
     if (err != musaSuccess) {
-        TR_THROW(DeviceError, "MUSA malloc failed: ", musaGetErrorString(err));
+        TR_MEMORY_ERROR("MUSA malloc failed: " << musaGetErrorString(err));
     }
 
     // 使用自定义删除器，自动调用musaFree
@@ -173,31 +173,31 @@ void MusaDevice::deallocate(void* ptr) {
     musaSetDevice(device_id_);
     musaError_t err = musaFree(ptr);
     if (err != musaSuccess) {
-        TR_THROW(DeviceError, "MUSA free failed: ", musaGetErrorString(err));
+        TR_DEVICE_ERROR("MUSA free failed: " << musaGetErrorString(err));
     }
 }
 
 void MusaDevice::memcpy_internal(void* dst, const void* src, size_t size) {
     if (!dst || !src) {
-        TR_THROW(ValueError, "Null pointer in memcpy");
+        TR_VALUE_ERROR("Null pointer in memcpy");
     }
 
     musaSetDevice(device_id_);
     musaError_t err = musaMemcpy(dst, src, size, musaMemcpyDeviceToDevice);
     if (err != musaSuccess) {
-        TR_THROW(DeviceError, "MUSA memcpy failed: ", musaGetErrorString(err));
+        TR_DEVICE_ERROR("MUSA memcpy failed: " << musaGetErrorString(err));
     }
 }
 
 void MusaDevice::memset_internal(void* ptr, int value, size_t size) {
     if (!ptr) {
-        TR_THROW(ValueError, "Null pointer in memset");
+        TR_VALUE_ERROR("Null pointer in memset");
     }
 
     musaSetDevice(device_id_);
     musaError_t err = musaMemset(ptr, value, size);
     if (err != musaSuccess) {
-        TR_THROW(DeviceError, "MUSA memset failed: ", musaGetErrorString(err));
+        TR_DEVICE_ERROR("MUSA memset failed: " << musaGetErrorString(err));
     }
 }
 
@@ -205,7 +205,7 @@ void MusaDevice::synchronize() {
     musaSetDevice(device_id_);
     musaError_t err = musaDeviceSynchronize();
     if (err != musaSuccess) {
-        TR_THROW(DeviceError, "MUSA synchronize failed: ", musaGetErrorString(err));
+        TR_DEVICE_ERROR("MUSA synchronize failed: " << musaGetErrorString(err));
     }
 }
 
@@ -226,7 +226,7 @@ Tensor MusaDevice::zeros(const Shape& shape, DType dtype) {
     musaSetDevice(device_id_);
     musaError_t err = musaMemset(tensor.data_ptr(), 0, nbytes);
     if (err != musaSuccess) {
-        TR_THROW(DeviceError, "MUSA memset failed in zeros: ", musaGetErrorString(err));
+        TR_DEVICE_ERROR("MUSA memset failed in zeros: " << musaGetErrorString(err));
     }
 
     return tensor;
@@ -249,7 +249,7 @@ Tensor MusaDevice::ones(const Shape& shape, DType dtype) {
     if (dtype == DType::INT8) {
         musaError_t err = musaMemset(tensor.data_ptr(), 1, nbytes);
         if (err != musaSuccess) {
-            TR_THROW(DeviceError, "MUSA memset failed in ones: ", musaGetErrorString(err));
+            TR_DEVICE_ERROR("MUSA memset failed in ones: " << musaGetErrorString(err));
         }
         return tensor;
     }
@@ -262,7 +262,7 @@ Tensor MusaDevice::ones(const Shape& shape, DType dtype) {
             static_cast<int32_t>(1)
         );
         if (err != musaSuccess) {
-            TR_THROW(DeviceError, "MUSA fill kernel failed in ones: ", musaGetErrorString(err));
+            TR_DEVICE_ERROR("MUSA fill kernel failed in ones: " << musaGetErrorString(err));
         }
         return tensor;
     }
@@ -282,7 +282,7 @@ Tensor MusaDevice::ones(const Shape& shape, DType dtype) {
         musaError_t err = musaMemcpy(tensor.data_ptr(), host_buffer.data(),
                                      count * sizeof(uint16_t), musaMemcpyHostToDevice);
         if (err != musaSuccess) {
-            TR_THROW(DeviceError, "MUSA memcpy failed in ones (BF16): ", musaGetErrorString(err));
+            TR_DEVICE_ERROR("MUSA memcpy failed in ones (BF16): " << musaGetErrorString(err));
         }
 
         return tensor;
@@ -298,7 +298,7 @@ Tensor MusaDevice::ones(const Shape& shape, DType dtype) {
 
     musa::dnn::Status status = fill_op.Run(mudnn_handle, mudnn_tensor);
     if (status != musa::dnn::Status::SUCCESS) {
-        TR_THROW(DeviceError, "muDNN Fill operation failed in ones");
+        TR_DEVICE_ERROR("muDNN Fill operation failed in ones");
     }
 
     return tensor;
@@ -314,7 +314,7 @@ void MusaDevice::add_into(const Tensor& a, const Tensor& b, Tensor& result) {
 
     // 2. 检查数据类型一致
     if (a.dtype() != b.dtype() || a.dtype() != result.dtype()) {
-        TR_THROW(TypeError, "Dtype mismatch in add_into");
+        TR_TYPE_ERROR("Dtype mismatch in add_into");
     }
 
     musaSetDevice(device_id_);
@@ -352,7 +352,7 @@ void MusaDevice::add_into(const Tensor& a, const Tensor& b, Tensor& result) {
         }
 
         if (err != musaSuccess) {
-            TR_THROW(DeviceError, "MUSA add kernel failed in add_into: ", musaGetErrorString(err));
+            TR_DEVICE_ERROR("MUSA add kernel failed in add_into: " << musaGetErrorString(err));
         }
         return;
     }
@@ -371,7 +371,7 @@ void MusaDevice::add_into(const Tensor& a, const Tensor& b, Tensor& result) {
 
     musa::dnn::Status status = binary_op.Run(mudnn_handle, mudnn_result, mudnn_a, mudnn_b);
     if (status != musa::dnn::Status::SUCCESS) {
-        TR_THROW(DeviceError, "muDNN Binary operation failed in add_into");
+        TR_DEVICE_ERROR("muDNN Binary operation failed in add_into");
     }
 
     // 同步确保计算完成
@@ -385,7 +385,7 @@ void MusaDevice::add_into(const Tensor& a, const Tensor& b, Tensor& result) {
 void MusaDevice::rand_uint64(uint64_t* ptr, size_t count, Generator& gen) {
     if (count == 0) return;
     if (!ptr) {
-        TR_THROW(ValueError, "Null pointer in rand_uint64");
+        TR_VALUE_ERROR("Null pointer in rand_uint64");
     }
 
     // 原子预留offset（与CPU使用相同的Generator！）
@@ -399,8 +399,8 @@ void MusaDevice::rand_uint64(uint64_t* ptr, size_t count, Generator& gen) {
     );
 
     if (err != musaSuccess) {
-        TR_THROW(DeviceError, "MUSA rand_uint64 kernel failed: ",
-                 musaGetErrorString(err));
+        TR_DEVICE_ERROR("MUSA rand_uint64 kernel failed: "
+                 << musaGetErrorString(err));
     }
 }
 
@@ -408,10 +408,10 @@ void MusaDevice::rand_bernoulli_int8(int8_t* ptr, size_t count, float prob_one,
                                       Generator& gen) {
     if (count == 0) return;
     if (!ptr) {
-        TR_THROW(ValueError, "Null pointer in rand_bernoulli_int8");
+        TR_VALUE_ERROR("Null pointer in rand_bernoulli_int8");
     }
     if (prob_one < 0.0f || prob_one > 1.0f) {
-        TR_THROW(ValueError, "prob_one must be in [0, 1], got ", prob_one);
+        TR_VALUE_ERROR("prob_one must be in [0, 1], got " << prob_one);
     }
 
     uint64_t base_offset = gen.next_offset(count);
@@ -424,8 +424,8 @@ void MusaDevice::rand_bernoulli_int8(int8_t* ptr, size_t count, float prob_one,
     );
 
     if (err != musaSuccess) {
-        TR_THROW(DeviceError, "MUSA rand_bernoulli_int8 kernel failed: ",
-                 musaGetErrorString(err));
+        TR_DEVICE_ERROR("MUSA rand_bernoulli_int8 kernel failed: "
+                 << musaGetErrorString(err));
     }
 }
 
@@ -433,10 +433,10 @@ void MusaDevice::rand_uniform_int8(int8_t* ptr, size_t count, int8_t low,
                                     int8_t high, Generator& gen) {
     if (count == 0) return;
     if (!ptr) {
-        TR_THROW(ValueError, "Null pointer in rand_uniform_int8");
+        TR_VALUE_ERROR("Null pointer in rand_uniform_int8");
     }
     if (low > high) {
-        TR_THROW(ValueError, "low must be <= high");
+        TR_VALUE_ERROR("low must be <= high");
     }
 
     uint64_t base_offset = gen.next_offset(count);
@@ -449,8 +449,8 @@ void MusaDevice::rand_uniform_int8(int8_t* ptr, size_t count, int8_t low,
     );
 
     if (err != musaSuccess) {
-        TR_THROW(DeviceError, "MUSA rand_uniform_int8 kernel failed: ",
-                 musaGetErrorString(err));
+        TR_DEVICE_ERROR("MUSA rand_uniform_int8 kernel failed: "
+                 << musaGetErrorString(err));
     }
 }
 
@@ -458,10 +458,10 @@ void MusaDevice::rand_bernoulli_int32(int32_t* ptr, size_t count, float prob_one
                                        Generator& gen) {
     if (count == 0) return;
     if (!ptr) {
-        TR_THROW(ValueError, "Null pointer in rand_bernoulli_int32");
+        TR_VALUE_ERROR("Null pointer in rand_bernoulli_int32");
     }
     if (prob_one < 0.0f || prob_one > 1.0f) {
-        TR_THROW(ValueError, "prob_one must be in [0, 1], got ", prob_one);
+        TR_VALUE_ERROR("prob_one must be in [0, 1], got " << prob_one);
     }
 
     uint64_t base_offset = gen.next_offset(count);
@@ -474,8 +474,8 @@ void MusaDevice::rand_bernoulli_int32(int32_t* ptr, size_t count, float prob_one
     );
 
     if (err != musaSuccess) {
-        TR_THROW(DeviceError, "MUSA rand_bernoulli_int32 kernel failed: ",
-                 musaGetErrorString(err));
+        TR_DEVICE_ERROR("MUSA rand_bernoulli_int32 kernel failed: "
+                 << musaGetErrorString(err));
     }
 }
 
@@ -483,10 +483,10 @@ void MusaDevice::rand_uniform_int32(int32_t* ptr, size_t count, int32_t low,
                                      int32_t high, Generator& gen) {
     if (count == 0) return;
     if (!ptr) {
-        TR_THROW(ValueError, "Null pointer in rand_uniform_int32");
+        TR_VALUE_ERROR("Null pointer in rand_uniform_int32");
     }
     if (low > high) {
-        TR_THROW(ValueError, "low must be <= high");
+        TR_VALUE_ERROR("low must be <= high");
     }
 
     uint64_t base_offset = gen.next_offset(count);
@@ -499,8 +499,8 @@ void MusaDevice::rand_uniform_int32(int32_t* ptr, size_t count, int32_t low,
     );
 
     if (err != musaSuccess) {
-        TR_THROW(DeviceError, "MUSA rand_uniform_int32 kernel failed: ",
-                 musaGetErrorString(err));
+        TR_DEVICE_ERROR("MUSA rand_uniform_int32 kernel failed: "
+                 << musaGetErrorString(err));
     }
 }
 
@@ -508,10 +508,10 @@ void MusaDevice::rand_uniform_float(float* ptr, size_t count, float low,
                                      float high, Generator& gen) {
     if (count == 0) return;
     if (!ptr) {
-        TR_THROW(ValueError, "Null pointer in rand_uniform_float");
+        TR_VALUE_ERROR("Null pointer in rand_uniform_float");
     }
     if (low > high) {
-        TR_THROW(ValueError, "low must be <= high");
+        TR_VALUE_ERROR("low must be <= high");
     }
 
     uint64_t base_offset = gen.next_offset(count);
@@ -524,8 +524,8 @@ void MusaDevice::rand_uniform_float(float* ptr, size_t count, float low,
     );
 
     if (err != musaSuccess) {
-        TR_THROW(DeviceError, "MUSA rand_uniform_float kernel failed: ",
-                 musaGetErrorString(err));
+        TR_DEVICE_ERROR("MUSA rand_uniform_float kernel failed: "
+                 << musaGetErrorString(err));
     }
 }
 
@@ -533,10 +533,10 @@ void MusaDevice::rand_normal_float(float* ptr, size_t count, float mean,
                                     float std, Generator& gen) {
     if (count == 0) return;
     if (!ptr) {
-        TR_THROW(ValueError, "Null pointer in rand_normal_float");
+        TR_VALUE_ERROR("Null pointer in rand_normal_float");
     }
     if (std < 0.0f) {
-        TR_THROW(ValueError, "std must be >= 0, got ", std);
+        TR_VALUE_ERROR("std must be >= 0, got " << std);
     }
 
     // Box-Muller消耗的offset：(count + 1) / 2
@@ -551,8 +551,8 @@ void MusaDevice::rand_normal_float(float* ptr, size_t count, float mean,
     );
 
     if (err != musaSuccess) {
-        TR_THROW(DeviceError, "MUSA rand_normal_float kernel failed: ",
-                 musaGetErrorString(err));
+        TR_DEVICE_ERROR("MUSA rand_normal_float kernel failed: "
+                 << musaGetErrorString(err));
     }
 }
 
@@ -562,7 +562,7 @@ void MusaDevice::rand_normal_float(float* ptr, size_t count, float mean,
 
 Tensor MusaDevice::uniform(const Shape& shape, float min_val, float max_val, DType dtype) {
     if (dtype != DType::FP32) {
-        TR_THROW(TypeError, "uniform only supports FP32, got ", dtype_name(dtype));
+        TR_TYPE_ERROR("uniform only supports FP32, got " << dtype_name(dtype));
     }
 
     Tensor tensor = zeros(shape, dtype);
@@ -576,7 +576,7 @@ Tensor MusaDevice::uniform(const Shape& shape, float min_val, float max_val, DTy
 
 void MusaDevice::uniform_inplace(Tensor& tensor_a, float min_val, float max_val, DType dtype) {
     if (dtype != DType::FP32) {
-        TR_THROW(TypeError, "uniform_inplace only supports FP32, got ", dtype_name(dtype));
+        TR_TYPE_ERROR("uniform_inplace only supports FP32, got " << dtype_name(dtype));
     }
     check_on_device(tensor_a);
 
@@ -588,7 +588,7 @@ void MusaDevice::uniform_inplace(Tensor& tensor_a, float min_val, float max_val,
 
 Tensor MusaDevice::randn(const Shape& shape, float mean, float stddev, DType dtype) {
     if (dtype != DType::FP32) {
-        TR_THROW(TypeError, "randn only supports FP32, got ", dtype_name(dtype));
+        TR_TYPE_ERROR("randn only supports FP32, got " << dtype_name(dtype));
     }
 
     Tensor tensor = zeros(shape, dtype);
@@ -602,7 +602,7 @@ Tensor MusaDevice::randn(const Shape& shape, float mean, float stddev, DType dty
 
 void MusaDevice::randn_inplace(Tensor& tensor_a, float mean, float stddev, DType dtype) {
     if (dtype != DType::FP32) {
-        TR_THROW(TypeError, "randn_inplace only supports FP32, got ", dtype_name(dtype));
+        TR_TYPE_ERROR("randn_inplace only supports FP32, got " << dtype_name(dtype));
     }
     check_on_device(tensor_a);
 
@@ -614,7 +614,7 @@ void MusaDevice::randn_inplace(Tensor& tensor_a, float mean, float stddev, DType
 
 Tensor MusaDevice::randint(const Shape& shape, int low, int high, DType dtype) {
     if (dtype != DType::FP32 && dtype != DType::INT32) {
-        TR_THROW(TypeError, "randint only supports FP32 and INT32, got ", dtype_name(dtype));
+        TR_TYPE_ERROR("randint only supports FP32 and INT32, got " << dtype_name(dtype));
     }
 
     Tensor tensor = zeros(shape, dtype);
@@ -636,7 +636,7 @@ Tensor MusaDevice::randint(const Shape& shape, int low, int high, DType dtype) {
         );
 
         if (err != musaSuccess) {
-            TR_THROW(DeviceError, "MUSA convert kernel failed: ", musaGetErrorString(err));
+            TR_DEVICE_ERROR("MUSA convert kernel failed: " << musaGetErrorString(err));
         }
     } else {  // INT32
         int32_t* data = static_cast<int32_t*>(tensor.data_ptr());
@@ -648,7 +648,7 @@ Tensor MusaDevice::randint(const Shape& shape, int low, int high, DType dtype) {
 
 void MusaDevice::randint_inplace(Tensor& tensor_a, int low, int high, DType dtype) {
     if (dtype != DType::FP32 && dtype != DType::INT32) {
-        TR_THROW(TypeError, "randint_inplace only supports FP32 and INT32, got ", dtype_name(dtype));
+        TR_TYPE_ERROR("randint_inplace only supports FP32 and INT32, got " << dtype_name(dtype));
     }
     check_on_device(tensor_a);
 
@@ -669,7 +669,7 @@ void MusaDevice::randint_inplace(Tensor& tensor_a, int low, int high, DType dtyp
         );
 
         if (err != musaSuccess) {
-            TR_THROW(DeviceError, "MUSA convert kernel failed: ", musaGetErrorString(err));
+            TR_DEVICE_ERROR("MUSA convert kernel failed: " << musaGetErrorString(err));
         }
     } else {  // INT32
         int32_t* data = static_cast<int32_t*>(tensor_a.data_ptr());
@@ -679,7 +679,7 @@ void MusaDevice::randint_inplace(Tensor& tensor_a, int low, int high, DType dtyp
 
 Tensor MusaDevice::randbool(const Shape& shape, float rate_of_zeros, DType dtype) {
     if (dtype != DType::FP32 && dtype != DType::INT32) {
-        TR_THROW(TypeError, "randbool only supports FP32 and INT32, got ", dtype_name(dtype));
+        TR_TYPE_ERROR("randbool only supports FP32 and INT32, got " << dtype_name(dtype));
     }
 
     Tensor tensor = zeros(shape, dtype);
@@ -700,7 +700,7 @@ Tensor MusaDevice::randbool(const Shape& shape, float rate_of_zeros, DType dtype
         );
 
         if (err != musaSuccess) {
-            TR_THROW(DeviceError, "MUSA convert kernel failed: ", musaGetErrorString(err));
+            TR_DEVICE_ERROR("MUSA convert kernel failed: " << musaGetErrorString(err));
         }
     } else {  // INT32
         int32_t* data = static_cast<int32_t*>(tensor.data_ptr());
@@ -717,7 +717,7 @@ Tensor MusaDevice::randbool(const Shape& shape, float rate_of_zeros, DType dtype
         );
 
         if (err != musaSuccess) {
-            TR_THROW(DeviceError, "MUSA convert kernel failed: ", musaGetErrorString(err));
+            TR_DEVICE_ERROR("MUSA convert kernel failed: " << musaGetErrorString(err));
         }
     }
 
@@ -726,7 +726,7 @@ Tensor MusaDevice::randbool(const Shape& shape, float rate_of_zeros, DType dtype
 
 void MusaDevice::randbool_inplace(Tensor& tensor_a, float rate_of_zeros, DType dtype) {
     if (dtype != DType::FP32 && dtype != DType::INT32) {
-        TR_THROW(TypeError, "randbool_inplace only supports FP32 and INT32, got ", dtype_name(dtype));
+        TR_TYPE_ERROR("randbool_inplace only supports FP32 and INT32, got " << dtype_name(dtype));
     }
     check_on_device(tensor_a);
 
@@ -747,7 +747,7 @@ void MusaDevice::randbool_inplace(Tensor& tensor_a, float rate_of_zeros, DType d
         );
 
         if (err != musaSuccess) {
-            TR_THROW(DeviceError, "MUSA convert kernel failed: ", musaGetErrorString(err));
+            TR_DEVICE_ERROR("MUSA convert kernel failed: " << musaGetErrorString(err));
         }
     } else {  // INT32
         int32_t* data = static_cast<int32_t*>(tensor_a.data_ptr());
@@ -764,7 +764,7 @@ void MusaDevice::randbool_inplace(Tensor& tensor_a, float rate_of_zeros, DType d
         );
 
         if (err != musaSuccess) {
-            TR_THROW(DeviceError, "MUSA convert kernel failed: ", musaGetErrorString(err));
+            TR_DEVICE_ERROR("MUSA convert kernel failed: " << musaGetErrorString(err));
         }
     }
 }
@@ -781,13 +781,13 @@ bool MusaDevice::equal(const Tensor& a, const Tensor& b) {
 
     // 检查dtype
     if (a.dtype() != b.dtype()) {
-        TR_THROW(TypeError, "Cannot compare tensors with different dtypes: ",
-                 dtype_name(a.dtype()), " vs ", dtype_name(b.dtype()));
+        TR_TYPE_ERROR("Cannot compare tensors with different dtypes: "
+                 << dtype_name(a.dtype()) << " vs " << dtype_name(b.dtype()));
     }
 
     // 仅支持INT8和INT32
     if (a.dtype() == DType::FP32 || a.dtype() == DType::BF16) {
-        TR_THROW(TypeError, "equal() only supports INT8 and INT32. ",
+        TR_TYPE_ERROR("equal() only supports INT8 and INT32. "
                  "For FP32/BF16 comparison, use is_close() instead.");
     }
 
@@ -804,7 +804,7 @@ bool MusaDevice::equal(const Tensor& a, const Tensor& b) {
     // 初始化为0（表示相等）
     musaError_t err = musaMemset(mismatch_flag, 0, sizeof(int));
     if (err != musaSuccess) {
-        TR_THROW(DeviceError, "MUSA memset failed: ", musaGetErrorString(err));
+        TR_DEVICE_ERROR("MUSA memset failed: " << musaGetErrorString(err));
     }
 
     // 调用相应的kernel
@@ -821,11 +821,11 @@ bool MusaDevice::equal(const Tensor& a, const Tensor& b) {
         err = launch_equal_int8_kernel(static_cast<int>(count), a_data, b_data, mismatch_flag);
     }
     else {
-        TR_THROW(TypeError, "Unsupported dtype in equal: ", dtype_name(a.dtype()));
+        TR_TYPE_ERROR("Unsupported dtype in equal: " << dtype_name(a.dtype()));
     }
 
     if (err != musaSuccess) {
-        TR_THROW(DeviceError, "MUSA equal kernel failed: ", musaGetErrorString(err));
+        TR_DEVICE_ERROR("MUSA equal kernel failed: " << musaGetErrorString(err));
     }
 
     // 同步并读取结果
@@ -834,7 +834,7 @@ bool MusaDevice::equal(const Tensor& a, const Tensor& b) {
     int flag;
     err = musaMemcpy(&flag, mismatch_flag, sizeof(int), musaMemcpyDeviceToHost);
     if (err != musaSuccess) {
-        TR_THROW(DeviceError, "MUSA memcpy failed: ", musaGetErrorString(err));
+        TR_DEVICE_ERROR("MUSA memcpy failed: " << musaGetErrorString(err));
     }
 
     // 如果flag仍为0，说明所有元素都相等
@@ -851,13 +851,13 @@ bool MusaDevice::is_close(const Tensor& a, const Tensor& b, float eps) {
 
     // 检查dtype
     if (a.dtype() != b.dtype()) {
-        TR_THROW(TypeError, "Cannot compare tensors with different dtypes: ",
-                 dtype_name(a.dtype()), " vs ", dtype_name(b.dtype()));
+        TR_TYPE_ERROR("Cannot compare tensors with different dtypes: "
+                 << dtype_name(a.dtype()) << " vs " << dtype_name(b.dtype()));
     }
 
     // 仅支持FP32和BF16
     if (a.dtype() == DType::INT8 || a.dtype() == DType::INT32) {
-        TR_THROW(TypeError, "is_close() only supports FP32 and BF16. ",
+        TR_TYPE_ERROR("is_close() only supports FP32 and BF16. "
                  "For INT8/INT32 comparison, use equal() instead.");
     }
 
@@ -883,7 +883,7 @@ bool MusaDevice::is_close(const Tensor& a, const Tensor& b, float eps) {
     // 初始化为0（表示相等）
     musaError_t err = musaMemset(mismatch_flag, 0, sizeof(int));
     if (err != musaSuccess) {
-        TR_THROW(DeviceError, "MUSA memset failed: ", musaGetErrorString(err));
+        TR_DEVICE_ERROR("MUSA memset failed: " << musaGetErrorString(err));
     }
 
     // 调用相应的kernel
@@ -901,11 +901,11 @@ bool MusaDevice::is_close(const Tensor& a, const Tensor& b, float eps) {
         err = launch_is_close_bf16_kernel(static_cast<int>(count), a_data, b_data, tolerance, mismatch_flag);
     }
     else {
-        TR_THROW(TypeError, "Unsupported dtype in is_close: ", dtype_name(a.dtype()));
+        TR_TYPE_ERROR("Unsupported dtype in is_close: " << dtype_name(a.dtype()));
     }
 
     if (err != musaSuccess) {
-        TR_THROW(DeviceError, "MUSA is_close kernel failed: ", musaGetErrorString(err));
+        TR_DEVICE_ERROR("MUSA is_close kernel failed: " << musaGetErrorString(err));
     }
 
     // 同步并读取结果
@@ -914,7 +914,7 @@ bool MusaDevice::is_close(const Tensor& a, const Tensor& b, float eps) {
     int flag;
     err = musaMemcpy(&flag, mismatch_flag, sizeof(int), musaMemcpyDeviceToHost);
     if (err != musaSuccess) {
-        TR_THROW(DeviceError, "MUSA memcpy failed: ", musaGetErrorString(err));
+        TR_DEVICE_ERROR("MUSA memcpy failed: " << musaGetErrorString(err));
     }
 
     // 如果flag仍为0，说明所有元素都在容差范围内

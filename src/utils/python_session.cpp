@@ -64,7 +64,7 @@ std::string generate_session_dir(int session_id) {
 void write_json_file(const std::string& path, const std::string& content) {
     std::ofstream ofs(path);
     if (!ofs) {
-        TR_THROW(DeviceError, "PythonSession: Failed to open file for writing: " + path);
+        TR_DEVICE_ERROR("Failed to open file for writing: " << path);
     }
     ofs << content;
     ofs.close();
@@ -76,7 +76,7 @@ void write_json_file(const std::string& path, const std::string& content) {
 std::string read_json_file(const std::string& path) {
     std::ifstream ifs(path);
     if (!ifs) {
-        TR_THROW(DeviceError, "PythonSession: Failed to open file for reading: " + path);
+        TR_DEVICE_ERROR("Failed to open file for reading: " << path);
     }
     std::stringstream buffer;
     buffer << ifs.rdbuf();
@@ -110,7 +110,7 @@ PythonSession::~PythonSession() {
 
 void PythonSession::start() {
     if (running_) {
-        TR_THROW(DeviceError, "PythonSession::start: Session is already running");
+        TR_DEVICE_ERROR("Session is already running");
     }
 
     // 创建会话目录
@@ -203,7 +203,7 @@ void PythonSession::send(
     const std::map<std::string, std::string>& parameters
 ) {
     if (!running_) {
-        TR_THROW(DeviceError, "PythonSession::send: Session is not running");
+        TR_DEVICE_ERROR("Session is not running");
     }
 
     // 将输入张量写入TSR文件 - 使用Device的方法
@@ -268,7 +268,7 @@ void PythonSession::send(
             &pi                        // 指向PROCESS_INFORMATION结构的指针
         )) {
             cleanup_session_dir();
-            TR_THROW(DeviceError, "PythonSession::send: Failed to start Python process");
+            TR_DEVICE_ERROR("Failed to start Python process");
         }
 
         process_handle_ = pi.hProcess;
@@ -279,7 +279,7 @@ void PythonSession::send(
         pid_t pid = fork();
         if (pid < 0) {
             cleanup_session_dir();
-            TR_THROW(DeviceError, "PythonSession::send: Failed to fork process");
+            TR_DEVICE_ERROR("Failed to fork process");
         } else if (pid == 0) {
             // 子进程
             execlp(python_exe_.c_str(), python_exe_.c_str(),
@@ -301,7 +301,7 @@ void PythonSession::send(
 
 void PythonSession::wait() {
     if (!running_) {
-        TR_THROW(DeviceError, "PythonSession::wait: Session is not running");
+        TR_DEVICE_ERROR("Session is not running");
     }
 
     std::string response_path = session_dir_ + "/response.json";
@@ -318,19 +318,19 @@ void PythonSession::wait() {
         attempts++;
     }
 
-    TR_THROW(DeviceError, "PythonSession::wait: Timeout waiting for Python response");
+    TR_DEVICE_ERROR("Timeout waiting for Python response");
 }
 
 std::vector<Tensor> PythonSession::fetch() {
     if (!running_) {
-        TR_THROW(DeviceError, "PythonSession::fetch: Session is not running");
+        TR_DEVICE_ERROR("Session is not running");
     }
 
     // 读取响应
     auto [success, message, result] = read_response();
 
     if (!success) {
-        TR_THROW(DeviceError, "PythonSession::fetch: Python operation failed: " + message);
+        TR_DEVICE_ERROR("Python operation failed: " << message);
     }
 
     // 加载输出张量 - 使用Device的方法
@@ -348,7 +348,7 @@ std::vector<Tensor> PythonSession::fetch() {
         std::string tensor_path = session_dir_ + "/output_" + std::to_string(i) + ".tsr";
 
         if (!std::filesystem::exists(tensor_path)) {
-            TR_THROW(DeviceError, "PythonSession::fetch: Output tensor file not found: " + tensor_path);
+            TR_DEVICE_ERROR("Output tensor file not found: " << tensor_path);
         }
 
         // 不使用mmap，避免文件句柄被占用导致清理失败
@@ -361,32 +361,32 @@ std::vector<Tensor> PythonSession::fetch() {
 
 std::string PythonSession::fetch_text_output() {
     if (!running_) {
-        TR_THROW(DeviceError, "PythonSession::fetch_text_output: Session is not running");
+        TR_DEVICE_ERROR("Session is not running");
     }
 
     // 读取响应
     auto [success, message, result] = read_response();
 
     if (!success) {
-        TR_THROW(DeviceError, "PythonSession::fetch_text_output: Python operation failed: " + message);
+        TR_DEVICE_ERROR("Python operation failed: " << message);
     }
 
     // 验证返回类型是txt
     if (message != "txt") {
-        TR_THROW(DeviceError, "PythonSession::fetch_text_output: Expected txt output, got: " + message);
+        TR_DEVICE_ERROR("Expected txt output, got: " << message);
     }
 
     // 读取文本文件
     std::string txt_path = session_dir_ + "/output_0.txt";
 
     if (!std::filesystem::exists(txt_path)) {
-        TR_THROW(DeviceError, "PythonSession::fetch_text_output: Output text file not found: " + txt_path);
+        TR_DEVICE_ERROR("Output text file not found: " << txt_path);
     }
 
     // 读取文件内容
     std::ifstream ifs(txt_path);
     if (!ifs) {
-        TR_THROW(DeviceError, "PythonSession::fetch_text_output: Failed to open text file: " + txt_path);
+        TR_DEVICE_ERROR("Failed to open text file: " << txt_path);
     }
 
     std::string content((std::istreambuf_iterator<char>(ifs)),
@@ -427,7 +427,7 @@ void PythonSession::create_session_dir() {
 
     // 创建目录
     if (!std::filesystem::create_directories(session_dir_)) {
-        TR_THROW(DeviceError, "PythonSession::create_session_dir: Failed to create session directory: " + session_dir_);
+        TR_DEVICE_ERROR("Failed to create session directory: " << session_dir_);
     }
 }
 

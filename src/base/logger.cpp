@@ -10,6 +10,7 @@
  */
 
 #include "renaissance/base/logger.h"
+#include "renaissance/base/tr_exception.h"
 #include <iomanip>
 #include <thread>
 #include <ctime>
@@ -122,6 +123,12 @@ const char* Logger::level_to_string(LogLevel level) const noexcept {
         case LogLevel::ERROR: return "ERROR";
         default: return "?????";
     }
+}
+
+void Logger::log_exception(const TRException& e) {
+    log(LogLevel::ERROR, "EXCEPTION",
+        e.contexts().empty() ? "" : e.contexts()[0].file,
+        0, e.what());
 }
 
 } // namespace tr

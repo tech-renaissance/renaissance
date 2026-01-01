@@ -40,6 +40,9 @@ add_executable(test_logger test_logger.cpp)
 # 创建Exception测试可执行文件
 add_executable(test_exception test_exception.cpp)
 
+# 创建Terminate Handler测试可执行文件
+add_executable(test_terminate_handler test_terminate_handler.cpp)
+
 # 创建内存池测试可执行文件
 add_executable(test_memory_alignment test_memory_alignment.cpp)
 
@@ -71,6 +74,10 @@ set_target_properties(test_logger PROPERTIES
 )
 
 set_target_properties(test_exception PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/base
+)
+
+set_target_properties(test_terminate_handler PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/base
 )
 
@@ -116,6 +123,9 @@ if(WIN32)
     set_target_properties(test_exception PROPERTIES
         WIN32_EXECUTABLE FALSE
     )
+    set_target_properties(test_terminate_handler PROPERTIES
+        WIN32_EXECUTABLE FALSE
+    )
     set_target_properties(test_memory_alignment PROPERTIES
         WIN32_EXECUTABLE FALSE
     )
@@ -149,6 +159,7 @@ endif()
 if(MSVC)
     target_compile_options(test_logger PRIVATE /W4 /utf-8)
     target_compile_options(test_exception PRIVATE /W4 /utf-8)
+    target_compile_options(test_terminate_handler PRIVATE /W4 /utf-8)
     target_compile_options(test_memory_alignment PRIVATE /W4 /utf-8)
     target_compile_options(test_arena PRIVATE /W4 /utf-8)
     target_compile_options(test_cpu_arena PRIVATE /W4 /utf-8)
@@ -184,6 +195,7 @@ endif()
 # 注意：TR_WORKSPACE已在主CMakeLists.txt中全局定义，此处无需重复传递
 target_compile_definitions(test_logger PRIVATE TR_LOG_LEVEL=0)
 target_compile_definitions(test_exception PRIVATE TR_LOG_LEVEL=0)
+target_compile_definitions(test_terminate_handler PRIVATE TR_LOG_LEVEL=0)
 target_compile_definitions(test_memory_alignment PRIVATE TR_LOG_LEVEL=0)
 target_compile_definitions(test_arena PRIVATE TR_LOG_LEVEL=0)
 target_compile_definitions(test_cpu_arena PRIVATE TR_LOG_LEVEL=0)
@@ -201,6 +213,7 @@ endif()
 # 链接renaissance统一库（包含base、data、device及所有依赖）
 target_link_libraries(test_logger PRIVATE renaissance)
 target_link_libraries(test_exception PRIVATE renaissance)
+target_link_libraries(test_terminate_handler PRIVATE renaissance)
 target_link_libraries(test_memory_alignment PRIVATE renaissance)
 target_link_libraries(test_arena PRIVATE renaissance)
 target_link_libraries(test_cpu_arena PRIVATE renaissance)

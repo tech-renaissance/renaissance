@@ -19,10 +19,10 @@ void test_basic_exception() {
     LOG_INFO << "Basic exception test started";
 
     try {
-        throw TRException("This is a basic exception");
-    } catch (const TRException& e) {
+        TR_VALUE_ERROR("This is a basic exception");  // 使用ValueError作为测试
+    } catch (const ValueError& e) {
         LOG_INFO << "Caught exception: " << e.what();
-        assert(std::string(e.type()) == "TRException");
+        assert(std::string(e.type()) == "ValueError");
         assert(e.message().find("basic exception") != std::string::npos);
     }
 
@@ -34,63 +34,63 @@ void test_exception_types() {
 
     // 测试各种异常类型
     try {
-        throw NotImplementedError("Feature not implemented yet");
+        TR_NOT_IMPLEMENTED("Feature not implemented yet");
     } catch (const NotImplementedError& e) {
         LOG_INFO << "NotImplementedError: " << e.what();
         assert(std::string(e.type()) == "NotImplementedError");
     }
 
     try {
-        throw ValueError("Invalid value provided");
+        TR_VALUE_ERROR("Invalid value provided");
     } catch (const ValueError& e) {
         LOG_INFO << "ValueError: " << e.what();
         assert(std::string(e.type()) == "ValueError");
     }
 
     try {
-        throw ShapeError("Tensor shape mismatch");
+        TR_SHAPE_ERROR("Tensor shape mismatch");
     } catch (const ShapeError& e) {
         LOG_INFO << "ShapeError: " << e.what();
         assert(std::string(e.type()) == "ShapeError");
     }
 
     try {
-        throw IndexError("Array index out of bounds");
+        TR_INDEX_ERROR("Array index out of bounds");
     } catch (const IndexError& e) {
         LOG_INFO << "IndexError: " << e.what();
         assert(std::string(e.type()) == "IndexError");
     }
 
     try {
-        throw TypeError("Type mismatch operation");
+        TR_TYPE_ERROR("Type mismatch operation");
     } catch (const TypeError& e) {
         LOG_INFO << "TypeError: " << e.what();
         assert(std::string(e.type()) == "TypeError");
     }
 
     try {
-        throw FileNotFoundError("Config file not found");
+        TR_FILE_NOT_FOUND("Config file not found");
     } catch (const FileNotFoundError& e) {
         LOG_INFO << "FileNotFoundError: " << e.what();
         assert(std::string(e.type()) == "FileNotFoundError");
     }
 
     try {
-        throw ZeroDivisionError("Division by zero");
+        TR_ZERO_DIVISION("Division by zero");
     } catch (const ZeroDivisionError& e) {
         LOG_INFO << "ZeroDivisionError: " << e.what();
         assert(std::string(e.type()) == "ZeroDivisionError");
     }
 
     try {
-        throw DeviceError("CUDA device not available");
+        TR_DEVICE_ERROR("CUDA device not available");
     } catch (const DeviceError& e) {
         LOG_INFO << "DeviceError: " << e.what();
         assert(std::string(e.type()) == "DeviceError");
     }
 
     try {
-        throw MemoryError("Out of memory");
+        TR_MEMORY_ERROR("Out of memory");
     } catch (const MemoryError& e) {
         LOG_INFO << "MemoryError: " << e.what();
         assert(std::string(e.type()) == "MemoryError");
@@ -102,17 +102,17 @@ void test_exception_types() {
 void test_throw_macros() {
     LOG_INFO << "Throw macros test started";
 
-    // 测试TR_THROW宏
+    // 测试TR_THROW宏（流式语法）
     try {
-        TR_THROW(ValueError, "Testing TR_THROW macro with value: ", 42);
+        TR_THROW(ValueError, "Testing TR_THROW macro with value: " << 42);
     } catch (const ValueError& e) {
         LOG_INFO << "TR_THROW: " << e.what();
         assert(e.message().find("42") != std::string::npos);
     }
 
-    // 测试快捷宏
+    // 测试快捷宏（流式语法）
     try {
-        TR_VALUE_ERROR("Value too large: ", 100);
+        TR_VALUE_ERROR("Value too large: " << 100);
     } catch (const ValueError& e) {
         LOG_INFO << "TR_VALUE_ERROR: " << e.what();
     }
@@ -155,13 +155,13 @@ void test_check_macro() {
 
     // 测试条件检查（正常情况）
     int value = 42;
-    TR_CHECK(value > 0, ValueError, "Value must be positive, got ", value);
+    TR_CHECK(value > 0, ValueError, "Value must be positive, got " << value);
     LOG_INFO << "Check passed: value > 0";
 
     // 测试条件检查（失败情况）
     try {
         int negative = -5;
-        TR_CHECK(negative >= 0, ValueError, "Value must be non-negative, got ", negative);
+        TR_CHECK(negative >= 0, ValueError, "Value must be non-negative, got " << negative);
     } catch (const ValueError& e) {
         LOG_INFO << "TR_CHECK caught: " << e.what();
         assert(e.message().find("-5") != std::string::npos);
@@ -191,8 +191,6 @@ void test_exception_info() {
 
         assert(std::string(e.type()) == "ValueError");
         assert(e.message().find("information extraction") != std::string::npos);
-        assert(e.file() != nullptr);
-        assert(e.line() > 0);
     }
 
     LOG_INFO << "Exception info test completed";
@@ -201,10 +199,11 @@ void test_exception_info() {
 void test_auto_logging() {
     LOG_INFO << "Auto logging test started";
 
-    // 注意：异常抛出时会自动记录到Logger
+    // 注意：V3.7.0后异常不再自动记录到Logger
+    // terminate handler会在未捕获异常时自动处理
     // 这个测试验证异常的what()包含完整信息
     try {
-        throw ValueError("This should be automatically logged");
+        TR_VALUE_ERROR("This should be automatically logged by terminate handler if not caught");
     } catch (const ValueError& e) {
         LOG_INFO << "Caught exception: " << e.what();
         // 异常信息应该包含类型、消息、位置等
@@ -219,10 +218,10 @@ void test_auto_logging() {
 void test_format_message() {
     LOG_INFO << "Format message test started";
 
-    // 测试变参格式化
+    // 测试流式语法格式化
     try {
         int x = 10, y = 20;
-        TR_THROW(ValueError, "Coordinate out of range: x=", x, ", y=", y);
+        TR_THROW(ValueError, "Coordinate out of range: x=" << x << ", y=" << y);
     } catch (const ValueError& e) {
         LOG_INFO << "Formatted message: " << e.what();
         assert(e.message().find("x=10") != std::string::npos);
@@ -233,7 +232,7 @@ void test_format_message() {
     try {
         double pi = 3.14159;
         std::string name = "test";
-        TR_THROW(ValueError, "Test: ", name, ", pi=", pi);
+        TR_THROW(ValueError, "Test: " << name << ", pi=" << pi);
     } catch (const ValueError& e) {
         LOG_INFO << "Mixed types: " << e.what();
         assert(e.message().find("test") != std::string::npos);
@@ -248,11 +247,11 @@ void test_nested_exceptions() {
 
     try {
         try {
-            throw ValueError("Inner exception");
+            TR_VALUE_ERROR("Inner exception");
         } catch (const ValueError& inner) {
             LOG_INFO << "Caught inner: " << inner.what();
             // 可以重新抛出或包装
-            throw ValueError("Outer exception wrapping: " + std::string(inner.what()));
+            TR_VALUE_ERROR("Outer exception wrapping: " << inner.what());
         }
     } catch (const ValueError& outer) {
         LOG_INFO << "Caught outer: " << outer.what();

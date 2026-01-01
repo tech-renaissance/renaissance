@@ -117,7 +117,7 @@ public:
 
         // 边界检查
         if (i < 0 || i >= ndim_) {
-            TR_THROW(IndexError, "Shape index out of bounds: index=", i, ", ndim=", ndim_);
+            TR_INDEX_ERROR("Shape index out of bounds: index=" << i << ", ndim=" << ndim_);
         }
 
         // 根据右对齐规则返回对应维度
