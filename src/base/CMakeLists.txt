@@ -9,6 +9,7 @@ set(BASE_SOURCES
     memory_plan.cpp
     cpu_arena.cpp
     rng.cpp
+    downloader.cpp
 )
 
 # 添加CUDA/MUSA源文件（条件编译）
@@ -39,6 +40,14 @@ if(TR_USE_MIMALLOC)
     if(DEFINED TR_MIMALLOC_INCLUDE_DIR)
         target_include_directories(base PRIVATE ${TR_MIMALLOC_INCLUDE_DIR})
         message(STATUS "Base library: Using mimalloc headers from ${TR_MIMALLOC_INCLUDE_DIR}")
+    endif()
+endif()
+
+# 添加libcurl支持（downloader.cpp需要）
+if(TR_USE_LIBCURL)
+    if(DEFINED TR_CURL_INCLUDE_DIR)
+        target_include_directories(base PRIVATE ${TR_CURL_INCLUDE_DIR})
+        message(STATUS "Base library: Using libcurl headers from ${TR_CURL_INCLUDE_DIR}")
     endif()
 endif()
 

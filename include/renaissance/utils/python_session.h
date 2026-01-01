@@ -64,7 +64,13 @@ public:
 #else
                     "python",
 #endif
-                  const std::string& server_script = "python/tests/test_python_server.py");
+                  const std::string& server_script =
+#ifdef TR_PROJECT_ROOT
+                      TR_PROJECT_ROOT "/python/scripts/default_python_server.py"
+#else
+                      "python/scripts/default_python_server.py"
+#endif
+                  );
 
     /**
      * @brief Destructor - automatically stops the session
@@ -120,6 +126,18 @@ public:
     bool is_running() const { return running_; }
 
     /**
+     * @brief Print tensor using PyTorch and return the printed text
+     *
+     * Sends a tensor to Python server, which prints it using PyTorch's format,
+     * then returns the printed text as a string.
+     *
+     * @param tensor Input tensor to print
+     * @return PyTorch's printed representation of the tensor
+     * @throw RuntimeError if operation fails
+     */
+    std::string print_tensor(const Tensor& tensor);
+
+    /**
      * @brief Get the session directory path
      *
      * @return Full path to the session directory
@@ -160,6 +178,17 @@ private:
      * @return Vector of output tensors
      */
     std::vector<Tensor> fetch();
+
+    /**
+     * @brief Fetch text output from Python
+     *
+     * Reads output_0.txt file and returns its content.
+     * The file is deleted immediately after reading (read-and-delete).
+     *
+     * @return Text content from Python
+     * @throw RuntimeError if file not found or read fails
+     */
+    std::string fetch_text_output();
 
     /**
      * @brief Create session directory

@@ -1,7 +1,7 @@
 # PythonSession C++/Python互操作机制
 
-**版本**: V3.6.10
-**日期**: 2025-12-27
+**版本**: V3.6.13
+**日期**: 2026-01-01
 **作者**: 技术觉醒团队
 **状态**: ✅ 已实现并测试通过
 
@@ -32,8 +32,9 @@
 ### 核心特性
 
 ✅ **进程隔离** - C++和Python运行在独立进程中，互不影响
-✅ **文件通信** -通过临时文件和JSON协议通信，无需复杂IPC
+✅ **文件通信** - 通过临时文件和JSON协议通信，无需复杂IPC
 ✅ **张量交换** - 使用TSR V3格式进行张量数据的导入导出
+✅ **文本输出** - 支持获取PyTorch的文本打印输出
 ✅ **跨平台** - 支持Windows和Linux，自动适配进程管理
 ✅ **易用性** - 简洁的API，3行代码即可完成Python调用
 
@@ -287,14 +288,24 @@ session.stop();
 
 ### response.json格式
 
-**成功响应**：
+**成功响应（返回TSR张量）**：
 ```json
 {
   "success": true,
-  "message": "Operation completed successfully",
+  "message": "tsr",
   "result": {
-    "output_count": 2,       // 输出张量数量
-    "extra_info": "..."      // 额外信息（可选）
+    "output_count": 2
+  }
+}
+```
+
+**成功响应（返回TXT文本）**：
+```json
+{
+  "success": true,
+  "message": "txt",
+  "result": {
+    "output_count": 1
   }
 }
 ```
@@ -303,10 +314,16 @@ session.stop();
 ```json
 {
   "success": false,
-  "message": "Addition failed: shape mismatch",
+  "message": "tsr",
   "result": {}
 }
 ```
+
+**重要说明**（V3.6.12更新）：
+- `message`字段现在表示输出类型：`"tsr"`或`"txt"`
+- `"tsr"`表示输出是TSR格式的张量文件（`output_0.tsr`, `output_1.tsr`, ...）
+- `"txt"`表示输出是文本文件（`output_0.txt`）
+- 文本文件采用"阅后即焚"策略：读取后立即删除
 
 ### TSR文件格式
 
@@ -315,6 +332,14 @@ session.stop();
 - **Python导入**：`tensor = import_tensor("input_0.tsr")`
 - **支持数据类型**：FP32, BF16, INT32, INT8
 - **支持维度**：1D, 2D, 3D, 4D
+
+### TXT文件格式（V3.6.12新增）
+
+文本文件包含Python（通常是PyTorch）的打印输出：
+- **文件路径**：`output_0.txt`
+- **编码**：UTF-8
+- **内容**：与PyTorch控制台输出完全一致的格式
+- **生命周期**：C++读取后立即删除（阅后即焚）
 
 ---
 
@@ -363,6 +388,29 @@ session.wait();
 auto outputs = session.fetch();
 ```
 
+### 打印张量（V3.6.12新增）
+
+```cpp
+// 获取PyTorch的张量打印文本
+auto& cpu = DeviceManager::instance().cpu();
+Tensor tensor = cpu.randn({2, 3, 4, 5}, 0.0f, 1.0f, DType::FP32);
+
+// 让PyTorch打印张量并返回文本
+std::string pytorch_print = session.print_tensor(tensor);
+
+// 对比我们自己的打印
+std::cout << "PyTorch output:" << std::endl;
+std::cout << pytorch_print << std::endl;
+
+std::cout << "\nOur output:" << std::endl;
+tensor.print();
+```
+
+**应用场景**：
+- 验证打印格式一致性
+- 调试张量内容
+- 对比不同框架的显示效果
+
 ### 自定义参数
 
 ```cpp
@@ -382,6 +430,37 @@ PythonSession session(
     "python/my_custom_server.py"    // 自定义脚本
 );
 ```
+
+### 默认Python服务器（V3.6.13新增）
+
+框架提供了默认Python服务器`python/scripts/default_python_server.py`，开箱即用：
+
+```cpp
+// 使用默认服务器（推荐）
+PythonSession session;  // 默认使用 default_python_server.py
+session.start();
+
+// 支持的方法：
+// 1. add - 张量加法
+// 2. print_tensor - 打印张量（返回TXT格式）
+
+// 示例1：张量加法
+Tensor a = cpu.randn({2, 3, 4}, 0.0f, 1.0f);
+Tensor b = cpu.randn({2, 3, 4}, 0.0f, 1.0f);
+auto outputs = session.calculate("add", {a, b});
+
+// 示例2：打印张量（获取PyTorch格式输出）
+std::string pytorch_output = session.print_tensor(a);
+std::cout << pytorch_output << std::endl;
+
+session.stop();
+```
+
+**默认服务器特性**：
+- ✅ 开箱即用，无需编写Python代码
+- ✅ 支持`add`和`print_tensor`方法
+- ✅ 自动使用项目根目录（TR_PROJECT_ROOT宏）
+- ✅ 完整的错误处理和日志记录
 
 ---
 
@@ -889,6 +968,15 @@ class MyServer(RenaissanceServer):
 ---
 
 ## 版本历史
+
+### V3.6.13 (2026-01-01)
+
+- **新增**：TXT文件输出支持（用于文本打印）
+- **新增**：`print_tensor()`方法（获取PyTorch打印输出）
+- **新增**：默认Python服务器`default_python_server.py`
+- **新增**：`fetch_text_output()`方法（读取并删除TXT文件）
+- **改进**：`message`字段语义改为表示输出类型（"tsr"或"txt"）
+- **测试**：test_python_print.cpp集成测试通过
 
 ### V3.6.10 (2025-12-27)
 

@@ -343,30 +343,14 @@ void Tensor::print(const char* name, int precision) const {
         std::cout << name << ":" << std::endl;
     }
 
-    // 打印内容
-    std::cout << "tensor(";
-
+    // 打印内容（format_tensor_content已包含"tensor("前缀）
     if (is_empty()) {
-        std::cout << "[]";
+        std::cout << "tensor([])" << std::endl;
     } else {
         // 格式化数据内容
         format_tensor_content(std::cout, precision);
+        std::cout << std::endl;
     }
-
-    // 打印设备和类型信息（仅非默认值）
-    if (!device_type_.is_cpu()) {
-        if (device_type_.is_cuda()) {
-            std::cout << ", device='cuda(" << device_type_.index() << ")'";
-        } else if (device_type_.is_musa()) {
-            std::cout << ", device='musa(" << device_type_.index() << ")'";
-        }
-    }
-
-    if (dtype_ != DType::FP32) {
-        std::cout << ", dtype=" << dtype_name(dtype_);
-    }
-
-    std::cout << ")" << std::endl;
 }
 
 void Tensor::format_tensor_content(std::ostream& os, int precision) const {
@@ -397,6 +381,21 @@ void Tensor::format_tensor_content(std::ostream& os, int precision) const {
         return;
     }
 
+    // 辅助函数：生成dtype字符串（FP32默认不显示）
+    auto get_dtype_str = [&]() -> const char* {
+        if (dtype_ == DType::FP32) {
+            return nullptr;  // FP32是默认类型，不显示
+        } else if (dtype_ == DType::BF16) {
+            return "dtype=BF16";
+        } else if (dtype_ == DType::INT32) {
+            return "dtype=INT32";
+        } else if (dtype_ == DType::INT8) {
+            return "dtype=INT8";
+        } else {
+            return nullptr;
+        }
+    };
+
     // 根据维度格式化输出（完全参照tensor_old.cpp）
     if (ndim() == 0) {
         // 标量
@@ -415,144 +414,228 @@ void Tensor::format_tensor_content(std::ostream& os, int precision) const {
         } else {
             os << "?";
         }
+
+        // 添加dtype信息（FP32默认不显示）
+        const char* dtype_str = get_dtype_str();
+        if (dtype_str != nullptr) {
+            os << ", " << dtype_str;
+        }
     } else if (ndim() == 1) {
-        // 1D张量
-        os << "[";
-        for (int32_t i = 0; i < shape_.dim(0); ++i) {
+        // 1D张量 - 完全匹配PyTorch风格
+        int32_t d0 = shape_.dim(0);
+
+        os << "tensor([";
+        for (int32_t i = 0; i < d0; ++i) {
             if (i > 0) os << ", ";
+            // 每8个元素换行（PyTorch默认）
+            if (i == 8) os << std::endl << "        ";  // 8个空格缩进
 
             if (dtype_ == DType::FP32) {
                 const float* data = reinterpret_cast<const float*>(raw_data);
-                os << std::fixed << std::setprecision(precision) << data[i];
+                float val = data[i];
+                if (val >= 0) os << " ";
+                os << std::fixed << std::setprecision(precision) << val;
             } else if (dtype_ == DType::BF16) {
                 const uint16_t* data = reinterpret_cast<const uint16_t*>(raw_data);
-                os << std::fixed << std::setprecision(precision) << bf16_to_float(data[i]);
+                float val = bf16_to_float(data[i]);
+                if (val >= 0) os << " ";
+                os << std::fixed << std::setprecision(precision) << val;
             } else if (dtype_ == DType::INT32) {
                 const int32_t* data = reinterpret_cast<const int32_t*>(raw_data);
-                os << data[i];
+                int32_t val = data[i];
+                // 整数右对齐，宽度根据数值范围动态调整
+                // INT8: 3位（-128到127），INT32: 至少4位
+                os << std::setw(4) << val;
             } else if (dtype_ == DType::INT8) {
                 const int8_t* data = reinterpret_cast<const int8_t*>(raw_data);
-                os << static_cast<int>(data[i]);
+                int val = static_cast<int>(data[i]);
+                // INT8范围: -128到127，需要3位字符
+                os << std::setw(3) << val;
             } else {
                 os << "?";
             }
         }
         os << "]";
+
+        // 添加dtype信息（FP32默认不显示）
+        const char* dtype_str = get_dtype_str();
+        if (dtype_str != nullptr) {
+            os << ", " << dtype_str;
+        }
+        os << ")";
     } else if (ndim() == 2) {
-        // 2D张量
-        os << "[" << std::endl;
-        for (int32_t i = 0; i < shape_.dim(0); ++i) {
-            os << "  [";
-            for (int32_t j = 0; j < shape_.dim(1); ++j) {
+        // 2D张量 - 完全匹配PyTorch风格
+        int32_t d0 = shape_.dim(0);
+        int32_t d1 = shape_.dim(1);
+
+        os << "tensor([";
+        for (int32_t i = 0; i < d0; ++i) {
+            if (i > 0) os << "        ";  // 8个空格缩进
+            os << "[";
+            for (int32_t j = 0; j < d1; ++j) {
                 if (j > 0) os << ", ";
-                int64_t idx = i * shape_.dim(1) + j;
+                int64_t idx = i * d1 + j;
 
                 if (dtype_ == DType::FP32) {
                     const float* data = reinterpret_cast<const float*>(raw_data);
-                    os << std::fixed << std::setprecision(precision) << data[idx];
+                    float val = data[idx];
+                    if (val >= 0) os << " ";
+                    os << std::fixed << std::setprecision(precision) << val;
                 } else if (dtype_ == DType::BF16) {
                     const uint16_t* data = reinterpret_cast<const uint16_t*>(raw_data);
-                    os << std::fixed << std::setprecision(precision) << bf16_to_float(data[idx]);
+                    float val = bf16_to_float(data[idx]);
+                    if (val >= 0) os << " ";
+                    os << std::fixed << std::setprecision(precision) << val;
                 } else if (dtype_ == DType::INT32) {
                     const int32_t* data = reinterpret_cast<const int32_t*>(raw_data);
-                    os << data[idx];
+                    int32_t val = data[idx];
+                    os << std::setw(4) << val;
                 } else if (dtype_ == DType::INT8) {
                     const int8_t* data = reinterpret_cast<const int8_t*>(raw_data);
-                    os << static_cast<int>(data[idx]);
+                    int val = static_cast<int>(data[idx]);
+                    os << std::setw(3) << val;
                 } else {
                     os << "?";
                 }
             }
             os << "]";
-            if (i < shape_.dim(0) - 1) os << ",";
-            os << std::endl;
+            // PyTorch格式：非最后一行才加逗号
+            if (i < d0 - 1) {
+                os << "," << std::endl;
+            }
         }
         os << "]";
+
+        // 添加dtype信息（FP32默认不显示）
+        const char* dtype_str = get_dtype_str();
+        if (dtype_str != nullptr) {
+            os << ", " << dtype_str;
+        }
+        os << ")";
     } else if (ndim() == 3) {
-        // 3D张量
-        os << "[" << std::endl;
-        for (int32_t i = 0; i < shape_.dim(0); ++i) {
-            os << "  [";
-            for (int32_t j = 0; j < shape_.dim(1); ++j) {
-                if (j > 0) os << std::endl << "   ";
+        // 3D张量 - 完全匹配PyTorch风格
+        int32_t d0 = shape_.dim(0);
+        int32_t d1 = shape_.dim(1);
+        int32_t d2 = shape_.dim(2);
+
+        os << "tensor([";
+        for (int32_t i = 0; i < d0; ++i) {
+            if (i > 0) {
+                os << std::endl << "        ";  // 8个空格，d0块之间有空行
+            }
+            os << "[";
+            for (int32_t j = 0; j < d1; ++j) {
+                if (j > 0) os << "         ";  // 9个空格
                 os << "[";
-                for (int32_t k = 0; k < shape_.dim(2); ++k) {
+                for (int32_t k = 0; k < d2; ++k) {
                     if (k > 0) os << ", ";
-                    int64_t idx = i * shape_.dim(1) * shape_.dim(2) + j * shape_.dim(2) + k;
+                    int64_t idx = i * d1 * d2 + j * d2 + k;
 
                     if (dtype_ == DType::FP32) {
                         const float* data = reinterpret_cast<const float*>(raw_data);
-                        os << std::fixed << std::setprecision(precision) << data[idx];
+                        float val = data[idx];
+                        if (val >= 0) os << " ";
+                        os << std::fixed << std::setprecision(precision) << val;
                     } else if (dtype_ == DType::BF16) {
                         const uint16_t* data = reinterpret_cast<const uint16_t*>(raw_data);
-                        os << std::fixed << std::setprecision(precision) << bf16_to_float(data[idx]);
+                        float val = bf16_to_float(data[idx]);
+                        if (val >= 0) os << " ";
+                        os << std::fixed << std::setprecision(precision) << val;
                     } else if (dtype_ == DType::INT32) {
                         const int32_t* data = reinterpret_cast<const int32_t*>(raw_data);
-                        os << data[idx];
+                        int32_t val = data[idx];
+                        os << std::setw(4) << val;
                     } else if (dtype_ == DType::INT8) {
                         const int8_t* data = reinterpret_cast<const int8_t*>(raw_data);
-                        os << static_cast<int>(data[idx]);
+                        int val = static_cast<int>(data[idx]);
+                        os << std::setw(3) << val;
                     } else {
                         os << "?";
                     }
                 }
                 os << "]";
+                // PyTorch格式：非最后一行才加逗号
+                if (j < d1 - 1) {
+                    os << "," << std::endl;
+                }
             }
-            os << "]";
-            if (i < shape_.dim(0) - 1) os << ",";
-            os << std::endl;
+            // d0块结束：需要关闭d0的左括号
+            // 非最后一行：d0右括号 + 外层逗号
+            // 最后一行：d0右括号
+            if (i < d0 - 1) {
+                os << "]," << std::endl << std::endl;
+            }
         }
-        os << "]";
+        os << "]]";
+
+        // 添加dtype信息（FP32默认不显示）
+        const char* dtype_str = get_dtype_str();
+        if (dtype_str != nullptr) {
+            os << ", " << dtype_str;
+        }
+        os << ")";
     } else if (ndim() == 4) {
-        // 4D张量 (NCHW格式) - 完全匹配PyTorch风格
-        int32_t N = shape_.dim(0);  // Batch
-        int32_t C = shape_.dim(1);  // Channel
-        int32_t H = shape_.dim(2);  // Height
-        int32_t W = shape_.dim(3);  // Width
+        // 4D张量 - 完全匹配PyTorch风格
+        int32_t d0 = shape_.dim(0);
+        int32_t d1 = shape_.dim(1);
+        int32_t d2 = shape_.dim(2);
+        int32_t d3 = shape_.dim(3);
 
-        os << "[" << std::endl;
-        for (int32_t n = 0; n < N; ++n) {
-            os << " [";
-            for (int32_t c = 0; c < C; ++c) {
-                if (c > 0) os << std::endl << " ";
+        os << "tensor([";
+        for (int32_t i = 0; i < d0; ++i) {
+            if (i > 0) os << "        ";  // 8个空格
+            os << "[";
+            for (int32_t j = 0; j < d1; ++j) {
+                if (j > 0) os << "         ";  // 9个空格
                 os << "[";
-                for (int32_t h = 0; h < H; ++h) {
-                    if (h > 0) os << std::endl << "  ";
+                for (int32_t k = 0; k < d2; ++k) {
+                    if (k > 0) os << "          ";  // 10个空格
                     os << "[";
-                    for (int32_t w = 0; w < W; ++w) {
-                        if (w > 0) os << ", ";
-                        // NCHW到线性索引的转换
-                        int64_t idx = n * C * H * W + c * H * W + h * W + w;
+                    for (int32_t l = 0; l < d3; ++l) {
+                        if (l > 0) os << ", ";
+                        // NHWC到线性索引的转换
+                        int64_t idx = i * d1 * d2 * d3 + j * d2 * d3 + k * d3 + l;
 
+                        // 使用固定宽度7位（右对齐）：符号+数字+小数点+4位小数
                         if (dtype_ == DType::FP32) {
                             const float* data = reinterpret_cast<const float*>(raw_data);
-                            os << std::fixed << std::setprecision(precision) << data[idx];
+                            float val = data[idx];
+                            // 右对齐，正数前面加空格，负数直接输出
+                            if (val >= 0) os << " ";
+                            os << std::fixed << std::setprecision(precision) << val;
                         } else if (dtype_ == DType::BF16) {
                             const uint16_t* data = reinterpret_cast<const uint16_t*>(raw_data);
-                            os << std::fixed << std::setprecision(precision) << bf16_to_float(data[idx]);
+                            float val = bf16_to_float(data[idx]);
+                            if (val >= 0) os << " ";
+                            os << std::fixed << std::setprecision(precision) << val;
                         } else if (dtype_ == DType::INT32) {
                             const int32_t* data = reinterpret_cast<const int32_t*>(raw_data);
-                            os << data[idx];
+                            int32_t val = data[idx];
+                            os << std::setw(4) << val;
                         } else if (dtype_ == DType::INT8) {
                             const int8_t* data = reinterpret_cast<const int8_t*>(raw_data);
-                            os << static_cast<int>(data[idx]);
+                            int val = static_cast<int>(data[idx]);
+                            os << std::setw(3) << val;
                         } else {
                             os << "?";
                         }
                     }
                     os << "]";
-                    if (h < H - 1) os << ",";
+                    if (k < d2 - 1) os << "," << std::endl;
                 }
                 os << "]";
+                if (j < d1 - 1) os << "," << std::endl << std::endl;
             }
             os << "]";
-            if (n < N - 1) {
-                os << "," << std::endl << std::endl;
-            } else {
-                os << std::endl;
-            }
+            if (i < d0 - 1) os << "," << std::endl << std::endl;
         }
         os << "]";
+        // 添加dtype信息（FP32默认不显示）
+        const char* dtype_str = get_dtype_str();
+        if (dtype_str != nullptr) {
+            os << ", " << dtype_str;
+        }
+        os << ")";
     } else {
         // 更高维度暂时不支持
         os << "[...unsupported dimensions...]";

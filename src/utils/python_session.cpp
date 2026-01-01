@@ -220,14 +220,27 @@ void PythonSession::send(
 
     // 第一次调用时启动Python进程（此时所有文件都已准备好）
     if (process_handle_ == nullptr) {
-        // 获取服务器脚本的完整路径
-        std::string workspace = get_workspace();
-        size_t pos = workspace.find("/workspace");
-        std::string project_root = (pos != std::string::npos) ? workspace.substr(0, pos) : workspace;
-        std::string server_path = project_root + "/" + server_script_;
+        // 确定服务器脚本路径（server_script_可能是绝对路径或相对路径）
+        std::string server_path;
+        if (server_script_.size() > 1 && server_script_[1] == ':') {
+            // Windows绝对路径 (如 "R:/renaissance/...")
+            server_path = server_script_;
+        } else if (server_script_[0] == '/') {
+            // Unix绝对路径
+            server_path = server_script_;
+        } else {
+            // 相对路径，需要拼接project_root
+            std::string workspace = get_workspace();
+            size_t pos = workspace.find("/workspace");
+            std::string project_root = (pos != std::string::npos) ? workspace.substr(0, pos) : workspace;
+            server_path = project_root + "/" + server_script_;
+        }
+
+        LOG_DEBUG << "Python server path: " << server_path;
 
         // 构建命令行
         std::string command = "\"" + python_exe_ + "\" \"" + server_path + "\" \"" + session_dir_ + "\"";
+        LOG_DEBUG << "Python command: " << command;
 
 #ifdef _WIN32
         // Windows: 使用CreateProcess
@@ -344,6 +357,65 @@ std::vector<Tensor> PythonSession::fetch() {
     }
 
     return outputs;
+}
+
+std::string PythonSession::fetch_text_output() {
+    if (!running_) {
+        TR_THROW(DeviceError, "PythonSession::fetch_text_output: Session is not running");
+    }
+
+    // 读取响应
+    auto [success, message, result] = read_response();
+
+    if (!success) {
+        TR_THROW(DeviceError, "PythonSession::fetch_text_output: Python operation failed: " + message);
+    }
+
+    // 验证返回类型是txt
+    if (message != "txt") {
+        TR_THROW(DeviceError, "PythonSession::fetch_text_output: Expected txt output, got: " + message);
+    }
+
+    // 读取文本文件
+    std::string txt_path = session_dir_ + "/output_0.txt";
+
+    if (!std::filesystem::exists(txt_path)) {
+        TR_THROW(DeviceError, "PythonSession::fetch_text_output: Output text file not found: " + txt_path);
+    }
+
+    // 读取文件内容
+    std::ifstream ifs(txt_path);
+    if (!ifs) {
+        TR_THROW(DeviceError, "PythonSession::fetch_text_output: Failed to open text file: " + txt_path);
+    }
+
+    std::string content((std::istreambuf_iterator<char>(ifs)),
+                        std::istreambuf_iterator<char>());
+    ifs.close();
+
+    // 立即删除文件（阅后即焚）
+    try {
+        std::filesystem::remove(txt_path);
+        LOG_DEBUG << "Deleted text output file: " << txt_path;
+    } catch (const std::exception& e) {
+        LOG_WARN << "Failed to delete text output file: " << txt_path
+                 << ", error: " << e.what();
+    }
+
+    return content;
+}
+
+std::string PythonSession::print_tensor(const Tensor& tensor) {
+    // 发送张量和命令
+    std::vector<Tensor> inputs = {tensor};
+    std::map<std::string, std::string> empty_params;
+    send("print_tensor", inputs, empty_params);
+
+    // 等待响应
+    wait();
+
+    // 获取文本输出
+    return fetch_text_output();
 }
 
 void PythonSession::create_session_dir() {

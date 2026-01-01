@@ -131,6 +131,18 @@ else()
 endif()
 
 # ============================================================================
+# 包含integration子目录（集成测试）
+# ============================================================================
+
+# 注意：integration测试当前已开启
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/integration AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/integration)
+    add_subdirectory(integration)
+    message(STATUS "Including integration tests")
+else()
+    message(STATUS "Integration tests directory not found")
+endif()
+
+# ============================================================================
 # 输出单元测试信息
 # ============================================================================
 
