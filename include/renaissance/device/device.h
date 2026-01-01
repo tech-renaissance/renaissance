@@ -273,6 +273,25 @@ public:
      */
     virtual void copy_into(const Tensor& tensor_a, Tensor& tensor_b);
 
+    /**
+     * @brief 跨设备张量传输（指定输出，核心方法！）
+     * @param tensor_a 源张量（从该张量传输）
+     * @param tensor_b 目标张量（传输到该张量）
+     * @throws ShapeError 形状不匹配时
+     * @throws TypeError 数据类型不匹配时
+     * @throws DeviceError 设备不匹配时或不支持跨设备传输时
+     *
+     * @note 要求:
+     *  - tensor_a和tensor_b必须在不同设备上
+     *  - 其中一个必须是CPU，另一个必须是GPU（CUDA或MUSA）
+     *  - 数据类型必须相同
+     *  - 形状必须相同
+     *  - 只支持CPU ↔ GPU传输，不支持GPU ↔ GPU
+     *  - 空张量(numel=0)允许,不执行任何操作
+     *  - 使用同步传输（cudaMemcpy/musaMemcpy）
+     */
+    virtual void transfer_into(const Tensor& tensor_a, Tensor& tensor_b);
+
     // =========================================================================
     // 同步与调试
     // =========================================================================

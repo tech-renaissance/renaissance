@@ -72,6 +72,7 @@ public:
     // ===== 张量运算（加法和复制）=====
     void add_into(const Tensor& a, const Tensor& b, Tensor& result) override;
     void copy_into(const Tensor& tensor_a, Tensor& tensor_b) override;
+    void transfer_into(const Tensor& tensor_a, Tensor& tensor_b) override;
 
     // ===== 张量比较 =====
     bool equal(const Tensor& a, const Tensor& b) override;

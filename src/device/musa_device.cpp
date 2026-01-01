@@ -350,6 +350,74 @@ void MusaDevice::copy_into(const Tensor& tensor_a, Tensor& tensor_b) {
     }
 }
 
+// ===== 跨设备传输 =====
+
+void MusaDevice::transfer_into(const Tensor& tensor_a, Tensor& tensor_b) {
+    // 1. 验证不同设备
+    TR_CHECK(tensor_a.device_type() != tensor_b.device_type(), DeviceError,
+            "transfer_into requires different devices. For same-device copy, use copy_into.");
+
+    // 2. 验证同形状、同数据类型
+    TR_CHECK(tensor_a.shape() == tensor_b.shape(), ShapeError,
+            "Shape mismatch in transfer_into");
+    TR_CHECK(tensor_a.dtype() == tensor_b.dtype(), TypeError,
+            "Dtype mismatch in transfer_into");
+
+    // 3. 确保其中一个是CPU
+    bool a_is_cpu = tensor_a.device_type().is_cpu();
+    bool b_is_cpu = tensor_b.device_type().is_cpu();
+
+    TR_CHECK(a_is_cpu || b_is_cpu, DeviceError,
+            "transfer_into only supports CPU <-> GPU transfer");
+
+    // 4. 执行传输
+    if (a_is_cpu) {
+        // CPU → MUSA
+        impl_transfer_from_cpu(tensor_a, tensor_b);
+    } else {
+        // MUSA → CPU
+        impl_transfer_to_cpu(tensor_a, tensor_b);
+    }
+}
+
+void MusaDevice::impl_transfer_from_cpu(const Tensor& tensor_a, Tensor& tensor_b) {
+    // CPU → MUSA传输
+    musaSetDevice(device_id_);
+
+    // 处理空张量
+    int64_t numel = tensor_a.numel();
+    if (numel == 0) {
+        return;
+    }
+
+    size_t nbytes = static_cast<size_t>(numel) * dtype_size(tensor_a.dtype());
+    musaError_t err = musaMemcpy(tensor_b.data_ptr(), tensor_a.data_ptr(),
+                                nbytes, musaMemcpyHostToDevice);
+    if (err != musaSuccess) {
+        TR_DEVICE_ERROR("MUSA memcpy failed in transfer_into (Host to Device): "
+                       << musaGetErrorString(err));
+    }
+}
+
+void MusaDevice::impl_transfer_to_cpu(const Tensor& tensor_a, Tensor& tensor_b) {
+    // MUSA → CPU传输
+    musaSetDevice(device_id_);
+
+    // 处理空张量
+    int64_t numel = tensor_a.numel();
+    if (numel == 0) {
+        return;
+    }
+
+    size_t nbytes = static_cast<size_t>(numel) * dtype_size(tensor_a.dtype());
+    musaError_t err = musaMemcpy(tensor_b.data_ptr(), tensor_a.data_ptr(),
+                                nbytes, musaMemcpyDeviceToHost);
+    if (err != musaSuccess) {
+        TR_DEVICE_ERROR("MUSA memcpy failed in transfer_into (Device to Host): "
+                       << musaGetErrorString(err));
+    }
+}
+
 void MusaDevice::add_into(const Tensor& a, const Tensor& b, Tensor& result) {
     // 1. 验证
     check_on_device(a);

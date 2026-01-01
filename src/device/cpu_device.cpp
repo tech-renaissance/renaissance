@@ -8,6 +8,17 @@
  */
 
 #include "renaissance/device/cpu_device.h"
+#include "renaissance/device/device_manager.h"
+
+// 根据编译选项包含对应GPU设备头文件
+#ifdef TR_USE_CUDA
+    #include "renaissance/device/cuda_device.h"
+#endif
+
+#ifdef TR_USE_MUSA
+    #include "renaissance/device/musa_device.h"
+#endif
+
 #include "renaissance/base/rng.h"
 #include "renaissance/data/tensor.h"
 #include "renaissance/data/storage.h"
@@ -323,6 +334,61 @@ void CpuDevice::randbool_inplace(Tensor& tensor_a, float rate_of_zeros, DType dt
 }
 
 // ===== 加法和复制运算 =====
+
+void CpuDevice::transfer_into(const Tensor& tensor_a, Tensor& tensor_b) {
+    // CpuDevice只验证设备，不验证形状和数据类型
+
+    if (tensor_a.device_type().is_cpu()) {
+        // tensor_a是CPU，tensor_b必须是GPU
+
+        #ifdef TR_USE_CUDA
+            if (tensor_b.device_type().is_cuda()) {
+                // CPU → CUDA，获取CUDA设备引用，调用其实现
+                auto& cuda = DeviceManager::instance().cuda(tensor_b.device_type().index());
+                cuda.impl_transfer_from_cpu(tensor_a, tensor_b);
+                return;
+            }
+        #endif
+
+        #ifdef TR_USE_MUSA
+            if (tensor_b.device_type().is_musa()) {
+                // CPU → MUSA，获取MUSA设备引用，调用其实现
+                auto& musa = DeviceManager::instance().musa(tensor_b.device_type().index());
+                musa.impl_transfer_from_cpu(tensor_a, tensor_b);
+                return;
+            }
+        #endif
+
+        // 没有GPU或tensor_b不是GPU
+        TR_DEVICE_ERROR("transfer_into is for cross-device transfer (CPU <-> GPU only). "
+                       "For same-device copy, use copy_into instead.");
+    }
+    else {
+        // tensor_a不是CPU，tensor_b必须是CPU
+        TR_CHECK(tensor_b.device_type().is_cpu(), DeviceError,
+                "transfer_into: One tensor must be on CPU, the other on GPU");
+
+        #ifdef TR_USE_CUDA
+            if (tensor_a.device_type().is_cuda()) {
+                // CUDA → CPU，获取CUDA设备引用，调用其实现
+                auto& cuda = DeviceManager::instance().cuda(tensor_a.device_type().index());
+                cuda.impl_transfer_to_cpu(tensor_a, tensor_b);
+                return;
+            }
+        #endif
+
+        #ifdef TR_USE_MUSA
+            if (tensor_a.device_type().is_musa()) {
+                // MUSA → CPU，获取MUSA设备引用，调用其实现
+                auto& musa = DeviceManager::instance().musa(tensor_a.device_type().index());
+                musa.impl_transfer_to_cpu(tensor_a, tensor_b);
+                return;
+            }
+        #endif
+
+        TR_DEVICE_ERROR("No GPU available or unsupported GPU type");
+    }
+}
 
 void CpuDevice::copy_into(const Tensor& tensor_a, Tensor& tensor_b) {
     // 1. 验证设备

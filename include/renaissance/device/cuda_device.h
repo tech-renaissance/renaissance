@@ -88,6 +88,7 @@ public:
     // ===== 张量运算（加法和复制）=====
     void add_into(const Tensor& a, const Tensor& b, Tensor& result) override;
     void copy_into(const Tensor& tensor_a, Tensor& tensor_b) override;
+    void transfer_into(const Tensor& tensor_a, Tensor& tensor_b) override;
 
     // ===== 张量比较 =====
     bool equal(const Tensor& a, const Tensor& b) override;
@@ -132,6 +133,21 @@ public:
      * @brief GPU生成正态分布FP32
      */
     void rand_normal_float(float* ptr, size_t count, float mean, float std, Generator& gen);
+
+    // ===== 跨设备传输辅助方法（供CpuDevice调用）=====
+    /**
+     * @brief 从CPU传输到CUDA（CPU → CUDA）
+     * @param tensor_a CPU上的源张量
+     * @param tensor_b CUDA上的目标张量
+     */
+    void impl_transfer_from_cpu(const Tensor& tensor_a, Tensor& tensor_b);
+
+    /**
+     * @brief 从CUDA传输到CPU（CUDA → CPU）
+     * @param tensor_a CUDA上的源张量
+     * @param tensor_b CPU上的目标张量
+     */
+    void impl_transfer_to_cpu(const Tensor& tensor_a, Tensor& tensor_b);
 
 private:
     int device_id_;  ///< GPU设备索引

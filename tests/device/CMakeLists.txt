@@ -165,6 +165,9 @@ if(TR_USE_CUDA)
     # CUDA张量复制测试
     add_executable(test_cuda_copy test_cuda_copy.cpp)
 
+    # CUDA跨设备传输测试
+    add_executable(test_cuda_transfer test_cuda_transfer.cpp)
+
     # CudaDevice高级RNG接口测试
     add_executable(test_cuda_rand_tensor
         test_cuda_rand_tensor.cpp
@@ -203,6 +206,9 @@ if(TR_USE_MUSA)
 
     # MUSA张量复制测试
     add_executable(test_musa_copy test_musa_copy.cpp)
+
+    # MUSA跨设备传输测试
+    add_executable(test_musa_transfer test_musa_transfer.cpp)
 endif()
 
 
@@ -270,6 +276,30 @@ if(TR_USE_CUDA)
     target_compile_definitions(test_cuda_copy PRIVATE TR_LOG_LEVEL=0)
     target_link_libraries(test_cuda_copy PRIVATE renaissance)
 
+    # ===== test_cuda_transfer配置 =====
+    target_include_directories(test_cuda_transfer PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    )
+
+    set_target_properties(test_cuda_transfer PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/device
+    )
+
+    if(WIN32)
+        set_target_properties(test_cuda_transfer PROPERTIES
+            WIN32_EXECUTABLE FALSE
+        )
+    endif()
+
+    if(MSVC)
+        target_compile_options(test_cuda_transfer PRIVATE /W4 /utf-8)
+    else()
+        target_compile_options(test_cuda_transfer PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+
+    target_compile_definitions(test_cuda_transfer PRIVATE TR_LOG_LEVEL=0)
+    target_link_libraries(test_cuda_transfer PRIVATE renaissance)
+
     # 为测试设置运行时PATH环境变量（合并所有DLL路径）
     if(WIN32)
         set(DLL_PATHS "")
@@ -308,6 +338,10 @@ if(TR_USE_CUDA)
             )
             # 为test_cuda_copy也设置相同的PATH
             set_target_properties(test_cuda_copy PROPERTIES
+                ENVIRONMENT "PATH=${DLL_PATH_STR};$ENV{PATH}"
+            )
+            # 为test_cuda_transfer也设置相同的PATH
+            set_target_properties(test_cuda_transfer PROPERTIES
                 ENVIRONMENT "PATH=${DLL_PATH_STR};$ENV{PATH}"
             )
             message(STATUS "CUDA device tests: All DLL paths added to environment")
@@ -378,6 +412,30 @@ if(TR_USE_MUSA)
 
     target_compile_definitions(test_musa_copy PRIVATE TR_LOG_LEVEL=0)
     target_link_libraries(test_musa_copy PRIVATE renaissance)
+
+    # ===== test_musa_transfer配置 =====
+    target_include_directories(test_musa_transfer PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    )
+
+    set_target_properties(test_musa_transfer PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/device
+    )
+
+    if(WIN32)
+        set_target_properties(test_musa_transfer PROPERTIES
+            WIN32_EXECUTABLE FALSE
+        )
+    endif()
+
+    if(MSVC)
+        target_compile_options(test_musa_transfer PRIVATE /W4 /utf-8)
+    else()
+        target_compile_options(test_musa_transfer PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+
+    target_compile_definitions(test_musa_transfer PRIVATE TR_LOG_LEVEL=0)
+    target_link_libraries(test_musa_transfer PRIVATE renaissance)
 
     # ===== test_musa_rand_tensor配置 =====
     add_executable(test_musa_rand_tensor
