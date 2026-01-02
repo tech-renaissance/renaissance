@@ -260,10 +260,35 @@ void CudaDevice::memset_internal(void* ptr, int value, size_t size) {
 
 void CudaDevice::synchronize() {
     cudaSetDevice(device_id_);
-    cudaError_t err = cudaDeviceSynchronize();
+
+    // 专家评审建议：使用细粒度流同步替代全局设备同步
+    // 优点：
+    // 1. 不阻塞NCCL通信流，提升多GPU并发性能
+    // 2. 更精确的同步控制，只等待需要等待的流
+    // 注意：comm_stream_在NCCL启用时才存在
+    cudaError_t err;
+
+    // 同步计算流
+    err = cudaStreamSynchronize(compute_stream_);
     if (err != cudaSuccess) {
-        TR_DEVICE_ERROR("CUDA synchronize failed: " << cudaGetErrorString(err));
+        TR_DEVICE_ERROR("CUDA compute stream synchronize failed: " << cudaGetErrorString(err));
     }
+
+    // 同步传输流
+    err = cudaStreamSynchronize(transfer_stream_);
+    if (err != cudaSuccess) {
+        TR_DEVICE_ERROR("CUDA transfer stream synchronize failed: " << cudaGetErrorString(err));
+    }
+
+#ifdef TR_USE_NCCL
+    // 同步通信流（如果NCCL已启用）
+    if (nccl_enabled_ && comm_stream_ != nullptr) {
+        err = cudaStreamSynchronize(comm_stream_);
+        if (err != cudaSuccess) {
+            TR_DEVICE_ERROR("CUDA comm stream synchronize failed: " << cudaGetErrorString(err));
+        }
+    }
+#endif
 }
 
 // ===== 张量创建 =====
@@ -512,6 +537,99 @@ void CudaDevice::impl_transfer_to_cpu(const Tensor& tensor_a, Tensor& tensor_b) 
 
     // 同步等待（保持同步语义）
     cudaStreamSynchronize(transfer_stream_);
+}
+
+// =============================================================================
+// 异步传输API实现（V3.6.18新增）
+// =============================================================================
+
+std::shared_ptr<void> CudaDevice::alloc_pinned(size_t size) {
+    if (size == 0) {
+        TR_VALUE_ERROR("Cannot allocate 0 bytes of pinned memory");
+    }
+
+    cudaSetDevice(device_id_);
+
+    void* ptr = nullptr;
+    cudaError_t err = cudaHostAlloc(&ptr, size, cudaHostAllocDefault);
+    TR_CHECK(err == cudaSuccess, MemoryError,
+            "cudaHostAlloc failed: " << cudaGetErrorString(err));
+
+    // RAII：shared_ptr自动释放（使用自定义deleter调用cudaFreeHost）
+    // 专家评审建议：添加判空检查，防御性编程（虽然cudaHostAlloc极少返回nullptr）
+    return std::shared_ptr<void>(ptr, [](void* p) {
+        // 静默失败，避免在析构函数中抛出异常
+        if (p) {
+            cudaFreeHost(p);
+        }
+    });
+}
+
+void CudaDevice::async_copy_h2d(const void* src_host, Tensor& dst_device) {
+    TR_CHECK(src_host != nullptr, ValueError, "src_host is null");
+    TR_CHECK(dst_device.is_bound(), DeviceError, "dst_device not bound");
+    check_on_device(dst_device);
+
+    cudaSetDevice(device_id_);
+
+    size_t nbytes = dst_device.nbytes();
+    if (nbytes == 0) return;
+
+    // 异步传输（在transfer_stream_上）
+    cudaError_t err = cudaMemcpyAsync(
+        dst_device.data_ptr(),
+        src_host,
+        nbytes,
+        cudaMemcpyHostToDevice,
+        transfer_stream_
+    );
+    TR_CHECK(err == cudaSuccess, DeviceError,
+            "cudaMemcpyAsync H2D failed: " << cudaGetErrorString(err));
+
+    // 记录完成Event（供sync_transfer_to_compute使用）
+    err = cudaEventRecord(transfer_ready_, transfer_stream_);
+    TR_CHECK(err == cudaSuccess, DeviceError,
+            "cudaEventRecord failed: " << cudaGetErrorString(err));
+
+    // 不调用synchronize()，立即返回（CPU不阻塞）
+}
+
+void CudaDevice::async_copy_d2h(const Tensor& src_device, void* dst_host) {
+    TR_CHECK(dst_host != nullptr, ValueError, "dst_host is null");
+    TR_CHECK(src_device.is_bound(), DeviceError, "src_device not bound");
+    check_on_device(src_device);
+
+    cudaSetDevice(device_id_);
+
+    size_t nbytes = src_device.nbytes();
+    if (nbytes == 0) return;
+
+    // 异步传输（在transfer_stream_上）
+    cudaError_t err = cudaMemcpyAsync(
+        dst_host,
+        src_device.data_ptr(),
+        nbytes,
+        cudaMemcpyDeviceToHost,
+        transfer_stream_
+    );
+    TR_CHECK(err == cudaSuccess, DeviceError,
+            "cudaMemcpyAsync D2H failed: " << cudaGetErrorString(err));
+
+    // 记录完成Event
+    err = cudaEventRecord(transfer_ready_, transfer_stream_);
+    TR_CHECK(err == cudaSuccess, DeviceError,
+            "cudaEventRecord failed: " << cudaGetErrorString(err));
+
+    // 不调用synchronize()，立即返回（CPU不阻塞）
+}
+
+void CudaDevice::sync_transfer_to_compute() {
+    cudaSetDevice(device_id_);
+
+    // 计算流在GPU端等待传输完成（CPU不阻塞）
+    cudaError_t err = cudaStreamWaitEvent(compute_stream_, transfer_ready_, 0);
+    TR_CHECK(err == cudaSuccess, DeviceError,
+            "cudaStreamWaitEvent failed: " << cudaGetErrorString(err));
 }
 
 // ===== 加法运算（使用cuDNN）=====
@@ -1316,10 +1434,11 @@ void CudaDevice::allreduce_gradient(Tensor& gradient) {
 
     cudaSetDevice(device_id_);
 
-    // ===== 关键修复：直接同步计算流（确保计算完成）=====
-    cudaError_t err = cudaStreamSynchronize(compute_stream_);
+    // ===== 关键优化：GPU端等待计算完成（不阻塞CPU）=====
+    // comm_stream等待compute_ready_ Event
+    cudaError_t err = cudaStreamWaitEvent(comm_stream_, compute_ready_, 0);
     TR_CHECK(err == cudaSuccess, DeviceError,
-            "cudaStreamSynchronize compute failed: " << cudaGetErrorString(err));
+            "cudaStreamWaitEvent failed: " << cudaGetErrorString(err));
 
     // 确定NCCL数据类型
     ncclDataType_t nccl_type;
@@ -1357,10 +1476,11 @@ void CudaDevice::broadcast_param(Tensor& param, int root_rank) {
 
     cudaSetDevice(device_id_);
 
-    // ===== 同步计算流，确保计算完成 =====
-    cudaError_t err = cudaStreamSynchronize(compute_stream_);
+    // ===== 关键优化：GPU端等待计算完成（不阻塞CPU）=====
+    // comm_stream等待compute_ready_ Event
+    cudaError_t err = cudaStreamWaitEvent(comm_stream_, compute_ready_, 0);
     TR_CHECK(err == cudaSuccess, DeviceError,
-            "cudaStreamSynchronize compute failed: " << cudaGetErrorString(err));
+            "cudaStreamWaitEvent failed: " << cudaGetErrorString(err));
 
     // 1. 确定NCCL数据类型
     ncclDataType_t nccl_type;

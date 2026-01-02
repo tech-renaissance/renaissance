@@ -34,4 +34,48 @@ else()
     message(STATUS "Python print tensor test skipped (TR_USE_PYTHON_SESSION not defined)")
 endif()
 
+# ============================================================================
+# Single GPU async pipeline test
+# ============================================================================
+
+if(TR_USE_CUDA)
+    add_executable(test_async_pipeline_single_gpu
+        test_async_pipeline_single_gpu.cpp
+    )
+
+    target_link_libraries(test_async_pipeline_single_gpu
+        renaissance
+    )
+
+    set_target_properties(test_async_pipeline_single_gpu PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/integration
+    )
+
+    add_test(NAME test_async_pipeline_single_gpu COMMAND test_async_pipeline_single_gpu)
+
+    message(STATUS "Single GPU async pipeline test configured: test_async_pipeline_single_gpu")
+endif()
+
+# ============================================================================
+# Dual GPU async pipeline test
+# ============================================================================
+
+if(TR_USE_CUDA AND TR_USE_NCCL)
+    add_executable(test_async_pipeline_dual_gpu
+        test_async_pipeline_dual_gpu.cpp
+    )
+
+    target_link_libraries(test_async_pipeline_dual_gpu
+        renaissance
+    )
+
+    set_target_properties(test_async_pipeline_dual_gpu PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/integration
+    )
+
+    add_test(NAME test_async_pipeline_dual_gpu COMMAND test_async_pipeline_dual_gpu)
+
+    message(STATUS "Dual GPU async pipeline test configured: test_async_pipeline_dual_gpu")
+endif()
+
 message(STATUS "=== Integration Tests Configuration Complete ===")

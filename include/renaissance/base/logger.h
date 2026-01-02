@@ -86,7 +86,7 @@ public:
      * @note 此方法可在catch块中手动调用，用于记录已捕获的异常
      *       terminate handler会自动处理未捕获的异常，无需手动调用
      *
-     * @deprecated V3.7.0后，异常不再自动记录Logger。此方法仅用于特殊场景。
+     * @deprecated V3.6.18后，异常不再自动记录Logger。此方法仅用于特殊场景。
      */
     void log_exception(const TRException& e);
 

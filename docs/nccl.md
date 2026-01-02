@@ -1,7 +1,7 @@
 # NCCL多GPU通信指南
 
 ## 版本信息
-- **版本**: V3.7.2
+- **版本**: V3.6.18
 - **日期**: 2026-01-02
 - **作者**: 技术觉醒团队
 
@@ -618,7 +618,7 @@ ncclGroupEnd();  // 批量提交，NCCL协调所有GPU同时执行
 
 ### 陷阱1：单线程顺序调用NCCL集合操作（最严重！）
 
-**重要发现（V3.7.2实测）**：
+**重要发现（V3.6.18实测）**：
 - ❌ **AllReduce**顺序调用 → 死锁
 - ❌ **Broadcast**顺序调用 → 死锁
 - ✅ **所有NCCL集合操作**都必须使用Group API
@@ -1128,7 +1128,7 @@ int main() {
 
 ---
 
-## 性能测试与实战经验（V3.7.2实测）
+## 性能测试与实战经验（V3.6.18实测）
 
 ### 测试环境
 
@@ -1217,7 +1217,7 @@ Verification: SUCCESS (cpu_0 == cpu_1)
 
 ---
 
-### 实战经验总结（V3.7.2关键教训）
+### 实战经验总结（V3.6.18关键教训）
 
 #### 1. NCCL集合操作的铁律（实测验证）
 
@@ -1292,26 +1292,32 @@ Verification: SUCCESS (cpu_0 == cpu_1)
    - Comm流：NCCL通信（高优先级）
 
 2. **同步策略**：
-   - NCCL操作前同步Compute流（确保数据就绪）
-   - **使用Group API协调多GPU（避免死锁）** ← V3.7.2新增
+   - NCCL操作前使用Event同步Compute流（GPU端等待，CPU不阻塞） ← V3.6.18优化
+   - **使用Group API协调多GPU（避免死锁）** ← V3.6.18新增
    - 析构前同步所有流（安全销毁）
 
+   **V3.6.18 Event同步优化**：
+   - `cudaStreamWaitEvent(comm_stream_, compute_ready_)` 替代 `cudaStreamSynchronize`
+   - CPU不再阻塞，可在NCCL通信期间准备下一batch
+   - 性能提升：AllReduce 12.09 → 14.48 GB/s（+20%）
+
 3. **常见陷阱**：
-   - ⚠️ **不使用Group API → 死锁（AllReduce & Broadcast都会死锁！）** ← V3.7.2更新
+   - ⚠️ **不使用Group API → 死锁（AllReduce & Broadcast都会死锁！）** ← V3.6.18更新
    - ⚠️ Double-free → Segmentation fault
    - ⚠️ 错误的期望值 → 测试失败
    - ⚠️ 使用未实现API → NotImplementedError
 
 4. **最佳实践**：
-   - ✅ **始终使用`ncclGroupStart/End`包裹所有NCCL集合操作** ← V3.7.2核心教训
+   - ✅ **始终使用`ncclGroupStart/End`包裹所有NCCL集合操作** ← V3.6.18核心教训
    - ✅ 使用`transfer_into()`而非`to()`
    - ✅ 理解`ncclSum`是求和，不是平均
    - ✅ 正确计算累加结果（`add_into`语义）
 
-5. **性能基准**（V3.7.2实测）：
-   - AllReduce：12.09 GB/s（2GB数据）
-   - Broadcast：15.17 GB/s（2GB数据）
+5. **性能基准**（V3.6.18实测，Event同步优化后）：
+   - AllReduce：14.48 GB/s（2GB数据）← V3.6.18优化后
+   - Broadcast：15.65 GB/s（2GB数据）← V3.6.18优化后
    - 两者都需要Group API
+   - CPU不再阻塞NCCL操作 ← V3.6.18关键优化
 
 ### 参考资料
 
@@ -1321,6 +1327,6 @@ Verification: SUCCESS (cpu_0 == cpu_1)
 
 ---
 
-**文档版本**: V3.7.2
+**文档版本**: V3.6.18
 **最后更新**: 2026-01-02
 **作者**: 技术觉醒团队

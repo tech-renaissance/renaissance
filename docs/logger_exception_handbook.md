@@ -1,6 +1,6 @@
-# Logger与TRException使用手册（V3.7.0）
+# Logger与TRException使用手册（V3.6.18）
 
-**版本**: V3.7.0
+**版本**: V3.6.18
 **日期**: 2026-01-01
 **作者**: 技术觉醒团队
 
@@ -279,14 +279,14 @@ void set_batch_size(int size) {
 ### 反模式2：使用逗号分隔的旧式语法
 
 ```cpp
-// ❌ 错误：使用逗号分隔参数（V3.7.0之前的旧语法）
+// ❌ 错误：使用逗号分隔参数（V3.6.18之前的旧语法）
 void allocate_memory(size_t size) {
     if (size == 0) {
         TR_THROW(ValueError, "Cannot allocate ", size, " bytes");
     }
 }
 
-// ✅ 正确：使用流式语法（V3.7.0推荐）
+// ✅ 正确：使用流式语法（V3.6.18推荐）
 void allocate_memory(size_t size) {
     if (size == 0) {
         TR_VALUE_ERROR("Cannot allocate " << size << " bytes");
@@ -295,7 +295,7 @@ void allocate_memory(size_t size) {
 ```
 
 **为什么错误**？
-- 逗号分隔语法是V3.7.0之前的旧语法
+- 逗号分隔语法是V3.6.18之前的旧语法
 - 不符合新的流式语法规范
 - 代码风格不统一
 
@@ -406,7 +406,7 @@ void Model::load(const std::string& path) {
 
 ---
 
-## 四、代码迁移清单（V3.6.x → V3.7.0）
+## 四、代码迁移清单（V3.6.x → V3.6.18）
 
 迁移代码时，按照以下清单逐项检查：
 
@@ -723,7 +723,7 @@ TR_THROW(DeviceError, "MusaArena: musaMalloc failed (", static_cast<int>(err), "
 TR_THROW(NotImplementedError, type().to_string(), "::", func_name, " not implemented");
 ```
 
-### 新代码（V3.7.0流式语法）
+### 新代码（V3.6.18流式语法）
 
 ```cpp
 // ✅ 新式写法
@@ -743,6 +743,6 @@ TR_NOT_IMPLEMENTED(type().to_string() << "::" << func_name << " not implemented"
 
 ---
 
-**文档版本**: V3.7.0
+**文档版本**: V3.6.18
 **最后更新**: 2026-01-01
 **作者**: 技术觉醒团队

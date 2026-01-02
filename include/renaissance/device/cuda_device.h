@@ -166,6 +166,45 @@ public:
      */
     cudaStream_t get_transfer_stream() const noexcept { return transfer_stream_; }
 
+    // ===== 异步传输API（V3.6.18新增）=====
+    /**
+     * @brief 分配锁页内存（Pinned Memory）
+     * @param size 字节数
+     * @return 锁页内存指针（使用shared_ptr管理，自动释放）
+     * @note 锁页内存不会swap到磁盘，传输速度更快（20-25 GB/s vs 5-12 GB/s）
+     * @note 使用cudaHostAlloc分配，shared_ptr自动调用cudaFreeHost释放
+     */
+    std::shared_ptr<void> alloc_pinned(size_t size);
+
+    /**
+     * @brief 异步Host-to-Device传输（CPU不阻塞）
+     * @param src_host Host端源指针（必须是锁页内存或普通内存）
+     * @param dst_device Device端目标张量
+     * @note 使用transfer_stream_异步传输
+     * @note 传输完成后自动记录transfer_ready_ Event
+     * @note 调用后必须调用sync_transfer_to_compute()在计算流上等待传输完成
+     * @warning 必须确保src_host有效，直到sync_transfer_to_compute()被调用
+     */
+    void async_copy_h2d(const void* src_host, Tensor& dst_device);
+
+    /**
+     * @brief 异步Device-to-Host传输（CPU不阻塞）
+     * @param src_device Device端源张量
+     * @param dst_host Host端目标指针（必须是锁页内存或普通内存）
+     * @note 使用transfer_stream_异步传输
+     * @note 传输完成后自动记录transfer_ready_ Event
+     * @warning 必须确保dst_host有效，直到传输完成（建议调用synchronize()）
+     */
+    void async_copy_d2h(const Tensor& src_device, void* dst_host);
+
+    /**
+     * @brief 在计算流上等待传输完成（Event-based，GPU端等待，CPU不阻塞）
+     * @note 调用cudaStreamWaitEvent(compute_stream_, transfer_ready_)
+     * @note 必须在async_copy_h2d/d2h之后、使用dst_device/src_device之前调用
+     * @note GPU端会等待传输完成，但CPU立即返回，可以并行准备下一batch
+     */
+    void sync_transfer_to_compute();
+
 #ifdef TR_USE_NCCL
     /**
      * @brief 获取通信流（AllReduce/Broadcast）

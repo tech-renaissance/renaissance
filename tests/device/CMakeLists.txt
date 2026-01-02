@@ -665,5 +665,69 @@ target_link_libraries(test_tsr_python PRIVATE renaissance)
 
 message(STATUS "Device tests: TSR Python interoperability test configured")
 
+# ==============================================================================
+# CUDA异步传输测试（V3.6.18新增）
+# ==============================================================================
+if(TR_USE_CUDA)
+    add_executable(test_cuda_async
+        test_cuda_async.cpp
+    )
+
+    target_include_directories(test_cuda_async PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    )
+
+    set_target_properties(test_cuda_async PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/device
+    )
+
+    if(WIN32)
+        set_target_properties(test_cuda_async PROPERTIES
+            WIN32_EXECUTABLE FALSE
+        )
+    endif()
+
+    if(MSVC)
+        target_compile_options(test_cuda_async PRIVATE /W4 /utf-8)
+    else()
+        target_compile_options(test_cuda_async PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+
+    target_compile_definitions(test_cuda_async PRIVATE TR_LOG_LEVEL=0)
+    target_link_libraries(test_cuda_async PRIVATE renaissance)
+
+    message(STATUS "Device tests: CUDA async transfer test configured (V3.6.18)")
+
+    # 同步vs异步性能对比测试（V3.6.18）
+    add_executable(test_sync_vs_async_perf
+        test_sync_vs_async_perf.cpp
+    )
+
+    target_include_directories(test_sync_vs_async_perf PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    )
+
+    set_target_properties(test_sync_vs_async_perf PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/device
+    )
+
+    if(WIN32)
+        set_target_properties(test_sync_vs_async_perf PROPERTIES
+            WIN32_EXECUTABLE FALSE
+        )
+    endif()
+
+    if(MSVC)
+        target_compile_options(test_sync_vs_async_perf PRIVATE /W4 /utf-8)
+    else()
+        target_compile_options(test_sync_vs_async_perf PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+
+    target_compile_definitions(test_sync_vs_async_perf PRIVATE TR_LOG_LEVEL=0)
+    target_link_libraries(test_sync_vs_async_perf PRIVATE renaissance)
+
+    message(STATUS "Device tests: Sync vs async performance test configured (V3.6.18)")
+endif()
+
 message(STATUS "Device tests: CUDA and MUSA device tests configured")
 

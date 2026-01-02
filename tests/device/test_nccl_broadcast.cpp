@@ -40,6 +40,14 @@ int main() {
     // GPU1: 参数为全0
     Tensor param1 = gpu1.zeros(Shape(1000), DType::FP32);
 
+    // ===== 专家评审建议：在Broadcast前标记计算完成 =====
+    // 虽然当前实现"碰巧"能工作（未记录的Event会立即返回），但显式调用更规范
+    // 这确保compute_ready_ Event被正确记录，避免潜在的数据竞争
+    gpu0.synchronize();
+    gpu1.synchronize();
+    gpu0.mark_compute_done();
+    gpu1.mark_compute_done();
+
     // ===== 关键修复：使用NCCL Group API =====
 #ifdef TR_USE_NCCL
     ncclGroupStart();
