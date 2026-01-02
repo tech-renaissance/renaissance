@@ -141,6 +141,33 @@ public:
      */
     void print_devices() const;
 
+#ifdef TR_USE_NCCL
+    // ===== NCCL通信管理 =====
+
+    /**
+     * @brief 初始化NCCL（多GPU通信）
+     * @param gpu_count GPU数量（至少2块）
+     * @throws ValueError 如果GPU数量不足
+     * @throws DeviceError 如果NCCL初始化失败
+     */
+    void setup_nccl(int gpu_count);
+
+    /**
+     * @brief 清理NCCL资源
+     */
+    void cleanup_nccl();
+
+    /**
+     * @brief 检查NCCL是否已激活
+     */
+    bool nccl_is_active() const noexcept { return nccl_active_; }
+
+    /**
+     * @brief 获取NCCL世界大小（GPU总数）
+     */
+    int nccl_world_size() const noexcept { return nccl_world_size_; }
+#endif
+
 private:
     DeviceManager();
     ~DeviceManager() = default;
@@ -186,6 +213,12 @@ private:
 
     // 初始化标志
     bool initialized_ = false;
+
+#ifdef TR_USE_NCCL
+    // NCCL状态
+    bool nccl_active_ = false;
+    int nccl_world_size_ = 0;
+#endif
 };
 
 // ============================================================================

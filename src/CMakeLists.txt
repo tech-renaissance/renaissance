@@ -109,6 +109,17 @@ if(TR_USE_CUDA)
         target_link_libraries(renaissance INTERFACE ${CUDNN_LIBRARY})
         message(STATUS "Renaissance library: cuDNN linked (for cuda_device)")
     endif()
+
+    # 链接NCCL（用于多GPU通信）
+    if(TR_USE_NCCL AND DEFINED TR_NCCL_LIBRARY_DIR)
+        target_link_directories(renaissance INTERFACE ${TR_NCCL_LIBRARY_DIR})
+        if(DEFINED TR_NCCL_INCLUDE_DIR)
+            target_include_directories(renaissance INTERFACE ${TR_NCCL_INCLUDE_DIR})
+            message(STATUS "Renaissance library: Using NCCL headers from ${TR_NCCL_INCLUDE_DIR}")
+        endif()
+        target_link_libraries(renaissance INTERFACE nccl)
+        message(STATUS "Renaissance library: NCCL linked (for multi-GPU communication)")
+    endif()
 endif()
 
 # 添加MUSA支持（base模块的musa_arena需要）

@@ -168,6 +168,9 @@ if(TR_USE_CUDA)
     # CUDA跨设备传输测试
     add_executable(test_cuda_transfer test_cuda_transfer.cpp)
 
+    # CUDA流创建测试
+    add_executable(test_cuda_stream_creation test_cuda_stream_creation.cpp)
+
     # CudaDevice高级RNG接口测试
     add_executable(test_cuda_rand_tensor
         test_cuda_rand_tensor.cpp
@@ -300,6 +303,136 @@ if(TR_USE_CUDA)
     target_compile_definitions(test_cuda_transfer PRIVATE TR_LOG_LEVEL=0)
     target_link_libraries(test_cuda_transfer PRIVATE renaissance)
 
+    # ===== test_cuda_stream_creation配置 =====
+    target_include_directories(test_cuda_stream_creation PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    )
+
+    set_target_properties(test_cuda_stream_creation PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/device
+    )
+
+    if(WIN32)
+        set_target_properties(test_cuda_stream_creation PROPERTIES
+            WIN32_EXECUTABLE FALSE
+        )
+    endif()
+
+    if(MSVC)
+        target_compile_options(test_cuda_stream_creation PRIVATE /W4 /utf-8)
+    else()
+        target_compile_options(test_cuda_stream_creation PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+
+    target_compile_definitions(test_cuda_stream_creation PRIVATE TR_LOG_LEVEL=0)
+    target_link_libraries(test_cuda_stream_creation PRIVATE renaissance)
+
+    # ===== NCCL AllReduce测试 =====
+    if(TR_USE_NCCL)
+        add_executable(test_nccl_allreduce test_nccl_allreduce.cpp)
+
+        target_include_directories(test_nccl_allreduce PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        )
+
+        set_target_properties(test_nccl_allreduce PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/device
+        )
+
+        if(WIN32)
+            set_target_properties(test_nccl_allreduce PROPERTIES
+                WIN32_EXECUTABLE FALSE
+            )
+        endif()
+
+        if(MSVC)
+            target_compile_options(test_nccl_allreduce PRIVATE /W4 /utf-8)
+        else()
+            target_compile_options(test_nccl_allreduce PRIVATE -Wall -Wextra -Wpedantic)
+        endif()
+
+        target_compile_definitions(test_nccl_allreduce PRIVATE TR_LOG_LEVEL=0)
+        target_link_libraries(test_nccl_allreduce PRIVATE renaissance)
+
+        # ===== NCCL Broadcast测试 =====
+        add_executable(test_nccl_broadcast test_nccl_broadcast.cpp)
+
+        target_include_directories(test_nccl_broadcast PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        )
+
+        set_target_properties(test_nccl_broadcast PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/device
+        )
+
+        if(WIN32)
+            set_target_properties(test_nccl_broadcast PROPERTIES
+                WIN32_EXECUTABLE FALSE
+            )
+        endif()
+
+        if(MSVC)
+            target_compile_options(test_nccl_broadcast PRIVATE /W4 /utf-8)
+        else()
+            target_compile_options(test_nccl_broadcast PRIVATE -Wall -Wextra -Wpedantic)
+        endif()
+
+        target_compile_definitions(test_nccl_broadcast PRIVATE TR_LOG_LEVEL=0)
+        target_link_libraries(test_nccl_broadcast PRIVATE renaissance)
+
+        # NCCL AllReduce性能测试
+        add_executable(test_allreduce_speed test_allreduce_speed.cpp)
+
+        target_include_directories(test_allreduce_speed PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        )
+
+        set_target_properties(test_allreduce_speed PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/device
+        )
+
+        if(WIN32)
+            set_target_properties(test_allreduce_speed PROPERTIES
+                WIN32_EXECUTABLE FALSE
+            )
+        endif()
+
+        if(MSVC)
+            target_compile_options(test_allreduce_speed PRIVATE /W4 /utf-8)
+        else()
+            target_compile_options(test_allreduce_speed PRIVATE -Wall -Wextra -Wpedantic)
+        endif()
+
+        target_compile_definitions(test_allreduce_speed PRIVATE TR_LOG_LEVEL=0)
+        target_link_libraries(test_allreduce_speed PRIVATE renaissance)
+
+        # NCCL Broadcast性能测试
+        add_executable(test_broadcast_speed test_broadcast_speed.cpp)
+
+        target_include_directories(test_broadcast_speed PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+        )
+
+        set_target_properties(test_broadcast_speed PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/device
+        )
+
+        if(WIN32)
+            set_target_properties(test_broadcast_speed PROPERTIES
+                WIN32_EXECUTABLE FALSE
+            )
+        endif()
+
+        if(MSVC)
+            target_compile_options(test_broadcast_speed PRIVATE /W4 /utf-8)
+        else()
+            target_compile_options(test_broadcast_speed PRIVATE -Wall -Wextra -Wpedantic)
+        endif()
+
+        target_compile_definitions(test_broadcast_speed PRIVATE TR_LOG_LEVEL=0)
+        target_link_libraries(test_broadcast_speed PRIVATE renaissance)
+    endif()
+
     # 为测试设置运行时PATH环境变量（合并所有DLL路径）
     if(WIN32)
         set(DLL_PATHS "")
@@ -342,6 +475,10 @@ if(TR_USE_CUDA)
             )
             # 为test_cuda_transfer也设置相同的PATH
             set_target_properties(test_cuda_transfer PROPERTIES
+                ENVIRONMENT "PATH=${DLL_PATH_STR};$ENV{PATH}"
+            )
+            # 为test_cuda_stream_creation也设置相同的PATH
+            set_target_properties(test_cuda_stream_creation PROPERTIES
                 ENVIRONMENT "PATH=${DLL_PATH_STR};$ENV{PATH}"
             )
             message(STATUS "CUDA device tests: All DLL paths added to environment")

@@ -42,35 +42,39 @@ __global__ void add_int8_clamped_kernel(int n, const int8_t* a, const int8_t* b,
 
 // ===== Wrapper Function Implementations (callable from .cpp) =====
 
-cudaError_t launch_fill_int32_kernel(int n, int32_t* ptr, int32_t value) {
+cudaError_t launch_fill_int32_kernel(int n, int32_t* ptr, int32_t value,
+                                      cudaStream_t stream) {
     const int block_size = 256;
     const int grid_size = (n + block_size - 1) / block_size;
 
-    fill_kernel<int32_t><<<grid_size, block_size, 0, cudaStreamDefault>>>(n, ptr, value);
+    fill_kernel<int32_t><<<grid_size, block_size, 0, stream>>>(n, ptr, value);
     return cudaGetLastError();
 }
 
-cudaError_t launch_fill_int8_kernel(int n, int8_t* ptr, int8_t value) {
+cudaError_t launch_fill_int8_kernel(int n, int8_t* ptr, int8_t value,
+                                     cudaStream_t stream) {
     const int block_size = 256;
     const int grid_size = (n + block_size - 1) / block_size;
 
-    fill_kernel<int8_t><<<grid_size, block_size, 0, cudaStreamDefault>>>(n, ptr, value);
+    fill_kernel<int8_t><<<grid_size, block_size, 0, stream>>>(n, ptr, value);
     return cudaGetLastError();
 }
 
-cudaError_t launch_add_int32_kernel(int n, const int32_t* a, const int32_t* b, int32_t* c) {
+cudaError_t launch_add_int32_kernel(int n, const int32_t* a, const int32_t* b, int32_t* c,
+                                     cudaStream_t stream) {
     const int block_size = 256;
     const int grid_size = (n + block_size - 1) / block_size;
 
-    add_kernel<int32_t><<<grid_size, block_size, 0, cudaStreamDefault>>>(n, a, b, c);
+    add_kernel<int32_t><<<grid_size, block_size, 0, stream>>>(n, a, b, c);
     return cudaGetLastError();
 }
 
-cudaError_t launch_add_int8_kernel(int n, const int8_t* a, const int8_t* b, int8_t* c) {
+cudaError_t launch_add_int8_kernel(int n, const int8_t* a, const int8_t* b, int8_t* c,
+                                    cudaStream_t stream) {
     const int block_size = 256;
     const int grid_size = (n + block_size - 1) / block_size;
 
-    add_int8_clamped_kernel<<<grid_size, block_size, 0, cudaStreamDefault>>>(n, a, b, c);
+    add_int8_clamped_kernel<<<grid_size, block_size, 0, stream>>>(n, a, b, c);
     return cudaGetLastError();
 }
 
@@ -99,27 +103,30 @@ __global__ void convert_int8_to_int32_kernel(int n, const int8_t* src, int32_t* 
 
 // ===== Type Conversion Wrapper Functions =====
 
-cudaError_t launch_convert_int32_to_float_kernel(int n, const int32_t* src, float* dst) {
+cudaError_t launch_convert_int32_to_float_kernel(int n, const int32_t* src, float* dst,
+                                                  cudaStream_t stream) {
     const int block_size = 256;
     const int grid_size = (n + block_size - 1) / block_size;
 
-    convert_int32_to_float_kernel<<<grid_size, block_size, 0, cudaStreamDefault>>>(n, src, dst);
+    convert_int32_to_float_kernel<<<grid_size, block_size, 0, stream>>>(n, src, dst);
     return cudaGetLastError();
 }
 
-cudaError_t launch_convert_int8_to_float_kernel(int n, const int8_t* src, float* dst) {
+cudaError_t launch_convert_int8_to_float_kernel(int n, const int8_t* src, float* dst,
+                                                 cudaStream_t stream) {
     const int block_size = 256;
     const int grid_size = (n + block_size - 1) / block_size;
 
-    convert_int8_to_float_kernel<<<grid_size, block_size, 0, cudaStreamDefault>>>(n, src, dst);
+    convert_int8_to_float_kernel<<<grid_size, block_size, 0, stream>>>(n, src, dst);
     return cudaGetLastError();
 }
 
-cudaError_t launch_convert_int8_to_int32_kernel(int n, const int8_t* src, int32_t* dst) {
+cudaError_t launch_convert_int8_to_int32_kernel(int n, const int8_t* src, int32_t* dst,
+                                                 cudaStream_t stream) {
     const int block_size = 256;
     const int grid_size = (n + block_size - 1) / block_size;
 
-    convert_int8_to_int32_kernel<<<grid_size, block_size, 0, cudaStreamDefault>>>(n, src, dst);
+    convert_int8_to_int32_kernel<<<grid_size, block_size, 0, stream>>>(n, src, dst);
     return cudaGetLastError();
 }
 
@@ -202,42 +209,46 @@ __global__ void is_close_bf16_kernel(
 // ===== Comparison Wrapper Functions =====
 
 cudaError_t launch_equal_int8_kernel(
-    int n, const int8_t* a, const int8_t* b, int* mismatch_flag
+    int n, const int8_t* a, const int8_t* b, int* mismatch_flag,
+    cudaStream_t stream
 ) {
     const int block_size = 256;
     const int grid_size = (n + block_size - 1) / block_size;
 
-    equal_int8_kernel<<<grid_size, block_size, 0, cudaStreamDefault>>>(a, b, n, mismatch_flag);
+    equal_int8_kernel<<<grid_size, block_size, 0, stream>>>(a, b, n, mismatch_flag);
     return cudaGetLastError();
 }
 
 cudaError_t launch_equal_int32_kernel(
-    int n, const int32_t* a, const int32_t* b, int* mismatch_flag
+    int n, const int32_t* a, const int32_t* b, int* mismatch_flag,
+    cudaStream_t stream
 ) {
     const int block_size = 256;
     const int grid_size = (n + block_size - 1) / block_size;
 
-    equal_int32_kernel<<<grid_size, block_size, 0, cudaStreamDefault>>>(a, b, n, mismatch_flag);
+    equal_int32_kernel<<<grid_size, block_size, 0, stream>>>(a, b, n, mismatch_flag);
     return cudaGetLastError();
 }
 
 cudaError_t launch_is_close_float_kernel(
-    int n, const float* a, const float* b, float tolerance, int* mismatch_flag
+    int n, const float* a, const float* b, float tolerance, int* mismatch_flag,
+    cudaStream_t stream
 ) {
     const int block_size = 256;
     const int grid_size = (n + block_size - 1) / block_size;
 
-    is_close_float_kernel<<<grid_size, block_size, 0, cudaStreamDefault>>>(a, b, n, tolerance, mismatch_flag);
+    is_close_float_kernel<<<grid_size, block_size, 0, stream>>>(a, b, n, tolerance, mismatch_flag);
     return cudaGetLastError();
 }
 
 cudaError_t launch_is_close_bf16_kernel(
-    int n, const uint16_t* a, const uint16_t* b, float tolerance, int* mismatch_flag
+    int n, const uint16_t* a, const uint16_t* b, float tolerance, int* mismatch_flag,
+    cudaStream_t stream
 ) {
     const int block_size = 256;
     const int grid_size = (n + block_size - 1) / block_size;
 
-    is_close_bf16_kernel<<<grid_size, block_size, 0, cudaStreamDefault>>>(a, b, n, tolerance, mismatch_flag);
+    is_close_bf16_kernel<<<grid_size, block_size, 0, stream>>>(a, b, n, tolerance, mismatch_flag);
     return cudaGetLastError();
 }
 

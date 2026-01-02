@@ -271,4 +271,75 @@ MusaDevice& DeviceManager::musa(int index) {
 }
 #endif
 
+// ============================================================================
+// NCCL通信管理实现
+// ============================================================================
+
+#ifdef TR_USE_NCCL
+#include "renaissance/device/cuda_device.h"
+#include <nccl.h>
+
+void DeviceManager::setup_nccl(int gpu_count) {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    if (nccl_active_) {
+        LOG_WARN << "NCCL already active";
+        return;
+    }
+
+    TR_CHECK(gpu_count >= 2, ValueError,
+            "NCCL requires at least 2 GPUs, got " << gpu_count);
+    TR_CHECK(gpu_count <= cuda_count_, ValueError,
+            "Requested " << gpu_count << " GPUs but only " << cuda_count_ << " available");
+
+    LOG_INFO << "Setting up NCCL for " << gpu_count << " GPUs";
+
+    // 1. 准备设备和通信器数组
+    std::vector<int> devices(gpu_count);
+    std::vector<ncclComm_t> comms(gpu_count);
+
+    for (int i = 0; i < gpu_count; ++i) {
+        devices[i] = i;
+    }
+
+    // 2. 使用ncclCommInitAll一次性初始化所有通信器（避免死锁）
+    ncclResult_t result = ncclCommInitAll(comms.data(), gpu_count, devices.data());
+    TR_CHECK(result == ncclSuccess, DeviceError,
+            "ncclCommInitAll failed: " << ncclGetErrorString(result));
+
+    // 3. 将通信器设置到每个CudaDevice
+    for (int rank = 0; rank < gpu_count; ++rank) {
+        CudaDevice* cuda_dev = static_cast<CudaDevice*>(devices_[1 + rank].get());
+        cuda_dev->enable_nccl(gpu_count, rank, comms[rank]);
+    }
+
+    nccl_active_ = true;
+    nccl_world_size_ = gpu_count;
+
+    LOG_INFO << "NCCL initialized for " << gpu_count << " GPUs";
+}
+
+void DeviceManager::cleanup_nccl() {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    if (!nccl_active_) {
+        LOG_WARN << "NCCL not active";
+        return;
+    }
+
+    LOG_INFO << "Cleaning up NCCL";
+
+    // 销毁所有CUDA设备的NCCL通信器
+    for (int i = 0; i < cuda_count_; ++i) {
+        CudaDevice* cuda_dev = static_cast<CudaDevice*>(devices_[1 + i].get());
+        cuda_dev->cleanup_nccl();
+    }
+
+    nccl_active_ = false;
+    nccl_world_size_ = 0;
+
+    LOG_INFO << "NCCL cleaned up";
+}
+#endif
+
 } // namespace tr

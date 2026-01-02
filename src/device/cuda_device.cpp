@@ -57,7 +57,16 @@ namespace {
 
 // ===== 构造/析构 =====
 
-CudaDevice::CudaDevice(int device_id) : device_id_(device_id) {
+CudaDevice::CudaDevice(int device_id)
+    : device_id_(device_id)
+#ifdef TR_USE_NCCL
+    , comm_stream_(nullptr)
+    , compute_ready_(nullptr)
+    , comm_ready_(nullptr)
+    , nccl_comm_(nullptr)
+    , nccl_enabled_(false)
+#endif
+{
     // 设置当前设备
     cudaError_t err = cudaSetDevice(device_id_);
     if (err != cudaSuccess) {
@@ -73,12 +82,90 @@ CudaDevice::CudaDevice(int device_id) : device_id_(device_id) {
                  << device_id_ << ": " << cudaGetErrorString(err));
     }
 
-    LOG_INFO << "CudaDevice[" << device_id_ << "] initialized: " << prop.name;
+    // 1. 获取优先级范围
+    int least_priority, greatest_priority;
+    err = cudaDeviceGetStreamPriorityRange(&least_priority, &greatest_priority);
+    TR_CHECK(err == cudaSuccess, DeviceError,
+            "Failed to get stream priority range: " << cudaGetErrorString(err));
+
+    // 2. 创建计算流（高优先级）
+    err = cudaStreamCreateWithPriority(
+        &compute_stream_,
+        cudaStreamNonBlocking,
+        greatest_priority
+    );
+    TR_CHECK(err == cudaSuccess, DeviceError,
+            "Failed to create compute stream: " << cudaGetErrorString(err));
+
+    // 3. 创建传输流（低优先级）
+    err = cudaStreamCreateWithPriority(
+        &transfer_stream_,
+        cudaStreamNonBlocking,
+        least_priority
+    );
+    if (err != cudaSuccess) {
+        cudaStreamDestroy(compute_stream_);
+        TR_DEVICE_ERROR("Failed to create transfer stream: " << cudaGetErrorString(err));
+    }
+
+    // 4. 创建传输完成Event
+    err = cudaEventCreateWithFlags(&transfer_ready_, cudaEventDisableTiming);
+    if (err != cudaSuccess) {
+        cudaStreamDestroy(compute_stream_);
+        cudaStreamDestroy(transfer_stream_);
+        TR_DEVICE_ERROR("Failed to create transfer_ready event: " << cudaGetErrorString(err));
+    }
+
+    // 注意：通信流和通信Event在enable_nccl时创建
+
+    LOG_INFO << "CudaDevice[" << device_id_ << "] initialized: " << prop.name
+             << " (2 streams: compute + transfer)";
 }
 
 CudaDevice::~CudaDevice() {
     cudaSetDevice(device_id_);
-    synchronize();
+
+    // 1. 同步所有流（确保工作完成）
+    if (compute_stream_) cudaStreamSynchronize(compute_stream_);
+    if (transfer_stream_) cudaStreamSynchronize(transfer_stream_);
+
+#ifdef TR_USE_NCCL
+    // 2. 销毁NCCL（如果还未被cleanup_nccl销毁）
+    if (nccl_enabled_) {
+        if (comm_stream_) cudaStreamSynchronize(comm_stream_);
+
+        if (nccl_comm_) {
+            ncclCommDestroy(nccl_comm_);
+            nccl_comm_ = nullptr;
+        }
+
+        // 销毁通信Event
+        if (comm_ready_) {
+            cudaEventDestroy(comm_ready_);
+            comm_ready_ = nullptr;
+        }
+        if (compute_ready_) {
+            cudaEventDestroy(compute_ready_);
+            compute_ready_ = nullptr;
+        }
+
+        // 销毁通信流
+        if (comm_stream_) {
+            cudaStreamDestroy(comm_stream_);
+            comm_stream_ = nullptr;
+        }
+
+        nccl_enabled_ = false;
+    }
+#endif
+
+    // 3. 销毁传输Event
+    if (transfer_ready_) cudaEventDestroy(transfer_ready_);
+
+    // 4. 销毁流
+    if (transfer_stream_) cudaStreamDestroy(transfer_stream_);
+    if (compute_stream_) cudaStreamDestroy(compute_stream_);
+
     LOG_INFO << "CudaDevice[" << device_id_ << "] destroyed";
 }
 
@@ -204,13 +291,17 @@ Tensor CudaDevice::zeros(const Shape& shape, DType dtype) {
     // 3. 创建Tensor
     Tensor tensor(shape, dtype, type(), storage, 0, false);
 
-    // 4. 统一使用cudaMemset填充为0
+    // 4. 统一使用cudaMemsetAsync填充为0（在compute_stream_上）
     // 0x00 在 FP32/INT32/INT8/BF16 中都代表数值 0
     cudaSetDevice(device_id_);
-    cudaError_t err = cudaMemset(tensor.data_ptr(), 0, nbytes);
-    if (err != cudaSuccess) {
-        TR_DEVICE_ERROR("CUDA memset failed in zeros: " << cudaGetErrorString(err));
-    }
+    cudaError_t err = cudaMemsetAsync(
+        tensor.data_ptr(),
+        0,
+        nbytes,
+        compute_stream_
+    );
+    TR_CHECK(err == cudaSuccess, DeviceError,
+            "cudaMemsetAsync failed: " << cudaGetErrorString(err));
 
     return tensor;
 }
@@ -228,33 +319,33 @@ Tensor CudaDevice::ones(const Shape& shape, DType dtype) {
 
     cudaSetDevice(device_id_);
 
-    // 策略1：INT8 - 使用cudaMemset（0x01 = 1）
+    // 策略1：INT8 - 使用cudaMemsetAsync（在compute_stream_上）
     if (dtype == DType::INT8) {
-        cudaError_t err = cudaMemset(tensor.data_ptr(), 1, nbytes);
-        if (err != cudaSuccess) {
-            TR_DEVICE_ERROR("CUDA memset failed in ones: " << cudaGetErrorString(err));
-        }
-        synchronize();  // 确保内核执行完成（未来可优化为按需同步）
+        cudaError_t err = cudaMemsetAsync(
+            tensor.data_ptr(), 1, nbytes,
+            compute_stream_
+        );
+        TR_CHECK(err == cudaSuccess, DeviceError,
+                "cudaMemsetAsync failed: " << cudaGetErrorString(err));
         return tensor;
     }
 
-    // 策略2：INT32 - 使用手写fill_kernel（纯GPU，无Host参与）
+    // 策略2：INT32 - 使用fill_kernel（在compute_stream_上）
     if (dtype == DType::INT32) {
         cudaError_t err = launch_fill_int32_kernel(
             static_cast<int>(count),
             static_cast<int32_t*>(tensor.data_ptr()),
-            static_cast<int32_t>(1)
+            static_cast<int32_t>(1),
+            compute_stream_
         );
-
-        if (err != cudaSuccess) {
-            TR_DEVICE_ERROR("CUDA fill kernel failed in ones: " << cudaGetErrorString(err));
-        }
-        synchronize();  // 确保内核执行完成（未来可优化为按需同步）
+        TR_CHECK(err == cudaSuccess, DeviceError,
+                "fill_kernel failed: " << cudaGetErrorString(err));
         return tensor;
     }
 
-    // 策略3：FP32/BF16 - 使用cuDNN SetTensor
+    // 策略3：FP32/BF16 - 使用cuDNN SetTensor（绑定compute_stream_）
     cudnnHandle_t cudnn_handle = get_cudnn_handle(device_id_);
+    cudnnSetStream(cudnn_handle, compute_stream_);  // 绑定流
 
     cudnnTensorDescriptor_t desc;
     cudnnStatus_t status = cudnnCreateTensorDescriptor(&desc);
@@ -293,7 +384,6 @@ Tensor CudaDevice::ones(const Shape& shape, DType dtype) {
         TR_DEVICE_ERROR("cuDNN set tensor failed: " << cudnnGetErrorString(status));
     }
 
-    synchronize();  // 确保内核执行完成（未来可优化为按需同步）
     return tensor;
 }
 
@@ -371,12 +461,25 @@ void CudaDevice::impl_transfer_from_cpu(const Tensor& tensor_a, Tensor& tensor_b
     }
 
     size_t nbytes = static_cast<size_t>(numel) * dtype_size(tensor_a.dtype());
-    cudaError_t err = cudaMemcpy(tensor_b.data_ptr(), tensor_a.data_ptr(),
-                                nbytes, cudaMemcpyHostToDevice);
-    if (err != cudaSuccess) {
-        TR_DEVICE_ERROR("CUDA memcpy failed in transfer_into (Host to Device): "
-                       << cudaGetErrorString(err));
-    }
+
+    // 同步compute_stream_，确保所有先前的计算操作完成（如zeros/ones/add_into等）
+    cudaError_t sync_err = cudaStreamSynchronize(compute_stream_);
+    TR_CHECK(sync_err == cudaSuccess, DeviceError,
+            "cudaStreamSynchronize compute failed: " << cudaGetErrorString(sync_err));
+
+    // 使用cudaMemcpyAsync + transfer_stream_
+    cudaError_t err = cudaMemcpyAsync(
+        tensor_b.data_ptr(),
+        tensor_a.data_ptr(),
+        nbytes,
+        cudaMemcpyHostToDevice,
+        transfer_stream_
+    );
+    TR_CHECK(err == cudaSuccess, DeviceError,
+            "cudaMemcpyAsync H2D failed: " << cudaGetErrorString(err));
+
+    // 同步等待（保持同步语义）
+    cudaStreamSynchronize(transfer_stream_);
 }
 
 void CudaDevice::impl_transfer_to_cpu(const Tensor& tensor_a, Tensor& tensor_b) {
@@ -390,12 +493,25 @@ void CudaDevice::impl_transfer_to_cpu(const Tensor& tensor_a, Tensor& tensor_b) 
     }
 
     size_t nbytes = static_cast<size_t>(numel) * dtype_size(tensor_a.dtype());
-    cudaError_t err = cudaMemcpy(tensor_b.data_ptr(), tensor_a.data_ptr(),
-                                nbytes, cudaMemcpyDeviceToHost);
-    if (err != cudaSuccess) {
-        TR_DEVICE_ERROR("CUDA memcpy failed in transfer_into (Device to Host): "
-                       << cudaGetErrorString(err));
-    }
+
+    // 同步compute_stream_，确保所有先前的计算操作完成（如zeros/ones/add_into等）
+    cudaError_t sync_err = cudaStreamSynchronize(compute_stream_);
+    TR_CHECK(sync_err == cudaSuccess, DeviceError,
+            "cudaStreamSynchronize compute failed: " << cudaGetErrorString(sync_err));
+
+    // 使用cudaMemcpyAsync + transfer_stream_
+    cudaError_t err = cudaMemcpyAsync(
+        tensor_b.data_ptr(),
+        tensor_a.data_ptr(),
+        nbytes,
+        cudaMemcpyDeviceToHost,
+        transfer_stream_
+    );
+    TR_CHECK(err == cudaSuccess, DeviceError,
+            "cudaMemcpyAsync D2H failed: " << cudaGetErrorString(err));
+
+    // 同步等待（保持同步语义）
+    cudaStreamSynchronize(transfer_stream_);
 }
 
 // ===== 加法运算（使用cuDNN）=====
@@ -420,7 +536,7 @@ void CudaDevice::add_into(const Tensor& a, const Tensor& b, Tensor& result) {
 
     // 4. 策略分支：INT8/INT32使用手写Kernel，FP32/BF16使用cuDNN
     if (a.dtype() == DType::INT8 || a.dtype() == DType::INT32) {
-        // 策略A：INT8/INT32 - 使用手写add_kernel（纯GPU，无Host参与）
+        // 策略A：INT8/INT32 - 使用手写add_kernel（在compute_stream_上）
         cudaError_t err;
 
         if (a.dtype() == DType::INT8) {
@@ -428,26 +544,28 @@ void CudaDevice::add_into(const Tensor& a, const Tensor& b, Tensor& result) {
                 static_cast<int>(count),
                 static_cast<const int8_t*>(a.data_ptr()),
                 static_cast<const int8_t*>(b.data_ptr()),
-                static_cast<int8_t*>(result.data_ptr())
+                static_cast<int8_t*>(result.data_ptr()),
+                compute_stream_
             );
         } else {  // INT32
             err = launch_add_int32_kernel(
                 static_cast<int>(count),
                 static_cast<const int32_t*>(a.data_ptr()),
                 static_cast<const int32_t*>(b.data_ptr()),
-                static_cast<int32_t*>(result.data_ptr())
+                static_cast<int32_t*>(result.data_ptr()),
+                compute_stream_
             );
         }
 
-        if (err != cudaSuccess) {
-            TR_DEVICE_ERROR("CUDA add kernel failed in add_into: " << cudaGetErrorString(err));
-        }
+        TR_CHECK(err == cudaSuccess, DeviceError,
+                "CUDA add kernel failed: " << cudaGetErrorString(err));
         return;
     }
 
-    // 策略B：FP32/BF16 - 使用cuDNN OpTensor（原有逻辑）
-    // 5. 获取cuDNN句柄
+    // 策略B：FP32/BF16 - 使用cuDNN OpTensor（绑定compute_stream_）
+    // 5. 获取cuDNN句柄并绑定流
     cudnnHandle_t cudnn_handle = get_cudnn_handle(device_id_);
+    cudnnSetStream(cudnn_handle, compute_stream_);
 
     // 6. 创建Tensor描述符
     cudnnTensorDescriptor_t a_desc, b_desc, r_desc;
@@ -564,9 +682,6 @@ void CudaDevice::add_into(const Tensor& a, const Tensor& b, Tensor& result) {
     if (status != CUDNN_STATUS_SUCCESS) {
         TR_DEVICE_ERROR("cuDNN op tensor failed: " << cudnnGetErrorString(status));
     }
-
-    // 13. 同步确保计算完成
-    synchronize();
 }
 
 // =============================================================================
@@ -1111,6 +1226,193 @@ bool CudaDevice::is_close(const Tensor& a, const Tensor& b, float eps) {
     // 如果flag仍为0，说明所有元素都在容差范围内
     return flag == 0;
 }
+
+// ============================================================================
+// NCCL通信方法实现
+// ============================================================================
+
+#ifdef TR_USE_NCCL
+#include <nccl.h>
+
+void CudaDevice::enable_nccl(int world_size, int rank, ncclComm_t comm) {
+    cudaSetDevice(device_id_);
+
+    TR_CHECK(!nccl_enabled_, DeviceError, "NCCL already enabled for device " << device_id_);
+
+    // 1. 创建通信流（高优先级）
+    int least_priority, greatest_priority;
+    cudaError_t err = cudaDeviceGetStreamPriorityRange(&least_priority, &greatest_priority);
+    TR_CHECK(err == cudaSuccess, DeviceError,
+            "Failed to get stream priority range: " << cudaGetErrorString(err));
+
+    err = cudaStreamCreateWithPriority(
+        &comm_stream_,
+        cudaStreamNonBlocking,
+        greatest_priority
+    );
+    TR_CHECK(err == cudaSuccess, DeviceError,
+            "Failed to create comm stream: " << cudaGetErrorString(err));
+
+    // 2. 创建通信Event
+    err = cudaEventCreateWithFlags(&compute_ready_, cudaEventDisableTiming);
+    TR_CHECK(err == cudaSuccess, DeviceError,
+            "Failed to create compute_ready event: " << cudaGetErrorString(err));
+
+    err = cudaEventCreateWithFlags(&comm_ready_, cudaEventDisableTiming);
+    TR_CHECK(err == cudaSuccess, DeviceError,
+            "Failed to create comm_ready event: " << cudaGetErrorString(err));
+
+    // 3. 直接使用已初始化的NCCL通信器
+    nccl_comm_ = comm;
+    nccl_enabled_ = true;
+
+    LOG_INFO << "CudaDevice[" << device_id_ << "] NCCL enabled (rank " << rank
+             << "/" << world_size << ")";
+}
+
+void CudaDevice::cleanup_nccl() {
+    if (!nccl_enabled_) {
+        return;
+    }
+
+    cudaSetDevice(device_id_);
+
+    // 1. 同步通信流
+    if (comm_stream_) {
+        cudaStreamSynchronize(comm_stream_);
+    }
+
+    // 2. 销毁通信器
+    if (nccl_comm_) {
+        ncclCommDestroy(nccl_comm_);
+        nccl_comm_ = nullptr;
+    }
+
+    // 3. 销毁Event
+    if (compute_ready_) {
+        cudaEventDestroy(compute_ready_);
+        compute_ready_ = nullptr;
+    }
+    if (comm_ready_) {
+        cudaEventDestroy(comm_ready_);
+        comm_ready_ = nullptr;
+    }
+
+    // 4. 销毁通信流
+    if (comm_stream_) {
+        cudaStreamDestroy(comm_stream_);
+        comm_stream_ = nullptr;
+    }
+
+    nccl_enabled_ = false;
+
+    LOG_INFO << "CudaDevice[" << device_id_ << "] NCCL cleaned up";
+}
+
+void CudaDevice::allreduce_gradient(Tensor& gradient) {
+    TR_CHECK(nccl_enabled_, DeviceError, "NCCL not enabled");
+    TR_CHECK(gradient.is_bound(), DeviceError, "Gradient not bound");
+    check_on_device(gradient);
+
+    cudaSetDevice(device_id_);
+
+    // ===== 关键修复：直接同步计算流（确保计算完成）=====
+    cudaError_t err = cudaStreamSynchronize(compute_stream_);
+    TR_CHECK(err == cudaSuccess, DeviceError,
+            "cudaStreamSynchronize compute failed: " << cudaGetErrorString(err));
+
+    // 确定NCCL数据类型
+    ncclDataType_t nccl_type;
+    switch (gradient.dtype()) {
+        case DType::FP32: nccl_type = ncclFloat32; break;
+        case DType::BF16: nccl_type = ncclBfloat16; break;
+        default:
+            TR_TYPE_ERROR("allreduce_gradient only supports FP32/BF16, got: "
+                         << dtype_name(gradient.dtype()));
+    }
+
+    // 执行AllReduce（在comm_stream_上）
+    ncclResult_t result = ncclAllReduce(
+        gradient.data_ptr(),
+        gradient.data_ptr(),
+        gradient.numel(),
+        nccl_type,
+        ncclSum,
+        nccl_comm_,
+        comm_stream_
+    );
+    TR_CHECK(result == ncclSuccess, DeviceError,
+            "ncclAllReduce failed: " << ncclGetErrorString(result));
+
+    // 记录通信完成（保留，供后续sync_comm_to_compute使用）
+    err = cudaEventRecord(comm_ready_, comm_stream_);
+    TR_CHECK(err == cudaSuccess, DeviceError, "cudaEventRecord comm_ready failed: "
+            << cudaGetErrorString(err));
+}
+
+void CudaDevice::broadcast_param(Tensor& param, int root_rank) {
+    TR_CHECK(nccl_enabled_, DeviceError, "NCCL not enabled");
+    TR_CHECK(param.is_bound(), DeviceError, "Parameter not bound");
+    check_on_device(param);
+
+    cudaSetDevice(device_id_);
+
+    // ===== 同步计算流，确保计算完成 =====
+    cudaError_t err = cudaStreamSynchronize(compute_stream_);
+    TR_CHECK(err == cudaSuccess, DeviceError,
+            "cudaStreamSynchronize compute failed: " << cudaGetErrorString(err));
+
+    // 1. 确定NCCL数据类型
+    ncclDataType_t nccl_type;
+    switch (param.dtype()) {
+        case DType::FP32: nccl_type = ncclFloat32; break;
+        case DType::BF16: nccl_type = ncclBfloat16; break;
+        case DType::INT32: nccl_type = ncclInt32; break;
+        default:
+            TR_TYPE_ERROR("broadcast_param supports FP32/BF16/INT32, got: "
+                         << dtype_name(param.dtype()));
+    }
+
+    // 2. 执行Broadcast
+    ncclResult_t result = ncclBroadcast(
+        param.data_ptr(),
+        param.data_ptr(),
+        param.numel(),
+        nccl_type,
+        root_rank,
+        nccl_comm_,
+        comm_stream_
+    );
+    TR_CHECK(result == ncclSuccess, DeviceError,
+            "ncclBroadcast failed: " << ncclGetErrorString(result));
+
+    // 3. 记录通信完成
+    err = cudaEventRecord(comm_ready_, comm_stream_);
+    TR_CHECK(err == cudaSuccess, DeviceError, "cudaEventRecord comm_ready failed");
+}
+
+void CudaDevice::sync_comm_to_compute() {
+    TR_CHECK(nccl_enabled_, DeviceError, "NCCL not enabled");
+
+    cudaSetDevice(device_id_);
+
+    // 计算流等待通信完成
+    cudaError_t err = cudaStreamWaitEvent(compute_stream_, comm_ready_, 0);
+    TR_CHECK(err == cudaSuccess, DeviceError, "cudaStreamWaitEvent failed: "
+            << cudaGetErrorString(err));
+}
+
+void CudaDevice::mark_compute_done() {
+    TR_CHECK(nccl_enabled_, DeviceError, "NCCL not enabled");
+
+    cudaSetDevice(device_id_);
+
+    // 记录计算完成
+    cudaError_t err = cudaEventRecord(compute_ready_, compute_stream_);
+    TR_CHECK(err == cudaSuccess, DeviceError, "cudaEventRecord compute_ready failed: "
+            << cudaGetErrorString(err));
+}
+#endif
 
 } // namespace tr
 

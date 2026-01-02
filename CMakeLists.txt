@@ -194,6 +194,11 @@ if(TR_USE_SIMD)
     message(STATUS "Global macro TR_USE_SIMD defined: 1")
 endif()
 
+if(TR_USE_NCCL)
+    add_compile_definitions(TR_USE_NCCL=1)
+    message(STATUS "Global macro TR_USE_NCCL defined: 1")
+endif()
+
 # ============================================================================
 # PythonSession支持（仅在特定场景下启用）
 # ============================================================================

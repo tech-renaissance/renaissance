@@ -16,6 +16,10 @@
 
 #include <cuda_runtime.h>
 
+#ifdef TR_USE_NCCL
+#include <nccl.h>
+#endif
+
 namespace tr {
 
 // 前置声明Generator类（避免在头文件中包含rng.h）
@@ -149,8 +153,92 @@ public:
      */
     void impl_transfer_to_cpu(const Tensor& tensor_a, Tensor& tensor_b);
 
+    // ===== 流访问接口（供外部获取，用于手动控制）=====
+    /**
+     * @brief 获取计算流（前向/反向/更新）
+     * @return CUDA计算流
+     */
+    cudaStream_t get_compute_stream() const noexcept { return compute_stream_; }
+
+    /**
+     * @brief 获取传输流（H2D/D2H）
+     * @return CUDA传输流
+     */
+    cudaStream_t get_transfer_stream() const noexcept { return transfer_stream_; }
+
+#ifdef TR_USE_NCCL
+    /**
+     * @brief 获取通信流（AllReduce/Broadcast）
+     * @return CUDA通信流
+     */
+    cudaStream_t get_comm_stream() const noexcept { return comm_stream_; }
+
+    /**
+     * @brief 检查NCCL是否已启用
+     * @return NCCL启用状态
+     */
+    bool has_nccl() const noexcept { return nccl_enabled_; }
+
+    /**
+     * @brief 初始化NCCL（由DeviceManager统一调用）
+     * @param world_size GPU总数
+     * @param rank 当前rank
+     * @param comm NCCL通信器（已由DeviceManager初始化）
+     */
+    void enable_nccl(int world_size, int rank, ncclComm_t comm);
+
+    /**
+     * @brief 梯度AllReduce
+     * @param gradient 梯度张量（原地更新）
+     * @note 自动处理依赖：等待计算完成 → AllReduce → 标记通信完成
+     */
+    void allreduce_gradient(Tensor& gradient);
+
+    /**
+     * @brief 参数广播
+     * @param param 参数张量
+     * @param root_rank 源GPU rank
+     */
+    void broadcast_param(Tensor& param, int root_rank);
+
+    /**
+     * @brief 在计算流上等待通信完成
+     * @note 在参数更新前调用
+     */
+    void sync_comm_to_compute();
+
+    /**
+     * @brief 标记计算完成（供通信流等待）
+     * @note 在反向传播后调用
+     */
+    void mark_compute_done();
+
+    /**
+     * @brief 清理NCCL资源（由DeviceManager统一调用）
+     */
+    void cleanup_nccl();
+#endif
+
 private:
     int device_id_;  ///< GPU设备索引
+
+    // ===== 核心流（始终创建）=====
+    cudaStream_t compute_stream_;   ///< 计算流（前向/反向/更新）
+    cudaStream_t transfer_stream_;  ///< 传输流（H2D/D2H）
+
+    // ===== 同步Event（始终创建）=====
+    cudaEvent_t transfer_ready_;    ///< 传输完成标记
+
+#ifdef TR_USE_NCCL
+    // ===== 通信流（仅多GPU时创建）=====
+    cudaStream_t comm_stream_;      ///< 通信流（AllReduce/Broadcast）
+    cudaEvent_t compute_ready_;     ///< 计算完成标记（供通信等待）
+    cudaEvent_t comm_ready_;        ///< 通信完成标记（供更新等待）
+
+    // ===== NCCL状态 =====
+    ncclComm_t nccl_comm_;
+    bool nccl_enabled_;
+#endif
 };
 
 } // namespace tr
