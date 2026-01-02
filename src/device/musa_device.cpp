@@ -18,6 +18,7 @@
 #ifdef TR_USE_MUSA
 
 #include <musa_runtime.h>
+#include <musa_bf16.h>
 #include <mudnn.h>
 #include <vector>
 #include <cstring>
@@ -99,12 +100,68 @@ MusaDevice::MusaDevice(int device_id) : device_id_(device_id) {
                  << device_id_ << ": " << musaGetErrorString(err));
     }
 
-    LOG_INFO << "MusaDevice[" << device_id_ << "] initialized: " << prop.name;
+    // 1. 获取优先级范围
+    int least_priority, greatest_priority;
+    err = musaDeviceGetStreamPriorityRange(&least_priority, &greatest_priority);
+    TR_CHECK(err == musaSuccess, DeviceError,
+            "Failed to get stream priority range: " << musaGetErrorString(err));
+
+    // 2. 创建计算流（高优先级）
+    err = musaStreamCreateWithPriority(
+        &compute_stream_,
+        musaStreamNonBlocking,
+        greatest_priority
+    );
+    TR_CHECK(err == musaSuccess, DeviceError,
+            "Failed to create compute stream: " << musaGetErrorString(err));
+
+    // 3. 创建传输流（低优先级）
+    err = musaStreamCreateWithPriority(
+        &transfer_stream_,
+        musaStreamNonBlocking,
+        least_priority
+    );
+    if (err != musaSuccess) {
+        musaStreamDestroy(compute_stream_);
+        TR_DEVICE_ERROR("Failed to create transfer stream: " << musaGetErrorString(err));
+    }
+
+    // 4. 创建传输完成Event
+    err = musaEventCreateWithFlags(&transfer_ready_, musaEventDisableTiming);
+    if (err != musaSuccess) {
+        musaStreamDestroy(compute_stream_);
+        musaStreamDestroy(transfer_stream_);
+        TR_DEVICE_ERROR("Failed to create transfer_ready event: " << musaGetErrorString(err));
+    }
+
+    // 5. 创建计算完成Event（V3.6.19修复：始终创建，用于D2H同步）
+    err = musaEventCreateWithFlags(&compute_ready_, musaEventDisableTiming);
+    if (err != musaSuccess) {
+        musaEventDestroy(transfer_ready_);
+        musaStreamDestroy(compute_stream_);
+        musaStreamDestroy(transfer_stream_);
+        TR_DEVICE_ERROR("Failed to create compute_ready event: " << musaGetErrorString(err));
+    }
+
+    LOG_INFO << "MusaDevice[" << device_id_ << "] initialized: " << prop.name
+             << " (2 streams: compute + transfer)";
 }
 
 MusaDevice::~MusaDevice() {
     musaSetDevice(device_id_);
-    synchronize();
+
+    // 1. 同步所有流（确保工作完成）
+    if (compute_stream_) musaStreamSynchronize(compute_stream_);
+    if (transfer_stream_) musaStreamSynchronize(transfer_stream_);
+
+    // 2. 销毁Event（V3.6.19修复：compute_ready_始终创建）
+    if (compute_ready_) musaEventDestroy(compute_ready_);
+    if (transfer_ready_) musaEventDestroy(transfer_ready_);
+
+    // 3. 销毁流
+    if (transfer_stream_) musaStreamDestroy(transfer_stream_);
+    if (compute_stream_) musaStreamDestroy(compute_stream_);
+
     LOG_INFO << "MusaDevice[" << device_id_ << "] destroyed";
 }
 
@@ -301,20 +358,37 @@ Tensor MusaDevice::ones(const Shape& shape, DType dtype) {
         return tensor;
     }
 
-    // 策略4：FP32 - 使用muDNN Fill操作
-    musa::dnn::Handle& mudnn_handle = get_mudnn_handle(device_id_);
-
-    musa::dnn::Tensor mudnn_tensor = wrap_tensor(tensor.data_ptr(), count, dtype);
-
-    musa::dnn::Fill fill_op;
-    fill_op.SetValue(1.0);
-
-    musa::dnn::Status status = fill_op.Run(mudnn_handle, mudnn_tensor);
-    if (status != musa::dnn::Status::SUCCESS) {
-        TR_DEVICE_ERROR("muDNN Fill operation failed in ones");
+    // 策略4：FP32 - V3.6.19修复：使用kernel替代muDNN（更可控）
+    if (dtype == DType::FP32) {
+        musaError_t err = launch_fill_float_kernel(
+            static_cast<int>(count),
+            static_cast<float*>(tensor.data_ptr()),
+            1.0f,
+            compute_stream_
+        );
+        TR_CHECK(err == musaSuccess, DeviceError,
+                "fill_float_kernel failed: " << musaGetErrorString(err));
+        return tensor;
     }
 
-    return tensor;
+    // 策略5：BF16 - 使用优化的填充策略
+    if (dtype == DType::BF16) {
+        // BF16的1.0表示：0x3F80 (float 1.0的高16位)
+        const uint16_t bf16_one = 0x3F80;
+
+        // 在Host端创建填充缓冲区
+        std::vector<uint16_t> host_buffer(count, bf16_one);
+
+        // 一次性复制到Device
+        musaError_t err = musaMemcpy(tensor.data_ptr(), host_buffer.data(),
+                                     count * sizeof(uint16_t), musaMemcpyHostToDevice);
+        TR_CHECK(err == musaSuccess, DeviceError,
+                "musaMemcpy failed in ones (BF16): " << musaGetErrorString(err));
+
+        return tensor;
+    }
+
+    TR_TYPE_ERROR("Unsupported dtype in ones: " << dtype_name(dtype));
 }
 
 // ===== 加法和复制运算 =====
@@ -399,6 +473,113 @@ void MusaDevice::impl_transfer_from_cpu(const Tensor& tensor_a, Tensor& tensor_b
     }
 }
 
+// ===== 数据类型转换 =====
+
+void MusaDevice::cast_into(const Tensor& tensor_a, Tensor& tensor_b,
+                            StreamType stream_type) {
+    // 前向声明dispatch函数（在musa_cast.cu中定义）
+    // 方案2：使用__mt_bfloat16类型
+    extern void musa_dispatch_fp32_to_int32(const float*, int32_t*, size_t, musaStream_t);
+    extern void musa_dispatch_fp32_to_bf16(const float*, __mt_bfloat16*, size_t, musaStream_t);
+    extern void musa_dispatch_bf16_to_fp32(const __mt_bfloat16*, float*, size_t, musaStream_t);
+    extern void musa_dispatch_int32_to_fp32(const int32_t*, float*, size_t, musaStream_t);
+    extern void musa_dispatch_int32_to_int8(const int32_t*, int8_t*, size_t, musaStream_t);
+    extern void musa_dispatch_int8_to_fp32(const int8_t*, float*, size_t, musaStream_t);
+    extern void musa_dispatch_int8_to_int32(const int8_t*, int32_t*, size_t, musaStream_t);
+
+    // 1. 验证设备
+    check_on_device(tensor_a);
+    check_on_device(tensor_b);
+
+    // 2. 验证形状相同
+    check_same_shape(tensor_a, tensor_b);
+
+    // 3. 验证数据类型不同
+    DType dtype_a = tensor_a.dtype();
+    DType dtype_b = tensor_b.dtype();
+    if (dtype_a == dtype_b) {
+        TR_TYPE_ERROR("Cannot cast to the same dtype: "
+                 << dtype_name(dtype_a) << " -> " << dtype_name(dtype_b)
+                 << ". Use copy_into() instead.");
+    }
+
+    // 4. 空张量直接返回
+    int64_t numel = tensor_a.numel();
+    if (numel == 0) {
+        return;
+    }
+
+    // 5. 检查是否支持该转换
+    bool supported = false;
+    if ((dtype_a == DType::FP32 && dtype_b == DType::INT32) ||
+        (dtype_a == DType::FP32 && dtype_b == DType::BF16) ||
+        (dtype_a == DType::BF16 && dtype_b == DType::FP32) ||
+        (dtype_a == DType::INT32 && dtype_b == DType::FP32) ||
+        (dtype_a == DType::INT32 && dtype_b == DType::INT8) ||
+        (dtype_a == DType::INT8 && dtype_b == DType::FP32) ||
+        (dtype_a == DType::INT8 && dtype_b == DType::INT32)) {
+        supported = true;
+    }
+
+    if (!supported) {
+        TR_NOT_IMPLEMENTED("Cast from " << dtype_name(dtype_a)
+                         << " to " << dtype_name(dtype_b)
+                         << " is not supported");
+    }
+
+    // 6. 映射StreamType到实际musaStream_t
+    musaStream_t stream = nullptr;
+    switch (stream_type) {
+        case StreamType::transfer_stream: stream = transfer_stream_; break;
+        case StreamType::compute_stream:  stream = compute_stream_;  break;
+#ifdef TR_USE_NCCL
+        case StreamType::comm_stream:     stream = comm_stream_;     break;
+#endif
+        case StreamType::default_stream:
+        default:                          stream = nullptr;          break;
+    }
+
+    // 7. 设置当前设备
+    musaSetDevice(device_id_);
+
+    // 8. 获取数据指针
+    const void* src_ptr = tensor_a.data_ptr();
+    void* dst_ptr = tensor_b.data_ptr();
+
+    // 9. 调用对应的kernel
+    if (dtype_a == DType::FP32 && dtype_b == DType::INT32) {
+        musa_dispatch_fp32_to_int32(static_cast<const float*>(src_ptr),
+                                     static_cast<int32_t*>(dst_ptr), numel, stream);
+    } else if (dtype_a == DType::FP32 && dtype_b == DType::BF16) {
+        // 方案2：uint16_t* 转换为 __mt_bfloat16*
+        musa_dispatch_fp32_to_bf16(static_cast<const float*>(src_ptr),
+                                    reinterpret_cast<__mt_bfloat16*>(dst_ptr), numel, stream);
+    } else if (dtype_a == DType::BF16 && dtype_b == DType::FP32) {
+        // 方案2：uint16_t* 转换为 __mt_bfloat16*
+        musa_dispatch_bf16_to_fp32(reinterpret_cast<const __mt_bfloat16*>(src_ptr),
+                                    static_cast<float*>(dst_ptr), numel, stream);
+    } else if (dtype_a == DType::INT32 && dtype_b == DType::FP32) {
+        musa_dispatch_int32_to_fp32(static_cast<const int32_t*>(src_ptr),
+                                     static_cast<float*>(dst_ptr), numel, stream);
+    } else if (dtype_a == DType::INT32 && dtype_b == DType::INT8) {
+        musa_dispatch_int32_to_int8(static_cast<const int32_t*>(src_ptr),
+                                     static_cast<int8_t*>(dst_ptr), numel, stream);
+    } else if (dtype_a == DType::INT8 && dtype_b == DType::FP32) {
+        musa_dispatch_int8_to_fp32(static_cast<const int8_t*>(src_ptr),
+                                    static_cast<float*>(dst_ptr), numel, stream);
+    } else if (dtype_a == DType::INT8 && dtype_b == DType::INT32) {
+        musa_dispatch_int8_to_int32(static_cast<const int8_t*>(src_ptr),
+                                     static_cast<int32_t*>(dst_ptr), numel, stream);
+    }
+
+    // 10. 同步等待（保持同步语义）
+    if (stream != nullptr) {
+        musaStreamSynchronize(stream);
+    } else {
+        musaDeviceSynchronize();
+    }
+}
+
 void MusaDevice::impl_transfer_to_cpu(const Tensor& tensor_a, Tensor& tensor_b) {
     // MUSA → CPU传输
     musaSetDevice(device_id_);
@@ -416,6 +597,109 @@ void MusaDevice::impl_transfer_to_cpu(const Tensor& tensor_a, Tensor& tensor_b) 
         TR_DEVICE_ERROR("MUSA memcpy failed in transfer_into (Device to Host): "
                        << musaGetErrorString(err));
     }
+}
+
+// =============================================================================
+// 异步传输API实现（V3.6.18新增）
+// =============================================================================
+
+std::shared_ptr<void> MusaDevice::alloc_pinned(size_t size) {
+    if (size == 0) {
+        TR_VALUE_ERROR("Cannot allocate 0 bytes of pinned memory");
+    }
+
+    musaSetDevice(device_id_);
+
+    void* ptr = nullptr;
+    musaError_t err = musaHostAlloc(&ptr, size, musaHostAllocDefault);
+    TR_CHECK(err == musaSuccess, MemoryError,
+            "musaHostAlloc failed: " << musaGetErrorString(err));
+
+    // RAII：shared_ptr自动释放（使用自定义deleter调用musaFreeHost）
+    return std::shared_ptr<void>(ptr, [](void* p) {
+        // 静默失败，避免在析构函数中抛出异常
+        if (p) {
+            musaFreeHost(p);
+        }
+    });
+}
+
+void MusaDevice::async_copy_h2d(const void* src_host, Tensor& dst_device) {
+    TR_CHECK(src_host != nullptr, ValueError, "src_host is null");
+    TR_CHECK(dst_device.is_bound(), DeviceError, "dst_device not bound");
+    check_on_device(dst_device);
+
+    musaSetDevice(device_id_);
+
+    size_t nbytes = dst_device.nbytes();
+    if (nbytes == 0) return;
+
+    // 异步传输（在transfer_stream_上）
+    musaError_t err = musaMemcpyAsync(
+        dst_device.data_ptr(),
+        src_host,
+        nbytes,
+        musaMemcpyHostToDevice,
+        transfer_stream_
+    );
+    TR_CHECK(err == musaSuccess, DeviceError,
+            "musaMemcpyAsync H2D failed: " << musaGetErrorString(err));
+
+    // 记录完成Event（供sync_transfer_to_compute使用）
+    err = musaEventRecord(transfer_ready_, transfer_stream_);
+    TR_CHECK(err == musaSuccess, DeviceError,
+            "musaEventRecord failed: " << musaGetErrorString(err));
+
+    // 不调用synchronize()，立即返回（CPU不阻塞）
+}
+
+void MusaDevice::async_copy_d2h(const Tensor& src_device, void* dst_host) {
+    TR_CHECK(dst_host != nullptr, ValueError, "dst_host is null");
+    TR_CHECK(src_device.is_bound(), DeviceError, "src_device not bound");
+    check_on_device(src_device);
+
+    musaSetDevice(device_id_);
+
+    size_t nbytes = src_device.nbytes();
+    if (nbytes == 0) return;
+
+    // ===== V3.6.19修复：使用Event实现GPU端等待（CPU不阻塞）=====
+    // 1. 在compute_stream_上记录Event，标记所有计算完成
+    musaError_t err = musaEventRecord(compute_ready_, compute_stream_);
+    TR_CHECK(err == musaSuccess, DeviceError,
+            "musaEventRecord compute_ready failed: " << musaGetErrorString(err));
+
+    // 2. transfer_stream_等待compute_stream_完成（GPU端依赖，CPU不阻塞！）
+    err = musaStreamWaitEvent(transfer_stream_, compute_ready_, 0);
+    TR_CHECK(err == musaSuccess, DeviceError,
+            "musaStreamWaitEvent failed: " << musaGetErrorString(err));
+
+    // 3. 异步传输（此时GPU端已确保compute完成）
+    err = musaMemcpyAsync(
+        dst_host,
+        src_device.data_ptr(),
+        nbytes,
+        musaMemcpyDeviceToHost,
+        transfer_stream_
+    );
+    TR_CHECK(err == musaSuccess, DeviceError,
+            "musaMemcpyAsync D2H failed: " << musaGetErrorString(err));
+
+    // 4. 记录传输完成Event（供synchronize()使用）
+    err = musaEventRecord(transfer_ready_, transfer_stream_);
+    TR_CHECK(err == musaSuccess, DeviceError,
+            "musaEventRecord transfer_ready failed: " << musaGetErrorString(err));
+
+    // CPU立即返回（真正异步！）
+}
+
+void MusaDevice::sync_transfer_to_compute() {
+    musaSetDevice(device_id_);
+
+    // 计算流在GPU端等待传输完成（CPU不阻塞）
+    musaError_t err = musaStreamWaitEvent(compute_stream_, transfer_ready_, 0);
+    TR_CHECK(err == musaSuccess, DeviceError,
+            "musaStreamWaitEvent failed: " << musaGetErrorString(err));
 }
 
 void MusaDevice::add_into(const Tensor& a, const Tensor& b, Tensor& result) {

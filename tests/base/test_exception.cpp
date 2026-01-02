@@ -199,7 +199,7 @@ void test_exception_info() {
 void test_auto_logging() {
     LOG_INFO << "Auto logging test started";
 
-    // 注意：V3.7.0后异常不再自动记录到Logger
+    // 注意：V3.6.18后异常不再自动记录到Logger
     // terminate handler会在未捕获异常时自动处理
     // 这个测试验证异常的what()包含完整信息
     try {

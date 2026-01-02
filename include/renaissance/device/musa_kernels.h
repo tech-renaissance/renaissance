@@ -27,6 +27,16 @@ namespace tr {
 musaError_t launch_fill_int32_kernel(int n, int32_t* ptr, int32_t value);
 
 /**
+ * @brief Wrapper function: Fill FP32 array (implemented in .mu)
+ * @param n Number of elements
+ * @param ptr Device pointer
+ * @param value Fill value
+ * @param stream MUSA stream (default: compute_stream)
+ * @return musaError_t Error code
+ */
+musaError_t launch_fill_float_kernel(int n, float* ptr, float value, musaStream_t stream = 0);
+
+/**
  * @brief Wrapper function: Fill INT8 array (implemented in .mu)
  */
 musaError_t launch_fill_int8_kernel(int n, int8_t* ptr, int8_t value);

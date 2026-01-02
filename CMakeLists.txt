@@ -240,10 +240,11 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
 
     # GCC Release优化
     if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-        # RISC-V场景：不使用-march=native
+        # RISC-V场景：添加向量扩展支持
         if(TR_SCENE_EDGE_RISCV)
-            set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3")
-            message(STATUS "EDGE_RISCV scene: using -O3 without -march=native")
+            # RISC-V向量扩展：启用RVV 1.0（march=rv64gcv）
+            set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -march=rv64gcv")
+            message(STATUS "EDGE_RISCV scene: using -O3 with -march=rv64gcv (vector extension)")
         else()
             # 其他场景：可以使用-march=native
             set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -march=native")
@@ -268,7 +269,14 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     endif()
 
     if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" OR CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
-        set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g -O0")
+        # RISC-V场景：添加向量扩展支持
+        if(TR_SCENE_EDGE_RISCV)
+            # RISC-V向量扩展：启用RVV 1.0（march=rv64gcv）
+            set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g -O0 -march=rv64gcv")
+            message(STATUS "EDGE_RISCV Debug: using -g -O0 with -march=rv64gcv (vector extension)")
+        else()
+            set(CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -g -O0")
+        endif()
     endif()
 endif()
 

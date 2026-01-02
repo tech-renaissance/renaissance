@@ -30,6 +30,17 @@ cudaError_t launch_fill_int32_kernel(int n, int32_t* ptr, int32_t value,
                                       cudaStream_t stream = 0);
 
 /**
+ * @brief 填充FP32数组
+ * @param n 元素数量
+ * @param ptr 设备指针
+ * @param value 填充值
+ * @param stream CUDA流（默认为compute_stream）
+ * @return cudaError_t 错误代码
+ */
+cudaError_t launch_fill_float_kernel(int n, float* ptr, float value,
+                                      cudaStream_t stream = 0);
+
+/**
  * @brief 填充INT8数组
  * @param n 元素数量
  * @param ptr 设备指针

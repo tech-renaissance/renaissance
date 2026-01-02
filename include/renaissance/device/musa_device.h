@@ -90,6 +90,8 @@ public:
     void add_into(const Tensor& a, const Tensor& b, Tensor& result) override;
     void copy_into(const Tensor& tensor_a, Tensor& tensor_b) override;
     void transfer_into(const Tensor& tensor_a, Tensor& tensor_b) override;
+    void cast_into(const Tensor& tensor_a, Tensor& tensor_b,
+                  StreamType stream = TR_DEFAULT_STREAM) override;
 
     // ===== 张量比较 =====
     bool equal(const Tensor& a, const Tensor& b) override;
@@ -150,8 +152,68 @@ public:
      */
     void impl_transfer_to_cpu(const Tensor& tensor_a, Tensor& tensor_b);
 
+    // ===== 流访问接口（供外部获取，用于手动控制）=====
+    /**
+     * @brief 获取计算流（前向/反向/更新）
+     * @return MUSA计算流
+     */
+    musaStream_t get_compute_stream() const noexcept { return compute_stream_; }
+
+    /**
+     * @brief 获取传输流（H2D/D2H）
+     * @return MUSA传输流
+     */
+    musaStream_t get_transfer_stream() const noexcept { return transfer_stream_; }
+
+    // ===== 异步传输API（V3.6.18新增）=====
+    /**
+     * @brief 分配锁页内存（Pinned Memory）
+     * @param size 字节数
+     * @return 锁页内存指针（使用shared_ptr管理，自动释放）
+     * @note 锁页内存不会swap到磁盘，传输速度更快（20-25 GB/s vs 5-12 GB/s）
+     * @note 使用musaHostAlloc分配，shared_ptr自动调用musaFreeHost释放
+     */
+    std::shared_ptr<void> alloc_pinned(size_t size);
+
+    /**
+     * @brief 异步Host-to-Device传输（CPU不阻塞）
+     * @param src_host Host端源指针（必须是锁页内存或普通内存）
+     * @param dst_device Device端目标张量
+     * @note 使用transfer_stream_异步传输
+     * @note 传输完成后自动记录transfer_ready_ Event
+     * @note 调用后必须调用sync_transfer_to_compute()在计算流上等待传输完成
+     * @warning 必须确保src_host有效，直到sync_transfer_to_compute()被调用
+     */
+    void async_copy_h2d(const void* src_host, Tensor& dst_device);
+
+    /**
+     * @brief 异步Device-to-Host传输（CPU不阻塞）
+     * @param src_device Device端源张量
+     * @param dst_host Host端目标指针（必须是锁页内存或普通内存）
+     * @note 使用transfer_stream_异步传输
+     * @note 传输完成后自动记录transfer_ready_ Event
+     * @warning 必须确保dst_host有效，直到传输完成（建议调用synchronize()）
+     */
+    void async_copy_d2h(const Tensor& src_device, void* dst_host);
+
+    /**
+     * @brief 在计算流上等待传输完成（Event-based，GPU端等待，CPU不阻塞）
+     * @note 调用musaStreamWaitEvent(compute_stream_, transfer_ready_)
+     * @note 必须在async_copy_h2d/d2h之后、使用dst_device/src_device之前调用
+     * @note GPU端会等待传输完成，但CPU立即返回，可以并行准备下一batch
+     */
+    void sync_transfer_to_compute();
+
 private:
-    int device_id_;  ///< GPU设备索引
+    int device_id_;           ///< GPU设备索引
+
+    // ===== 核心流（始终创建）=====
+    musaStream_t compute_stream_;    ///< 计算流（高优先级，用于前向/反向/更新）
+    musaStream_t transfer_stream_;   ///< 传输流（低优先级，用于H2D/D2H）
+
+    // ===== 同步Event（始终创建）=====
+    musaEvent_t transfer_ready_;     ///< 传输完成标记（H2D→Compute）
+    musaEvent_t compute_ready_;      ///< 计算完成标记（Compute→D2H）
 };
 
 } // namespace tr

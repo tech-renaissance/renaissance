@@ -8,6 +8,7 @@
  */
 
 #include "renaissance/device/device.h"
+#include "renaissance/base/global_config.h"
 #include "renaissance/data/tensor.h"
 #include "renaissance/data/storage.h"
 #include "renaissance/data/shape.h"
@@ -85,6 +86,11 @@ void Device::copy_into([[maybe_unused]] const Tensor& tensor_a, [[maybe_unused]]
 
 void Device::transfer_into([[maybe_unused]] const Tensor& tensor_a, [[maybe_unused]] Tensor& tensor_b) {
     throw_not_impl("transfer_into");
+}
+
+void Device::cast_into([[maybe_unused]] const Tensor& tensor_a, [[maybe_unused]] Tensor& tensor_b,
+                       [[maybe_unused]] StreamType stream) {
+    throw_not_impl("cast_into");
 }
 
 // =============================================================================

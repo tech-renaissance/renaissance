@@ -73,6 +73,8 @@ public:
     void add_into(const Tensor& a, const Tensor& b, Tensor& result) override;
     void copy_into(const Tensor& tensor_a, Tensor& tensor_b) override;
     void transfer_into(const Tensor& tensor_a, Tensor& tensor_b) override;
+    void cast_into(const Tensor& tensor_a, Tensor& tensor_b,
+                  StreamType stream = TR_DEFAULT_STREAM) override;
 
     // ===== 张量比较 =====
     bool equal(const Tensor& a, const Tensor& b) override;

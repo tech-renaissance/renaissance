@@ -27,7 +27,7 @@ class Generator;
 
 /**
  * @class CudaDevice
- * @brief NVIDIA GPU器件实现（基于CUDA Runtime）
+ * @brief NVIDIA GPU器件实现（基于CUDA Runtime)
  */
 class CudaDevice final : public Device {
 public:
@@ -93,6 +93,8 @@ public:
     void add_into(const Tensor& a, const Tensor& b, Tensor& result) override;
     void copy_into(const Tensor& tensor_a, Tensor& tensor_b) override;
     void transfer_into(const Tensor& tensor_a, Tensor& tensor_b) override;
+    void cast_into(const Tensor& tensor_a, Tensor& tensor_b,
+                  StreamType stream = TR_DEFAULT_STREAM) override;
 
     // ===== 张量比较 =====
     bool equal(const Tensor& a, const Tensor& b) override;
@@ -166,6 +168,45 @@ public:
      */
     cudaStream_t get_transfer_stream() const noexcept { return transfer_stream_; }
 
+    // ===== 异步传输API（V3.6.18新增）=====
+    /**
+     * @brief 分配锁页内存（Pinned Memory）
+     * @param size 字节数
+     * @return 锁页内存指针（使用shared_ptr管理，自动释放）
+     * @note 锁页内存不会swap到磁盘，传输速度更快（20-25 GB/s vs 5-12 GB/s）
+     * @note 使用cudaHostAlloc分配，shared_ptr自动调用cudaFreeHost释放
+     */
+    std::shared_ptr<void> alloc_pinned(size_t size);
+
+    /**
+     * @brief 异步Host-to-Device传输（CPU不阻塞）
+     * @param src_host Host端源指针（必须是锁页内存或普通内存）
+     * @param dst_device Device端目标张量
+     * @note 使用transfer_stream_异步传输
+     * @note 传输完成后自动记录transfer_ready_ Event
+     * @note 调用后必须调用sync_transfer_to_compute()在计算流上等待传输完成
+     * @warning 必须确保src_host有效，直到sync_transfer_to_compute()被调用
+     */
+    void async_copy_h2d(const void* src_host, Tensor& dst_device);
+
+    /**
+     * @brief 异步Device-to-Host传输（CPU不阻塞）
+     * @param src_device Device端源张量
+     * @param dst_host Host端目标指针（必须是锁页内存或普通内存）
+     * @note 使用transfer_stream_异步传输
+     * @note 传输完成后自动记录transfer_ready_ Event
+     * @warning 必须确保dst_host有效，直到传输完成（建议调用synchronize()）
+     */
+    void async_copy_d2h(const Tensor& src_device, void* dst_host);
+
+    /**
+     * @brief 在计算流上等待传输完成（Event-based，GPU端等待，CPU不阻塞）
+     * @note 调用cudaStreamWaitEvent(compute_stream_, transfer_ready_)
+     * @note 必须在async_copy_h2d/d2h之后、使用dst_device/src_device之前调用
+     * @note GPU端会等待传输完成，但CPU立即返回，可以并行准备下一batch
+     */
+    void sync_transfer_to_compute();
+
 #ifdef TR_USE_NCCL
     /**
      * @brief 获取通信流（AllReduce/Broadcast）
@@ -227,13 +268,13 @@ private:
     cudaStream_t transfer_stream_;  ///< 传输流（H2D/D2H）
 
     // ===== 同步Event（始终创建）=====
-    cudaEvent_t transfer_ready_;    ///< 传输完成标记
+    cudaEvent_t transfer_ready_;    ///< 传输完成标记（H2D→Compute）
+    cudaEvent_t compute_ready_;     ///< 计算完成标记（Compute→D2H/NCCL）
 
 #ifdef TR_USE_NCCL
     // ===== 通信流（仅多GPU时创建）=====
     cudaStream_t comm_stream_;      ///< 通信流（AllReduce/Broadcast）
-    cudaEvent_t compute_ready_;     ///< 计算完成标记（供通信等待）
-    cudaEvent_t comm_ready_;        ///< 通信完成标记（供更新等待）
+    cudaEvent_t comm_ready_;        ///< 通信完成标记（NCCL→Update）
 
     // ===== NCCL状态 =====
     ncclComm_t nccl_comm_;

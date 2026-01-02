@@ -665,5 +665,309 @@ target_link_libraries(test_tsr_python PRIVATE renaissance)
 
 message(STATUS "Device tests: TSR Python interoperability test configured")
 
+# ==============================================================================
+# CUDA异步传输测试（V3.6.18新增）
+# ==============================================================================
+if(TR_USE_CUDA)
+    add_executable(test_cuda_async
+        test_cuda_async.cpp
+    )
+
+    target_include_directories(test_cuda_async PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    )
+
+    set_target_properties(test_cuda_async PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/device
+    )
+
+    if(WIN32)
+        set_target_properties(test_cuda_async PROPERTIES
+            WIN32_EXECUTABLE FALSE
+        )
+    endif()
+
+    if(MSVC)
+        target_compile_options(test_cuda_async PRIVATE /W4 /utf-8)
+    else()
+        target_compile_options(test_cuda_async PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+
+    target_compile_definitions(test_cuda_async PRIVATE TR_LOG_LEVEL=0)
+    target_link_libraries(test_cuda_async PRIVATE renaissance)
+
+    message(STATUS "Device tests: CUDA async transfer test configured (V3.6.18)")
+
+    # 同步vs异步性能对比测试（V3.6.18）
+    add_executable(test_sync_vs_async_perf
+        test_sync_vs_async_perf.cpp
+    )
+
+    target_include_directories(test_sync_vs_async_perf PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    )
+
+    set_target_properties(test_sync_vs_async_perf PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/device
+    )
+
+    if(WIN32)
+        set_target_properties(test_sync_vs_async_perf PROPERTIES
+            WIN32_EXECUTABLE FALSE
+        )
+    endif()
+
+    if(MSVC)
+        target_compile_options(test_sync_vs_async_perf PRIVATE /W4 /utf-8)
+    else()
+        target_compile_options(test_sync_vs_async_perf PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+
+    target_compile_definitions(test_sync_vs_async_perf PRIVATE TR_LOG_LEVEL=0)
+    target_link_libraries(test_sync_vs_async_perf PRIVATE renaissance)
+
+    message(STATUS "Device tests: Sync vs async performance test configured (V3.6.18)")
+endif()
+
+# ============================================================================
+# 数据类型转换测试（V3.6.18新增）
+# ============================================================================
+
+# CPU cast测试
+add_executable(test_cpu_cast
+    test_cpu_cast.cpp
+)
+
+target_include_directories(test_cpu_cast PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+)
+
+set_target_properties(test_cpu_cast PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/device
+)
+
+if(MSVC)
+    target_compile_options(test_cpu_cast PRIVATE /W4 /utf-8)
+else()
+    target_compile_options(test_cpu_cast PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+target_compile_definitions(test_cpu_cast PRIVATE TR_LOG_LEVEL=0)
+target_link_libraries(test_cpu_cast PRIVATE renaissance)
+
+message(STATUS "Device tests: CPU cast test configured (V3.6.18)")
+
+# CUDA cast测试
+if(TR_USE_CUDA)
+    add_executable(test_cuda_cast
+        test_cuda_cast.cpp
+    )
+
+    target_include_directories(test_cuda_cast PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    )
+
+    set_target_properties(test_cuda_cast PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/device
+    )
+
+    if(WIN32)
+        set_target_properties(test_cuda_cast PROPERTIES
+            WIN32_EXECUTABLE FALSE
+        )
+    endif()
+
+    if(MSVC)
+        target_compile_options(test_cuda_cast PRIVATE /W4 /utf-8)
+    else()
+        target_compile_options(test_cuda_cast PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+
+    target_compile_definitions(test_cuda_cast PRIVATE TR_LOG_LEVEL=0)
+    target_link_libraries(test_cuda_cast PRIVATE renaissance)
+
+    message(STATUS "Device tests: CUDA cast test configured (V3.6.18)")
+endif()
+
+# MUSA cast测试
+if(TR_USE_MUSA)
+    add_executable(test_musa_cast
+        test_musa_cast.cpp
+    )
+
+    target_include_directories(test_musa_cast PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    )
+
+    set_target_properties(test_musa_cast PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/device
+    )
+
+    if(MSVC)
+        target_compile_options(test_musa_cast PRIVATE /W4 /utf-8)
+    else()
+        target_compile_options(test_musa_cast PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+
+    target_compile_definitions(test_musa_cast PRIVATE TR_LOG_LEVEL=0)
+    target_link_libraries(test_musa_cast PRIVATE renaissance)
+
+    message(STATUS "Device tests: MUSA cast test configured (V3.6.18)")
+
+    # ===== MUSA异步传输测试 =====
+    add_executable(test_musa_async
+        test_musa_async.cpp
+    )
+
+    target_include_directories(test_musa_async PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    )
+
+    set_target_properties(test_musa_async PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/device
+    )
+
+    if(WIN32)
+        set_target_properties(test_musa_async PROPERTIES
+            WIN32_EXECUTABLE FALSE
+        )
+    endif()
+
+    if(MSVC)
+        target_compile_options(test_musa_async PRIVATE /W4 /utf-8)
+    else()
+        target_compile_options(test_musa_async PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+
+    target_compile_definitions(test_musa_async PRIVATE TR_LOG_LEVEL=0)
+    target_link_libraries(test_musa_async PRIVATE renaissance)
+
+    message(STATUS "Device tests: MUSA async transfer test configured (V3.6.18)")
+
+    # 同步vs异步性能对比测试（MUSA版本）
+    add_executable(test_sync_vs_async_perf_musa
+        test_sync_vs_async_perf_musa.cpp
+    )
+
+    target_include_directories(test_sync_vs_async_perf_musa PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    )
+
+    set_target_properties(test_sync_vs_async_perf_musa PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/device
+    )
+
+    if(WIN32)
+        set_target_properties(test_sync_vs_async_perf_musa PROPERTIES
+            WIN32_EXECUTABLE FALSE
+        )
+    endif()
+
+    if(MSVC)
+        target_compile_options(test_sync_vs_async_perf_musa PRIVATE /W4 /utf-8)
+    else()
+        target_compile_options(test_sync_vs_async_perf_musa PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+
+    target_compile_definitions(test_sync_vs_async_perf_musa PRIVATE TR_LOG_LEVEL=0)
+    target_link_libraries(test_sync_vs_async_perf_musa PRIVATE renaissance)
+
+    message(STATUS "Device tests: MUSA sync vs async performance test configured (V3.6.18)")
+endif()
+
 message(STATUS "Device tests: CUDA and MUSA device tests configured")
+
+# ============================================================================
+# 数据类型转换性能测试（V3.6.18新增）
+# ============================================================================
+
+# CPU cast性能测试
+add_executable(test_cpu_cast_perf
+    test_cpu_cast_perf.cpp
+)
+
+target_include_directories(test_cpu_cast_perf PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+)
+
+set_target_properties(test_cpu_cast_perf PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/device
+)
+
+if(MSVC)
+    target_compile_options(test_cpu_cast_perf PRIVATE /W4 /utf-8)
+else()
+    target_compile_options(test_cpu_cast_perf PRIVATE -Wall -Wextra -Wpedantic)
+endif()
+
+target_compile_definitions(test_cpu_cast_perf PRIVATE TR_LOG_LEVEL=0)
+target_link_libraries(test_cpu_cast_perf PRIVATE renaissance)
+
+message(STATUS "Device tests: CPU cast performance test configured (V3.6.18)")
+
+# CUDA cast性能测试
+if(TR_USE_CUDA)
+    add_executable(test_cuda_cast_perf
+        test_cuda_cast_perf.cpp
+    )
+
+    target_include_directories(test_cuda_cast_perf PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    )
+
+    set_target_properties(test_cuda_cast_perf PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/device
+    )
+
+    if(WIN32)
+        set_target_properties(test_cuda_cast_perf PROPERTIES
+            WIN32_EXECUTABLE FALSE
+        )
+    endif()
+
+    if(MSVC)
+        target_compile_options(test_cuda_cast_perf PRIVATE /W4 /utf-8)
+    else()
+        target_compile_options(test_cuda_cast_perf PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+
+    target_compile_definitions(test_cuda_cast_perf PRIVATE TR_LOG_LEVEL=0)
+    target_link_libraries(test_cuda_cast_perf PRIVATE renaissance)
+
+    message(STATUS "Device tests: CUDA cast performance test configured (V3.6.18)")
+endif()
+
+# MUSA cast性能测试
+if(TR_USE_MUSA)
+    add_executable(test_musa_cast_perf
+        test_musa_cast_perf.cpp
+    )
+
+    target_include_directories(test_musa_cast_perf PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../include
+    )
+
+    set_target_properties(test_musa_cast_perf PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/device
+    )
+
+    if(WIN32)
+        set_target_properties(test_musa_cast_perf PROPERTIES
+            WIN32_EXECUTABLE FALSE
+        )
+    endif()
+
+    if(MSVC)
+        target_compile_options(test_musa_cast_perf PRIVATE /W4 /utf-8)
+    else()
+        target_compile_options(test_musa_cast_perf PRIVATE -Wall -Wextra -Wpedantic)
+    endif()
+
+    target_compile_definitions(test_musa_cast_perf PRIVATE TR_LOG_LEVEL=0)
+    target_link_libraries(test_musa_cast_perf PRIVATE renaissance)
+
+    message(STATUS "Device tests: MUSA cast performance test configured (V3.6.18)")
+endif()
+
+message(STATUS "Device tests: All cast performance tests configured (V3.6.18)")
 

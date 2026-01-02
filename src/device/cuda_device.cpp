@@ -31,6 +31,15 @@
 
 namespace tr {
 
+// ===== 数据类型转换dispatch函数前向声明（在cuda_cast.cu中定义）=====
+void cuda_dispatch_fp32_to_int32(const float*, int32_t*, size_t, cudaStream_t);
+void cuda_dispatch_fp32_to_bf16(const float*, uint16_t*, size_t, cudaStream_t);
+void cuda_dispatch_bf16_to_fp32(const uint16_t*, float*, size_t, cudaStream_t);
+void cuda_dispatch_int32_to_fp32(const int32_t*, float*, size_t, cudaStream_t);
+void cuda_dispatch_int32_to_int8(const int32_t*, int8_t*, size_t, cudaStream_t);
+void cuda_dispatch_int8_to_fp32(const int8_t*, float*, size_t, cudaStream_t);
+void cuda_dispatch_int8_to_int32(const int8_t*, int32_t*, size_t, cudaStream_t);
+
 // ===== cuDNN句柄管理 =====
 
 namespace {
@@ -59,9 +68,10 @@ namespace {
 
 CudaDevice::CudaDevice(int device_id)
     : device_id_(device_id)
+    , compute_ready_(nullptr)
+    , transfer_ready_(nullptr)
 #ifdef TR_USE_NCCL
     , comm_stream_(nullptr)
-    , compute_ready_(nullptr)
     , comm_ready_(nullptr)
     , nccl_comm_(nullptr)
     , nccl_enabled_(false)
@@ -116,6 +126,15 @@ CudaDevice::CudaDevice(int device_id)
         TR_DEVICE_ERROR("Failed to create transfer_ready event: " << cudaGetErrorString(err));
     }
 
+    // 5. 创建计算完成Event（V3.6.19修复：始终创建，不仅用于NCCL）
+    err = cudaEventCreateWithFlags(&compute_ready_, cudaEventDisableTiming);
+    if (err != cudaSuccess) {
+        cudaEventDestroy(transfer_ready_);
+        cudaStreamDestroy(compute_stream_);
+        cudaStreamDestroy(transfer_stream_);
+        TR_DEVICE_ERROR("Failed to create compute_ready event: " << cudaGetErrorString(err));
+    }
+
     // 注意：通信流和通信Event在enable_nccl时创建
 
     LOG_INFO << "CudaDevice[" << device_id_ << "] initialized: " << prop.name
@@ -144,10 +163,6 @@ CudaDevice::~CudaDevice() {
             cudaEventDestroy(comm_ready_);
             comm_ready_ = nullptr;
         }
-        if (compute_ready_) {
-            cudaEventDestroy(compute_ready_);
-            compute_ready_ = nullptr;
-        }
 
         // 销毁通信流
         if (comm_stream_) {
@@ -159,8 +174,15 @@ CudaDevice::~CudaDevice() {
     }
 #endif
 
-    // 3. 销毁传输Event
-    if (transfer_ready_) cudaEventDestroy(transfer_ready_);
+    // 3. 销毁Event（V3.6.19修复：compute_ready_始终创建）
+    if (compute_ready_) {
+        cudaEventDestroy(compute_ready_);
+        compute_ready_ = nullptr;
+    }
+    if (transfer_ready_) {
+        cudaEventDestroy(transfer_ready_);
+        transfer_ready_ = nullptr;
+    }
 
     // 4. 销毁流
     if (transfer_stream_) cudaStreamDestroy(transfer_stream_);
@@ -260,10 +282,35 @@ void CudaDevice::memset_internal(void* ptr, int value, size_t size) {
 
 void CudaDevice::synchronize() {
     cudaSetDevice(device_id_);
-    cudaError_t err = cudaDeviceSynchronize();
+
+    // 专家评审建议：使用细粒度流同步替代全局设备同步
+    // 优点：
+    // 1. 不阻塞NCCL通信流，提升多GPU并发性能
+    // 2. 更精确的同步控制，只等待需要等待的流
+    // 注意：comm_stream_在NCCL启用时才存在
+    cudaError_t err;
+
+    // 同步计算流
+    err = cudaStreamSynchronize(compute_stream_);
     if (err != cudaSuccess) {
-        TR_DEVICE_ERROR("CUDA synchronize failed: " << cudaGetErrorString(err));
+        TR_DEVICE_ERROR("CUDA compute stream synchronize failed: " << cudaGetErrorString(err));
     }
+
+    // 同步传输流
+    err = cudaStreamSynchronize(transfer_stream_);
+    if (err != cudaSuccess) {
+        TR_DEVICE_ERROR("CUDA transfer stream synchronize failed: " << cudaGetErrorString(err));
+    }
+
+#ifdef TR_USE_NCCL
+    // 同步通信流（如果NCCL已启用）
+    if (nccl_enabled_ && comm_stream_ != nullptr) {
+        err = cudaStreamSynchronize(comm_stream_);
+        if (err != cudaSuccess) {
+            TR_DEVICE_ERROR("CUDA comm stream synchronize failed: " << cudaGetErrorString(err));
+        }
+    }
+#endif
 }
 
 // ===== 张量创建 =====
@@ -343,7 +390,20 @@ Tensor CudaDevice::ones(const Shape& shape, DType dtype) {
         return tensor;
     }
 
-    // 策略3：FP32/BF16 - 使用cuDNN SetTensor（绑定compute_stream_）
+    // 策略3：FP32 - V3.6.19修复：使用kernel替代cuDNN（更可控）
+    if (dtype == DType::FP32) {
+        cudaError_t err = launch_fill_float_kernel(
+            static_cast<int>(count),
+            static_cast<float*>(tensor.data_ptr()),
+            1.0f,
+            compute_stream_
+        );
+        TR_CHECK(err == cudaSuccess, DeviceError,
+                "fill_float_kernel failed: " << cudaGetErrorString(err));
+        return tensor;
+    }
+
+    // 策略4：BF16 - 继续使用cuDNN SetTensor（绑定compute_stream_）
     cudnnHandle_t cudnn_handle = get_cudnn_handle(device_id_);
     cudnnSetStream(cudnn_handle, compute_stream_);  // 绑定流
 
@@ -360,9 +420,6 @@ Tensor CudaDevice::ones(const Shape& shape, DType dtype) {
     float value_f = 1.0f;
 
     switch (dtype) {
-        case DType::FP32:
-            cudnn_dtype = CUDNN_DATA_FLOAT;
-            break;
         case DType::BF16:
             cudnn_dtype = CUDNN_DATA_BFLOAT16;
             break;
@@ -482,6 +539,101 @@ void CudaDevice::impl_transfer_from_cpu(const Tensor& tensor_a, Tensor& tensor_b
     cudaStreamSynchronize(transfer_stream_);
 }
 
+// ===== 数据类型转换 =====
+
+void CudaDevice::cast_into(const Tensor& tensor_a, Tensor& tensor_b,
+                            StreamType stream_type) {
+    // 1. 验证设备
+    check_on_device(tensor_a);
+    check_on_device(tensor_b);
+
+    // 2. 验证形状相同
+    check_same_shape(tensor_a, tensor_b);
+
+    // 3. 验证数据类型不同
+    DType dtype_a = tensor_a.dtype();
+    DType dtype_b = tensor_b.dtype();
+    if (dtype_a == dtype_b) {
+        TR_TYPE_ERROR("Cannot cast to the same dtype: "
+                 << dtype_name(dtype_a) << " -> " << dtype_name(dtype_b)
+                 << ". Use copy_into() instead.");
+    }
+
+    // 4. 空张量直接返回
+    int64_t numel = tensor_a.numel();
+    if (numel == 0) {
+        return;
+    }
+
+    // 5. 检查是否支持该转换
+    bool supported = false;
+    if ((dtype_a == DType::FP32 && dtype_b == DType::INT32) ||
+        (dtype_a == DType::FP32 && dtype_b == DType::BF16) ||
+        (dtype_a == DType::BF16 && dtype_b == DType::FP32) ||
+        (dtype_a == DType::INT32 && dtype_b == DType::FP32) ||
+        (dtype_a == DType::INT32 && dtype_b == DType::INT8) ||
+        (dtype_a == DType::INT8 && dtype_b == DType::FP32) ||
+        (dtype_a == DType::INT8 && dtype_b == DType::INT32)) {
+        supported = true;
+    }
+
+    if (!supported) {
+        TR_NOT_IMPLEMENTED("Cast from " << dtype_name(dtype_a)
+                         << " to " << dtype_name(dtype_b)
+                         << " is not supported");
+    }
+
+    // 6. 映射StreamType到实际cudaStream_t
+    cudaStream_t stream = nullptr;
+    switch (stream_type) {
+        case StreamType::transfer_stream: stream = transfer_stream_; break;
+        case StreamType::compute_stream:  stream = compute_stream_;  break;
+#ifdef TR_USE_NCCL
+        case StreamType::comm_stream:     stream = comm_stream_;     break;
+#endif
+        case StreamType::default_stream:
+        default:                          stream = nullptr;          break;
+    }
+
+    // 7. 设置当前设备
+    cudaSetDevice(device_id_);
+
+    // 8. 获取数据指针
+    const void* src_ptr = tensor_a.data_ptr();
+    void* dst_ptr = tensor_b.data_ptr();
+
+    // 9. 调用对应的kernel
+    if (dtype_a == DType::FP32 && dtype_b == DType::INT32) {
+        cuda_dispatch_fp32_to_int32(static_cast<const float*>(src_ptr),
+                                     static_cast<int32_t*>(dst_ptr), numel, stream);
+    } else if (dtype_a == DType::FP32 && dtype_b == DType::BF16) {
+        cuda_dispatch_fp32_to_bf16(static_cast<const float*>(src_ptr),
+                                    static_cast<uint16_t*>(dst_ptr), numel, stream);
+    } else if (dtype_a == DType::BF16 && dtype_b == DType::FP32) {
+        cuda_dispatch_bf16_to_fp32(static_cast<const uint16_t*>(src_ptr),
+                                    static_cast<float*>(dst_ptr), numel, stream);
+    } else if (dtype_a == DType::INT32 && dtype_b == DType::FP32) {
+        cuda_dispatch_int32_to_fp32(static_cast<const int32_t*>(src_ptr),
+                                     static_cast<float*>(dst_ptr), numel, stream);
+    } else if (dtype_a == DType::INT32 && dtype_b == DType::INT8) {
+        cuda_dispatch_int32_to_int8(static_cast<const int32_t*>(src_ptr),
+                                     static_cast<int8_t*>(dst_ptr), numel, stream);
+    } else if (dtype_a == DType::INT8 && dtype_b == DType::FP32) {
+        cuda_dispatch_int8_to_fp32(static_cast<const int8_t*>(src_ptr),
+                                    static_cast<float*>(dst_ptr), numel, stream);
+    } else if (dtype_a == DType::INT8 && dtype_b == DType::INT32) {
+        cuda_dispatch_int8_to_int32(static_cast<const int8_t*>(src_ptr),
+                                     static_cast<int32_t*>(dst_ptr), numel, stream);
+    }
+
+    // 10. 同步等待（保持同步语义）
+    if (stream != nullptr) {
+        cudaStreamSynchronize(stream);
+    } else {
+        cudaDeviceSynchronize();
+    }
+}
+
 void CudaDevice::impl_transfer_to_cpu(const Tensor& tensor_a, Tensor& tensor_b) {
     // CUDA → CPU传输
     cudaSetDevice(device_id_);
@@ -512,6 +664,110 @@ void CudaDevice::impl_transfer_to_cpu(const Tensor& tensor_a, Tensor& tensor_b) 
 
     // 同步等待（保持同步语义）
     cudaStreamSynchronize(transfer_stream_);
+}
+
+// =============================================================================
+// 异步传输API实现（V3.6.18新增）
+// =============================================================================
+
+std::shared_ptr<void> CudaDevice::alloc_pinned(size_t size) {
+    if (size == 0) {
+        TR_VALUE_ERROR("Cannot allocate 0 bytes of pinned memory");
+    }
+
+    cudaSetDevice(device_id_);
+
+    void* ptr = nullptr;
+    cudaError_t err = cudaHostAlloc(&ptr, size, cudaHostAllocDefault);
+    TR_CHECK(err == cudaSuccess, MemoryError,
+            "cudaHostAlloc failed: " << cudaGetErrorString(err));
+
+    // RAII：shared_ptr自动释放（使用自定义deleter调用cudaFreeHost）
+    // 专家评审建议：添加判空检查，防御性编程（虽然cudaHostAlloc极少返回nullptr）
+    return std::shared_ptr<void>(ptr, [](void* p) {
+        // 静默失败，避免在析构函数中抛出异常
+        if (p) {
+            cudaFreeHost(p);
+        }
+    });
+}
+
+void CudaDevice::async_copy_h2d(const void* src_host, Tensor& dst_device) {
+    TR_CHECK(src_host != nullptr, ValueError, "src_host is null");
+    TR_CHECK(dst_device.is_bound(), DeviceError, "dst_device not bound");
+    check_on_device(dst_device);
+
+    cudaSetDevice(device_id_);
+
+    size_t nbytes = dst_device.nbytes();
+    if (nbytes == 0) return;
+
+    // 异步传输（在transfer_stream_上）
+    cudaError_t err = cudaMemcpyAsync(
+        dst_device.data_ptr(),
+        src_host,
+        nbytes,
+        cudaMemcpyHostToDevice,
+        transfer_stream_
+    );
+    TR_CHECK(err == cudaSuccess, DeviceError,
+            "cudaMemcpyAsync H2D failed: " << cudaGetErrorString(err));
+
+    // 记录完成Event（供sync_transfer_to_compute使用）
+    err = cudaEventRecord(transfer_ready_, transfer_stream_);
+    TR_CHECK(err == cudaSuccess, DeviceError,
+            "cudaEventRecord failed: " << cudaGetErrorString(err));
+
+    // 不调用synchronize()，立即返回（CPU不阻塞）
+}
+
+void CudaDevice::async_copy_d2h(const Tensor& src_device, void* dst_host) {
+    TR_CHECK(dst_host != nullptr, ValueError, "dst_host is null");
+    TR_CHECK(src_device.is_bound(), DeviceError, "src_device not bound");
+    check_on_device(src_device);
+
+    cudaSetDevice(device_id_);
+
+    size_t nbytes = src_device.nbytes();
+    if (nbytes == 0) return;
+
+    // ===== V3.6.19修复：使用Event实现GPU端等待（CPU不阻塞）=====
+    // 1. 在compute_stream_上记录Event，标记所有计算完成
+    cudaError_t err = cudaEventRecord(compute_ready_, compute_stream_);
+    TR_CHECK(err == cudaSuccess, DeviceError,
+            "cudaEventRecord compute_ready failed: " << cudaGetErrorString(err));
+
+    // 2. transfer_stream_等待compute_stream_完成（GPU端依赖，CPU不阻塞！）
+    err = cudaStreamWaitEvent(transfer_stream_, compute_ready_, 0);
+    TR_CHECK(err == cudaSuccess, DeviceError,
+            "cudaStreamWaitEvent failed: " << cudaGetErrorString(err));
+
+    // 3. 异步传输（此时GPU端已确保compute完成）
+    err = cudaMemcpyAsync(
+        dst_host,
+        src_device.data_ptr(),
+        nbytes,
+        cudaMemcpyDeviceToHost,
+        transfer_stream_
+    );
+    TR_CHECK(err == cudaSuccess, DeviceError,
+            "cudaMemcpyAsync D2H failed: " << cudaGetErrorString(err));
+
+    // 4. 记录传输完成Event（供synchronize()使用）
+    err = cudaEventRecord(transfer_ready_, transfer_stream_);
+    TR_CHECK(err == cudaSuccess, DeviceError,
+            "cudaEventRecord transfer_ready failed: " << cudaGetErrorString(err));
+
+    // CPU立即返回（真正异步！）
+}
+
+void CudaDevice::sync_transfer_to_compute() {
+    cudaSetDevice(device_id_);
+
+    // 计算流在GPU端等待传输完成（CPU不阻塞）
+    cudaError_t err = cudaStreamWaitEvent(compute_stream_, transfer_ready_, 0);
+    TR_CHECK(err == cudaSuccess, DeviceError,
+            "cudaStreamWaitEvent failed: " << cudaGetErrorString(err));
 }
 
 // ===== 加法运算（使用cuDNN）=====
@@ -1253,11 +1509,7 @@ void CudaDevice::enable_nccl(int world_size, int rank, ncclComm_t comm) {
     TR_CHECK(err == cudaSuccess, DeviceError,
             "Failed to create comm stream: " << cudaGetErrorString(err));
 
-    // 2. 创建通信Event
-    err = cudaEventCreateWithFlags(&compute_ready_, cudaEventDisableTiming);
-    TR_CHECK(err == cudaSuccess, DeviceError,
-            "Failed to create compute_ready event: " << cudaGetErrorString(err));
-
+    // 2. 创建通信Event（V3.6.19修复：compute_ready_已在构造函数中创建）
     err = cudaEventCreateWithFlags(&comm_ready_, cudaEventDisableTiming);
     TR_CHECK(err == cudaSuccess, DeviceError,
             "Failed to create comm_ready event: " << cudaGetErrorString(err));
@@ -1316,10 +1568,11 @@ void CudaDevice::allreduce_gradient(Tensor& gradient) {
 
     cudaSetDevice(device_id_);
 
-    // ===== 关键修复：直接同步计算流（确保计算完成）=====
-    cudaError_t err = cudaStreamSynchronize(compute_stream_);
+    // ===== 关键优化：GPU端等待计算完成（不阻塞CPU）=====
+    // comm_stream等待compute_ready_ Event
+    cudaError_t err = cudaStreamWaitEvent(comm_stream_, compute_ready_, 0);
     TR_CHECK(err == cudaSuccess, DeviceError,
-            "cudaStreamSynchronize compute failed: " << cudaGetErrorString(err));
+            "cudaStreamWaitEvent failed: " << cudaGetErrorString(err));
 
     // 确定NCCL数据类型
     ncclDataType_t nccl_type;
@@ -1357,10 +1610,11 @@ void CudaDevice::broadcast_param(Tensor& param, int root_rank) {
 
     cudaSetDevice(device_id_);
 
-    // ===== 同步计算流，确保计算完成 =====
-    cudaError_t err = cudaStreamSynchronize(compute_stream_);
+    // ===== 关键优化：GPU端等待计算完成（不阻塞CPU）=====
+    // comm_stream等待compute_ready_ Event
+    cudaError_t err = cudaStreamWaitEvent(comm_stream_, compute_ready_, 0);
     TR_CHECK(err == cudaSuccess, DeviceError,
-            "cudaStreamSynchronize compute failed: " << cudaGetErrorString(err));
+            "cudaStreamWaitEvent failed: " << cudaGetErrorString(err));
 
     // 1. 确定NCCL数据类型
     ncclDataType_t nccl_type;

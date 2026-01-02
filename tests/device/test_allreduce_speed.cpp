@@ -64,6 +64,14 @@ int main() {
 
         // 执行AllReduce并计时
         std::cout << "\n[3/4] Executing AllReduce..." << std::endl;
+
+        // 专家评审建议：在AllReduce前标记计算完成
+        // 虽然当前实现"碰巧"能工作（未记录的Event会立即返回），但显式调用更规范
+        gpu0.synchronize();
+        gpu1.synchronize();
+        gpu0.mark_compute_done();
+        gpu1.mark_compute_done();
+
         auto start3 = std::chrono::high_resolution_clock::now();
 
 #ifdef TR_USE_NCCL

@@ -14,6 +14,7 @@
 #include "renaissance/base/tr_exception.h"
 #include "renaissance/base/device_type.h"
 #include "renaissance/base/dtype.h"
+#include "renaissance/base/global_config.h"
 #include "renaissance/data/shape.h"
 #include <memory>
 #include <string>
@@ -291,6 +292,29 @@ public:
      *  - 使用同步传输（cudaMemcpy/musaMemcpy）
      */
     virtual void transfer_into(const Tensor& tensor_a, Tensor& tensor_b);
+
+    /**
+     * @brief 数据类型转换（指定输出，核心方法！）
+     * @param tensor_a 源张量（从该张量转换数据类型）
+     * @param tensor_b 目标张量（转换结果写入该张量）
+     * @param stream 使用的流类型（仅GPU有效，CPU忽略此参数）
+     * @throws ShapeError 形状不匹配时
+     * @throws TypeError 数据类型转换不支持或同类型转换时
+     * @throws ValueError 元素数不匹配时
+     *
+     * @note 要求:
+     *  - tensor_a和tensor_b必须在同一设备上
+     *  - 形状必须相同
+     *  - 数据类型必须不同
+     *  - 仅支持以下7种转换：
+     *    * FP32 ↔ INT32, FP32 ↔ BF16, BF16 ↔ FP32
+     *    * INT32 ↔ FP32, INT32 ↔ INT8, INT8 ↔ FP32, INT8 ↔ INT32
+     *  - 空张量(numel=0)允许，不执行任何操作（静默返回）
+     *  - INT32→INT8使用饱和处理（clamp到[-128, 127]）
+     *  - FP32→BF16使用RNE舍入（Round to Nearest Even）
+     */
+    virtual void cast_into(const Tensor& tensor_a, Tensor& tensor_b,
+                          StreamType stream = TR_DEFAULT_STREAM);
 
     // =========================================================================
     // 同步与调试

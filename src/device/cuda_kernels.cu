@@ -51,6 +51,15 @@ cudaError_t launch_fill_int32_kernel(int n, int32_t* ptr, int32_t value,
     return cudaGetLastError();
 }
 
+cudaError_t launch_fill_float_kernel(int n, float* ptr, float value,
+                                      cudaStream_t stream) {
+    const int block_size = 256;
+    const int grid_size = (n + block_size - 1) / block_size;
+
+    fill_kernel<float><<<grid_size, block_size, 0, stream>>>(n, ptr, value);
+    return cudaGetLastError();
+}
+
 cudaError_t launch_fill_int8_kernel(int n, int8_t* ptr, int8_t value,
                                      cudaStream_t stream) {
     const int block_size = 256;
