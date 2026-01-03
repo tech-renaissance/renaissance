@@ -43,93 +43,142 @@ public:
     void memcpy_internal(void* dst, const void* src, size_t size) override;
     void memset_internal(void* ptr, int value, size_t size) override;
 
-    // ===== 张量创建 =====
-    Tensor empty(const Shape& shape, DType dtype) override;
-    Tensor zeros(const Shape& shape, DType dtype) override;
-    Tensor ones(const Shape& shape, DType dtype) override;
-    Tensor null_tensor() override;
-    void zeros_inplace(Tensor& tensor_a) override;
-    void ones_inplace(Tensor& tensor_a) override;
+    // ===== 同步操作 =====
+    // void sync(StreamType stream_type) override;  // CPU不需要同步
+    // void sync_all() override;  // CPU不需要同步
 
-    // ===== 全值填充方法（V3.6.21新增）=====
-    Tensor full_fp32(const Shape& shape, float value) override;
-    Tensor full_bf16(const Shape& shape, float value) override;
-    Tensor full_int32(const Shape& shape, int32_t value) override;
-    Tensor full_int8(const Shape& shape, int8_t value) override;
-    void full_fp32_inplace(Tensor& tensor_a, float value) override;
-    void full_bf16_inplace(Tensor& tensor_a, float value) override;
-    void full_int32_inplace(Tensor& tensor_a, int32_t value) override;
-    void full_int8_inplace(Tensor& tensor_a, int8_t value) override;
 
-    // ===== 统一全值填充方法（V3.6.24新增）=====
-    Tensor full(const Shape& shape, DType dtype, float value) override;
-    void full_inplace(Tensor& tensor, float value) override;
 
-    // ===== 随机数生成（高级接口，调用默认Generator）=====
-    Tensor uniform(const Shape& shape, float min_val = 0.0f, float max_val = 1.0f,
-                  DType dtype = DType::FP32) override;
-    void uniform_inplace(Tensor& tensor_a, float min_val = 0.0f, float max_val = 1.0f,
-                         DType dtype = DType::FP32) override;
 
-    Tensor randn(const Shape& shape, float mean = 0.0f, float stddev = 1.0f,
-                 DType dtype = DType::FP32) override;
-    void randn_inplace(Tensor& tensor_a, float mean = 0.0f, float stddev = 1.0f,
-                       DType dtype = DType::FP32) override;
 
-    Tensor randint(const Shape& shape, int low = 0, int high = 10,
-                  DType dtype = DType::FP32) override;
-    void randint_inplace(Tensor& tensor_a, int low = 0, int high = 10,
-                         DType dtype = DType::FP32) override;
 
-    Tensor randbool(const Shape& shape, float rate_of_zeros = 0.5,
-                   DType dtype = DType::FP32) override;
-    void randbool_inplace(Tensor& tensor_a, float rate_of_zeros = 0.5,
-                          DType dtype = DType::FP32) override;
 
-    // ===== 张量运算（加法和复制）=====
+
+
+
+// ************************* cpu_comp.cpp START
+    // ===== 张量运算 =====
     void add_into(const Tensor& a, const Tensor& b, Tensor& result) override;
-    void copy_into(const Tensor& tensor_a, Tensor& tensor_b, StreamType stream_type = TR_TRANSFER_STREAM) override;
-    void transfer_into(const Tensor& tensor_a, Tensor& tensor_b) override;
-    void cast_into(const Tensor& tensor_a, Tensor& tensor_b, StreamType stream_type = TR_TRANSFER_STREAM) override;
-    void trunc_cast_into(const Tensor& tensor_a, Tensor& tensor_b, StreamType stream_type = TR_TRANSFER_STREAM) override;
-
-    // ===== 张量比较 =====
     bool equal(const Tensor& a, const Tensor& b) override;
     bool is_close(const Tensor& a, const Tensor& b, float eps = -1.0f) override;
+// ************************* cpu_comp.cpp END
 
-    // =========================================================================
-    // TSR V3 文件导入导出
-    // =========================================================================
 
-    /**
-     * @brief 导出张量到TSR V3文件
-     * @param tensor 要导出的张量（必须在CPU上且已绑定存储）
-     * @param filename 目标文件路径
-     * @param compress true使用ZLIB压缩模式，false使用RAW快速模式
-     * @throws DeviceError 张量不在CPU上
-     * @throws ValueError 张量无效或未绑定
-     * @throws FileNotFoundError 无法创建文件
-     *
-     * 模式选择建议：
-     * - RAW模式：大模型权重、需要频繁加载的场景
-     * - ZLIB模式：稀疏张量、网络传输、磁盘空间受限
-     */
-    void export_tensor(const Tensor& tensor, const std::string& filename,
-                       bool compress = false) const;
 
-    /**
-     * @brief 从TSR V3文件导入张量
-     * @param filename 源文件路径
-     * @param using_mmap 是否使用mmap零拷贝加载（仅RAW模式，默认true）
-     * @return 加载到CPU的Tensor对象
-     * @throws FileNotFoundError 文件不存在
-     * @throws ValueError 文件格式无效或数据损坏
-     *
-     * 加载策略：
-     * - RAW模式：using_mmap=true时使用mmap零拷贝，false时使用常规读取
-     * - ZLIB模式：解压到新分配的内存（using_mmap参数无效）
-     */
+
+
+
+
+
+
+
+// ************************* cpu_create.cpp START
+    // ===== 张量创建 =====
+    Tensor null_tensor() override;
+    Tensor empty(const Shape& shape, DType dtype) override;
+
+    Tensor zeros(const Shape& shape, DType dtype) override;
+    void zeros_inplace(Tensor& tensor_a) override;
+
+    Tensor ones(const Shape& shape, DType dtype) override;
+    void ones_inplace(Tensor& tensor_a) override;
+
+    // ===== 全值填充方法 =====
+    Tensor full_fp32(const Shape& shape, float value) override;
+    void full_fp32_inplace(Tensor& tensor_a, float value) override;
+
+    Tensor full_bf16(const Shape& shape, float value) override;
+    void full_bf16_inplace(Tensor& tensor_a, float value) override;
+
+    Tensor full_int32(const Shape& shape, int32_t value) override;
+    void full_int32_inplace(Tensor& tensor_a, int32_t value) override;
+
+    Tensor full_int8(const Shape& shape, int8_t value) override;
+    void full_int8_inplace(Tensor& tensor_a, int8_t value) override;
+
+    Tensor full(const Shape& shape, DType dtype, float value) override;
+    void full_inplace(Tensor& tensor, float value) override;
+// ************************* cpu_create.cpp END
+
+
+
+
+
+
+
+
+
+
+// ************************* cpu_random.cpp START
+    // ===== 随机数生成 =====
+    Tensor uniform(const Shape& shape, float min_val = 0.0f, float max_val = 1.0f, DType dtype = DType::FP32) override;
+    void uniform_inplace(Tensor& tensor_a, float min_val = 0.0f, float max_val = 1.0f, DType dtype = DType::FP32) override;
+
+    Tensor randn(const Shape& shape, float mean = 0.0f, float stddev = 1.0f, DType dtype = DType::FP32) override;
+    void randn_inplace(Tensor& tensor_a, float mean = 0.0f, float stddev = 1.0f, DType dtype = DType::FP32) override;
+
+    Tensor randint(const Shape& shape, int low = 0, int high = 10, DType dtype = DType::FP32) override;
+    void randint_inplace(Tensor& tensor_a, int low = 0, int high = 10, DType dtype = DType::FP32) override;
+
+    Tensor randbool(const Shape& shape, float rate_of_zeros = 0.5, DType dtype = DType::FP32) override;
+    void randbool_inplace(Tensor& tensor_a, float rate_of_zeros = 0.5, DType dtype = DType::FP32) override;
+// ************************* cpu_random.cpp END
+
+
+
+
+
+
+
+
+
+
+// ************************* cpu_copy.cpp START
+    // ===== 同步传输API =====
+    void transfer_into(const Tensor& tensor_a, Tensor& tensor_b) override;
+
+    // ===== 本设备内复制API =====
+    void copy_into(const Tensor& tensor_a, Tensor& tensor_b, StreamType stream_type = TR_TRANSFER_STREAM) override;
+// ************************* cpu_copy.cpp END
+
+
+
+
+
+
+
+
+
+
+// ************************* cpu_cast.cpp START
+    // ===== 张量类型转换 =====
+    void cast_into(const Tensor& tensor_a, Tensor& tensor_b, StreamType stream_type = TR_TRANSFER_STREAM) override;
+    void trunc_cast_into(const Tensor& tensor_a, Tensor& tensor_b, StreamType stream_type = TR_TRANSFER_STREAM) override;  // FP32 to BF16专用
+// ************************* cpu_cast.cpp END
+
+
+
+
+
+
+
+
+
+
+// ************************* cpu_tsr.cpp START
+    void export_tensor(const Tensor& tensor, const std::string& filename, bool compress = false) const;
     Tensor import_tensor(const std::string& filename, bool using_mmap = true);
+// ************************* cpu_tsr.cpp END
+
+
+
+
+
+
+
+
+
+
 
 private:
     // =========================================================================

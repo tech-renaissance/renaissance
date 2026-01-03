@@ -1,9 +1,10 @@
 /**
  * @file test_cuda_async.cpp
  * @brief CUDA异步传输功能测试
- * @version 3.6.18
- * @date 2026-01-02
+ * @version 3.6.19
+ * @date 2026-01-04
  * @author 技术觉醒团队
+ * @note V3.6.19更新：添加Warm-up预热，优化性能测试方法
  */
 
 #include "renaissance.h"
@@ -156,10 +157,25 @@ int main() {
         }
 
         // ============================================================
-        // 测试4：性能测试（多次传输求平均）
+        // 测试4：性能测试（Warm-up + 多次迭代）
         // ============================================================
-        std::cout << "\n[TEST 8] Performance test (10 iterations)..." << std::endl;
-        const int num_iterations = 10;
+        std::cout << "\n[TEST 8] Performance test..." << std::endl;
+
+        // Warm-up：3次预热，消除冷启动开销
+        std::cout << "  [Warm-up] Running 3 iterations..." << std::endl;
+        for(int i = 0; i < 3; ++i) {
+            cuda.async_copy_h2d(host_data, device_tensor);
+            cuda.sync_transfer_to_compute();
+            cuda.sync(TR_TRANSFER_STREAM);
+
+            cuda.async_copy_d2h(device_tensor, host_result);
+            cuda.sync(TR_TRANSFER_STREAM);
+        }
+        std::cout << "  Warm-up completed." << std::endl;
+
+        // 正式测试：3次迭代取平均值
+        std::cout << "  [Benchmark] Running 3 iterations..." << std::endl;
+        const int num_iterations = 3;
         std::vector<double> h2d_times;
         std::vector<double> d2h_times;
 
@@ -195,7 +211,7 @@ int main() {
         double h2d_bandwidth_gb_s = (static_cast<double>(num_bytes) / (1024.0 * 1024.0 * 1024.0)) / (avg_h2d_ms / 1000.0);
         double d2h_bandwidth_gb_s = (static_cast<double>(num_bytes) / (1024.0 * 1024.0 * 1024.0)) / (avg_d2h_ms / 1000.0);
 
-        std::cout << "\nPerformance Summary:" << std::endl;
+        std::cout << "\nPerformance Summary (avg of 3 iterations):" << std::endl;
         std::cout << "  H2D: " << std::fixed << std::setprecision(2)
                   << avg_h2d_ms << " ms (" << h2d_bandwidth_gb_s << " GB/s)" << std::endl;
         std::cout << "  D2H: " << avg_d2h_ms << " ms (" << d2h_bandwidth_gb_s << " GB/s)" << std::endl;

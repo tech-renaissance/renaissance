@@ -61,7 +61,7 @@ void test_cpu_gpu_consistency() {
         Generator gpu_gen(seed);
         gpu.rand_normal_float(static_cast<float*>(gpu_tensor.data_ptr()),
                               count, 0.0f, 1.0f, gpu_gen);
-        gpu.sync(TR_TRANSFER_STREAM);
+        gpu.sync_all();
 
         // 拷贝GPU结果到CPU
         std::vector<float> gpu_data(count);
@@ -94,7 +94,7 @@ void test_cpu_gpu_consistency() {
         Generator gpu_gen(seed);
         gpu.rand_uniform_int32(static_cast<int32_t*>(gpu_tensor.data_ptr()),
                                count, -100, 100, gpu_gen);
-        gpu.sync(TR_TRANSFER_STREAM);
+        gpu.sync_all();
 
         std::vector<int32_t> gpu_data(count);
         musaMemcpy(gpu_data.data(), gpu_tensor.data_ptr(),
@@ -114,7 +114,7 @@ void test_cpu_gpu_consistency() {
         Generator gpu_gen(seed);
         gpu.rand_bernoulli_int8(static_cast<int8_t*>(gpu_tensor.data_ptr()),
                                 count, 0.5f, gpu_gen);
-        gpu.sync(TR_TRANSFER_STREAM);
+        gpu.sync_all();
 
         std::vector<int8_t> gpu_data(count);
         musaMemcpy(gpu_data.data(), gpu_tensor.data_ptr(),
@@ -140,7 +140,7 @@ void test_gpu_reproducibility() {
         Generator gen(12345);
         gpu.rand_normal_float(static_cast<float*>(t1.data_ptr()),
                               count, 0.0f, 1.0f, gen);
-        gpu.sync(TR_TRANSFER_STREAM);
+        gpu.sync_all();
     }
 
     // 第二次运行（相同种子）
@@ -149,7 +149,7 @@ void test_gpu_reproducibility() {
         Generator gen(12345);
         gpu.rand_normal_float(static_cast<float*>(t2.data_ptr()),
                               count, 0.0f, 1.0f, gen);
-        gpu.sync(TR_TRANSFER_STREAM);
+        gpu.sync_all();
     }
 
     // 第三次运行（不同种子）
@@ -158,7 +158,7 @@ void test_gpu_reproducibility() {
         Generator gen(54321);
         gpu.rand_normal_float(static_cast<float*>(t3.data_ptr()),
                               count, 0.0f, 1.0f, gen);
-        gpu.sync(TR_TRANSFER_STREAM);
+        gpu.sync_all();
     }
 
     // 直接在GPU上比较（无需拷贝到CPU）
@@ -205,7 +205,7 @@ void test_performance() {
         // 预热
         gpu.rand_normal_float(static_cast<float*>(gpu_tensor.data_ptr()),
                               count, 0.0f, 1.0f, gen);
-        gpu.sync(TR_TRANSFER_STREAM);
+        gpu.sync_all();
 
         // 重置Generator
         gen.set_seed(42);
@@ -213,7 +213,7 @@ void test_performance() {
         auto start = std::chrono::high_resolution_clock::now();
         gpu.rand_normal_float(static_cast<float*>(gpu_tensor.data_ptr()),
                               count, 0.0f, 1.0f, gen);
-        gpu.sync(TR_TRANSFER_STREAM);
+        gpu.sync_all();
         auto end = std::chrono::high_resolution_clock::now();
 
         double ms = std::chrono::duration<double, std::milli>(end - start).count();

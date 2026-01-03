@@ -1,9 +1,10 @@
 /**
  * @file test_musa_transfer.cpp
  * @brief MUSA跨设备张量同步传输测试
- * @version 3.7.0
- * @date 2026-01-01
+ * @version 3.7.1
+ * @date 2026-01-04
  * @author 技术觉醒团队
+ * @note V3.7.1更新：添加Warm-up预热和多次测试取平均值，消除冷启动开销
  */
 
 #include "renaissance.h"
@@ -54,37 +55,67 @@ int main() {
         double time2_ms = std::chrono::duration<double, std::milli>(end2 - start2).count();
         std::cout << "  Completed in " << std::fixed << std::setprecision(2) << time2_ms << " ms" << std::endl;
 
-        // CPU → MUSA 传输
-        std::cout << "\n[3/6] Transferring from CPU to MUSA..." << std::endl;
-        auto start3 = std::chrono::high_resolution_clock::now();
-        cpu.transfer_into(tensor_a, tensor_b);
-        auto end3 = std::chrono::high_resolution_clock::now();
-        double time3_ms = std::chrono::duration<double, std::milli>(end3 - start3).count();
+        // ==============================================
+        // Warm-up阶段：3次预热，消除首次传输的冷启动开销
+        // ==============================================
+        std::cout << "\n[Warm-up] Running 3 iterations to warm up transfers..." << std::endl;
+        for(int i = 0; i < 3; ++i) {
+            cpu.transfer_into(tensor_a, tensor_b);
+            musa.transfer_into(tensor_b, tensor_c);
+        }
+        std::cout << "  Warm-up completed." << std::endl;
+
+        // ==============================================
+        // 性能测试阶段：3次迭代取平均值
+        // ==============================================
+        std::cout << "\n[3/6] CPU -> MUSA Transfer Benchmark (3 iterations)..." << std::endl;
+        double total_time3_ms = 0.0;
+        const int ITERATIONS = 3;
+
+        for(int i = 0; i < ITERATIONS; ++i) {
+            auto start3 = std::chrono::high_resolution_clock::now();
+            cpu.transfer_into(tensor_a, tensor_b);
+            auto end3 = std::chrono::high_resolution_clock::now();
+            total_time3_ms += std::chrono::duration<double, std::milli>(end3 - start3).count();
+        }
+
+        double avg_time3_ms = total_time3_ms / ITERATIONS;
         double size_gb = (N * H * W * C * 4) / (1024.0 * 1024.0 * 1024.0);
-        double throughput3_gb_s = size_gb / (time3_ms / 1000.0);
-        std::cout << "  Transfer time: " << std::fixed << std::setprecision(2) << time3_ms << " ms" << std::endl;
+        double throughput3_gb_s = size_gb / (avg_time3_ms / 1000.0);
+        std::cout << "  Total time for 3 iterations: " << std::fixed << std::setprecision(2) << total_time3_ms << " ms" << std::endl;
+        std::cout << "  Avg transfer time: " << std::setprecision(2) << avg_time3_ms << " ms" << std::endl;
         std::cout << "  Throughput: " << std::setprecision(2) << throughput3_gb_s << " GB/s" << std::endl;
 
         // MUSA → CPU 传输
-        std::cout << "\n[4/6] Transferring from MUSA to CPU..." << std::endl;
-        auto start4 = std::chrono::high_resolution_clock::now();
-        musa.transfer_into(tensor_b, tensor_c);
-        auto end4 = std::chrono::high_resolution_clock::now();
-        double time4_ms = std::chrono::duration<double, std::milli>(end4 - start4).count();
-        double throughput4_gb_s = size_gb / (time4_ms / 1000.0);
-        std::cout << "  Transfer time: " << std::fixed << std::setprecision(2) << time4_ms << " ms" << std::endl;
+        std::cout << "\n[4/6] MUSA -> CPU Transfer Benchmark (3 iterations)..." << std::endl;
+        double total_time4_ms = 0.0;
+
+        for(int i = 0; i < ITERATIONS; ++i) {
+            auto start4 = std::chrono::high_resolution_clock::now();
+            musa.transfer_into(tensor_b, tensor_c);
+            auto end4 = std::chrono::high_resolution_clock::now();
+            total_time4_ms += std::chrono::duration<double, std::milli>(end4 - start4).count();
+        }
+
+        double avg_time4_ms = total_time4_ms / ITERATIONS;
+        double throughput4_gb_s = size_gb / (avg_time4_ms / 1000.0);
+        std::cout << "  Total time for 3 iterations: " << std::fixed << std::setprecision(2) << total_time4_ms << " ms" << std::endl;
+        std::cout << "  Avg transfer time: " << std::setprecision(2) << avg_time4_ms << " ms" << std::endl;
         std::cout << "  Throughput: " << std::setprecision(2) << throughput4_gb_s << " GB/s" << std::endl;
 
         // 计算平均吞吐量
         double avg_throughput = (throughput3_gb_s + throughput4_gb_s) / 2.0;
 
         std::cout << "\n[5/6] Performance Summary:" << std::endl;
-        std::cout << "  CPU -> MUSA throughput: " << std::setprecision(2) << throughput3_gb_s << " GB/s" << std::endl;
-        std::cout << "  MUSA -> CPU throughput: " << std::setprecision(2) << throughput4_gb_s << " GB/s" << std::endl;
+        std::cout << "  CPU -> MUSA throughput (avg): " << std::setprecision(2) << throughput3_gb_s << " GB/s" << std::endl;
+        std::cout << "  MUSA -> CPU throughput (avg): " << std::setprecision(2) << throughput4_gb_s << " GB/s" << std::endl;
         std::cout << "  Average throughput: " << std::setprecision(2) << avg_throughput << " GB/s" << std::endl;
 
         // 验证相等
         std::cout << "\n[6/6] Verifying tensor_a and tensor_c are equal..." << std::endl;
+        // 再做一次传输用于验证
+        cpu.transfer_into(tensor_a, tensor_b);
+        musa.transfer_into(tensor_b, tensor_c);
         bool equal = cpu.is_close(tensor_a, tensor_c);
 
         if (equal) {
