@@ -3,13 +3,25 @@ set(DEVICE_SOURCES
     device.cpp
     device_manager.cpp
     cpu_device.cpp
-    cpu_device_tsr.cpp
+    cpu_comp.cpp
+    cpu_create.cpp
+    cpu_random.cpp
+    cpu_copy.cpp
     cpu_cast.cpp
+    cpu_tsr.cpp
 )
 
 # CUDA支持
 if(TR_USE_CUDA)
-    list(APPEND DEVICE_SOURCES cuda_device.cpp)
+    list(APPEND DEVICE_SOURCES
+        cuda_device.cpp
+        cuda_comp.cpp
+        cuda_create.cpp
+        cuda_random.cpp
+        cuda_copy.cpp
+        cuda_cast.cpp
+        cuda_nccl.cpp
+    )
 
     # CUDA kernels文件（.cu会被CMake自动识别并使用nvcc编译）
     # 参考 INFO7.md：CMake会自动处理.cu文件的编译
@@ -21,7 +33,14 @@ endif()
 
 # MUSA支持
 if(TR_USE_MUSA)
-    list(APPEND DEVICE_SOURCES musa_device.cpp)
+    list(APPEND DEVICE_SOURCES
+        musa_device.cpp
+        musa_comp.cpp
+        musa_create.cpp
+        musa_random.cpp
+        musa_copy.cpp
+        musa_cast.cpp
+    )
 
     # MUSA kernels文件 - 使用MUSA编译器单独编译
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/musa_kernels.cu)

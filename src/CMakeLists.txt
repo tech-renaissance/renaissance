@@ -94,6 +94,15 @@ if(TR_USE_MIMALLOC)
     endif()
 endif()
 
+# 添加zlib支持（用于DTS数据加载器的CRC校验）
+# zlib是vcpkg的标准依赖，应该已经可用
+find_package(ZLIB REQUIRED)
+if(ZLIB_FOUND)
+    target_include_directories(renaissance INTERFACE ${ZLIB_INCLUDE_DIRS})
+    target_link_libraries(renaissance INTERFACE ${ZLIB_LIBRARIES})
+    message(STATUS "Renaissance library: zlib linked (for DTS CRC verification)")
+endif()
+
 # 添加CUDA支持（base模块的cuda_arena需要）
 if(TR_USE_CUDA)
     if(DEFINED TR_CUDA_PATH)

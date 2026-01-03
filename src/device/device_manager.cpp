@@ -292,7 +292,29 @@ void DeviceManager::setup_nccl(int gpu_count) {
     TR_CHECK(gpu_count <= cuda_count_, ValueError,
             "Requested " << gpu_count << " GPUs but only " << cuda_count_ << " available");
 
-    LOG_INFO << "Setting up NCCL for " << gpu_count << " GPUs";
+    // ===== 性能调优环境变量设置（V3.6.30新增）=====
+    // 强制使用Ring算法（双GPU场景最优）
+    // 启用P2P直接访问
+    // 优化通道数以提升带宽利用率
+#ifdef _WIN32
+    _putenv_s("NCCL_ALGO", "Ring");
+    _putenv_s("NCCL_MIN_NCHANNELS", "4");
+    _putenv_s("NCCL_MAX_NCHANNELS", "16");
+    _putenv_s("NCCL_P2P_DISABLE", "0");
+    _putenv_s("NCCL_SHM_DISABLE", "0");
+    _putenv_s("NCCL_IB_DISABLE", "1");
+    _putenv_s("NCCL_NET_GDR_LEVEL", "PHB");
+#else
+    setenv("NCCL_ALGO", "Ring", 1);
+    setenv("NCCL_MIN_NCHANNELS", "4", 1);
+    setenv("NCCL_MAX_NCHANNELS", "16", 1);
+    setenv("NCCL_P2P_DISABLE", "0", 1);
+    setenv("NCCL_SHM_DISABLE", "0", 1);
+    setenv("NCCL_IB_DISABLE", "1", 1);
+    setenv("NCCL_NET_GDR_LEVEL", "PHB", 1);
+#endif
+
+    LOG_INFO << "Setting up NCCL for " << gpu_count << " GPUs (Performance tuning enabled)";
 
     // 1. 准备设备和通信器数组
     std::vector<int> devices(gpu_count);

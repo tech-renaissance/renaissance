@@ -18,11 +18,11 @@ using namespace tr;
 void test_fp32_to_int32() {
     LOG_INFO << "Test FP32 -> INT32";
 
-    MusaDevice& gpu = DeviceManager::instance().musa(0);
+    auto& musa = DeviceManager::instance().musa(0);
     Shape shape{2, 3};
 
-    Tensor a = gpu.zeros(shape, DType::FP32);
-    Tensor b = gpu.empty(shape, DType::INT32);
+    Tensor a = musa.zeros(shape, DType::FP32);
+    Tensor b = musa.empty(shape, DType::INT32);
 
     // 准备测试数据
     Tensor h_a = get_cpu().zeros(shape, DType::FP32);
@@ -38,11 +38,11 @@ void test_fp32_to_int32() {
     get_cpu().transfer_into(h_a, a);
 
     // 转换
-    gpu.cast_into(a, b);
+    musa.cast_into(a, b);
 
     // D2H
     Tensor h_b = get_cpu().empty(shape, DType::INT32);
-    gpu.transfer_into(b, h_b);
+    musa.transfer_into(b, h_b);
 
     [[maybe_unused]] const int32_t* h_b_ptr = h_b.typed_data<int32_t>();
     assert(h_b_ptr[0] == 1);
@@ -61,11 +61,11 @@ void test_fp32_to_int32() {
 void test_int32_to_int8() {
     LOG_INFO << "Test INT32 -> INT8 (saturating)";
 
-    MusaDevice& gpu = DeviceManager::instance().musa(0);
+    auto& musa = DeviceManager::instance().musa(0);
     Shape shape{6};
 
-    Tensor a = gpu.zeros(shape, DType::INT32);
-    Tensor b = gpu.empty(shape, DType::INT8);
+    Tensor a = musa.zeros(shape, DType::INT32);
+    Tensor b = musa.empty(shape, DType::INT8);
 
     // 准备测试数据
     Tensor h_a = get_cpu().zeros(shape, DType::INT32);
@@ -81,11 +81,11 @@ void test_int32_to_int8() {
     get_cpu().transfer_into(h_a, a);
 
     // 转换
-    gpu.cast_into(a, b);
+    musa.cast_into(a, b);
 
     // D2H
     Tensor h_b = get_cpu().empty(shape, DType::INT8);
-    gpu.transfer_into(b, h_b);
+    musa.transfer_into(b, h_b);
 
     [[maybe_unused]] const int8_t* h_b_ptr = h_b.typed_data<int8_t>();
     assert(h_b_ptr[0] == 0);
@@ -104,11 +104,11 @@ void test_int32_to_int8() {
 void test_fp32_to_bf16() {
     LOG_INFO << "Test FP32 -> BF16";
 
-    MusaDevice& gpu = DeviceManager::instance().musa(0);
+    auto& musa = DeviceManager::instance().musa(0);
     Shape shape{4};
 
-    Tensor a = gpu.zeros(shape, DType::FP32);
-    Tensor b = gpu.empty(shape, DType::BF16);
+    Tensor a = musa.zeros(shape, DType::FP32);
+    Tensor b = musa.empty(shape, DType::BF16);
 
     // 准备测试数据
     Tensor h_a = get_cpu().zeros(shape, DType::FP32);
@@ -122,11 +122,11 @@ void test_fp32_to_bf16() {
     get_cpu().transfer_into(h_a, a);
 
     // 转换
-    gpu.cast_into(a, b);
+    musa.cast_into(a, b);
 
     // D2H
     Tensor h_b = get_cpu().empty(shape, DType::BF16);
-    gpu.transfer_into(b, h_b);
+    musa.transfer_into(b, h_b);
 
     // 验证往返转换（使用CPU进行转换）
     Tensor h_c = get_cpu().empty(shape, DType::FP32);
@@ -146,11 +146,11 @@ void test_fp32_to_bf16() {
 void test_fp32_to_bf16_trunc() {
     LOG_INFO << "Test FP32 -> BF16 (Truncation)";
 
-    MusaDevice& gpu = DeviceManager::instance().musa(0);
+    auto& musa = DeviceManager::instance().musa(0);
     Shape shape{4};
 
-    Tensor a = gpu.zeros(shape, DType::FP32);
-    Tensor b = gpu.empty(shape, DType::BF16);
+    Tensor a = musa.zeros(shape, DType::FP32);
+    Tensor b = musa.empty(shape, DType::BF16);
 
     // 准备测试数据
     Tensor h_a = get_cpu().zeros(shape, DType::FP32);
@@ -164,11 +164,11 @@ void test_fp32_to_bf16_trunc() {
     get_cpu().transfer_into(h_a, a);
 
     // 截断转换
-    gpu.trunc_cast_into(a, b);
+    musa.trunc_cast_into(a, b);
 
     // D2H
     Tensor h_b = get_cpu().empty(shape, DType::BF16);
-    gpu.transfer_into(b, h_b);
+    musa.transfer_into(b, h_b);
 
     // 验证往返转换（使用CPU进行转换）
     Tensor h_c = get_cpu().empty(shape, DType::FP32);
@@ -189,16 +189,16 @@ void test_fp32_to_bf16_trunc() {
 void test_trunc_cast_type_error() {
     LOG_INFO << "Test trunc_cast_into Type Error";
 
-    MusaDevice& gpu = DeviceManager::instance().musa(0);
+    auto& musa = DeviceManager::instance().musa(0);
     Shape shape{2, 2};
 
     // 测试非FP32->BF16组合（应该抛出异常）
-    Tensor a = gpu.zeros(shape, DType::INT32);
-    Tensor b = gpu.empty(shape, DType::INT8);
+    Tensor a = musa.zeros(shape, DType::INT32);
+    Tensor b = musa.empty(shape, DType::INT8);
 
     [[maybe_unused]] bool caught = false;
     try {
-        gpu.trunc_cast_into(a, b);
+        musa.trunc_cast_into(a, b);
     } catch (const TypeError& [[maybe_unused]] e) {
         caught = true;
     }
@@ -213,11 +213,11 @@ void test_trunc_cast_type_error() {
 void test_bf16_to_fp32() {
     LOG_INFO << "Test BF16 -> FP32";
 
-    MusaDevice& gpu = DeviceManager::instance().musa(0);
+    auto& musa = DeviceManager::instance().musa(0);
     Shape shape{3};
 
-    Tensor a = gpu.zeros(shape, DType::BF16);
-    Tensor b = gpu.empty(shape, DType::FP32);
+    Tensor a = musa.zeros(shape, DType::BF16);
+    Tensor b = musa.empty(shape, DType::FP32);
 
     // 准备测试数据
     Tensor h_a = get_cpu().zeros(shape, DType::BF16);
@@ -230,11 +230,11 @@ void test_bf16_to_fp32() {
     get_cpu().transfer_into(h_a, a);
 
     // 转换
-    gpu.cast_into(a, b);
+    musa.cast_into(a, b);
 
     // D2H
     Tensor h_b = get_cpu().empty(shape, DType::FP32);
-    gpu.transfer_into(b, h_b);
+    musa.transfer_into(b, h_b);
 
     [[maybe_unused]] const float* h_b_ptr = h_b.typed_data<float>();
     assert(std::abs(h_b_ptr[0] - 1.0f) < 0.01f);
@@ -250,11 +250,11 @@ void test_bf16_to_fp32() {
 void test_int32_to_fp32() {
     LOG_INFO << "Test INT32 -> FP32";
 
-    MusaDevice& gpu = DeviceManager::instance().musa(0);
+    auto& musa = DeviceManager::instance().musa(0);
     Shape shape{5};
 
-    Tensor a = gpu.zeros(shape, DType::INT32);
-    Tensor b = gpu.empty(shape, DType::FP32);
+    Tensor a = musa.zeros(shape, DType::INT32);
+    Tensor b = musa.empty(shape, DType::FP32);
 
     // 准备测试数据
     Tensor h_a = get_cpu().zeros(shape, DType::INT32);
@@ -269,11 +269,11 @@ void test_int32_to_fp32() {
     get_cpu().transfer_into(h_a, a);
 
     // 转换
-    gpu.cast_into(a, b);
+    musa.cast_into(a, b);
 
     // D2H
     Tensor h_b = get_cpu().empty(shape, DType::FP32);
-    gpu.transfer_into(b, h_b);
+    musa.transfer_into(b, h_b);
 
     [[maybe_unused]] const float* h_b_ptr = h_b.typed_data<float>();
     assert(h_b_ptr[0] == 0.0f);
@@ -291,11 +291,11 @@ void test_int32_to_fp32() {
 void test_int8_to_fp32() {
     LOG_INFO << "Test INT8 -> FP32";
 
-    MusaDevice& gpu = DeviceManager::instance().musa(0);
+    auto& musa = DeviceManager::instance().musa(0);
     Shape shape{5};
 
-    Tensor a = gpu.zeros(shape, DType::INT8);
-    Tensor b = gpu.empty(shape, DType::FP32);
+    Tensor a = musa.zeros(shape, DType::INT8);
+    Tensor b = musa.empty(shape, DType::FP32);
 
     // 准备测试数据
     Tensor h_a = get_cpu().zeros(shape, DType::INT8);
@@ -310,11 +310,11 @@ void test_int8_to_fp32() {
     get_cpu().transfer_into(h_a, a);
 
     // 转换
-    gpu.cast_into(a, b);
+    musa.cast_into(a, b);
 
     // D2H
     Tensor h_b = get_cpu().empty(shape, DType::FP32);
-    gpu.transfer_into(b, h_b);
+    musa.transfer_into(b, h_b);
 
     [[maybe_unused]] const float* h_b_ptr = h_b.typed_data<float>();
     assert(h_b_ptr[0] == 0.0f);
@@ -332,11 +332,11 @@ void test_int8_to_fp32() {
 void test_int8_to_int32() {
     LOG_INFO << "Test INT8 -> INT32";
 
-    MusaDevice& gpu = DeviceManager::instance().musa(0);
+    auto& musa = DeviceManager::instance().musa(0);
     Shape shape{5};
 
-    Tensor a = gpu.zeros(shape, DType::INT8);
-    Tensor b = gpu.empty(shape, DType::INT32);
+    Tensor a = musa.zeros(shape, DType::INT8);
+    Tensor b = musa.empty(shape, DType::INT32);
 
     // 准备测试数据
     Tensor h_a = get_cpu().zeros(shape, DType::INT8);
@@ -351,11 +351,11 @@ void test_int8_to_int32() {
     get_cpu().transfer_into(h_a, a);
 
     // 转换
-    gpu.cast_into(a, b);
+    musa.cast_into(a, b);
 
     // D2H
     Tensor h_b = get_cpu().empty(shape, DType::INT32);
-    gpu.transfer_into(b, h_b);
+    musa.transfer_into(b, h_b);
 
     [[maybe_unused]] const int32_t* h_b_ptr = h_b.typed_data<int32_t>();
     assert(h_b_ptr[0] == 0);

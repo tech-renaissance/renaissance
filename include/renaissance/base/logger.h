@@ -24,6 +24,9 @@ namespace tr {
 class TRException;
 
 // 日志等级枚举
+#ifdef ERROR
+#undef ERROR
+#endif
 enum class LogLevel {
     DEBUG = 0,
     INFO  = 1,

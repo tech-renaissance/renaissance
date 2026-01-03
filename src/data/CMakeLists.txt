@@ -4,6 +4,9 @@ set(DATA_SOURCES
     shape.cpp
     storage.cpp
     tensor.cpp
+    dts_data_loader.cpp
+    raw_data_loader.cpp
+    preprocessor_emulator.cpp
 )
 
 # 创建数据库静态库
@@ -27,6 +30,17 @@ target_compile_definitions(data PRIVATE
 
 # 链接base模块（data依赖base的tr_exception等）
 target_link_libraries(data PUBLIC base)
+
+# 链接zlib（DTS数据加载器的CRC校验需要）
+find_package(ZLIB)
+if(ZLIB_FOUND)
+    target_link_libraries(data PUBLIC ZLIB::ZLIB)
+    target_compile_definitions(data PUBLIC TR_USE_ZLIB=1)
+    message(STATUS "Data library: zlib linked for DTS CRC verification")
+else()
+    message(WARNING "zlib not found, DTS CRC verification will be disabled")
+    target_compile_definitions(data PUBLIC TR_USE_ZLIB=0)
+endif()
 
 # 设置C++标准
 set_target_properties(data PROPERTIES

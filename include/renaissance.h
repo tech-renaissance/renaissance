@@ -47,6 +47,10 @@
 #include "renaissance/data/shape.h"
 #include "renaissance/data/storage.h"
 #include "renaissance/data/tensor.h"
+#include "renaissance/data/data_loader_base.h"
+#include "renaissance/data/dts_data_loader.h"
+#include "renaissance/data/raw_data_loader.h"
+#include "renaissance/data/preprocessor_emulator.h"
 
 // Device
 #include "renaissance/device/device.h"

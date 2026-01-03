@@ -60,23 +60,43 @@ public:
     void memcpy_internal(void* dst, const void* src, size_t size) override;
     void memset_internal(void* ptr, int value, size_t size) override;
 
+    // ===== 流访问接口（供外部获取，用于手动控制）=====
+    cudaStream_t get_compute_stream() const noexcept { return compute_stream_; }
+    cudaStream_t get_transfer_stream() const noexcept { return transfer_stream_; }
+#ifdef TR_USE_NCCL
+    cudaStream_t get_comm_stream() const noexcept { return comm_stream_; }
+#endif
+
     // ===== 同步操作 =====
-    void sync(StreamType stream_type) override;  // CUDA实现
-    void sync_all() override;  // CUDA实现
+    void sync(StreamType stream_type) override;
+    void sync_all() override;
 
-// ************************* COMPUTE STREAM START *************************/
 
+
+
+
+
+
+
+
+
+// ************************* cuda_comp.cpp (USING COMPUTE STREAM) START
     // ===== 张量运算 =====
     void add_into(const Tensor& a, const Tensor& b, Tensor& result) override;
     bool equal(const Tensor& a, const Tensor& b) override;
     bool is_close(const Tensor& a, const Tensor& b, float eps = -1.0f) override;
-
-// ************************* COMPUTE STREAM END *************************/
-
+// ************************* cuda_comp.cpp (USING COMPUTE STREAM) END
 
 
-// ************************* TRANSFER STREAM START *************************/
 
+
+
+
+
+
+
+
+// ************************* cuda_create.cpp (USING TRANSFER STREAM) START
     // ===== 张量创建 =====
     Tensor null_tensor() override;
     Tensor empty(const Shape& shape, DType dtype) override;
@@ -87,7 +107,7 @@ public:
     Tensor ones(const Shape& shape, DType dtype) override;
     void ones_inplace(Tensor& tensor_a) override;
 
-    // ===== 全值填充方法（V3.6.21新增）=====
+    // ===== 全值填充方法 =====
     Tensor full_fp32(const Shape& shape, float value) override;
     void full_fp32_inplace(Tensor& tensor_a, float value) override;
 
@@ -100,11 +120,21 @@ public:
     Tensor full_int8(const Shape& shape, int8_t value) override;
     void full_int8_inplace(Tensor& tensor_a, int8_t value) override;
 
-    // ===== 统一全值填充方法（V3.6.24新增）=====
     Tensor full(const Shape& shape, DType dtype, float value) override;
     void full_inplace(Tensor& tensor, float value) override;
+// ************************* cuda_create.cpp (USING TRANSFER STREAM) END
 
-    // ===== 随机数生成（高级接口，调用默认Generator）=====
+
+
+
+
+
+
+
+
+
+// ************************* cuda_random.cpp (USING TRANSFER STREAM) START
+    // ===== 随机数生成 =====
     Tensor uniform(const Shape& shape, float min_val = 0.0f, float max_val = 1.0f, DType dtype = DType::FP32) override;
     void uniform_inplace(Tensor& tensor_a, float min_val = 0.0f, float max_val = 1.0f, DType dtype = DType::FP32) override;
 
@@ -117,141 +147,66 @@ public:
     Tensor randbool(const Shape& shape, float rate_of_zeros = 0.5, DType dtype = DType::FP32) override;
     void randbool_inplace(Tensor& tensor_a, float rate_of_zeros = 0.5, DType dtype = DType::FP32) override;
 
-
-
-    // ===== 张量传输、复制、类型转换 =====
-    void copy_into(const Tensor& tensor_a, Tensor& tensor_b, StreamType stream_type = TR_TRANSFER_STREAM) override;
-    void transfer_into(const Tensor& tensor_a, Tensor& tensor_b) override;
-    void cast_into(const Tensor& tensor_a, Tensor& tensor_b, StreamType stream_type = TR_TRANSFER_STREAM) override;
-    void trunc_cast_into(const Tensor& tensor_a, Tensor& tensor_b, StreamType stream_type = TR_TRANSFER_STREAM) override;
-
-
-
-    // ===== 随机数生成（与CPU API完全一致）=====
-
-    /**
-     * @brief GPU生成uint64随机数
-     * @param ptr 设备内存指针
-     * @param count 元素数量
-     * @param gen 生成器引用
-     */
     void rand_uint64(uint64_t* ptr, size_t count, Generator& gen);
-
-    /**
-     * @brief GPU生成伯努利INT8
-     */
     void rand_bernoulli_int8(int8_t* ptr, size_t count, float prob_one, Generator& gen);
-
-    /**
-     * @brief GPU生成均匀分布INT8
-     */
     void rand_uniform_int8(int8_t* ptr, size_t count, int8_t low, int8_t high, Generator& gen);
-
-    /**
-     * @brief GPU生成伯努利INT32
-     */
     void rand_bernoulli_int32(int32_t* ptr, size_t count, float prob_one, Generator& gen);
-
-    /**
-     * @brief GPU生成均匀分布INT32
-     */
     void rand_uniform_int32(int32_t* ptr, size_t count, int32_t low, int32_t high, Generator& gen);
-
-    /**
-     * @brief GPU生成均匀分布FP32
-     */
     void rand_uniform_float(float* ptr, size_t count, float low, float high, Generator& gen);
-
-    /**
-     * @brief GPU生成正态分布FP32
-     */
     void rand_normal_float(float* ptr, size_t count, float mean, float std, Generator& gen);
+// ************************* cuda_random.cpp (USING TRANSFER STREAM) END
 
 
 
 
 
-    // ===== 跨设备传输辅助方法（供CpuDevice调用）=====
-    /**
-     * @brief 从CPU传输到CUDA（CPU → CUDA）
-     * @param tensor_a CPU上的源张量
-     * @param tensor_b CUDA上的目标张量
-     */
+
+
+
+
+
+// ************************* cuda_copy.cpp (USING TRANSFER STREAM) START
+    // ===== 同步传输API =====
+    void transfer_into(const Tensor& tensor_a, Tensor& tensor_b) override;
     void impl_transfer_from_cpu(const Tensor& tensor_a, Tensor& tensor_b);
-
-    /**
-     * @brief 从CUDA传输到CPU（CUDA → CPU）
-     * @param tensor_a CUDA上的源张量
-     * @param tensor_b CPU上的目标张量
-     */
     void impl_transfer_to_cpu(const Tensor& tensor_a, Tensor& tensor_b);
 
-    // ===== 流访问接口（供外部获取，用于手动控制）=====
-    /**
-     * @brief 获取计算流（前向/反向/更新）
-     * @return CUDA计算流
-     */
-    cudaStream_t get_compute_stream() const noexcept { return compute_stream_; }
-
-    /**
-     * @brief 获取传输流（H2D/D2H）
-     * @return CUDA传输流
-     */
-    cudaStream_t get_transfer_stream() const noexcept { return transfer_stream_; }
-
-    // ===== 异步传输API（V3.6.18新增）=====
-    /**
-     * @brief 分配锁页内存（Pinned Memory）
-     * @param size 字节数
-     * @return 锁页内存指针（使用shared_ptr管理，自动释放）
-     * @note 锁页内存不会swap到磁盘，传输速度更快（20-25 GB/s vs 5-12 GB/s）
-     * @note 使用cudaHostAlloc分配，shared_ptr自动调用cudaFreeHost释放
-     */
+    // ===== 异步传输API =====
     std::shared_ptr<void> alloc_pinned(size_t size);
-
-    /**
-     * @brief 异步Host-to-Device传输（CPU不阻塞）
-     * @param src_host Host端源指针（必须是锁页内存或普通内存）
-     * @param dst_device Device端目标张量
-     * @note 使用transfer_stream_异步传输
-     * @note 传输完成后自动记录transfer_ready_ Event
-     * @note 调用后必须调用sync_transfer_to_compute()在计算流上等待传输完成
-     * @warning 必须确保src_host有效，直到sync_transfer_to_compute()被调用
-     */
     void async_copy_h2d(const void* src_host, Tensor& dst_device);
-
-    /**
-     * @brief 异步Device-to-Host传输（CPU不阻塞）
-     * @param src_device Device端源张量
-     * @param dst_host Host端目标指针（必须是锁页内存或普通内存）
-     * @note 使用transfer_stream_异步传输
-     * @note 传输完成后自动记录transfer_ready_ Event
-     * @warning 必须确保dst_host有效，直到传输完成（建议调用synchronize()）
-     */
     void async_copy_d2h(const Tensor& src_device, void* dst_host);
-
-    /**
-     * @brief 在计算流上等待传输完成（Event-based，GPU端等待，CPU不阻塞）
-     * @note 调用cudaStreamWaitEvent(compute_stream_, transfer_ready_)
-     * @note 必须在async_copy_h2d/d2h之后、使用dst_device/src_device之前调用
-     * @note GPU端会等待传输完成，但CPU立即返回，可以并行准备下一batch
-     */
     void sync_transfer_to_compute();
 
+    // ===== 本设备内复制API =====
+    void copy_into(const Tensor& tensor_a, Tensor& tensor_b, StreamType stream_type = TR_TRANSFER_STREAM) override;
+// ************************* cuda_copy.cpp (USING TRANSFER STREAM) END
 
-// ************************* TRANSFER STREAM END *************************/
 
 
 
-// ************************* COMM STREAM START *************************/
 
+
+
+
+
+
+// ************************* cuda_cast.cpp (USING TRANSFER STREAM) START
+    // ===== 张量类型转换 =====
+    void cast_into(const Tensor& tensor_a, Tensor& tensor_b, StreamType stream_type = TR_TRANSFER_STREAM) override;
+    void trunc_cast_into(const Tensor& tensor_a, Tensor& tensor_b, StreamType stream_type = TR_TRANSFER_STREAM) override;  // FP32 to BF16专用
+// ************************* cuda_cast.cpp (USING TRANSFER STREAM) END
+
+
+
+
+
+
+
+
+
+
+// ************************* cuda_nccl.cpp (USING COMM STREAM) START
 #ifdef TR_USE_NCCL
-    /**
-     * @brief 获取通信流（AllReduce/Broadcast）
-     * @return CUDA通信流
-     */
-    cudaStream_t get_comm_stream() const noexcept { return comm_stream_; }
-
     /**
      * @brief 检查NCCL是否已启用
      * @return NCCL启用状态
@@ -297,12 +252,20 @@ public:
      */
     void cleanup_nccl();
 #endif
-
-protected:
-    void synchronize() override;  // @deprecated V3.6.24: 使用 sync() 或 sync_all()
+// ************************* cuda_nccl.cpp (USING COMM STREAM) END
 
 
-// ************************* COMM STREAM END *************************/
+
+
+
+
+
+
+
+
+
+
+
 private:
     int device_id_;  ///< GPU设备索引
 

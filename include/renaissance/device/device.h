@@ -634,12 +634,6 @@ protected:
     ) const;
 
     /**
-     * @brief 同步设备（GPU专用，CPU为空操作）
-     * @deprecated V3.6.24: 请使用 sync() 或 sync_all() 代替
-     */
-    virtual void synchronize();
-
-    /**
      * @brief 抛出未实现错误
      */
     [[noreturn]] void throw_not_impl(const char* func_name) const;

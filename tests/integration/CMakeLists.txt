@@ -100,4 +100,23 @@ if(TR_USE_MUSA)
     message(STATUS "Single MUSA GPU async pipeline test configured: test_async_pipeline_single_musa")
 endif()
 
+# ============================================================================
+# ImageNet Data Loader Test
+# ============================================================================
+
+add_executable(test_imagenet_loader
+    test_imagenet_loader.cpp
+)
+
+target_link_libraries(test_imagenet_loader
+    renaissance
+)
+
+set_target_properties(test_imagenet_loader PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/integration
+)
+
+# 注意：不添加为CTest，因为它需要外部数据集
+message(STATUS "ImageNet data loader test configured: test_imagenet_loader")
+
 message(STATUS "=== Integration Tests Configuration Complete ===")

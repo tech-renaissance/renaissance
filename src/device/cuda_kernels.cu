@@ -596,8 +596,8 @@ __global__ void k_fp32_to_bf16_trunc(const float* __restrict__ src,
         uint32_t bits;
         // 直接截断：丢弃FP32的低16位
         asm("mov.b32 %0, %1;" : "=r"(bits) : "f"(src[i]));
-        // 将截断后的位转换为__nv_bfloat16
-        dst[i] = *reinterpret_cast<__nv_bfloat16*>(&bits);
+        // 将截断后的位转换为__nv_bfloat16（取高16位）
+        dst[i] = __ushort_as_bfloat16(static_cast<uint16_t>(bits >> 16));  // 右移16位
     }
 }
 
