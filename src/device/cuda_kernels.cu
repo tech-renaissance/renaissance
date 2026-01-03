@@ -74,12 +74,18 @@ cudaError_t launch_fill_int8_kernel(int n, int8_t* ptr, int8_t value,
     return cudaGetLastError();
 }
 
-cudaError_t launch_fill_bf16_kernel(int n, uint16_t* ptr, uint16_t value,
+cudaError_t launch_fill_bf16_kernel(int n, uint16_t* ptr, float value,
                                      cudaStream_t stream) {
     const int block_size = 256;
     const int grid_size = (n + block_size - 1) / block_size;
 
-    fill_kernel<uint16_t><<<grid_size, block_size, 0, stream>>>(n, ptr, value);
+    // 使用__nv_bfloat16类型和RNE舍入
+    __nv_bfloat16 bf16_value = __float2bfloat16_rn(value);
+
+    // 调用填充kernel（传递__nv_bfloat16类型）
+    fill_kernel<__nv_bfloat16><<<grid_size, block_size, 0, stream>>>(
+        n, reinterpret_cast<__nv_bfloat16*>(ptr), bf16_value
+    );
     return cudaGetLastError();
 }
 
@@ -552,7 +558,7 @@ __global__ void k_fp32_to_int32(const float* __restrict__ src,
  * @brief FP32 -> BF16 (RNE模式)
  */
 __global__ void k_fp32_to_bf16(const float* __restrict__ src,
-                                uint16_t* __restrict__ dst,
+                                __nv_bfloat16* __restrict__ dst,
                                 size_t n) {
     size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
     size_t stride = blockDim.x * gridDim.x;
@@ -565,14 +571,14 @@ __global__ void k_fp32_to_bf16(const float* __restrict__ src,
         __nv_bfloat162 low = __float22bfloat162_rn(make_float2(in.x, in.y));
         __nv_bfloat162 high = __float22bfloat162_rn(make_float2(in.z, in.w));
 
-        __nv_bfloat16* base = reinterpret_cast<__nv_bfloat16*>(dst + i * 4);
+        __nv_bfloat16* base = dst + i * 4;
         reinterpret_cast<__nv_bfloat162*>(base)[0] = low;
         reinterpret_cast<__nv_bfloat162*>(base)[1] = high;
     }
 
     // 尾部处理
     for (size_t i = vec_n * 4 + idx; i < n; i += stride) {
-        dst[i] = fp32_to_bf16_rne_device(src[i]);
+        dst[i] = __float2bfloat16_rn(src[i]);
     }
 }
 
@@ -580,24 +586,25 @@ __global__ void k_fp32_to_bf16(const float* __restrict__ src,
  * @brief FP32 -> BF16 (Truncation模式 - 直接截断，速度更快)
  */
 __global__ void k_fp32_to_bf16_trunc(const float* __restrict__ src,
-                                     uint16_t* __restrict__ dst,
+                                     __nv_bfloat16* __restrict__ dst,
                                      size_t n) {
     size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
     size_t stride = blockDim.x * gridDim.x;
 
-    // 逐元素处理（不使用向量化，避免内存对齐问题）
+    // 逐元素处理（使用__nv_bfloat16类型）
     for (size_t i = idx; i < n; i += stride) {
         uint32_t bits;
         // 直接截断：丢弃FP32的低16位
         asm("mov.b32 %0, %1;" : "=r"(bits) : "f"(src[i]));
-        dst[i] = static_cast<uint16_t>(bits >> 16);
+        // 将截断后的位转换为__nv_bfloat16
+        dst[i] = *reinterpret_cast<__nv_bfloat16*>(&bits);
     }
 }
 
 /**
  * @brief BF16 -> FP32
  */
-__global__ void k_bf16_to_fp32(const uint16_t* __restrict__ src,
+__global__ void k_bf16_to_fp32(const __nv_bfloat16* __restrict__ src,
                                 float* __restrict__ dst,
                                 size_t n) {
     size_t idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -605,7 +612,7 @@ __global__ void k_bf16_to_fp32(const uint16_t* __restrict__ src,
 
     size_t vec_n = n / 4;
     for (size_t i = idx; i < vec_n; i += stride) {
-        const __nv_bfloat16* base = reinterpret_cast<const __nv_bfloat16*>(src + i * 4);
+        const __nv_bfloat16* base = src + i * 4;
         __nv_bfloat162 low = reinterpret_cast<const __nv_bfloat162*>(base)[0];
         __nv_bfloat162 high = reinterpret_cast<const __nv_bfloat162*>(base)[1];
 
@@ -620,11 +627,8 @@ __global__ void k_bf16_to_fp32(const uint16_t* __restrict__ src,
     }
 
     for (size_t i = vec_n * 4 + idx; i < n; i += stride) {
-        uint16_t bf16 = src[i];
-        uint32_t bits = static_cast<uint32_t>(bf16) << 16;
-        float fp32;
-        asm("mov.b32 %0, %1;" : "=f"(fp32) : "r"(bits));
-        dst[i] = fp32;
+        // 直接使用CUDA intrinsic转换
+        dst[i] = __bfloat162float(src[i]);
     }
 }
 
@@ -776,21 +780,24 @@ void cuda_dispatch_fp32_to_bf16(const float* src, uint16_t* dst, size_t n,
                                  cudaStream_t stream) {
     int blocks, threads;
     get_launch_config(n, blocks, threads);
-    k_fp32_to_bf16<<<blocks, threads, 0, stream>>>(src, dst, n);
+    // 内部转换uint16_t*为__nv_bfloat16*
+    k_fp32_to_bf16<<<blocks, threads, 0, stream>>>(src, reinterpret_cast<__nv_bfloat16*>(dst), n);
 }
 
 void cuda_dispatch_fp32_to_bf16_trunc(const float* src, uint16_t* dst, size_t n,
                                        cudaStream_t stream) {
     int blocks, threads;
     get_launch_config(n, blocks, threads);
-    k_fp32_to_bf16_trunc<<<blocks, threads, 0, stream>>>(src, dst, n);
+    // 内部转换uint16_t*为__nv_bfloat16*
+    k_fp32_to_bf16_trunc<<<blocks, threads, 0, stream>>>(src, reinterpret_cast<__nv_bfloat16*>(dst), n);
 }
 
 void cuda_dispatch_bf16_to_fp32(const uint16_t* src, float* dst, size_t n,
                                  cudaStream_t stream) {
     int blocks, threads;
     get_launch_config(n, blocks, threads);
-    k_bf16_to_fp32<<<blocks, threads, 0, stream>>>(src, dst, n);
+    // 内部转换uint16_t*为__nv_bfloat16*
+    k_bf16_to_fp32<<<blocks, threads, 0, stream>>>(reinterpret_cast<const __nv_bfloat16*>(src), dst, n);
 }
 
 void cuda_dispatch_int32_to_fp32(const int32_t* src, float* dst, size_t n,

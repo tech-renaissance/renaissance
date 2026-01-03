@@ -172,6 +172,18 @@ void Device::ones_inplace([[maybe_unused]] Tensor& tensor_a) {
     throw_not_impl("ones_inplace");
 }
 
+void Device::synchronize() {
+    throw_not_impl("synchronize");
+}
+
+void Device::sync([[maybe_unused]] StreamType stream_type) {
+    throw_not_impl("sync");
+}
+
+void Device::sync_all() {
+    throw_not_impl("sync_all");
+}
+
 // ===== 辅助验证方法 =====
 
 void Device::check_same_shape(const Tensor& a, const Tensor& b) const {

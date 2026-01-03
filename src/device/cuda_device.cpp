@@ -1,12 +1,108 @@
 /**
  * @file cuda_device.cpp
  * @brief CUDA器件实现
- * @version 3.6.8
- * @date 2025-12-27
+ * @version 3.6.24
+ * @date 2026-01-03
  * @author 技术觉醒团队
  * @note 依赖项: CUDA Runtime, cuDNN
  * @note 所属系列: device
  */
+
+// =============================================================================
+// CUDA Backend 同步策略声明（V3.6.24）
+// =============================================================================
+//
+// 本Device类采用"构造同步、操作异步"的混合策略：
+//
+// 【自动同步的方法】以下方法会在内部调用同步，返回后立即可用：
+//
+// 1. 构造方法（10个）：
+//    - empty(), zeros(), ones(), null_tensor(), full()
+//    - full_fp32(), full_bf16(), full_int32(), full_int8()
+//
+// 2. 跨设备同步传输（1个）：
+//    - transfer_into()
+//
+// 3. 比较方法（2个）：
+//    - equal(), is_close()
+//
+// 【完全异步的方法】以下方法不会调用同步，用户必须手动调用sync()或sync_all()：
+//
+// 1. 所有*_inplace方法（7个）：
+//    - zeros_inplace(), ones_inplace(), full_*_inplace()等
+//
+// 2. 同步拷贝（1个）：
+//    - copy_into()
+//
+// 3. 类型转换（2个）：
+//    - cast_into(), trunc_cast_into()
+//
+// 4. 异步传输（3个）：
+//    - async_copy_h2d(), async_copy_d2h(), sync_transfer_to_compute()
+//
+// 5. 随机数生成（7个基础方法）：
+//    - rand_uint64(), rand_*_int8(), rand_*_int32()等
+//
+// 6. 高级随机接口（8个方法）：
+//    - uniform(), randn(), randint(), randbool()及其_inplace版本
+//
+// 7. 全值填充统一接口（1个）：
+//    - full_inplace()
+//
+// 【同步API】用户可用的同步方法（必须显式指定流类型，无默认参数）：
+//
+// - sync(StreamType stream_type) - 同步指定流
+// - sync_all() - 同步所有流
+//
+// =============================================================================
+
+// =============================================================================
+// CUDA Backend API选择策略
+// =============================================================================
+//
+// 本实现根据数据类型（dtype）和操作类型，智能选择最优的实现方式：
+//
+// 1. **FP32/BF16张量运算**: 使用cuDNN
+//    - 原因: cuDNN已针对NVIDIA GPU深度优化，性能优于自写kernel
+//    - 典型场景: 张量加法、类型转换（FP32↔BF16）
+//    - 实现方式: 调用cudnnOpTensor等API
+//    - 示例函数:
+//      - add_into() - FP32/BF16使用cuDNN的OpTensor
+//
+// 2. **INT8/INT32张量运算**: 使用自定义kernel
+//    - 原因: cuDNN对INT8/INT32的简单运算支持有限或性能不佳
+//    - 典型场景: INT32加法、INT8加法、整数类型填充
+//    - 实现方式: 调用launch_*_kernel()系列函数（实现于.cu文件）
+//    - 示例函数:
+//      - add_into() - INT8/INT32使用launch_add_*_kernel
+//      - full_int32_inplace() - 使用launch_fill_int32_kernel
+//
+// 3. **随机数生成**: 使用Philox算法自定义kernel
+//    - 原因: cuDNN无对应的通用随机数生成API
+//    - 实现方式: 调用launch_philox_*_kernel()系列函数
+//    - 支持分布: 均匀分布、正态分布、伯努利分布
+//    - 示例函数:
+//      - rand_uint64() - Philox uint64生成器
+//      - uniform() / randn() / randint() - 高级随机接口
+//
+// 4. **流（Stream）管理策略**:
+//    - compute_stream_: 计算流（前向/反向/更新），高优先级
+//    - transfer_stream_: 传输流（H2D/D2H），低优先级
+//    - 所有自定义kernel必须显式指定stream参数
+//
+// 5. **同步（Synchronization）策略**:
+//    - inplace方法: 不同步，由调用者决定何时同步
+//    - 非inplace方法: 内部同步，返回后立即可用
+//    - 跨流依赖: 使用Event机制（async_copy_h2d + sync_transfer_to_compute）
+//
+// =============================================================================
+//
+// 注意: CUDA backend与MUSA backend的策略一致
+//       - CUDA: FP32/BF16使用cuDNN，INT8/INT32使用自定义kernel
+//       - MUSA: FP32/BF16使用muDNN，INT8/INT32使用自定义kernel
+//       两者策略一致，都是根据各backend的DLNN库能力选择最优实现。
+//
+// =============================================================================
 
 #include "renaissance/base/rng.h"  // Generator类完整定义
 #include "renaissance/data/tensor.h"
@@ -22,6 +118,8 @@
 
 #include <vector>
 #include <cstring>
+#include <cmath>      // for std::round
+#include <algorithm>  // for std::clamp
 
 #include "renaissance/base/cuda_arena.h"
 #include "renaissance/device/cuda_kernels.h"
@@ -29,16 +127,6 @@
 
 
 namespace tr {
-
-// ===== 数据类型转换dispatch函数前向声明（在cuda_cast.cu中定义）=====
-void cuda_dispatch_fp32_to_int32(const float*, int32_t*, size_t, cudaStream_t);
-void cuda_dispatch_fp32_to_bf16(const float*, uint16_t*, size_t, cudaStream_t);
-void cuda_dispatch_fp32_to_bf16_trunc(const float*, uint16_t*, size_t, cudaStream_t);
-void cuda_dispatch_bf16_to_fp32(const uint16_t*, float*, size_t, cudaStream_t);
-void cuda_dispatch_int32_to_fp32(const int32_t*, float*, size_t, cudaStream_t);
-void cuda_dispatch_int32_to_int8(const int32_t*, int8_t*, size_t, cudaStream_t);
-void cuda_dispatch_int8_to_fp32(const int8_t*, float*, size_t, cudaStream_t);
-void cuda_dispatch_int8_to_int32(const int8_t*, int32_t*, size_t, cudaStream_t);
 
 // ===== cuDNN句柄管理 =====
 
@@ -313,8 +401,71 @@ void CudaDevice::synchronize() {
 #endif
 }
 
+void CudaDevice::sync(StreamType stream_type) {
+    cudaStream_t stream = nullptr;
+
+    switch (stream_type) {
+        case StreamType::transfer_stream: stream = transfer_stream_; break;
+        case StreamType::compute_stream:  stream = compute_stream_;  break;
+#ifdef TR_USE_NCCL
+        case StreamType::comm_stream:
+            TR_CHECK(nccl_enabled_ && comm_stream_ != nullptr, DeviceError,
+                    "NCCL not enabled or comm_stream not available");
+            stream = comm_stream_;
+            break;
+#endif
+        default:
+            TR_DEVICE_ERROR("Invalid stream type: " << static_cast<int>(stream_type));
+    }
+
+    cudaSetDevice(device_id_);
+    cudaError_t err = cudaStreamSynchronize(stream);
+    TR_CHECK(err == cudaSuccess, DeviceError,
+            "CUDA stream synchronize failed: " << cudaGetErrorString(err));
+}
+
+void CudaDevice::sync_all() {
+    cudaSetDevice(device_id_);
+
+    // 同步计算流
+    cudaError_t err = cudaStreamSynchronize(compute_stream_);
+    TR_CHECK(err == cudaSuccess, DeviceError,
+            "CUDA compute stream synchronize failed: " << cudaGetErrorString(err));
+
+    // 同步传输流
+    err = cudaStreamSynchronize(transfer_stream_);
+    TR_CHECK(err == cudaSuccess, DeviceError,
+            "CUDA transfer stream synchronize failed: " << cudaGetErrorString(err));
+
+#ifdef TR_USE_NCCL
+    // 同步通信流（如果启用）
+    if (nccl_enabled_ && comm_stream_ != nullptr) {
+        err = cudaStreamSynchronize(comm_stream_);
+        TR_CHECK(err == cudaSuccess, DeviceError,
+                "CUDA comm stream synchronize failed: " << cudaGetErrorString(err));
+    }
+#endif
+}
+
 // ===== 张量创建 =====
 
+/**
+ * @brief 创建未初始化的张量
+ * @param shape 张量形状
+ * @param dtype 数据类型
+ * @return 新创建的未初始化张量
+ *
+ * @note 此方法不调用任何内核，返回后张量立即可用（无同步）
+ * @note 属于"自动同步方法"之一，详见文件头部的同步策略声明
+ *
+ * @warning 返回的张量内容是未初始化的，读取未初始化内存是未定义行为
+ *
+ * @example
+ * @code
+ * auto t = device->empty({2, 3}, DType::FP32);
+ * // t可以立即使用，但内容未定义
+ * @endcode
+ */
 Tensor CudaDevice::empty(const Shape& shape, DType dtype) {
     // 1. 计算所需字节
     size_t nbytes = static_cast<size_t>(shape.numel()) * dtype_size(dtype);
@@ -527,7 +678,9 @@ void CudaDevice::cast_into(const Tensor& tensor_a, Tensor& tensor_b,
     const void* src_ptr = tensor_a.data_ptr();
     void* dst_ptr = tensor_b.data_ptr();
 
-    // 9. 调用对应的kernel
+    // 9. 调用对应的dispatch函数（详见文件顶部API选择策略）
+    //    - FP32↔BF16: 自定义dispatch（cuDNN不支持简单类型转换）
+    //    - FP32/INT8/INT32互转: 自定义dispatch（cuDNN不支持）
     if (dtype_a == DType::FP32 && dtype_b == DType::INT32) {
         cuda_dispatch_fp32_to_int32(static_cast<const float*>(src_ptr),
                                      static_cast<int32_t*>(dst_ptr), numel, stream);
@@ -777,9 +930,11 @@ void CudaDevice::add_into(const Tensor& a, const Tensor& b, Tensor& result) {
     // 3. 计算元素数量
     size_t count = static_cast<size_t>(a.shape().numel());
 
-    // 4. 策略分支：INT8/INT32使用手写Kernel，FP32/BF16使用cuDNN
+    // 4. 策略分支：根据dtype选择最优实现（详见文件顶部API选择策略）
+    //    - INT8/INT32: 自定义kernel（cuDNN不支持或性能不佳）
+    //    - FP32/BF16: cuDNN OpTensor（已针对NVIDIA GPU优化）
     if (a.dtype() == DType::INT8 || a.dtype() == DType::INT32) {
-        // 策略A：INT8/INT32 - 使用手写add_kernel（在compute_stream_上）
+        // INT8/INT32 - 使用自定义kernel（性能最优）
         cudaError_t err;
 
         if (a.dtype() == DType::INT8) {
@@ -805,7 +960,7 @@ void CudaDevice::add_into(const Tensor& a, const Tensor& b, Tensor& result) {
         return;
     }
 
-    // 策略B：FP32/BF16 - 使用cuDNN OpTensor（绑定compute_stream_）
+    // FP32/BF16 - 使用cuDNN OpTensor（性能最优，已针对NVIDIA GPU优化）
     // 5. 获取cuDNN句柄并绑定流
     cudnnHandle_t cudnn_handle = get_cudnn_handle(device_id_);
     cudnnSetStream(cudnn_handle, compute_stream_);
@@ -944,7 +1099,7 @@ void CudaDevice::rand_uint64(uint64_t* ptr, size_t count, Generator& gen) {
     cudaSetDevice(device_id_);
 
     cudaError_t err = launch_philox_uint64_kernel(
-        static_cast<int>(count), seed, base_offset, ptr
+        static_cast<int>(count), seed, base_offset, ptr, transfer_stream_
     );
 
     if (err != cudaSuccess) {
@@ -969,7 +1124,7 @@ void CudaDevice::rand_bernoulli_int8(int8_t* ptr, size_t count, float prob_one,
     cudaSetDevice(device_id_);
 
     cudaError_t err = launch_philox_bernoulli_int8_kernel(
-        static_cast<int>(count), seed, base_offset, prob_one, ptr
+        static_cast<int>(count), seed, base_offset, prob_one, ptr, transfer_stream_
     );
 
     if (err != cudaSuccess) {
@@ -994,7 +1149,7 @@ void CudaDevice::rand_uniform_int8(int8_t* ptr, size_t count, int8_t low,
     cudaSetDevice(device_id_);
 
     cudaError_t err = launch_philox_uniform_int8_kernel(
-        static_cast<int>(count), seed, base_offset, low, high, ptr
+        static_cast<int>(count), seed, base_offset, low, high, ptr, transfer_stream_
     );
 
     if (err != cudaSuccess) {
@@ -1019,7 +1174,7 @@ void CudaDevice::rand_bernoulli_int32(int32_t* ptr, size_t count, float prob_one
     cudaSetDevice(device_id_);
 
     cudaError_t err = launch_philox_bernoulli_int32_kernel(
-        static_cast<int>(count), seed, base_offset, prob_one, ptr
+        static_cast<int>(count), seed, base_offset, prob_one, ptr, transfer_stream_
     );
 
     if (err != cudaSuccess) {
@@ -1044,7 +1199,7 @@ void CudaDevice::rand_uniform_int32(int32_t* ptr, size_t count, int32_t low,
     cudaSetDevice(device_id_);
 
     cudaError_t err = launch_philox_uniform_int32_kernel(
-        static_cast<int>(count), seed, base_offset, low, high, ptr
+        static_cast<int>(count), seed, base_offset, low, high, ptr, transfer_stream_
     );
 
     if (err != cudaSuccess) {
@@ -1069,7 +1224,7 @@ void CudaDevice::rand_uniform_float(float* ptr, size_t count, float low,
     cudaSetDevice(device_id_);
 
     cudaError_t err = launch_philox_uniform_float_kernel(
-        static_cast<int>(count), seed, base_offset, low, high, ptr
+        static_cast<int>(count), seed, base_offset, low, high, ptr, transfer_stream_
     );
 
     if (err != cudaSuccess) {
@@ -1096,7 +1251,7 @@ void CudaDevice::rand_normal_float(float* ptr, size_t count, float mean,
     cudaSetDevice(device_id_);
 
     cudaError_t err = launch_philox_normal_float_kernel(
-        static_cast<int>(count), seed, base_offset, mean, std, ptr
+        static_cast<int>(count), seed, base_offset, mean, std, ptr, transfer_stream_
     );
 
     if (err != cudaSuccess) {
@@ -1258,8 +1413,7 @@ void CudaDevice::full_fp32_inplace(Tensor& tensor_a, float value) {
     TR_CHECK(err == cudaSuccess, DeviceError,
             "CUDA fill_float kernel failed: " << cudaGetErrorString(err));
 
-    // 6. 同步等待（保持同步语义）
-    cudaStreamSynchronize(transfer_stream_);
+    // 注意：此方法不再调用同步，由调用者负责
 }
 
 // -------------------------------------------------------------------------
@@ -1283,17 +1437,13 @@ void CudaDevice::full_bf16_inplace(Tensor& tensor_a, float value) {
     // 4. 设置当前设备
     cudaSetDevice(device_id_);
 
-    // 5. 转换value为BF16（使用RNE舍入）
-    uint16_t bf16_value = fp32_to_bf16_rne(value);
-
-    // 6. 调用填充kernel（在transfer_stream上执行）
+    // 5. 调用填充kernel（在transfer_stream上执行，kernel内部使用RNE舍入）
     uint16_t* ptr = static_cast<uint16_t*>(tensor_a.data_ptr());
-    cudaError_t err = launch_fill_bf16_kernel(static_cast<int>(numel), ptr, bf16_value, transfer_stream_);
+    cudaError_t err = launch_fill_bf16_kernel(static_cast<int>(numel), ptr, value, transfer_stream_);
     TR_CHECK(err == cudaSuccess, DeviceError,
             "CUDA fill_bf16 kernel failed: " << cudaGetErrorString(err));
 
-    // 7. 同步等待（保持同步语义）
-    cudaStreamSynchronize(transfer_stream_);
+    // 注意：此方法不再调用同步，由调用者负责
 }
 
 // -------------------------------------------------------------------------
@@ -1323,8 +1473,7 @@ void CudaDevice::full_int32_inplace(Tensor& tensor_a, int32_t value) {
     TR_CHECK(err == cudaSuccess, DeviceError,
             "CUDA fill_int32 kernel failed: " << cudaGetErrorString(err));
 
-    // 6. 同步等待（保持同步语义）
-    cudaStreamSynchronize(transfer_stream_);
+    // 注意：此方法不再调用同步，由调用者负责
 }
 
 // -------------------------------------------------------------------------
@@ -1354,8 +1503,86 @@ void CudaDevice::full_int8_inplace(Tensor& tensor_a, int8_t value) {
     TR_CHECK(err == cudaSuccess, DeviceError,
             "CUDA fill_int8 kernel failed: " << cudaGetErrorString(err));
 
-    // 6. 同步等待（保持同步语义）
-    cudaStreamSynchronize(transfer_stream_);
+    // 注意：此方法不再调用同步，由调用者负责
+}
+
+// =============================================================================
+// 统一全值填充方法（V3.6.24新增）
+// =============================================================================
+
+Tensor CudaDevice::full(const Shape& shape, DType dtype, float value) {
+    Tensor tensor = empty(shape, dtype);
+    full_inplace(tensor, value);
+    return tensor;
+}
+
+void CudaDevice::full_inplace(Tensor& tensor, float value) {
+    // 1. 验证设备
+    check_on_device(tensor);
+
+    // 2. 空张量静默返回
+    int64_t numel = tensor.numel();
+    if (numel == 0) {
+        return;
+    }
+
+    // 3. 设置当前设备
+    cudaSetDevice(device_id_);
+
+    // 4. 根据dtype选择转换策略和填充kernel
+    switch (tensor.dtype()) {
+        case DType::FP32: {
+            // FP32: 直接填充（无精度损失）
+            float* ptr = static_cast<float*>(tensor.data_ptr());
+            cudaError_t err = launch_fill_float_kernel(
+                static_cast<int>(numel), ptr, value, transfer_stream_);
+            TR_CHECK(err == cudaSuccess, DeviceError,
+                    "CUDA fill_fp32 kernel failed: " << cudaGetErrorString(err));
+            break;
+        }
+
+        case DType::BF16: {
+            // BF16: 直接传递float，kernel内部使用__nv_bfloat16和RNE舍入
+            uint16_t* ptr = static_cast<uint16_t*>(tensor.data_ptr());
+            cudaError_t err = launch_fill_bf16_kernel(
+                static_cast<int>(numel), ptr, value, transfer_stream_);
+            TR_CHECK(err == cudaSuccess, DeviceError,
+                    "CUDA fill_bf16 kernel failed: " << cudaGetErrorString(err));
+            break;
+        }
+
+        case DType::INT32: {
+            // INT32: 四舍五入转换
+            int32_t ivalue = static_cast<int32_t>(std::round(value));
+            int32_t* ptr = static_cast<int32_t*>(tensor.data_ptr());
+            cudaError_t err = launch_fill_int32_kernel(
+                static_cast<int>(numel), ptr, ivalue, transfer_stream_);
+            TR_CHECK(err == cudaSuccess, DeviceError,
+                    "CUDA fill_int32 kernel failed: " << cudaGetErrorString(err));
+            break;
+        }
+
+        case DType::INT8: {
+            // INT8: 四舍五入转换，并检查溢出
+            if (value > 127.0f || value < -128.0f) {
+                LOG_WARN << "[CUDA] full_inplace: value " << value
+                         << " exceeds INT8 range [-128, 127], clamping";
+                value = std::clamp(value, -128.0f, 127.0f);
+            }
+            int8_t ivalue = static_cast<int8_t>(std::round(value));
+            int8_t* ptr = static_cast<int8_t*>(tensor.data_ptr());
+            cudaError_t err = launch_fill_int8_kernel(
+                static_cast<int>(numel), ptr, ivalue, transfer_stream_);
+            TR_CHECK(err == cudaSuccess, DeviceError,
+                    "CUDA fill_int8 kernel failed: " << cudaGetErrorString(err));
+            break;
+        }
+
+        default:
+            TR_TYPE_ERROR("Unsupported dtype in full_inplace: " << dtype_name(tensor.dtype()));
+    }
+
+    // 注意：此方法不再调用同步，由调用者负责
 }
 
 // =============================================================================
@@ -1434,7 +1661,7 @@ Tensor CudaDevice::randint(const Shape& shape, int low, int high, DType dtype) {
         // 使用自定义kernel将INT32转换为FP32
         cudaSetDevice(device_id_);
         cudaError_t err = launch_convert_int32_to_float_kernel(
-            static_cast<int>(count), temp_data, data
+            static_cast<int>(count), temp_data, data, transfer_stream_
         );
 
         if (err != cudaSuccess) {
@@ -1467,7 +1694,7 @@ void CudaDevice::randint_inplace(Tensor& tensor_a, int low, int high, DType dtyp
         // 使用自定义kernel将INT32转换为FP32
         cudaSetDevice(device_id_);
         cudaError_t err = launch_convert_int32_to_float_kernel(
-            static_cast<int>(count), temp_data, data
+            static_cast<int>(count), temp_data, data, transfer_stream_
         );
 
         if (err != cudaSuccess) {
@@ -1498,7 +1725,7 @@ Tensor CudaDevice::randbool(const Shape& shape, float rate_of_zeros, DType dtype
         // 使用自定义kernel将INT8转换为FP32
         cudaSetDevice(device_id_);
         cudaError_t err = launch_convert_int8_to_float_kernel(
-            static_cast<int>(count), temp_data, data
+            static_cast<int>(count), temp_data, data, transfer_stream_
         );
 
         if (err != cudaSuccess) {
@@ -1515,7 +1742,7 @@ Tensor CudaDevice::randbool(const Shape& shape, float rate_of_zeros, DType dtype
         // 使用自定义kernel将INT8转换为INT32
         cudaSetDevice(device_id_);
         cudaError_t err = launch_convert_int8_to_int32_kernel(
-            static_cast<int>(count), temp_data, data
+            static_cast<int>(count), temp_data, data, transfer_stream_
         );
 
         if (err != cudaSuccess) {
@@ -1545,7 +1772,7 @@ void CudaDevice::randbool_inplace(Tensor& tensor_a, float rate_of_zeros, DType d
         // 使用自定义kernel将INT8转换为FP32
         cudaSetDevice(device_id_);
         cudaError_t err = launch_convert_int8_to_float_kernel(
-            static_cast<int>(count), temp_data, data
+            static_cast<int>(count), temp_data, data, transfer_stream_
         );
 
         if (err != cudaSuccess) {
@@ -1562,7 +1789,7 @@ void CudaDevice::randbool_inplace(Tensor& tensor_a, float rate_of_zeros, DType d
         // 使用自定义kernel将INT8转换为INT32
         cudaSetDevice(device_id_);
         cudaError_t err = launch_convert_int8_to_int32_kernel(
-            static_cast<int>(count), temp_data, data
+            static_cast<int>(count), temp_data, data, transfer_stream_
         );
 
         if (err != cudaSuccess) {
@@ -1615,12 +1842,12 @@ bool CudaDevice::equal(const Tensor& a, const Tensor& b) {
     if (a.dtype() == DType::INT32) {
         const int32_t* a_data = static_cast<const int32_t*>(a.data_ptr());
         const int32_t* b_data = static_cast<const int32_t*>(b.data_ptr());
-        err = launch_equal_int32_kernel(static_cast<int>(count), a_data, b_data, mismatch_flag);
+        err = launch_equal_int32_kernel(static_cast<int>(count), a_data, b_data, mismatch_flag, compute_stream_);
     }
     else if (a.dtype() == DType::INT8) {
         const int8_t* a_data = static_cast<const int8_t*>(a.data_ptr());
         const int8_t* b_data = static_cast<const int8_t*>(b.data_ptr());
-        err = launch_equal_int8_kernel(static_cast<int>(count), a_data, b_data, mismatch_flag);
+        err = launch_equal_int8_kernel(static_cast<int>(count), a_data, b_data, mismatch_flag, compute_stream_);
     }
     else {
         TR_TYPE_ERROR("Unsupported dtype in equal: " << dtype_name(a.dtype()));
@@ -1694,13 +1921,13 @@ bool CudaDevice::is_close(const Tensor& a, const Tensor& b, float eps) {
     if (a.dtype() == DType::FP32) {
         const float* a_data = static_cast<const float*>(a.data_ptr());
         const float* b_data = static_cast<const float*>(b.data_ptr());
-        err = launch_is_close_float_kernel(static_cast<int>(count), a_data, b_data, tolerance, mismatch_flag);
+        err = launch_is_close_float_kernel(static_cast<int>(count), a_data, b_data, tolerance, mismatch_flag, compute_stream_);
     }
     else if (a.dtype() == DType::BF16) {
         // BF16存储为uint16，需要转换为FP32比较
         const uint16_t* a_data = static_cast<const uint16_t*>(a.data_ptr());
         const uint16_t* b_data = static_cast<const uint16_t*>(b.data_ptr());
-        err = launch_is_close_bf16_kernel(static_cast<int>(count), a_data, b_data, tolerance, mismatch_flag);
+        err = launch_is_close_bf16_kernel(static_cast<int>(count), a_data, b_data, tolerance, mismatch_flag, compute_stream_);
     }
     else {
         TR_TYPE_ERROR("Unsupported dtype in is_close: " << dtype_name(a.dtype()));

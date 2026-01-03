@@ -61,59 +61,72 @@ public:
     void memset_internal(void* ptr, int value, size_t size) override;
 
     // ===== 同步操作 =====
-    void synchronize() override;
+    void synchronize() override;  // @deprecated V3.6.24: 使用 sync() 或 sync_all()
+    void sync(StreamType stream_type) override;  // CUDA实现
+    void sync_all() override;  // CUDA实现
+
+// ************************* COMPUTE STREAM START *************************/
+
+    // ===== 张量运算 =====
+    void add_into(const Tensor& a, const Tensor& b, Tensor& result) override;
+    bool equal(const Tensor& a, const Tensor& b) override;
+    bool is_close(const Tensor& a, const Tensor& b, float eps = -1.0f) override;
+
+// ************************* COMPUTE STREAM END *************************/
+
+
+
+// ************************* TRANSFER STREAM START *************************/
 
     // ===== 张量创建 =====
-    Tensor empty(const Shape& shape, DType dtype) override;
-    Tensor zeros(const Shape& shape, DType dtype) override;
-    Tensor ones(const Shape& shape, DType dtype) override;
     Tensor null_tensor() override;
+    Tensor empty(const Shape& shape, DType dtype) override;
+
+    Tensor zeros(const Shape& shape, DType dtype) override;
     void zeros_inplace(Tensor& tensor_a) override;
+
+    Tensor ones(const Shape& shape, DType dtype) override;
     void ones_inplace(Tensor& tensor_a) override;
 
     // ===== 全值填充方法（V3.6.21新增）=====
     Tensor full_fp32(const Shape& shape, float value) override;
-    Tensor full_bf16(const Shape& shape, float value) override;
-    Tensor full_int32(const Shape& shape, int32_t value) override;
-    Tensor full_int8(const Shape& shape, int8_t value) override;
     void full_fp32_inplace(Tensor& tensor_a, float value) override;
+
+    Tensor full_bf16(const Shape& shape, float value) override;
     void full_bf16_inplace(Tensor& tensor_a, float value) override;
+
+    Tensor full_int32(const Shape& shape, int32_t value) override;
     void full_int32_inplace(Tensor& tensor_a, int32_t value) override;
+
+    Tensor full_int8(const Shape& shape, int8_t value) override;
     void full_int8_inplace(Tensor& tensor_a, int8_t value) override;
 
+    // ===== 统一全值填充方法（V3.6.24新增）=====
+    Tensor full(const Shape& shape, DType dtype, float value) override;
+    void full_inplace(Tensor& tensor, float value) override;
+
     // ===== 随机数生成（高级接口，调用默认Generator）=====
-    Tensor uniform(const Shape& shape, float min_val = 0.0f, float max_val = 1.0f,
-                  DType dtype = DType::FP32) override;
-    void uniform_inplace(Tensor& tensor_a, float min_val = 0.0f, float max_val = 1.0f,
-                         DType dtype = DType::FP32) override;
+    Tensor uniform(const Shape& shape, float min_val = 0.0f, float max_val = 1.0f, DType dtype = DType::FP32) override;
+    void uniform_inplace(Tensor& tensor_a, float min_val = 0.0f, float max_val = 1.0f, DType dtype = DType::FP32) override;
 
-    Tensor randn(const Shape& shape, float mean = 0.0f, float stddev = 1.0f,
-                 DType dtype = DType::FP32) override;
-    void randn_inplace(Tensor& tensor_a, float mean = 0.0f, float stddev = 1.0f,
-                       DType dtype = DType::FP32) override;
+    Tensor randn(const Shape& shape, float mean = 0.0f, float stddev = 1.0f, DType dtype = DType::FP32) override;
+    void randn_inplace(Tensor& tensor_a, float mean = 0.0f, float stddev = 1.0f, DType dtype = DType::FP32) override;
 
-    Tensor randint(const Shape& shape, int low = 0, int high = 10,
-                  DType dtype = DType::FP32) override;
-    void randint_inplace(Tensor& tensor_a, int low = 0, int high = 10,
-                         DType dtype = DType::FP32) override;
+    Tensor randint(const Shape& shape, int low = 0, int high = 10, DType dtype = DType::FP32) override;
+    void randint_inplace(Tensor& tensor_a, int low = 0, int high = 10, DType dtype = DType::FP32) override;
 
-    Tensor randbool(const Shape& shape, float rate_of_zeros = 0.5,
-                   DType dtype = DType::FP32) override;
-    void randbool_inplace(Tensor& tensor_a, float rate_of_zeros = 0.5,
-                          DType dtype = DType::FP32) override;
+    Tensor randbool(const Shape& shape, float rate_of_zeros = 0.5, DType dtype = DType::FP32) override;
+    void randbool_inplace(Tensor& tensor_a, float rate_of_zeros = 0.5, DType dtype = DType::FP32) override;
 
-    // ===== 张量运算（加法和复制）=====
-    void add_into(const Tensor& a, const Tensor& b, Tensor& result) override;
+
+
+    // ===== 张量传输、复制、类型转换 =====
     void copy_into(const Tensor& tensor_a, Tensor& tensor_b) override;
     void transfer_into(const Tensor& tensor_a, Tensor& tensor_b) override;
-    void cast_into(const Tensor& tensor_a, Tensor& tensor_b,
-                  StreamType stream = TR_DEFAULT_STREAM) override;
-    void trunc_cast_into(const Tensor& tensor_a, Tensor& tensor_b,
-                        StreamType stream = TR_DEFAULT_STREAM) override;
+    void cast_into(const Tensor& tensor_a, Tensor& tensor_b, StreamType stream = TR_DEFAULT_STREAM) override;
+    void trunc_cast_into(const Tensor& tensor_a, Tensor& tensor_b, StreamType stream = TR_DEFAULT_STREAM) override;
 
-    // ===== 张量比较 =====
-    bool equal(const Tensor& a, const Tensor& b) override;
-    bool is_close(const Tensor& a, const Tensor& b, float eps = -1.0f) override;
+
 
     // ===== 随机数生成（与CPU API完全一致）=====
 
@@ -154,6 +167,10 @@ public:
      * @brief GPU生成正态分布FP32
      */
     void rand_normal_float(float* ptr, size_t count, float mean, float std, Generator& gen);
+
+
+
+
 
     // ===== 跨设备传输辅助方法（供CpuDevice调用）=====
     /**
@@ -222,6 +239,13 @@ public:
      */
     void sync_transfer_to_compute();
 
+
+// ************************* TRANSFER STREAM END *************************/
+
+
+
+// ************************* COMM STREAM START *************************/
+
 #ifdef TR_USE_NCCL
     /**
      * @brief 获取通信流（AllReduce/Broadcast）
@@ -275,6 +299,7 @@ public:
     void cleanup_nccl();
 #endif
 
+// ************************* COMM STREAM END *************************/
 private:
     int device_id_;  ///< GPU设备索引
 

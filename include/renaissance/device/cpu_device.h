@@ -61,6 +61,10 @@ public:
     void full_int32_inplace(Tensor& tensor_a, int32_t value) override;
     void full_int8_inplace(Tensor& tensor_a, int8_t value) override;
 
+    // ===== 统一全值填充方法（V3.6.24新增）=====
+    Tensor full(const Shape& shape, DType dtype, float value) override;
+    void full_inplace(Tensor& tensor, float value) override;
+
     // ===== 随机数生成（高级接口，调用默认Generator）=====
     Tensor uniform(const Shape& shape, float min_val = 0.0f, float max_val = 1.0f,
                   DType dtype = DType::FP32) override;

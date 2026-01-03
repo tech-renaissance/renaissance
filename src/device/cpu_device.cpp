@@ -1,8 +1,8 @@
 /**
  * @file cpu_device.cpp
  * @brief CPU器件实现
- * @version 3.6.8
- * @date 2025-12-27
+ * @version 3.6.23
+ * @date 2026-01-03
  * @author 技术觉醒团队
  * @note 所属系列: device
  */
@@ -27,6 +27,7 @@
 #include <cstring>
 #include <algorithm>
 #include <vector>
+#include <cmath>  // for std::round
 
 // SIMD头文件（根据架构条件包含）
 #if defined(TR_CPU_ARCH_X86_64)
@@ -622,6 +623,152 @@ void CpuDevice::full_int8_inplace(Tensor& tensor_a, int8_t value) {
             data[i] = value;
         }
     #endif
+}
+
+// =============================================================================
+// 统一全值填充方法（V3.6.24新增）
+// =============================================================================
+
+namespace {
+    // 手动实现FP32到BF16的RNE舍入转换
+    uint16_t float_to_bfloat16_rne(float value) {
+        uint32_t bits = *reinterpret_cast<uint32_t*>(&value);
+        uint32_t sign = (bits >> 16) & 0x8000;
+        int32_t exponent = (bits >> 23) & 0xFF;
+        uint32_t mantissa = bits & 0x7FFFFF;
+
+        // 处理特殊值
+        if (exponent == 255) {
+            // NaN或Inf
+            return sign | 0x7C00;
+        }
+
+        // 正常值：RNE舍入
+        int32_t new_exp = exponent - 127;
+        if (new_exp <= 0) {
+            // 下溢，返回0
+            return sign;
+        } else if (new_exp >= 127) {
+            // 上溢，返回Inf
+            return sign | 0x7C00;
+        } else {
+            // 正常情况：提取高16位，并根据RNE规则调整
+            uint32_t rounding_bias = (mantissa >> 13) & 1;
+            uint32_t bf16_mantissa = (mantissa + rounding_bias) >> 13;
+            return static_cast<uint16_t>(sign | (new_exp << 7) | bf16_mantissa);
+        }
+    }
+}
+
+Tensor CpuDevice::full(const Shape& shape, DType dtype, float value) {
+    Tensor tensor = empty(shape, dtype);
+    full_inplace(tensor, value);
+    return tensor;
+}
+
+void CpuDevice::full_inplace(Tensor& tensor, float value) {
+    // 1. 验证设备
+    check_on_device(tensor);
+
+    // 2. 空张量静默返回
+    int64_t numel = tensor.numel();
+    if (numel == 0) {
+        return;
+    }
+
+    // 3. 根据dtype选择转换策略和填充方法
+    switch (tensor.dtype()) {
+        case DType::FP32: {
+            // FP32: 直接填充（无精度损失）
+            float* data = static_cast<float*>(tensor.data_ptr());
+            size_t count = static_cast<size_t>(numel);
+
+            #if defined(TR_CPU_ARCH_X86_64)
+                fill_float_avx2(data, count, value);
+            #elif defined(TR_CPU_ARCH_ARM64)
+                fill_float_neon(data, count, value);
+            #elif defined(TR_CPU_ARCH_RISCV64)
+                fill_float_rvv(data, count, value);
+            #else
+                // 标量fallback
+                for (size_t i = 0; i < count; ++i) {
+                    data[i] = value;
+                }
+            #endif
+            break;
+        }
+
+        case DType::BF16: {
+            // BF16: 使用IEEE 754 RNE舍入
+            uint16_t bf16_value = float_to_bfloat16_rne(value);
+            uint16_t* data = static_cast<uint16_t*>(tensor.data_ptr());
+            size_t count = static_cast<size_t>(numel);
+
+            #if defined(TR_CPU_ARCH_X86_64)
+                fill_bf16_avx2(data, count, bf16_value);
+            #elif defined(TR_CPU_ARCH_ARM64)
+                fill_bf16_neon(data, count, bf16_value);
+            #elif defined(TR_CPU_ARCH_RISCV64)
+                fill_bf16_rvv(data, count, bf16_value);
+            #else
+                // 标量fallback
+                for (size_t i = 0; i < count; ++i) {
+                    data[i] = bf16_value;
+                }
+            #endif
+            break;
+        }
+
+        case DType::INT32: {
+            // INT32: 四舍五入转换
+            int32_t ivalue = static_cast<int32_t>(std::round(value));
+            int32_t* data = static_cast<int32_t*>(tensor.data_ptr());
+            size_t count = static_cast<size_t>(numel);
+
+            #if defined(TR_CPU_ARCH_X86_64)
+                fill_int32_avx2(data, count, ivalue);
+            #elif defined(TR_CPU_ARCH_ARM64)
+                fill_int32_neon(data, count, ivalue);
+            #elif defined(TR_CPU_ARCH_RISCV64)
+                fill_int32_rvv(data, count, ivalue);
+            #else
+                // 标量fallback
+                for (size_t i = 0; i < count; ++i) {
+                    data[i] = ivalue;
+                }
+            #endif
+            break;
+        }
+
+        case DType::INT8: {
+            // INT8: 四舍五入转换，并检查溢出
+            if (value > 127.0f || value < -128.0f) {
+                LOG_WARN << "CPU full_inplace: value " << value
+                         << " exceeds INT8 range [-128, 127], clamping";
+                value = std::clamp(value, -128.0f, 127.0f);
+            }
+            int8_t ivalue = static_cast<int8_t>(std::round(value));
+            int8_t* data = static_cast<int8_t*>(tensor.data_ptr());
+            size_t count = static_cast<size_t>(numel);
+
+            #if defined(TR_CPU_ARCH_X86_64)
+                fill_int8_avx2(data, count, ivalue);
+            #elif defined(TR_CPU_ARCH_ARM64)
+                fill_int8_neon(data, count, ivalue);
+            #elif defined(TR_CPU_ARCH_RISCV64)
+                fill_int8_rvv(data, count, ivalue);
+            #else
+                // 标量fallback
+                for (size_t i = 0; i < count; ++i) {
+                    data[i] = ivalue;
+                }
+            #endif
+            break;
+        }
+
+        default:
+            TR_TYPE_ERROR("Unsupported dtype in full_inplace: " << dtype_name(tensor.dtype()));
+    }
 }
 
 // =============================================================================

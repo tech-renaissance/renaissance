@@ -322,6 +322,55 @@ public:
     virtual void full_int8_inplace(Tensor& tensor_a, int8_t value) = 0;
 
     // =========================================================================
+    // 统一全值填充方法（V3.6.24新增）
+    // =========================================================================
+
+    /**
+     * @brief 创建填充标量值的张量（通用接口）
+     * @param shape 张量形状
+     * @param dtype 数据类型（FP32/BF16/INT32/INT8）
+     * @param value 填充值（float类型，会根据dtype自动转换）
+     * @return 填充后的张量
+     * @throws NotImplementedError 基类实现抛出此异常
+     *
+     * @note 类型转换规则：
+     *   - FP32: 直接填充（无精度损失）
+     *   - BF16: 使用IEEE 754 RNE舍入（Round to Nearest Even）
+     *   - INT32: 四舍五入转换
+     *   - INT8: 四舍五入转换，超出范围时钳制到[-128, 127]并记录警告日志
+     *
+     * @note 行为特点：
+     *   - 如果shape为(0,0,0,0)，返回空张量（不占用内存）
+     *   - 否则在当前设备上分配内存并填充转换后的value
+     *   - 使用传输流（transfer_stream_），调用后需手动同步
+     *
+     * @note 设计理念：提供统一的填充接口，避免用户记忆多个类型特定方法
+     */
+    virtual Tensor full(const Shape& shape, DType dtype, float value) = 0;
+
+    /**
+     * @brief 将张量的所有元素填充为value（原地操作，通用接口）
+     * @param tensor 目标张量（必须在当前设备上，dtype可以是FP32/BF16/INT32/INT8）
+     * @param value 填充值（float类型，会根据tensor.dtype()自动转换）
+     * @throws DeviceError 张量不在此设备上
+     * @throws NotImplementedError 基类实现抛出此异常
+     *
+     * @note 类型转换规则：
+     *   - FP32: 直接填充（无精度损失）
+     *   - BF16: 使用IEEE 754 RNE舍入（Round to Nearest Even）
+     *   - INT32: 四舍五入转换
+     *   - INT8: 四舍五入转换，超出范围时钳制到[-128, 127]并记录警告日志
+     *
+     * @note 行为特点：
+     *   - 验证张量必须在当前设备上
+     *   - 空张量（numel==0）静默返回，不执行任何操作
+     *   - 使用传输流（transfer_stream_），调用后需手动同步
+     *
+     * @note 设计理念：提供统一的inplace填充接口，与zeros_inplace/ones_inplace命名一致
+     */
+    virtual void full_inplace(Tensor& tensor, float value) = 0;
+
+    // =========================================================================
     // 随机数生成（高级接口，仅FP32实现）
     // =========================================================================
 
@@ -523,8 +572,48 @@ public:
 
     /**
      * @brief 同步设备（GPU专用，CPU为空操作）
+     * @deprecated V3.6.24: 请使用 sync() 或 sync_all() 代替
      */
-    virtual void synchronize() {}
+    virtual void synchronize();
+
+    /**
+     * @brief 同步指定流
+     * @param stream_type 流类型（必须显式指定，无默认值）
+     *   - TR_COMPUTE_STREAM: 计算流
+     *   - TR_TRANSFER_STREAM: 传输流
+     *   - TR_COMM_STREAM: 通信流（NCCL/MCCL，如果启用）
+     *
+     * @note 阻塞CPU，直到指定流上所有操作完成
+     * @warning
+     *   - 必须显式指定流类型，避免意外同步错流
+     *   - 频繁同步会严重影响性能，应尽量batch操作后统一同步
+     *   - CPU设备会抛出NotImplementedError
+     *
+     * @throws NotImplementedError CPU设备不支持流同步
+     *
+     * @example
+     * @code
+     * device->cast_into(a, b, TR_COMPUTE_STREAM);
+     * device->sync(TR_COMPUTE_STREAM);  // 必须显式指定流
+     * @endcode
+     */
+    virtual void sync(StreamType stream_type);
+
+    /**
+     * @brief 同步所有流
+     *
+     * @note 阻塞CPU，直到所有流上所有操作完成
+     * @warning 粗粒度同步，性能开销较大，仅在必要时使用
+     * @note CPU设备为空操作（立即返回）
+     *
+     * @example
+     * @code
+     * device->zeros_inplace(t1);
+     * device->full_inplace(t2, 1.0f);
+     * device->sync_all();  // 统一同步所有流
+     * @endcode
+     */
+    virtual void sync_all();
 
     /**
      * @brief 打印设备状态
