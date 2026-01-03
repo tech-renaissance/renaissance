@@ -58,7 +58,8 @@ public:
     void memset_internal(void* ptr, int value, size_t size) override;
 
     // ===== 同步操作 =====
-    void synchronize() override;
+    void sync(StreamType stream_type) override;
+    void sync_all() override;
 
 
 
@@ -126,10 +127,10 @@ public:
 
 
     // ===== 张量传输、复制、类型转换 =====
-    void copy_into(const Tensor& tensor_a, Tensor& tensor_b) override;
+    void copy_into(const Tensor& tensor_a, Tensor& tensor_b, StreamType stream_type = TR_TRANSFER_STREAM) override;
     void transfer_into(const Tensor& tensor_a, Tensor& tensor_b) override;
-    void cast_into(const Tensor& tensor_a, Tensor& tensor_b, StreamType stream = TR_DEFAULT_STREAM) override;
-    void trunc_cast_into(const Tensor& tensor_a, Tensor& tensor_b, StreamType stream = TR_DEFAULT_STREAM) override;
+    void cast_into(const Tensor& tensor_a, Tensor& tensor_b, StreamType stream_type = TR_TRANSFER_STREAM) override;
+    void trunc_cast_into(const Tensor& tensor_a, Tensor& tensor_b, StreamType stream_type = TR_TRANSFER_STREAM) override;
 
 
 
@@ -244,6 +245,10 @@ public:
 
 
 // ************************* TRANSFER STREAM END *************************/
+
+
+protected:
+    void synchronize() override;  // @deprecated V3.6.24: 使用 sync() 或 sync_all()
 
 
 private:

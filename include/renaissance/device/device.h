@@ -498,7 +498,7 @@ public:
      *  - 形状必须相同
      *  - 空张量(numel=0)允许,不执行任何操作
      */
-    virtual void copy_into(const Tensor& tensor_a, Tensor& tensor_b);
+    virtual void copy_into(const Tensor& tensor_a, Tensor& tensor_b, StreamType stream_type = TR_TRANSFER_STREAM);
 
     /**
      * @brief 跨设备张量传输（指定输出，核心方法！）
@@ -519,62 +519,12 @@ public:
      */
     virtual void transfer_into(const Tensor& tensor_a, Tensor& tensor_b);
 
-    /**
-     * @brief 数据类型转换（指定输出，核心方法！）
-     * @param tensor_a 源张量（从该张量转换数据类型）
-     * @param tensor_b 目标张量（转换结果写入该张量）
-     * @param stream 使用的流类型（仅GPU有效，CPU忽略此参数）
-     * @throws ShapeError 形状不匹配时
-     * @throws TypeError 数据类型转换不支持或同类型转换时
-     * @throws ValueError 元素数不匹配时
-     *
-     * @note 要求:
-     *  - tensor_a和tensor_b必须在同一设备上
-     *  - 形状必须相同
-     *  - 数据类型必须不同
-     *  - 仅支持以下7种转换：
-     *    * FP32 ↔ INT32, FP32 ↔ BF16, BF16 ↔ FP32
-     *    * INT32 ↔ FP32, INT32 ↔ INT8, INT8 ↔ FP32, INT8 ↔ INT32
-     *  - 空张量(numel=0)允许，不执行任何操作（静默返回）
-     *  - INT32→INT8使用饱和处理（clamp到[-128, 127]）
-     *  - FP32→BF16使用RNE舍入（Round to Nearest Even）
-     */
-    virtual void cast_into(const Tensor& tensor_a, Tensor& tensor_b,
-                          StreamType stream = TR_DEFAULT_STREAM);
-
-    /**
-     * @brief 截断类型转换（仅支持FP32→BF16）
-     * @param tensor_a 源张量（必须是FP32）
-     * @param tensor_b 目标张量（必须是BF16）
-     * @param stream 流类型（仅GPU有效，CPU忽略）
-     * @throws TypeError 如果类型组合不是FP32→BF16
-     * @throws ValueError 如果形状不匹配或不在同一设备上
-     * @note 空张量(numel=0)允许，不执行任何操作（静默返回）
-     * @note 截断模式：直接丢弃FP32的低16位，速度比RNE舍入更快
-     * @version 3.6.19
-     * @date 2026-01-03
-     *
-     * 对比cast_into：
-     * - cast_into(FP32→BF16)：使用RNE舍入（Round to Nearest Even），精度更高但速度较慢
-     * - trunc_cast_into(FP32→BF16)：使用截断（直接丢弃低16位），速度更快但略有精度损失
-     *
-     * 使用场景：
-     * - 深度学习推理：精度要求不高的场景，可使用trunc_cast_into提升速度
-     * - 深度学习训练：建议使用cast_into保持精度
-     * - 数据预处理：对精度不敏感的数据转换
-     */
-    virtual void trunc_cast_into(const Tensor& tensor_a, Tensor& tensor_b,
-                                 StreamType stream = TR_DEFAULT_STREAM);
+    virtual void cast_into(const Tensor& tensor_a, Tensor& tensor_b, StreamType stream_type = TR_TRANSFER_STREAM);
+    virtual void trunc_cast_into(const Tensor& tensor_a, Tensor& tensor_b, StreamType stream_type = TR_TRANSFER_STREAM);
 
     // =========================================================================
     // 同步与调试
     // =========================================================================
-
-    /**
-     * @brief 同步设备（GPU专用，CPU为空操作）
-     * @deprecated V3.6.24: 请使用 sync() 或 sync_all() 代替
-     */
-    virtual void synchronize();
 
     /**
      * @brief 同步指定流
@@ -682,6 +632,12 @@ protected:
         std::initializer_list<const Tensor*> tensors,
         bool require_same_dtype = false
     ) const;
+
+    /**
+     * @brief 同步设备（GPU专用，CPU为空操作）
+     * @deprecated V3.6.24: 请使用 sync() 或 sync_all() 代替
+     */
+    virtual void synchronize();
 
     /**
      * @brief 抛出未实现错误

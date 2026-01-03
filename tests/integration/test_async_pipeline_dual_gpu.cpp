@@ -1,9 +1,9 @@
 /**
  * @file test_async_pipeline_dual_gpu.cpp
- * @brief 双GPU异步训练流水线集成测试
+ * @brief 双GPU异步训练流水线集成测?
  * @version 3.6.18
  * @date 2026-01-02
- * @author 技术觉醒团队
+ * @author 技术觉醒团?
  */
 
 #include "renaissance.h"
@@ -52,7 +52,7 @@ int main() {
         std::cout << "  SUCCESS: NCCL initialized" << std::endl;
 
         // ============================================================
-        // 步骤2：分配锁页内存（两个GPU）
+        // 步骤2：分配锁页内存（两个GPU?
         // ============================================================
         std::cout << "\n[Step 2] Allocating pinned memory for both GPUs..." << std::endl;
         auto pinned0 = cuda0.alloc_pinned(num_bytes);
@@ -62,7 +62,7 @@ int main() {
         std::cout << "  SUCCESS: Allocated pinned memory for both GPUs" << std::endl;
 
         // ============================================================
-        // 步骤3：准备数据
+        // 步骤3：准备数?
         // ============================================================
         std::cout << "\n[Step 3] Preparing data..." << std::endl;
         for (int64_t i = 0; i < num_elements; ++i) {
@@ -82,7 +82,7 @@ int main() {
         std::cout << "  SUCCESS: GPU tensors created" << std::endl;
 
         // ============================================================
-        // 步骤5：异步传输（并行到两个GPU）
+        // 步骤5：异步传输（并行到两个GPU?
         // ============================================================
         std::cout << "\n[Step 5] Async H2D transfer to both GPUs..." << std::endl;
         auto h2d_start = std::chrono::high_resolution_clock::now();
@@ -95,7 +95,7 @@ int main() {
         std::cout << "  Launch time: " << h2d_us << " us (parallel transfer)" << std::endl;
 
         // ============================================================
-        // 步骤6：GPU端等待传输完成
+        // 步骤6：GPU端等待传输完?
         // ============================================================
         std::cout << "\n[Step 6] Sync transfer to compute streams..." << std::endl;
         cuda0.sync_transfer_to_compute();
@@ -103,7 +103,7 @@ int main() {
         std::cout << "  SUCCESS: Both GPUs waiting for transfer completion" << std::endl;
 
         // ============================================================
-        // 步骤7：模拟前向传播
+        // 步骤7：模拟前向传?
         // ============================================================
         std::cout << "\n[Step 7] Simulating forward pass on both GPUs..." << std::endl;
         auto forward_start = std::chrono::high_resolution_clock::now();
@@ -127,15 +127,15 @@ int main() {
         cuda1.add_into(output1, output1, grad1);
 
         // 等待计算完成
-        cuda0.synchronize();
-        cuda1.synchronize();
+        cuda0.sync_all();
+        cuda1.sync_all();
 
         auto backward_end = std::chrono::high_resolution_clock::now();
         double backward_ms = std::chrono::duration<double, std::milli>(backward_end - backward_start).count();
         std::cout << "  Backward pass completed in " << backward_ms << " ms" << std::endl;
 
         // ============================================================
-        // 步骤9：标记计算完成
+        // 步骤9：标记计算完?
         // ============================================================
         std::cout << "\n[Step 9] Marking compute completion..." << std::endl;
         cuda0.mark_compute_done();
@@ -171,8 +171,8 @@ int main() {
         // 步骤12：同步并验证结果
         // ============================================================
         std::cout << "\n[Step 12] Verifying results..." << std::endl;
-        cuda0.synchronize();
-        cuda1.synchronize();
+        cuda0.sync_all();
+        cuda1.sync_all();
 
         // 验证梯度已同步（两个GPU的梯度应该相等）
         auto& cpu = mgr.cpu();
@@ -201,7 +201,7 @@ int main() {
         }
 
         // ============================================================
-        // 步骤13：性能测试（10次迭代）
+        // 步骤13：性能测试?0次迭代）
         // ============================================================
         std::cout << "\n[Step 13] Performance test (10 iterations)..." << std::endl;
         const int num_iterations = 10;
@@ -225,14 +225,14 @@ int main() {
             cuda1.add_into(output1, output1, grad1);
 
             // 等待计算完成（确保Event记录正确的完成时间）
-            cuda0.synchronize();
-            cuda1.synchronize();
+            cuda0.sync_all();
+            cuda1.sync_all();
 
             // 标记计算完成
             cuda0.mark_compute_done();
             cuda1.mark_compute_done();
 
-            // AllReduce（使用Group API避免死锁）
+            // AllReduce（使用Group API避免死锁?
 #ifdef TR_USE_NCCL
             ncclGroupStart();
             cuda0.allreduce_gradient(grad0);
@@ -245,8 +245,8 @@ int main() {
             cuda1.sync_comm_to_compute();
 
             // 同步
-            cuda0.synchronize();
-            cuda1.synchronize();
+            cuda0.sync_all();
+            cuda1.sync_all();
 
             auto iter_end = std::chrono::high_resolution_clock::now();
             double iter_ms = std::chrono::duration<double, std::milli>(iter_end - iter_start).count();

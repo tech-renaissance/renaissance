@@ -80,7 +80,7 @@ void Device::add_into([[maybe_unused]] const Tensor& a, [[maybe_unused]] const T
     throw_not_impl("add_into");
 }
 
-void Device::copy_into([[maybe_unused]] const Tensor& tensor_a, [[maybe_unused]] Tensor& tensor_b) {
+void Device::copy_into([[maybe_unused]] const Tensor& tensor_a, [[maybe_unused]] Tensor& tensor_b, [[maybe_unused]] StreamType stream_type) {
     throw_not_impl("copy_into");
 }
 
@@ -88,13 +88,11 @@ void Device::transfer_into([[maybe_unused]] const Tensor& tensor_a, [[maybe_unus
     throw_not_impl("transfer_into");
 }
 
-void Device::cast_into([[maybe_unused]] const Tensor& tensor_a, [[maybe_unused]] Tensor& tensor_b,
-                       [[maybe_unused]] StreamType stream) {
+void Device::cast_into([[maybe_unused]] const Tensor& tensor_a, [[maybe_unused]] Tensor& tensor_b, [[maybe_unused]] StreamType stream_type) {
     throw_not_impl("cast_into");
 }
 
-void Device::trunc_cast_into([[maybe_unused]] const Tensor& tensor_a, [[maybe_unused]] Tensor& tensor_b,
-                       [[maybe_unused]] StreamType stream) {
+void Device::trunc_cast_into([[maybe_unused]] const Tensor& tensor_a, [[maybe_unused]] Tensor& tensor_b, [[maybe_unused]] StreamType stream_type) {
     throw_not_impl("cast_into");
 }
 

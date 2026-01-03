@@ -81,7 +81,7 @@ int main() {
         std::cout << "  SUCCESS: GPU will wait for transfer completion" << std::endl;
 
         // 同步设备以便验证
-        musa.synchronize();
+        musa.sync(TR_TRANSFER_STREAM);
 
         // 验证数据正确性（D2H同步读回）
         std::cout << "\n[TEST 5] Verifying H2D transfer correctness..." << std::endl;
@@ -135,7 +135,7 @@ int main() {
 
         // 同步等待D2H完成
         std::cout << "\n[TEST 7] Synchronizing to read D2H result..." << std::endl;
-        musa.synchronize();
+        musa.sync(TR_TRANSFER_STREAM);
         std::cout << "  SUCCESS: D2H transfer completed" << std::endl;
 
         // 验证D2H数据正确性
@@ -168,7 +168,7 @@ int main() {
             auto t0 = std::chrono::high_resolution_clock::now();
             musa.async_copy_h2d(host_data, device_tensor);
             musa.sync_transfer_to_compute();
-            musa.synchronize();
+            musa.sync(TR_TRANSFER_STREAM);
             auto t1 = std::chrono::high_resolution_clock::now();
 
             double h2d_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
@@ -177,7 +177,7 @@ int main() {
             // D2H
             auto t2 = std::chrono::high_resolution_clock::now();
             musa.async_copy_d2h(device_tensor, host_result);
-            musa.synchronize();
+            musa.sync(TR_TRANSFER_STREAM);
             auto t3 = std::chrono::high_resolution_clock::now();
 
             double d2h_ms = std::chrono::duration<double, std::milli>(t3 - t2).count();

@@ -982,7 +982,8 @@ void CpuDevice::transfer_into(const Tensor& tensor_a, Tensor& tensor_b) {
     }
 }
 
-void CpuDevice::copy_into(const Tensor& tensor_a, Tensor& tensor_b) {
+void CpuDevice::copy_into(const Tensor& tensor_a, Tensor& tensor_b, StreamType stream_type) {
+    (void)stream_type;
     // 1. 验证设备
     check_on_device(tensor_a);
     check_on_device(tensor_b);

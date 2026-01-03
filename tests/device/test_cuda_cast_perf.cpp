@@ -89,7 +89,7 @@ int main() {
         std::cout << "\n[3/9] Testing FP32 -> BF16 (RNE)..." << std::endl;
         Timer timer;
         cuda.cast_into(fp32_gpu, bf16_gpu);
-        cuda.synchronize();
+        cuda.sync(TR_TRANSFER_STREAM);
         double time_fp32_to_bf16 = timer.elapsed_ms();
         print_throughput("FP32 -> BF16 (RNE)", num_elements, time_fp32_to_bf16);
 
@@ -97,7 +97,7 @@ int main() {
         std::cout << "\n[3.5/9] Testing FP32 -> BF16 (Truncation)..." << std::endl;
         timer.reset();
         cuda.trunc_cast_into(fp32_gpu, bf16_gpu);
-        cuda.synchronize();
+        cuda.sync(TR_TRANSFER_STREAM);
         double time_fp32_to_bf16_trunc = timer.elapsed_ms();
         print_throughput("FP32 -> BF16 (Trunc)", num_elements, time_fp32_to_bf16_trunc);
 
@@ -105,7 +105,7 @@ int main() {
         std::cout << "\n[4/9] Testing BF16 -> FP32..." << std::endl;
         timer.reset();
         cuda.cast_into(bf16_gpu, fp32_gpu);
-        cuda.synchronize();
+        cuda.sync(TR_TRANSFER_STREAM);
         double time_bf16_to_fp32 = timer.elapsed_ms();
         print_throughput("BF16 -> FP32", num_elements, time_bf16_to_fp32);
 
@@ -121,7 +121,7 @@ int main() {
         std::cout << "\n[6/9] Testing INT32 -> FP32..." << std::endl;
         timer.reset();
         cuda.cast_into(int32_gpu, fp32_gpu);
-        cuda.synchronize();
+        cuda.sync(TR_TRANSFER_STREAM);
         double time_int32_to_fp32 = timer.elapsed_ms();
         print_throughput("INT32 -> FP32", num_elements, time_int32_to_fp32);
 
@@ -129,7 +129,7 @@ int main() {
         std::cout << "\n[7/9] Testing FP32 -> INT32..." << std::endl;
         timer.reset();
         cuda.cast_into(fp32_gpu, int32_gpu);
-        cuda.synchronize();
+        cuda.sync(TR_TRANSFER_STREAM);
         double time_fp32_to_int32 = timer.elapsed_ms();
         print_throughput("FP32 -> INT32", num_elements, time_fp32_to_int32);
 
@@ -143,7 +143,7 @@ int main() {
         std::cout << "\n[9/9] Testing INT32 -> INT8..." << std::endl;
         timer.reset();
         cuda.cast_into(int32_gpu, int8_gpu);
-        cuda.synchronize();
+        cuda.sync(TR_TRANSFER_STREAM);
         double time_int32_to_int8 = timer.elapsed_ms();
         print_throughput("INT32 -> INT8", num_elements, time_int32_to_int8);
 
@@ -151,7 +151,7 @@ int main() {
         std::cout << "\n[10/9] Testing INT8 -> INT32..." << std::endl;
         timer.reset();
         cuda.cast_into(int8_gpu, int32_gpu);
-        cuda.synchronize();
+        cuda.sync(TR_TRANSFER_STREAM);
         double time_int8_to_int32 = timer.elapsed_ms();
         print_throughput("INT8 -> INT32", num_elements, time_int8_to_int32);
 
@@ -159,7 +159,7 @@ int main() {
         std::cout << "\n[11/9] Testing INT8 -> FP32..." << std::endl;
         timer.reset();
         cuda.cast_into(int8_gpu, fp32_gpu);
-        cuda.synchronize();
+        cuda.sync(TR_TRANSFER_STREAM);
         double time_int8_to_fp32 = timer.elapsed_ms();
         print_throughput("INT8 -> FP32", num_elements, time_int8_to_fp32);
 

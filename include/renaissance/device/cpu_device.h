@@ -88,12 +88,10 @@ public:
 
     // ===== 张量运算（加法和复制）=====
     void add_into(const Tensor& a, const Tensor& b, Tensor& result) override;
-    void copy_into(const Tensor& tensor_a, Tensor& tensor_b) override;
+    void copy_into(const Tensor& tensor_a, Tensor& tensor_b, StreamType stream_type = TR_TRANSFER_STREAM) override;
     void transfer_into(const Tensor& tensor_a, Tensor& tensor_b) override;
-    void cast_into(const Tensor& tensor_a, Tensor& tensor_b,
-                  StreamType stream = TR_DEFAULT_STREAM) override;
-    void trunc_cast_into(const Tensor& tensor_a, Tensor& tensor_b,
-                        StreamType stream = TR_DEFAULT_STREAM) override;
+    void cast_into(const Tensor& tensor_a, Tensor& tensor_b, StreamType stream_type = TR_TRANSFER_STREAM) override;
+    void trunc_cast_into(const Tensor& tensor_a, Tensor& tensor_b, StreamType stream_type = TR_TRANSFER_STREAM) override;
 
     // ===== 张量比较 =====
     bool equal(const Tensor& a, const Tensor& b) override;

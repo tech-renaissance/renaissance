@@ -10,6 +10,14 @@
 #include <iostream>
 #include <iomanip>
 
+#ifdef TR_USE_MUSA
+// MUSA SDK defines INFO/WARN/ERROR macros that conflict with our LogLevel::INFO/WARN/ERROR
+#undef INFO
+#undef WARN
+#undef ERROR
+#include <musa_runtime.h>
+#endif
+
 using namespace tr;
 
 int main() {

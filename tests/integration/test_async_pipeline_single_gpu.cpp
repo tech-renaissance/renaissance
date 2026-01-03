@@ -1,9 +1,9 @@
 /**
  * @file test_async_pipeline_single_gpu.cpp
- * @brief 单GPU异步流水线集成测试
+ * @brief 单GPU异步流水线集成测?
  * @version 3.6.18
  * @date 2026-01-02
- * @author 技术觉醒团队
+ * @author 技术觉醒团?
  */
 
 #include "renaissance.h"
@@ -40,7 +40,7 @@ int main() {
         std::cout << "  Total size: " << static_cast<double>(num_bytes) / (1024.0 * 1024.0) << " MB" << std::endl;
 
         // ============================================================
-        // 步骤1：分配锁页内存
+        // 步骤1：分配锁页内?
         // ============================================================
         std::cout << "\n[Step 1] Allocating pinned memory..." << std::endl;
         auto pinned = cuda.alloc_pinned(num_bytes);
@@ -54,7 +54,7 @@ int main() {
                   << " MB of pinned memory" << std::endl;
 
         // ============================================================
-        // 步骤2：准备数据（模拟数据加载）
+        // 步骤2：准备数据（模拟数据加载?
         // ============================================================
         std::cout << "\n[Step 2] Preparing data on host..." << std::endl;
         auto prepare_start = std::chrono::high_resolution_clock::now();
@@ -88,7 +88,7 @@ int main() {
         std::cout << "  Launch time: " << h2d_launch_us << " us (CPU returned immediately)" << std::endl;
 
         // ============================================================
-        // 步骤5：GPU端等待传输完成（Event-based，不阻塞CPU）
+        // 步骤5：GPU端等待传输完成（Event-based，不阻塞CPU?
         // ============================================================
         std::cout << "\n[Step 5] Sync transfer to compute stream..." << std::endl;
         cuda.sync_transfer_to_compute();
@@ -100,7 +100,7 @@ int main() {
         std::cout << "\n[Step 6] Simulating forward pass..." << std::endl;
         auto compute_start = std::chrono::high_resolution_clock::now();
 
-        // 模拟计算：将所有值乘以2（通过自加实现）
+        // 模拟计算：将所有值乘?（通过自加实现?
         Tensor result = cuda.empty(shape, DType::FP32);
         cuda.add_into(device_tensor, device_tensor, result);
 
@@ -112,7 +112,7 @@ int main() {
         // 步骤7：同步并验证结果
         // ============================================================
         std::cout << "\n[Step 7] Verifying results..." << std::endl;
-        cuda.synchronize();
+        cuda.sync_all();
 
         // 创建CPU tensor用于验证
         Tensor cpu_verify = cpu.empty(shape, DType::FP32);
@@ -120,7 +120,7 @@ int main() {
 
         const float* verify_ptr = static_cast<const float*>(cpu_verify.data_ptr());
 
-        // 验证前100个元素
+        // 验证?00个元?
         bool all_correct = true;
         for (int i = 0; i < 100; ++i) {
             float expected = host_data[i] * 2.0f;
@@ -139,7 +139,7 @@ int main() {
         }
 
         // ============================================================
-        // 步骤8：性能测试（10次迭代）
+        // 步骤8：性能测试?0次迭代）
         // ============================================================
         std::cout << "\n[Step 8] Performance test (10 iterations)..." << std::endl;
         const int num_iterations = 10;
@@ -156,7 +156,7 @@ int main() {
             cuda.add_into(device_tensor, device_tensor, result);
 
             // 同步
-            cuda.synchronize();
+            cuda.sync_all();
 
             auto iter_end = std::chrono::high_resolution_clock::now();
             double iter_ms = std::chrono::duration<double, std::milli>(iter_end - iter_start).count();

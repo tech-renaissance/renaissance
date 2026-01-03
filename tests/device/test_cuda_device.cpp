@@ -41,7 +41,7 @@ int main() {
     Tensor fp32_result = cuda.zeros(shape, DType::FP32);
 
     cuda.add_into(fp32_zeros, fp32_ones, fp32_result);
-    cuda.synchronize();
+    cuda.sync(TR_COMPUTE_STREAM);
 
     // 拷回CPU验证
     std::vector<float> fp32_data(10);
@@ -60,7 +60,7 @@ int main() {
     Tensor bf16_result = cuda.zeros(shape, DType::BF16);
 
     cuda.add_into(bf16_zeros, bf16_ones, bf16_result);
-    cuda.synchronize();
+    cuda.sync(TR_COMPUTE_STREAM);
 
     std::vector<uint16_t> bf16_data(10);
     cudaMemcpy(bf16_data.data(), bf16_result.data_ptr(),
@@ -79,7 +79,7 @@ int main() {
     Tensor int32_result = cuda.zeros(shape, DType::INT32);
 
     cuda.add_into(int32_zeros, int32_ones, int32_result);
-    cuda.synchronize();
+    cuda.sync(TR_COMPUTE_STREAM);
 
     std::vector<int32_t> int32_data(10);
     cudaMemcpy(int32_data.data(), int32_result.data_ptr(),
@@ -97,7 +97,7 @@ int main() {
     Tensor int8_result = cuda.zeros(shape, DType::INT8);
 
     cuda.add_into(int8_zeros, int8_ones, int8_result);
-    cuda.synchronize();
+    cuda.sync(TR_COMPUTE_STREAM);
 
     std::vector<int8_t> int8_data(10);
     cudaMemcpy(int8_data.data(), int8_result.data_ptr(),

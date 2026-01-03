@@ -319,28 +319,28 @@ std::shared_ptr<void> CudaDevice::allocate(size_t size) {
     cudaSetDevice(device_id_);
 
     void* ptr = nullptr;
-    cudaError_t err = cudaMallocAsync(&ptr, size, cudaStreamDefault);
+    cudaError_t err = cudaMallocAsync(&ptr, size, transfer_stream_);
     if (err != cudaSuccess) {
         TR_MEMORY_ERROR("CUDA allocation failed on device " << device_id_
                  << ": " << cudaGetErrorString(err));
     }
 
     // 同步确保分配完成
-    cudaStreamSynchronize(cudaStreamDefault);
+    cudaStreamSynchronize(transfer_stream_);
 
     // 返回shared_ptr，自定义删除器
     return std::shared_ptr<void>(ptr, [this](void* p) {
         cudaSetDevice(device_id_);
-        cudaFreeAsync(p, cudaStreamDefault);
-        cudaStreamSynchronize(cudaStreamDefault);
+        cudaFreeAsync(p, transfer_stream_);
+        cudaStreamSynchronize(transfer_stream_);
     });
 }
 
 void CudaDevice::deallocate(void* ptr) {
     if (ptr) {
         cudaSetDevice(device_id_);
-        cudaFreeAsync(ptr, cudaStreamDefault);
-        cudaStreamSynchronize(cudaStreamDefault);
+        cudaFreeAsync(ptr, transfer_stream_);
+        cudaStreamSynchronize(transfer_stream_);
     }
 }
 
@@ -368,6 +368,7 @@ void CudaDevice::memset_internal(void* ptr, int value, size_t size) {
     }
 }
 
+// @deprecated V3.6.24: 使用 sync() 或 sync_all()
 void CudaDevice::synchronize() {
     cudaSetDevice(device_id_);
 
@@ -489,14 +490,14 @@ Tensor CudaDevice::zeros(const Shape& shape, DType dtype) {
     // 3. 创建Tensor
     Tensor tensor(shape, dtype, type(), storage, 0, false);
 
-    // 4. 统一使用cudaMemsetAsync填充为0（在compute_stream_上）
+    // 4. 统一使用cudaMemsetAsync填充为0（transfer_stream_）
     // 0x00 在 FP32/INT32/INT8/BF16 中都代表数值 0
     cudaSetDevice(device_id_);
     cudaError_t err = cudaMemsetAsync(
         tensor.data_ptr(),
         0,
         nbytes,
-        compute_stream_
+        transfer_stream_
     );
     TR_CHECK(err == cudaSuccess, DeviceError,
             "cudaMemsetAsync failed: " << cudaGetErrorString(err));
@@ -522,7 +523,18 @@ Tensor CudaDevice::ones(const Shape& shape, DType dtype) {
 
 // ===== 加法和复制运算 =====
 
-void CudaDevice::copy_into(const Tensor& tensor_a, Tensor& tensor_b) {
+void CudaDevice::copy_into(const Tensor& tensor_a, Tensor& tensor_b, StreamType stream_type) {
+    cudaStream_t stream = nullptr;
+    switch (stream_type) {
+        case StreamType::transfer_stream: stream = transfer_stream_; break;
+        case StreamType::compute_stream:  stream = compute_stream_;  break;
+#ifdef TR_USE_NCCL
+        case StreamType::comm_stream:     stream = comm_stream_;     break;
+#endif
+        case StreamType::default_stream:
+        default:                          stream = nullptr;          break;
+    }
+
     // 1. 验证设备
     check_on_device(tensor_a);
     check_on_device(tensor_b);
@@ -546,8 +558,15 @@ void CudaDevice::copy_into(const Tensor& tensor_a, Tensor& tensor_b) {
     // 5. 执行GPU内存复制（使用cudaMemcpy DeviceToDevice）
     cudaSetDevice(device_id_);
     size_t nbytes = static_cast<size_t>(numel) * dtype_size(tensor_a.dtype());
-    cudaError_t err = cudaMemcpy(tensor_b.data_ptr(), tensor_a.data_ptr(),
-                                nbytes, cudaMemcpyDeviceToDevice);
+
+    cudaError_t err = cudaMemcpyAsync(
+        tensor_b.data_ptr(),
+        tensor_a.data_ptr(),
+        nbytes,
+        cudaMemcpyDeviceToDevice,
+        stream
+    );
+
     if (err != cudaSuccess) {
         TR_DEVICE_ERROR("CUDA memcpy failed in copy_into: " << cudaGetErrorString(err));
     }
@@ -595,7 +614,7 @@ void CudaDevice::impl_transfer_from_cpu(const Tensor& tensor_a, Tensor& tensor_b
 
     size_t nbytes = static_cast<size_t>(numel) * dtype_size(tensor_a.dtype());
 
-    // 同步compute_stream_，确保所有先前的计算操作完成（如zeros/ones/add_into等）
+    // 同步compute_stream_，确保所有先前的计算操作完成
     cudaError_t sync_err = cudaStreamSynchronize(compute_stream_);
     TR_CHECK(sync_err == cudaSuccess, DeviceError,
             "cudaStreamSynchronize compute failed: " << cudaGetErrorString(sync_err));
@@ -617,8 +636,7 @@ void CudaDevice::impl_transfer_from_cpu(const Tensor& tensor_a, Tensor& tensor_b
 
 // ===== 数据类型转换 =====
 
-void CudaDevice::cast_into(const Tensor& tensor_a, Tensor& tensor_b,
-                            StreamType stream_type) {
+void CudaDevice::cast_into(const Tensor& tensor_a, Tensor& tensor_b, StreamType stream_type) {
     // 1. 验证设备
     check_on_device(tensor_a);
     check_on_device(tensor_b);
@@ -712,8 +730,7 @@ void CudaDevice::cast_into(const Tensor& tensor_a, Tensor& tensor_b,
     }
 }
 
-void CudaDevice::trunc_cast_into(const Tensor& tensor_a, Tensor& tensor_b,
-                                 StreamType stream_type) {
+void CudaDevice::trunc_cast_into(const Tensor& tensor_a, Tensor& tensor_b, StreamType stream_type) {
     // 1. 验证设备
     check_on_device(tensor_a);
     check_on_device(tensor_b);
@@ -786,7 +803,7 @@ void CudaDevice::impl_transfer_to_cpu(const Tensor& tensor_a, Tensor& tensor_b) 
 
     size_t nbytes = static_cast<size_t>(numel) * dtype_size(tensor_a.dtype());
 
-    // 同步compute_stream_，确保所有先前的计算操作完成（如zeros/ones/add_into等）
+    // 同步compute_stream_，确保所有先前的计算操作完成
     cudaError_t sync_err = cudaStreamSynchronize(compute_stream_);
     TR_CHECK(sync_err == cudaSuccess, DeviceError,
             "cudaStreamSynchronize compute failed: " << cudaGetErrorString(sync_err));
@@ -909,8 +926,6 @@ void CudaDevice::sync_transfer_to_compute() {
     TR_CHECK(err == cudaSuccess, DeviceError,
             "cudaStreamWaitEvent failed: " << cudaGetErrorString(err));
 }
-
-// ===== 加法运算（使用cuDNN）=====
 
 void CudaDevice::add_into(const Tensor& a, const Tensor& b, Tensor& result) {
     // 1. 验证
@@ -1288,7 +1303,7 @@ void CudaDevice::zeros_inplace(Tensor& tensor_a) {
     // 4. 批量清零（使用cudaMemsetAsync）
     size_t nbytes = static_cast<size_t>(numel) * dtype_size(tensor_a.dtype());
     cudaError_t err = cudaMemsetAsync(
-        tensor_a.data_ptr(), 0, nbytes, compute_stream_
+        tensor_a.data_ptr(), 0, nbytes, transfer_stream_
     );
     TR_CHECK(err == cudaSuccess, DeviceError,
             "cudaMemsetAsync failed in zeros_inplace: " << cudaGetErrorString(err));
@@ -1858,7 +1873,10 @@ bool CudaDevice::equal(const Tensor& a, const Tensor& b) {
     }
 
     // 同步并读取结果
-    this->synchronize();
+    cudaSetDevice(device_id_);
+    err = cudaStreamSynchronize(compute_stream_);
+    TR_CHECK(err == cudaSuccess, DeviceError,
+            "CUDA stream synchronize failed: " << cudaGetErrorString(err));
 
     int flag;
     err = cudaMemcpy(&flag, mismatch_flag, sizeof(int), cudaMemcpyDeviceToHost);
@@ -1938,7 +1956,10 @@ bool CudaDevice::is_close(const Tensor& a, const Tensor& b, float eps) {
     }
 
     // 同步并读取结果
-    this->synchronize();
+    cudaSetDevice(device_id_);
+    err = cudaStreamSynchronize(compute_stream_);
+    TR_CHECK(err == cudaSuccess, DeviceError,
+            "CUDA stream synchronize failed: " << cudaGetErrorString(err));
 
     int flag;
     err = cudaMemcpy(&flag, mismatch_flag, sizeof(int), cudaMemcpyDeviceToHost);

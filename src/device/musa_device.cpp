@@ -354,13 +354,53 @@ void MusaDevice::memset_internal(void* ptr, int value, size_t size) {
     }
 }
 
+// @deprecated V3.6.24: 使用 sync() 或 sync_all()
 void MusaDevice::synchronize() {
     musaSetDevice(device_id_);
-    musaError_t err = musaDeviceSynchronize();
+
+    musaError_t err;
+
+    // 同步计算流
+    err = musaStreamSynchronize(compute_stream_);
     if (err != musaSuccess) {
-        TR_DEVICE_ERROR("MUSA synchronize failed: " << musaGetErrorString(err));
+        TR_DEVICE_ERROR("MUSA compute stream synchronize failed: " << musaGetErrorString(err));
+    }
+
+    // 同步传输流
+    err = musaStreamSynchronize(transfer_stream_);
+    if (err != musaSuccess) {
+        TR_DEVICE_ERROR("MUSA transfer stream synchronize failed: " << musaGetErrorString(err));
     }
 }
+
+void MusaDevice::sync(StreamType stream_type) {
+    musaStream_t stream = nullptr;
+    switch (stream_type) {
+        case StreamType::transfer_stream: stream = transfer_stream_; break;
+        case StreamType::compute_stream:  stream = compute_stream_;  break;
+        default:
+            TR_DEVICE_ERROR("Invalid stream type: " << static_cast<int>(stream_type));
+    }
+    musaSetDevice(device_id_);
+    musaError_t err = musaStreamSynchronize(stream);
+    TR_CHECK(err == musaSuccess, DeviceError,
+            "MUSA stream synchronize failed: " << musaGetErrorString(err));
+}
+
+void MusaDevice::sync_all() {
+    musaSetDevice(device_id_);
+
+    // 同步计算流
+    musaError_t err = musaStreamSynchronize(compute_stream_);
+    TR_CHECK(err == musaSuccess, DeviceError,
+            "MUSA compute stream synchronize failed: " << musaGetErrorString(err));
+
+    // 同步传输流
+    err = musaStreamSynchronize(transfer_stream_);
+    TR_CHECK(err == musaSuccess, DeviceError,
+            "MUSA transfer stream synchronize failed: " << musaGetErrorString(err));
+}
+
 
 // ===== 张量创建 =====
 
@@ -392,6 +432,86 @@ Tensor MusaDevice::empty(const Shape& shape, DType dtype) {
     Tensor tensor(shape, dtype, type(), storage, 0, false);
 
     return tensor;
+}
+
+
+/**
+ * @brief 创建全一张量
+ * @param shape 张量形状
+ * @param dtype 数据类型
+ * @return 新创建的全一张量
+ *
+ * @note 此方法内部会调用同步，返回后张量立即可用
+ * @note 属于"自动同步方法"之一，详见文件头部的同步策略声明
+ *
+ * @example
+ * @code
+ * auto t = device->ones({2, 3}, DType::FP32);
+ * // t可以立即使用，无需手动同步
+ * @endcode
+ */
+Tensor MusaDevice::ones(const Shape& shape, DType dtype) {
+    // 根据数据类型调用对应的full方法
+    switch (dtype) {
+        case DType::FP32:
+            return full_fp32(shape, 1.0f);
+        case DType::BF16:
+            return full_bf16(shape, 1.0f);
+        case DType::INT32:
+            return full_int32(shape, 1);
+        case DType::INT8:
+            return full_int8(shape, 1);
+        default:
+            TR_TYPE_ERROR("Unsupported dtype in ones: " << dtype_name(dtype));
+    }
+}
+
+// ===== 加法和复制运算 =====
+
+void MusaDevice::copy_into(const Tensor& tensor_a, Tensor& tensor_b, StreamType stream_type) {
+    musaStream_t stream = nullptr;
+    switch (stream_type) {
+        case StreamType::transfer_stream: stream = transfer_stream_; break;
+        case StreamType::compute_stream:  stream = compute_stream_;  break;
+        case StreamType::default_stream:
+        default:                          stream = nullptr;          break;
+    }
+
+    // 1. 验证设备
+    check_on_device(tensor_a);
+    check_on_device(tensor_b);
+
+    // 2. 检查数据类型一致
+    if (tensor_a.dtype() != tensor_b.dtype()) {
+        TR_TYPE_ERROR("Dtype mismatch in copy_into: " << dtype_name(tensor_a.dtype())
+                     << " vs " << dtype_name(tensor_b.dtype()));
+    }
+
+    // 3. 检查形状一致
+    check_same_shape(tensor_a, tensor_b);
+
+    // 4. 处理空张量（numel=0）
+    int64_t numel = tensor_a.numel();
+    if (numel == 0) {
+        // 空张量不执行任何操作
+        return;
+    }
+
+    // 5. 执行GPU内存复制（使用musaMemcpy DeviceToDevice）
+    musaSetDevice(device_id_);
+    size_t nbytes = static_cast<size_t>(numel) * dtype_size(tensor_a.dtype());
+
+    musaError_t err = musaMemcpyAsync(
+        tensor_b.data_ptr(),
+        tensor_a.data_ptr(),
+        nbytes,
+        musaMemcpyDeviceToDevice,
+        stream
+    );
+
+    if (err != musaSuccess) {
+        TR_DEVICE_ERROR("MUSA memcpy failed in copy_into: " << musaGetErrorString(err));
+    }
 }
 
 /**
@@ -430,69 +550,31 @@ Tensor MusaDevice::zeros(const Shape& shape, DType dtype) {
     return tensor;
 }
 
-/**
- * @brief 创建全一张量
- * @param shape 张量形状
- * @param dtype 数据类型
- * @return 新创建的全一张量
- *
- * @note 此方法内部会调用同步，返回后张量立即可用
- * @note 属于"自动同步方法"之一，详见文件头部的同步策略声明
- *
- * @example
- * @code
- * auto t = device->ones({2, 3}, DType::FP32);
- * // t可以立即使用，无需手动同步
- * @endcode
- */
-Tensor MusaDevice::ones(const Shape& shape, DType dtype) {
-    // 根据数据类型调用对应的full方法
-    switch (dtype) {
-        case DType::FP32:
-            return full_fp32(shape, 1.0f);
-        case DType::BF16:
-            return full_bf16(shape, 1.0f);
-        case DType::INT32:
-            return full_int32(shape, 1);
-        case DType::INT8:
-            return full_int8(shape, 1);
-        default:
-            TR_TYPE_ERROR("Unsupported dtype in ones: " << dtype_name(dtype));
-    }
-}
 
-// ===== 加法和复制运算 =====
 
-void MusaDevice::copy_into(const Tensor& tensor_a, Tensor& tensor_b) {
-    // 1. 验证设备
-    check_on_device(tensor_a);
-    check_on_device(tensor_b);
 
-    // 2. 检查数据类型一致
-    if (tensor_a.dtype() != tensor_b.dtype()) {
-        TR_TYPE_ERROR("Dtype mismatch in copy_into: " << dtype_name(tensor_a.dtype())
-                     << " vs " << dtype_name(tensor_b.dtype()));
-    }
 
-    // 3. 检查形状一致
-    check_same_shape(tensor_a, tensor_b);
 
-    // 4. 处理空张量（numel=0）
-    int64_t numel = tensor_a.numel();
-    if (numel == 0) {
-        // 空张量不执行任何操作
-        return;
-    }
 
-    // 5. 执行GPU内存复制（使用musaMemcpy DeviceToDevice）
-    musaSetDevice(device_id_);
-    size_t nbytes = static_cast<size_t>(numel) * dtype_size(tensor_a.dtype());
-    musaError_t err = musaMemcpy(tensor_b.data_ptr(), tensor_a.data_ptr(),
-                                nbytes, musaMemcpyDeviceToDevice);
-    if (err != musaSuccess) {
-        TR_DEVICE_ERROR("MUSA memcpy failed in copy_into: " << musaGetErrorString(err));
-    }
-}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 // ===== 跨设备传输 =====
 
@@ -558,18 +640,30 @@ void MusaDevice::impl_transfer_from_cpu(const Tensor& tensor_a, Tensor& tensor_b
     }
 
     size_t nbytes = static_cast<size_t>(numel) * dtype_size(tensor_a.dtype());
-    musaError_t err = musaMemcpy(tensor_b.data_ptr(), tensor_a.data_ptr(),
-                                nbytes, musaMemcpyHostToDevice);
-    if (err != musaSuccess) {
-        TR_DEVICE_ERROR("MUSA memcpy failed in transfer_into (Host to Device): "
-                       << musaGetErrorString(err));
-    }
+
+    // 同步compute_stream_，确保所有先前的计算操作完成
+    musaError_t sync_err = musaStreamSynchronize(compute_stream_);
+    TR_CHECK(sync_err == musaSuccess, DeviceError,
+            "musaStreamSynchronize compute failed: " << musaGetErrorString(sync_err));
+
+    // 使用musaMemcpyAsync + transfer_stream_
+    musaError_t err = musaMemcpyAsync(
+        tensor_b.data_ptr(),
+        tensor_a.data_ptr(),
+        nbytes,
+        musaMemcpyHostToDevice,
+        transfer_stream_
+    );
+    TR_CHECK(err == musaSuccess, DeviceError,
+            "musaMemcpyAsync H2D failed: " << musaGetErrorString(err));
+
+    // 同步等待（保持同步语义）
+    musaStreamSynchronize(transfer_stream_);
 }
 
 // ===== 数据类型转换 =====
 
-void MusaDevice::cast_into(const Tensor& tensor_a, Tensor& tensor_b,
-                            StreamType stream_type) {
+void MusaDevice::cast_into(const Tensor& tensor_a, Tensor& tensor_b, StreamType stream_type) {
     // 1. 验证设备
     check_on_device(tensor_a);
     check_on_device(tensor_b);
@@ -615,9 +709,6 @@ void MusaDevice::cast_into(const Tensor& tensor_a, Tensor& tensor_b,
     switch (stream_type) {
         case StreamType::transfer_stream: stream = transfer_stream_; break;
         case StreamType::compute_stream:  stream = compute_stream_;  break;
-#ifdef TR_USE_NCCL
-        case StreamType::comm_stream:     stream = comm_stream_;     break;
-#endif
         case StreamType::default_stream:
         default:                          stream = nullptr;          break;
     }
@@ -665,8 +756,7 @@ void MusaDevice::cast_into(const Tensor& tensor_a, Tensor& tensor_b,
     }
 }
 
-void MusaDevice::trunc_cast_into(const Tensor& tensor_a, Tensor& tensor_b,
-                                 StreamType stream_type) {
+void MusaDevice::trunc_cast_into(const Tensor& tensor_a, Tensor& tensor_b, StreamType stream_type) {
     // 1. 验证设备
     check_on_device(tensor_a);
     check_on_device(tensor_b);
@@ -735,12 +825,25 @@ void MusaDevice::impl_transfer_to_cpu(const Tensor& tensor_a, Tensor& tensor_b) 
     }
 
     size_t nbytes = static_cast<size_t>(numel) * dtype_size(tensor_a.dtype());
-    musaError_t err = musaMemcpy(tensor_b.data_ptr(), tensor_a.data_ptr(),
-                                nbytes, musaMemcpyDeviceToHost);
-    if (err != musaSuccess) {
-        TR_DEVICE_ERROR("MUSA memcpy failed in transfer_into (Device to Host): "
-                       << musaGetErrorString(err));
-    }
+
+    // 同步compute_stream_，确保所有先前的计算操作完成
+    musaError_t sync_err = musaStreamSynchronize(compute_stream_);
+    TR_CHECK(sync_err == musaSuccess, DeviceError,
+            "musaStreamSynchronize compute failed: " << musaGetErrorString(sync_err));
+
+    // 使用musaMemcpyAsync + transfer_stream_
+    musaError_t err = musaMemcpyAsync(
+        tensor_b.data_ptr(),
+        tensor_a.data_ptr(),
+        nbytes,
+        musaMemcpyDeviceToHost,
+        transfer_stream_
+    );
+    TR_CHECK(err == musaSuccess, DeviceError,
+            "musaMemcpyAsync D2H failed: " << musaGetErrorString(err));
+
+    // 同步等待（保持同步语义）
+    musaStreamSynchronize(transfer_stream_);
 }
 
 // =============================================================================
@@ -921,9 +1024,6 @@ void MusaDevice::add_into(const Tensor& a, const Tensor& b, Tensor& result) {
     if (status != musa::dnn::Status::SUCCESS) {
         TR_DEVICE_ERROR("muDNN Binary operation failed in add_into");
     }
-
-    // 同步确保计算完成
-    synchronize();
 }
 
 // =============================================================================
@@ -1145,7 +1245,7 @@ void MusaDevice::zeros_inplace(Tensor& tensor_a) {
     // 4. 批量清零（使用musaMemsetAsync）
     size_t nbytes = static_cast<size_t>(numel) * dtype_size(tensor_a.dtype());
     musaError_t err = musaMemsetAsync(
-        tensor_a.data_ptr(), 0, nbytes, compute_stream_
+        tensor_a.data_ptr(), 0, nbytes, transfer_stream_
     );
     TR_CHECK(err == musaSuccess, DeviceError,
             "musaMemsetAsync failed in zeros_inplace: " << musaGetErrorString(err));
@@ -1848,7 +1948,10 @@ bool MusaDevice::equal(const Tensor& a, const Tensor& b) {
     }
 
     // 同步并读取结果
-    this->synchronize();
+    musaSetDevice(device_id_);
+    err = musaStreamSynchronize(compute_stream_);
+    TR_CHECK(err == musaSuccess, DeviceError,
+            "MUSA stream synchronize failed: " << musaGetErrorString(err));
 
     int flag;
     err = musaMemcpy(&flag, mismatch_flag, sizeof(int), musaMemcpyDeviceToHost);
@@ -1948,7 +2051,10 @@ bool MusaDevice::is_close(const Tensor& a, const Tensor& b, float eps) {
     }
 
     // 同步并读取结果
-    this->synchronize();
+    musaSetDevice(device_id_);
+    err = musaStreamSynchronize(compute_stream_);
+    TR_CHECK(err == musaSuccess, DeviceError,
+            "MUSA stream synchronize failed: " << musaGetErrorString(err));
 
     int flag;
     err = musaMemcpy(&flag, mismatch_flag, sizeof(int), musaMemcpyDeviceToHost);

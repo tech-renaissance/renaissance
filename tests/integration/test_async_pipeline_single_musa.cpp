@@ -114,7 +114,7 @@ int main() {
         // 步骤7：同步并验证结果
         // ============================================================
         std::cout << "\n[Step 7] Verifying results..." << std::endl;
-        musa.synchronize();
+        musa.sync_all();
 
         // 创建CPU tensor用于验证
         Tensor cpu_verify = cpu.empty(shape, DType::FP32);
@@ -158,7 +158,7 @@ int main() {
             musa.add_into(device_tensor, device_tensor, result);
 
             // 同步
-            musa.synchronize();
+            musa.sync_all();
 
             auto iter_end = std::chrono::high_resolution_clock::now();
             double iter_ms = std::chrono::duration<double, std::milli>(iter_end - iter_start).count();

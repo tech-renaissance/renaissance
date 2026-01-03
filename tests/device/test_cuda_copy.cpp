@@ -56,6 +56,7 @@ int main() {
         std::cout << "\n[3/4] Copying tensor_a to tensor_b using copy_into..." << std::endl;
         auto start3 = std::chrono::high_resolution_clock::now();
         cuda.copy_into(tensor_a, tensor_b);
+        cuda.sync(TR_TRANSFER_STREAM);
         auto end3 = std::chrono::high_resolution_clock::now();
         double time3_ms = std::chrono::duration<double, std::milli>(end3 - start3).count();
 
