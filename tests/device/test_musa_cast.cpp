@@ -141,6 +141,73 @@ void test_fp32_to_bf16() {
 }
 
 /**
+ * @brief 测试FP32 -> BF16截断转换 (trunc_cast_into)
+ */
+void test_fp32_to_bf16_trunc() {
+    LOG_INFO << "Test FP32 -> BF16 (Truncation)";
+
+    MusaDevice& gpu = DeviceManager::instance().musa(0);
+    Shape shape{4};
+
+    Tensor a = gpu.zeros(shape, DType::FP32);
+    Tensor b = gpu.empty(shape, DType::BF16);
+
+    // 准备测试数据
+    Tensor h_a = get_cpu().zeros(shape, DType::FP32);
+    float* h_a_ptr = h_a.typed_data<float>();
+    h_a_ptr[0] = 1.0f;
+    h_a_ptr[1] = 1.5f;
+    h_a_ptr[2] = 2.5f;
+    h_a_ptr[3] = 3.14159f;
+
+    // H2D
+    get_cpu().transfer_into(h_a, a);
+
+    // 截断转换
+    gpu.trunc_cast_into(a, b);
+
+    // D2H
+    Tensor h_b = get_cpu().empty(shape, DType::BF16);
+    gpu.transfer_into(b, h_b);
+
+    // 验证往返转换（使用CPU进行转换）
+    Tensor h_c = get_cpu().empty(shape, DType::FP32);
+    get_cpu().cast_into(h_b, h_c);
+
+    [[maybe_unused]] const float* h_c_ptr = h_c.typed_data<float>();
+    // 截断模式容差稍大
+    assert(std::abs(h_c_ptr[0] - 1.0f) < 0.1f);
+    assert(std::abs(h_c_ptr[1] - 1.5f) < 0.1f);
+    assert(std::abs(h_c_ptr[2] - 2.5f) < 0.1f);
+
+    LOG_INFO << "PASS";
+}
+
+/**
+ * @brief 测试trunc_cast_into类型错误
+ */
+void test_trunc_cast_type_error() {
+    LOG_INFO << "Test trunc_cast_into Type Error";
+
+    MusaDevice& gpu = DeviceManager::instance().musa(0);
+    Shape shape{2, 2};
+
+    // 测试非FP32->BF16组合（应该抛出异常）
+    Tensor a = gpu.zeros(shape, DType::INT32);
+    Tensor b = gpu.empty(shape, DType::INT8);
+
+    [[maybe_unused]] bool caught = false;
+    try {
+        gpu.trunc_cast_into(a, b);
+    } catch (const TypeError& [[maybe_unused]] e) {
+        caught = true;
+    }
+
+    assert(caught);
+    LOG_INFO << "PASS";
+}
+
+/**
  * @brief 测试BF16 -> FP32转换
  */
 void test_bf16_to_fp32() {
@@ -308,11 +375,13 @@ int main() {
 
     test_fp32_to_int32();
     test_fp32_to_bf16();
+    test_fp32_to_bf16_trunc();
     test_bf16_to_fp32();
     test_int32_to_fp32();
     test_int32_to_int8();
     test_int8_to_fp32();
     test_int8_to_int32();
+    test_trunc_cast_type_error();
 
     LOG_INFO << "=== All MUSA Cast Tests Passed ===";
     return 0;

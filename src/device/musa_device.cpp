@@ -26,7 +26,6 @@
 
 #include "renaissance/base/musa_arena.h"
 #include "renaissance/device/musa_kernels.h"
-#include "renaissance/device/musa_rng_kernels.h"
 #include "renaissance/device/musa_device.h"
 
 namespace tr {
@@ -303,92 +302,19 @@ Tensor MusaDevice::zeros(const Shape& shape, DType dtype) {
 }
 
 Tensor MusaDevice::ones(const Shape& shape, DType dtype) {
-    // 1. 计算所需字节
-    size_t count = static_cast<size_t>(shape.numel());
-    size_t nbytes = count * dtype_size(dtype);
-
-    // 2. 创建Storage
-    auto storage = create_storage(nbytes, -1);
-
-    // 3. 创建Tensor
-    Tensor tensor(shape, dtype, type(), storage, 0, false);
-
-    musaSetDevice(device_id_);
-
-    // 策略1：INT8 - 使用musaMemset（0x01 = 1）
-    if (dtype == DType::INT8) {
-        musaError_t err = musaMemset(tensor.data_ptr(), 1, nbytes);
-        if (err != musaSuccess) {
-            TR_DEVICE_ERROR("MUSA memset failed in ones: " << musaGetErrorString(err));
-        }
-        return tensor;
+    // 根据数据类型调用对应的full方法
+    switch (dtype) {
+        case DType::FP32:
+            return full_fp32(shape, 1.0f);
+        case DType::BF16:
+            return full_bf16(shape, 1.0f);
+        case DType::INT32:
+            return full_int32(shape, 1);
+        case DType::INT8:
+            return full_int8(shape, 1);
+        default:
+            TR_TYPE_ERROR("Unsupported dtype in ones: " << dtype_name(dtype));
     }
-
-    // 策略2：INT32 - 使用手写fill_kernel
-    if (dtype == DType::INT32) {
-        musaError_t err = launch_fill_int32_kernel(
-            static_cast<int>(count),
-            static_cast<int32_t*>(tensor.data_ptr()),
-            static_cast<int32_t>(1)
-        );
-        if (err != musaSuccess) {
-            TR_DEVICE_ERROR("MUSA fill kernel failed in ones: " << musaGetErrorString(err));
-        }
-        return tensor;
-    }
-
-    // 策略3：BF16 - 使用优化的填充策略
-    if (dtype == DType::BF16) {
-        // 方法1：对于小张量，使用kernel
-        // 方法2：对于大张量，在Host端准备填充数据，然后一次性复制
-
-        // BF16的1.0表示：0x3F80 (float 1.0的高16位)
-        const uint16_t bf16_one = 0x3F80;
-
-        // 在Host端创建填充缓冲区
-        std::vector<uint16_t> host_buffer(count, bf16_one);
-
-        // 一次性复制到Device
-        musaError_t err = musaMemcpy(tensor.data_ptr(), host_buffer.data(),
-                                     count * sizeof(uint16_t), musaMemcpyHostToDevice);
-        if (err != musaSuccess) {
-            TR_DEVICE_ERROR("MUSA memcpy failed in ones (BF16): " << musaGetErrorString(err));
-        }
-
-        return tensor;
-    }
-
-    // 策略4：FP32 - V3.6.19修复：使用kernel替代muDNN（更可控）
-    if (dtype == DType::FP32) {
-        musaError_t err = launch_fill_float_kernel(
-            static_cast<int>(count),
-            static_cast<float*>(tensor.data_ptr()),
-            1.0f,
-            compute_stream_
-        );
-        TR_CHECK(err == musaSuccess, DeviceError,
-                "fill_float_kernel failed: " << musaGetErrorString(err));
-        return tensor;
-    }
-
-    // 策略5：BF16 - 使用优化的填充策略
-    if (dtype == DType::BF16) {
-        // BF16的1.0表示：0x3F80 (float 1.0的高16位)
-        const uint16_t bf16_one = 0x3F80;
-
-        // 在Host端创建填充缓冲区
-        std::vector<uint16_t> host_buffer(count, bf16_one);
-
-        // 一次性复制到Device
-        musaError_t err = musaMemcpy(tensor.data_ptr(), host_buffer.data(),
-                                     count * sizeof(uint16_t), musaMemcpyHostToDevice);
-        TR_CHECK(err == musaSuccess, DeviceError,
-                "musaMemcpy failed in ones (BF16): " << musaGetErrorString(err));
-
-        return tensor;
-    }
-
-    TR_TYPE_ERROR("Unsupported dtype in ones: " << dtype_name(dtype));
 }
 
 // ===== 加法和复制运算 =====
@@ -481,6 +407,7 @@ void MusaDevice::cast_into(const Tensor& tensor_a, Tensor& tensor_b,
     // 方案2：使用__mt_bfloat16类型
     extern void musa_dispatch_fp32_to_int32(const float*, int32_t*, size_t, musaStream_t);
     extern void musa_dispatch_fp32_to_bf16(const float*, __mt_bfloat16*, size_t, musaStream_t);
+    extern void musa_dispatch_fp32_to_bf16_trunc(const float*, __mt_bfloat16*, size_t, musaStream_t);
     extern void musa_dispatch_bf16_to_fp32(const __mt_bfloat16*, float*, size_t, musaStream_t);
     extern void musa_dispatch_int32_to_fp32(const int32_t*, float*, size_t, musaStream_t);
     extern void musa_dispatch_int32_to_int8(const int32_t*, int8_t*, size_t, musaStream_t);
@@ -571,6 +498,68 @@ void MusaDevice::cast_into(const Tensor& tensor_a, Tensor& tensor_b,
         musa_dispatch_int8_to_int32(static_cast<const int8_t*>(src_ptr),
                                      static_cast<int32_t*>(dst_ptr), numel, stream);
     }
+
+    // 10. 同步等待（保持同步语义）
+    if (stream != nullptr) {
+        musaStreamSynchronize(stream);
+    } else {
+        musaDeviceSynchronize();
+    }
+}
+
+void MusaDevice::trunc_cast_into(const Tensor& tensor_a, Tensor& tensor_b,
+                                 StreamType stream_type) {
+    // 前向声明dispatch函数（在musa_cast.cu中定义）
+    extern void musa_dispatch_fp32_to_bf16_trunc(const float*, __mt_bfloat16*, size_t, musaStream_t);
+
+    // 1. 验证设备
+    check_on_device(tensor_a);
+    check_on_device(tensor_b);
+
+    // 2. 验证形状相同
+    check_same_shape(tensor_a, tensor_b);
+
+    // 3. 验证数据类型不同
+    DType dtype_a = tensor_a.dtype();
+    DType dtype_b = tensor_b.dtype();
+    if (dtype_a == dtype_b) {
+        TR_TYPE_ERROR("Cannot cast to the same dtype: "
+                 << dtype_name(dtype_a) << " -> " << dtype_name(dtype_b)
+                 << ". Use copy_into() instead.");
+    }
+
+    // 4. 空张量直接返回
+    int64_t numel = tensor_a.numel();
+    if (numel == 0) {
+        return;
+    }
+
+    // 5. 只支持FP32 -> BF16
+    if (!(dtype_a == DType::FP32 && dtype_b == DType::BF16)) {
+        TR_TYPE_ERROR("trunc_cast_into only supports FP32 -> BF16 conversion. "
+                 << "Got: " << dtype_name(dtype_a) << " -> " << dtype_name(dtype_b)
+                 << ". Use cast_into() for other conversions.");
+    }
+
+    // 6. 映射StreamType到实际musaStream_t
+    musaStream_t stream = nullptr;
+    switch (stream_type) {
+        case StreamType::transfer_stream: stream = transfer_stream_; break;
+        case StreamType::compute_stream:  stream = compute_stream_;  break;
+        case StreamType::default_stream:
+        default:                          stream = nullptr;          break;
+    }
+
+    // 7. 设置当前设备
+    musaSetDevice(device_id_);
+
+    // 8. 获取数据指针
+    const void* src_ptr = tensor_a.data_ptr();
+    void* dst_ptr = tensor_b.data_ptr();
+
+    // 9. 调用截断模式的kernel
+    musa_dispatch_fp32_to_bf16_trunc(static_cast<const float*>(src_ptr),
+                                      reinterpret_cast<__mt_bfloat16*>(dst_ptr), numel, stream);
 
     // 10. 同步等待（保持同步语义）
     if (stream != nullptr) {
@@ -957,6 +946,252 @@ void MusaDevice::rand_normal_float(float* ptr, size_t count, float mean,
 // =============================================================================
 // 随机数生成（高级接口实现）
 // =============================================================================
+
+// ===== 辅助方法：创建空张量（用于释放大张量）=====
+
+Tensor MusaDevice::null_tensor() {
+    // 返回形状为(0, 0, 0, 0)的空张量，不占用内存
+    // 这是本框架推荐的销毁张量的方式
+    return Tensor();
+}
+
+void MusaDevice::zeros_inplace(Tensor& tensor_a) {
+    // 1. 验证设备
+    check_on_device(tensor_a);
+
+    // 2. 空张量静默返回
+    int64_t numel = tensor_a.numel();
+    if (numel == 0) {
+        return;
+    }
+
+    // 3. 设置当前设备
+    musaSetDevice(device_id_);
+
+    // 4. 批量清零（使用musaMemsetAsync）
+    size_t nbytes = static_cast<size_t>(numel) * dtype_size(tensor_a.dtype());
+    musaError_t err = musaMemsetAsync(
+        tensor_a.data_ptr(), 0, nbytes, compute_stream_
+    );
+    TR_CHECK(err == musaSuccess, DeviceError,
+            "musaMemsetAsync failed in zeros_inplace: " << musaGetErrorString(err));
+}
+
+void MusaDevice::ones_inplace(Tensor& tensor_a) {
+    // 1. 验证设备
+    check_on_device(tensor_a);
+
+    // 2. 根据数据类型调用对应的full方法
+    DType dtype = tensor_a.dtype();
+    switch (dtype) {
+        case DType::FP32:
+            full_fp32_inplace(tensor_a, 1.0f);
+            break;
+        case DType::BF16:
+            full_bf16_inplace(tensor_a, 1.0f);
+            break;
+        case DType::INT32:
+            full_int32_inplace(tensor_a, 1);
+            break;
+        case DType::INT8:
+            full_int8_inplace(tensor_a, 1);
+            break;
+        default:
+            TR_TYPE_ERROR("Unsupported dtype in ones_inplace: " << dtype_name(dtype));
+    }
+}
+
+// =============================================================================
+// 全值填充方法（V3.6.21新增）
+// =============================================================================
+
+// -------------------------------------------------------------------------
+// full_fp32: 创建FP32全值张量
+// -------------------------------------------------------------------------
+Tensor MusaDevice::full_fp32(const Shape& shape, float value) {
+    (void)value; // 标记为未使用（numel==0时）
+
+    // 空张量检查
+    if (shape.numel() == 0) {
+        return null_tensor();
+    }
+
+    Tensor tensor = empty(shape, DType::FP32);
+    full_fp32_inplace(tensor, value);
+    return tensor;
+}
+
+// -------------------------------------------------------------------------
+// full_bf16: 创建BF16全值张量
+// -------------------------------------------------------------------------
+Tensor MusaDevice::full_bf16(const Shape& shape, float value) {
+    (void)value; // 标记为未使用（numel==0时）
+
+    // 空张量检查
+    if (shape.numel() == 0) {
+        return null_tensor();
+    }
+
+    Tensor tensor = empty(shape, DType::BF16);
+    full_bf16_inplace(tensor, value);
+    return tensor;
+}
+
+// -------------------------------------------------------------------------
+// full_int32: 创建INT32全值张量
+// -------------------------------------------------------------------------
+Tensor MusaDevice::full_int32(const Shape& shape, int32_t value) {
+    (void)value; // 标记为未使用（numel==0时）
+
+    // 空张量检查
+    if (shape.numel() == 0) {
+        return null_tensor();
+    }
+
+    Tensor tensor = empty(shape, DType::INT32);
+    full_int32_inplace(tensor, value);
+    return tensor;
+}
+
+// -------------------------------------------------------------------------
+// full_int8: 创建INT8全值张量
+// -------------------------------------------------------------------------
+Tensor MusaDevice::full_int8(const Shape& shape, int8_t value) {
+    (void)value; // 标记为未使用（numel==0时）
+
+    // 空张量检查
+    if (shape.numel() == 0) {
+        return null_tensor();
+    }
+
+    Tensor tensor = empty(shape, DType::INT8);
+    full_int8_inplace(tensor, value);
+    return tensor;
+}
+
+// -------------------------------------------------------------------------
+// full_fp32_inplace: 原地填充FP32张量
+// -------------------------------------------------------------------------
+void MusaDevice::full_fp32_inplace(Tensor& tensor_a, float value) {
+    // 1. 验证设备
+    check_on_device(tensor_a);
+
+    // 2. 验证类型
+    if (tensor_a.dtype() != DType::FP32) {
+        TR_TYPE_ERROR("requires FP32 tensor, got " << dtype_name(tensor_a.dtype()));
+    }
+
+    // 3. 空张量静默返回
+    int64_t numel = tensor_a.numel();
+    if (numel == 0) {
+        return;
+    }
+
+    // 4. 设置当前设备
+    musaSetDevice(device_id_);
+
+    // 5. 调用填充kernel（在transfer_stream上执行）
+    float* ptr = static_cast<float*>(tensor_a.data_ptr());
+    musaError_t err = launch_fill_float_kernel(static_cast<int>(numel), ptr, value, transfer_stream_);
+    TR_CHECK(err == musaSuccess, DeviceError,
+            "MUSA fill_float kernel failed: " << musaGetErrorString(err));
+
+    // 6. 同步等待（保持同步语义）
+    musaStreamSynchronize(transfer_stream_);
+}
+
+// -------------------------------------------------------------------------
+// full_bf16_inplace: 原地填充BF16张量
+// -------------------------------------------------------------------------
+void MusaDevice::full_bf16_inplace(Tensor& tensor_a, float value) {
+    // 1. 验证设备
+    check_on_device(tensor_a);
+
+    // 2. 验证类型
+    if (tensor_a.dtype() != DType::BF16) {
+        TR_TYPE_ERROR("requires BF16 tensor, got " << dtype_name(tensor_a.dtype()));
+    }
+
+    // 3. 空张量静默返回
+    int64_t numel = tensor_a.numel();
+    if (numel == 0) {
+        return;
+    }
+
+    // 4. 设置当前设备
+    musaSetDevice(device_id_);
+
+    // 5. 调用填充kernel（在transfer_stream上执行，kernel内部使用RNE舍入）
+    uint16_t* ptr = static_cast<uint16_t*>(tensor_a.data_ptr());
+    musaError_t err = launch_fill_bf16_kernel(static_cast<int>(numel), ptr, value, transfer_stream_);
+    TR_CHECK(err == musaSuccess, DeviceError,
+            "MUSA fill_bf16 kernel failed: " << musaGetErrorString(err));
+
+    // 6. 同步等待（保持同步语义）
+    musaStreamSynchronize(transfer_stream_);
+}
+
+// -------------------------------------------------------------------------
+// full_int32_inplace: 原地填充INT32张量
+// -------------------------------------------------------------------------
+void MusaDevice::full_int32_inplace(Tensor& tensor_a, int32_t value) {
+    // 1. 验证设备
+    check_on_device(tensor_a);
+
+    // 2. 验证类型
+    if (tensor_a.dtype() != DType::INT32) {
+        TR_TYPE_ERROR("requires INT32 tensor, got " << dtype_name(tensor_a.dtype()));
+    }
+
+    // 3. 空张量静默返回
+    int64_t numel = tensor_a.numel();
+    if (numel == 0) {
+        return;
+    }
+
+    // 4. 设置当前设备
+    musaSetDevice(device_id_);
+
+    // 5. 调用填充kernel（在transfer_stream上执行）
+    int32_t* ptr = static_cast<int32_t*>(tensor_a.data_ptr());
+    musaError_t err = launch_fill_int32_kernel(static_cast<int>(numel), ptr, value, transfer_stream_);
+    TR_CHECK(err == musaSuccess, DeviceError,
+            "MUSA fill_int32 kernel failed: " << musaGetErrorString(err));
+
+    // 6. 同步等待（保持同步语义）
+    musaStreamSynchronize(transfer_stream_);
+}
+
+// -------------------------------------------------------------------------
+// full_int8_inplace: 原地填充INT8张量
+// -------------------------------------------------------------------------
+void MusaDevice::full_int8_inplace(Tensor& tensor_a, int8_t value) {
+    // 1. 验证设备
+    check_on_device(tensor_a);
+
+    // 2. 验证类型
+    if (tensor_a.dtype() != DType::INT8) {
+        TR_TYPE_ERROR("requires INT8 tensor, got " << dtype_name(tensor_a.dtype()));
+    }
+
+    // 3. 空张量静默返回
+    int64_t numel = tensor_a.numel();
+    if (numel == 0) {
+        return;
+    }
+
+    // 4. 设置当前设备
+    musaSetDevice(device_id_);
+
+    // 5. 调用填充kernel（在transfer_stream上执行）
+    int8_t* ptr = static_cast<int8_t*>(tensor_a.data_ptr());
+    musaError_t err = launch_fill_int8_kernel(static_cast<int>(numel), ptr, value, transfer_stream_);
+    TR_CHECK(err == musaSuccess, DeviceError,
+            "MUSA fill_int8 kernel failed: " << musaGetErrorString(err));
+
+    // 6. 同步等待（保持同步语义）
+    musaStreamSynchronize(transfer_stream_);
+}
 
 Tensor MusaDevice::uniform(const Shape& shape, float min_val, float max_val, DType dtype) {
     if (dtype != DType::FP32) {

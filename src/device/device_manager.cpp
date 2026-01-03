@@ -307,9 +307,6 @@ void DeviceManager::setup_nccl(int gpu_count) {
 
     // 专家评审建议：如果初始化失败，清理已创建的通信器，避免资源泄漏
     if (result != ncclSuccess) {
-        LOG_ERROR << "ncclCommInitAll failed: " << ncclGetErrorString(result)
-                  << ", cleaning up partially initialized communicators";
-
         // 清理可能已经部分初始化的通信器
         for (int i = 0; i < gpu_count; ++i) {
             if (comms[i] != nullptr) {
@@ -318,8 +315,8 @@ void DeviceManager::setup_nccl(int gpu_count) {
             }
         }
 
-        TR_THROW(DeviceError,
-                "ncclCommInitAll failed: " << ncclGetErrorString(result));
+        TR_DEVICE_ERROR("ncclCommInitAll failed: " << ncclGetErrorString(result)
+                        << ", cleaned up partially initialized communicators");
     }
 
     // 3. 将通信器设置到每个CudaDevice

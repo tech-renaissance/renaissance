@@ -169,6 +169,28 @@ void int8_to_int32(const int8_t* src, int32_t* dst, size_t n) {
     }
 }
 
+// 8. FP32 -> BF16 (Truncation模式 - 直接截断，速度更快)
+void fp32_to_bf16_trunc(const float* src, uint16_t* dst, size_t n) {
+    size_t i = 0;
+    for (; i + 7 < n; i += 8) {
+        __m256i v = _mm256_loadu_si256((const __m256i*)(src + i));
+        // 直接右移16位，丢弃低16位（截断模式）
+        v = _mm256_srli_epi32(v, 16);
+        // Pack 32-bit -> 16-bit
+        __m128i lo = _mm256_castsi256_si128(v);
+        __m128i hi = _mm256_extracti128_si256(v, 1);
+        __m128i res = _mm_packus_epi32(lo, hi);
+        _mm_storeu_si128((__m128i*)(dst + i), res);
+    }
+    // 处理剩余元素
+    for (; i < n; ++i) {
+        uint32_t bits;
+        std::memcpy(&bits, &src[i], sizeof(float));
+        // 直接丢弃低16位（截断）
+        dst[i] = static_cast<uint16_t>(bits >> 16);
+    }
+}
+
 } // namespace X86Converter
 
 #endif // TR_CPU_ARCH_X86_64
@@ -348,6 +370,32 @@ void int8_to_int32(const int8_t* src, int32_t* dst, size_t n) {
     }
 }
 
+// 8. FP32 -> BF16 (Truncation模式 - 直接截断，速度更快)
+void fp32_to_bf16_trunc(const float* src, uint16_t* dst, size_t n) {
+    size_t i = 0;
+    // 主循环：每次处理8个元素
+    for (; i + 8 <= n; i += 8) {
+        float32x4_t f_lo = vld1q_f32(src + i);
+        float32x4_t f_hi = vld1q_f32(src + i + 4);
+
+        uint32x4_t u_lo = vreinterpretq_u32_f32(f_lo);
+        uint32x4_t u_hi = vreinterpretq_u32_f32(f_hi);
+
+        // 直接右移16位（截断模式）
+        uint16x4_t bf_lo = vshrn_n_u32(u_lo, 16);
+        uint16x4_t bf_hi = vshrn_n_u32(u_hi, 16);
+
+        vst1q_u16(dst + i, vcombine_u16(bf_lo, bf_hi));
+    }
+    // 处理剩余元素
+    for (; i < n; ++i) {
+        uint32_t bits;
+        std::memcpy(&bits, &src[i], sizeof(float));
+        // 直接丢弃低16位（截断）
+        dst[i] = static_cast<uint16_t>(bits >> 16);
+    }
+}
+
 } // namespace ARMConverter
 
 #endif // TR_CPU_ARCH_ARM64
@@ -489,6 +537,25 @@ void i8_to_i32(const int8_t* src, int32_t* dst, size_t n) {
     }
 }
 
+// 8. FP32 -> BF16 (Truncation模式 - 直接截断，速度更快)
+void f32_to_bf16_trunc(const float* src, uint16_t* dst, size_t n) {
+    size_t vl;
+    while (n > 0) {
+        vl = __riscv_vsetvl_e32m8(n);
+
+        vfloat32m8_t v_f32 = __riscv_vle32_v_f32m8(src, vl);
+        vuint32m8_t v_u32 = __riscv_vreinterpret_v_f32m8_u32m8(v_f32);
+
+        // 直接右移16位（截断模式）
+        vuint16m4_t v_bf16 = __riscv_vnsrl_wx_u16m4(v_u32, 16, vl);
+        __riscv_vse16_v_u16m4(dst, v_bf16, vl);
+
+        src += vl;
+        dst += vl;
+        n -= vl;
+    }
+}
+
 } // namespace RISCVConverter
 
 #endif // TR_CPU_ARCH_RISCV64
@@ -623,6 +690,65 @@ void CpuDevice::cast_into(const Tensor& tensor_a, Tensor& tensor_b,
         RISCVConverter::i8_to_i32(static_cast<const int8_t*>(src_ptr),
                                    static_cast<int32_t*>(dst_ptr), numel);
     }
+
+#else
+    #error "Unsupported CPU architecture"
+#endif
+}
+
+void CpuDevice::trunc_cast_into(const Tensor& tensor_a, Tensor& tensor_b,
+                                [[maybe_unused]] StreamType stream) {
+    // 1. 验证设备
+    check_on_device(tensor_a);
+    check_on_device(tensor_b);
+
+    // 2. 验证形状相同
+    check_same_shape(tensor_a, tensor_b);
+
+    // 3. 验证数据类型不同
+    DType dtype_a = tensor_a.dtype();
+    DType dtype_b = tensor_b.dtype();
+    if (dtype_a == dtype_b) {
+        TR_TYPE_ERROR("Cannot cast to the same dtype: "
+                 << dtype_name(dtype_a) << " -> " << dtype_name(dtype_b)
+                 << ". Use copy_into() instead.");
+    }
+
+    // 4. 空张量直接返回
+    int64_t numel = tensor_a.numel();
+    if (numel == 0) {
+        return;
+    }
+
+    // 5. 只支持FP32 -> BF16
+    if (!(dtype_a == DType::FP32 && dtype_b == DType::BF16)) {
+        TR_TYPE_ERROR("trunc_cast_into only supports FP32 -> BF16 conversion. "
+                 << "Got: " << dtype_name(dtype_a) << " -> " << dtype_name(dtype_b)
+                 << ". Use cast_into() for other conversions.");
+    }
+
+    // 6. 获取数据指针
+    const void* src_ptr = tensor_a.data_ptr();
+    void* dst_ptr = tensor_b.data_ptr();
+
+    // 7. 根据架构调用对应的SIMD实现（截断模式）
+#if defined(TR_CPU_ARCH_X86_64)
+
+    // X86_64实现（AVX2）
+    X86Converter::fp32_to_bf16_trunc(static_cast<const float*>(src_ptr),
+                                     static_cast<uint16_t*>(dst_ptr), numel);
+
+#elif defined(TR_CPU_ARCH_ARM64)
+
+    // ARM64实现（NEON）
+    ARMConverter::fp32_to_bf16_trunc(static_cast<const float*>(src_ptr),
+                                     static_cast<uint16_t*>(dst_ptr), numel);
+
+#elif defined(TR_CPU_ARCH_RISCV64)
+
+    // RISC-V实现（RVV 1.0）
+    RISCVConverter::f32_to_bf16_trunc(static_cast<const float*>(src_ptr),
+                                      static_cast<uint16_t*>(dst_ptr), numel);
 
 #else
     #error "Unsupported CPU architecture"

@@ -93,6 +93,11 @@ void Device::cast_into([[maybe_unused]] const Tensor& tensor_a, [[maybe_unused]]
     throw_not_impl("cast_into");
 }
 
+void Device::trunc_cast_into([[maybe_unused]] const Tensor& tensor_a, [[maybe_unused]] Tensor& tensor_b,
+                       [[maybe_unused]] StreamType stream) {
+    throw_not_impl("cast_into");
+}
+
 // =============================================================================
 // 随机数生成（基类实现：抛出NotImplementedError）
 // =============================================================================
@@ -143,6 +148,28 @@ void Device::randbool_inplace([[maybe_unused]] Tensor& tensor_a,
                                [[maybe_unused]] float rate_of_zeros,
                                [[maybe_unused]] DType dtype) {
     throw_not_impl("randbool_inplace");
+}
+
+// =============================================================================
+// 张量创建辅助方法（基类实现：抛出NotImplementedError）
+// =============================================================================
+
+Tensor Device::null_tensor() {
+    throw_not_impl("null_tensor");
+}
+
+void Device::zeros_inplace([[maybe_unused]] Tensor& tensor_a) {
+    throw_not_impl("zeros_inplace");
+}
+
+Tensor Device::ones(const Shape& shape, DType dtype) {
+    (void)shape;
+    (void)dtype;
+    throw_not_impl("ones");
+}
+
+void Device::ones_inplace([[maybe_unused]] Tensor& tensor_a) {
+    throw_not_impl("ones_inplace");
 }
 
 // ===== 辅助验证方法 =====

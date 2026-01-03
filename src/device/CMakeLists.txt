@@ -17,18 +17,6 @@ if(TR_USE_CUDA)
         list(APPEND DEVICE_SOURCES cuda_kernels.cu)
         message(STATUS "Device library: CUDA kernels (cuda_kernels.cu) added to device library")
     endif()
-
-    # CUDA RNG kernels文件（仅在CUDA环境下编译）
-    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/cuda_rng_kernels.cu)
-        list(APPEND DEVICE_SOURCES cuda_rng_kernels.cu)
-        message(STATUS "Device library: CUDA RNG kernels (cuda_rng_kernels.cu) added to device library")
-    endif()
-
-    # CUDA cast kernels文件（V3.6.18新增）
-    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/cuda_cast.cu)
-        list(APPEND DEVICE_SOURCES cuda_cast.cu)
-        message(STATUS "Device library: CUDA cast kernels (cuda_cast.cu) added to device library")
-    endif()
 endif()
 
 # MUSA支持
@@ -68,82 +56,6 @@ if(TR_USE_MUSA)
             set(MUSA_KERNELS_LINK_LIB musa_kernels)
         else()
             message(WARNING "MUSA_ROOT not found, skipping musa_kernels.cu")
-        endif()
-    endif()
-
-    # MUSA RNG kernels文件（仅在MUSA环境下编译）
-    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/musa_rng_kernels.cu)
-        # 查找MUSA
-        if(DEFINED TR_MUSA_PATH)
-            set(MUSA_ROOT ${TR_MUSA_PATH})
-        elseif(DEFINED ENV{MUSA_ROOT})
-            set(MUSA_ROOT $ENV{MUSA_ROOT})
-        elseif(EXISTS /usr/local/musa)
-            set(MUSA_ROOT /usr/local/musa)
-        endif()
-
-        if(MUSA_ROOT)
-            # 添加MUSA CMake模块路径
-            list(APPEND CMAKE_MODULE_PATH ${MUSA_ROOT}/cmake)
-            find_package(MUSA REQUIRED)
-
-            # 创建独立的MUSA RNG kernels静态库
-            musa_add_library(musa_rng_kernels STATIC musa_rng_kernels.cu
-                OPTIONS
-                -Xclang -I${CMAKE_SOURCE_DIR}/include
-                -Xclang -I${TR_MUSA_PATH}/include
-                -Xclang -I/usr/include/c++/13
-                -Xclang -I/usr/include/x86_64-linux-gnu/c++/13
-            )
-
-            message(STATUS "Device library: MUSA RNG kernels (musa_rng_kernels.cu) compiled as separate library")
-
-            # 将musa_rng_kernels库添加到device库的链接依赖中
-            if(DEFINED MUSA_KERNELS_LINK_LIB)
-                list(APPEND MUSA_KERNELS_LINK_LIB musa_rng_kernels)
-            else()
-                set(MUSA_KERNELS_LINK_LIB musa_rng_kernels)
-            endif()
-        else()
-            message(WARNING "MUSA_ROOT not found, skipping musa_rng_kernels.cu")
-        endif()
-    endif()
-
-    # MUSA cast kernels文件（V3.6.18新增）
-    if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/musa_cast.cu)
-        # 查找MUSA
-        if(DEFINED TR_MUSA_PATH)
-            set(MUSA_ROOT ${TR_MUSA_PATH})
-        elseif(DEFINED ENV{MUSA_ROOT})
-            set(MUSA_ROOT $ENV{MUSA_ROOT})
-        elseif(EXISTS /usr/local/musa)
-            set(MUSA_ROOT /usr/local/musa)
-        endif()
-
-        if(MUSA_ROOT)
-            # 添加MUSA CMake模块路径
-            list(APPEND CMAKE_MODULE_PATH ${MUSA_ROOT}/cmake)
-            find_package(MUSA REQUIRED)
-
-            # 创建独立的MUSA cast kernels静态库
-            musa_add_library(musa_cast_kernels STATIC musa_cast.cu
-                OPTIONS
-                -Xclang -I${CMAKE_SOURCE_DIR}/include
-                -Xclang -I${TR_MUSA_PATH}/include
-                -Xclang -I/usr/include/c++/13
-                -Xclang -I/usr/include/x86_64-linux-gnu/c++/13
-            )
-
-            message(STATUS "Device library: MUSA cast kernels (musa_cast.cu) compiled as separate library")
-
-            # 将musa_cast_kernels库添加到device库的链接依赖中
-            if(DEFINED MUSA_KERNELS_LINK_LIB)
-                list(APPEND MUSA_KERNELS_LINK_LIB musa_cast_kernels)
-            else()
-                set(MUSA_KERNELS_LINK_LIB musa_cast_kernels)
-            endif()
-        else()
-            message(WARNING "MUSA_ROOT not found, skipping musa_cast.cu")
         endif()
     endif()
 endif()

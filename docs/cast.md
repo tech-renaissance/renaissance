@@ -1,6 +1,6 @@
-# 数据类型转换功能实现文档（cast_into）
+# 数据类型转换功能实现文档（cast_into & trunc_cast_into）
 
-**版本**: V3.6.18
+**版本**: V3.6.21
 **日期**: 2026-01-03
 **作者**: 技术觉醒团队
 **状态**: ✅ CPU/CUDA/MUSA全平台实现完成并测试通过
@@ -23,13 +23,22 @@
 
 ## 功能概述
 
-`cast_into`是器件类（Device）的核心方法之一，用于在不同数据类型之间转换张量数据。该方法采用**into型语义**，避免内存反复分配，符合框架的高性能设计理念。
+`cast_into`和`trunc_cast_into`是器件类（Device）的核心方法，用于在不同数据类型之间转换张量数据。这些方法采用**into型语义**，避免内存反复分配，符合框架的高性能设计理念。
 
 ### 方法签名
+
+#### cast_into（RNE舍入模式）
 
 ```cpp
 void Device::cast_into(const Tensor& tensor_a, Tensor& tensor_b,
                        StreamType stream = TR_DEFAULT_STREAM);
+```
+
+#### trunc_cast_into（截断模式，仅FP32→BF16）
+
+```cpp
+void Device::trunc_cast_into(const Tensor& tensor_a, Tensor& tensor_b,
+                            StreamType stream = TR_DEFAULT_STREAM);
 ```
 
 **参数说明**：
@@ -37,11 +46,18 @@ void Device::cast_into(const Tensor& tensor_a, Tensor& tensor_b,
 - `tensor_b`: 目标张量（写入转换结果）
 - `stream`: 流类型（仅GPU有效，CPU忽略此参数）
 
-**行为特点**：
+**cast_into行为特点**：
 - ✅ **同步接口**：函数返回时数据转换完成
 - ✅ **形状必须相同**：`tensor_a.shape() == tensor_b.shape()`
 - ✅ **类型必须不同**：同类型转换会抛出TypeError
 - ✅ **设备必须相同**：两个张量必须在同一器件上
+- ✅ **空张量静默返回**：`numel == 0`时不执行任何操作
+
+**trunc_cast_into行为特点**：
+- ✅ **仅支持FP32→BF16转换**：其他类型组合会抛出TypeError
+- ✅ **截断模式**：直接丢弃FP32的低16位，速度比RNE模式快5倍以上
+- ✅ **同步接口**：函数返回时数据转换完成
+- ✅ **形状必须相同**：`tensor_a.shape() == tensor_b.shape()`
 - ✅ **空张量静默返回**：`numel == 0`时不执行任何操作
 
 ---
@@ -49,6 +65,8 @@ void Device::cast_into(const Tensor& tensor_a, Tensor& tensor_b,
 ## 支持的转换类型
 
 ### 完整支持矩阵
+
+**cast_into（RNE舍入模式）**：
 
 | 转换类型 | CPU | CUDA | MUSA | 实现方式 |
 |---------|-----|------|------|---------|
@@ -59,6 +77,12 @@ void Device::cast_into(const Tensor& tensor_a, Tensor& tensor_b,
 | INT32 → INT8 | ✅ | ✅ | ✅ | 饱和处理 |
 | INT8 → FP32 | ✅ | ✅ | ✅ | 符号扩展 |
 | INT8 → INT32 | ✅ | ✅ | ✅ | 符号扩展 |
+
+**trunc_cast_into（截断模式）**：
+
+| 转换类型 | CPU | CUDA | MUSA | 实现方式 | 性能优势 |
+|---------|-----|------|------|---------|---------|
+| FP32 → BF16 | ✅ | ✅ | ✅ | 直接截断 | 比RNE快5倍+ |
 
 ### 数据类型定义
 
@@ -263,7 +287,7 @@ musa_dispatch_bf16_to_fp32(reinterpret_cast<const __mt_bfloat16*>(src_ptr),
 
 **应用场景**：
 - FP32 → INT32
-- FP32 → BF16
+- FP32 → BF16（cast_into）
 
 **规则**：
 - 舍入位 < 0.5 → 向下舍入
@@ -277,6 +301,32 @@ musa_dispatch_bf16_to_fp32(reinterpret_cast<const __mt_bfloat16*>(src_ptr),
 | 2.5 | 2 | 舍入到偶数 |
 | 3.5 | 4 | 舍入到偶数 |
 | -2.7 | -3 | 舍入位0.7 > 0.5 |
+
+### 截断模式（Truncation）
+
+**应用场景**：
+- FP32 → BF16（trunc_cast_into）
+
+**规则**：
+- 直接丢弃FP32的低16位尾数
+- 不进行舍入，速度比RNE快5倍以上
+- 精度略低于RNE，但适用于对精度要求不高的场景
+
+**示例**：
+| 输入值（FP32） | 截断结果 | RNE结果 | 差异 |
+|--------------|---------|---------|------|
+| 1.2 | 1.0 | 1.0 | 无 |
+| 1.5 | 1.0 | 2.0 | 向下舍入 |
+| 2.5 | 2.0 | 2.0 | 无（偶数） |
+| 3.5 | 3.0 | 4.0 | 向下舍入 |
+| -2.7 | -2.0 | -3.0 | 向上舍入 |
+
+**性能对比**（RTX 4060，268M元素）：
+| 模式 | 吞吐量 | 时间 |
+|------|--------|------|
+| **截断模式** | **33.80 G elems/s** | **7.94 ms** |
+| RNE模式 | 6.49 G elems/s | 41.34 ms |
+| **加速比** | **5.2x** | - |
 
 ### 饱和处理（Saturation）
 
@@ -402,6 +452,32 @@ Tensor bf16_cpu = get_cpu().zeros({256, 1024, 1024, 1}, DType::BF16);
 cuda.transfer_into(bf16_gpu, bf16_cpu);
 ```
 
+### 截断模式转换（trunc_cast_into）
+
+```cpp
+// FP32 -> BF16（截断模式，速度更快）
+auto& cuda = DeviceManager::instance().cuda(0);
+
+Tensor f32_gpu = cuda.randn({256, 1024, 1024, 1}, 0.0f, 1.0f);
+Tensor bf16_gpu = cuda.zeros({256, 1024, 1024, 1}, DType::BF16);
+
+// 使用截断模式（比RNE快5倍）
+cuda.trunc_cast_into(f32_gpu, bf16_gpu);
+
+// 注意：只支持FP32 -> BF16
+// 如果尝试其他类型组合会抛出TypeError
+```
+
+**何时使用trunc_cast_into**：
+- ✅ 对精度要求不高（如推理场景）
+- ✅ 需要极致性能（比RNE快5倍）
+- ✅ 只需FP32→BF16转换
+
+**何时使用cast_into（RNE）**：
+- ✅ 需要高精度（如训练场景）
+- ✅ 需要多种类型转换
+- ✅ 符合IEEE 754舍入标准
+
 ### 多次转换链
 
 ```cpp
@@ -475,11 +551,13 @@ cpu.cast_into(i8, f32_out); // INT8 -> FP32
 
 ### 实现亮点
 
-1. ✅ **多架构SIMD支持**：X86 AVX2、ARM NEON、RISC-V RVV 1.0
-2. ✅ **统一的RNE舍入**：所有平台使用IEEE 754标准舍入
-3. ✅ **GPU高性能**：CUDA平均31.57 G elems/s，MUSA平均48.65 G elems/s
-4. ✅ **类型安全**：使用DType枚举，编译期类型检查
-5. ✅ **零拷贝设计**：into语义避免内存分配
+1. ✅ **双模式支持**：cast_into（RNE高精度）+ trunc_cast_into（截断高性能）
+2. ✅ **多架构SIMD支持**：X86 AVX2、ARM NEON、RISC-V RVV 1.0
+3. ✅ **统一的RNE舍入**：所有平台使用IEEE 754标准舍入
+4. ✅ **截断模式超高性能**：GPU上比RNE快5.2倍（33.80 vs 6.49 G elems/s）
+5. ✅ **GPU高性能**：CUDA平均31.57 G elems/s，MUSA平均48.65 G elems/s
+6. ✅ **类型安全**：使用DType枚举，编译期类型检查
+7. ✅ **零拷贝设计**：into语义避免内存分配
 
 ### 性能优化建议
 
@@ -487,9 +565,17 @@ cpu.cast_into(i8, f32_out); // INT8 -> FP32
 2. **批量处理**：大张量性能优于小张量
 3. **避免频繁转换**：尽量保持数据类型一致
 4. **选择合适的精度**：FP32 vs BF16 vs INT8
+5. **FP32→BF16转换**：
+   - **推理场景**：使用`trunc_cast_into`（速度快5倍，精度略低）
+   - **训练场景**：使用`cast_into`（RNE高精度）
+
+### 版本历史
+
+- **V3.6.21**（2026-01-03）：新增`trunc_cast_into`方法，支持FP32→BF16截断模式，性能提升5.2倍
+- **V3.6.18**（2026-01-03）：初始版本，实现7种类型转换的RNE模式
 
 ---
 
-**文档版本**: V3.6.18
+**文档版本**: V3.6.21
 **最后更新**: 2026-01-03
-**测试状态**: ✅ 全平台测试通过
+**测试状态**: ✅ 全平台测试通过（包括trunc_cast_into）

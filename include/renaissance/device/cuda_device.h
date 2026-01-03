@@ -67,6 +67,19 @@ public:
     Tensor empty(const Shape& shape, DType dtype) override;
     Tensor zeros(const Shape& shape, DType dtype) override;
     Tensor ones(const Shape& shape, DType dtype) override;
+    Tensor null_tensor() override;
+    void zeros_inplace(Tensor& tensor_a) override;
+    void ones_inplace(Tensor& tensor_a) override;
+
+    // ===== 全值填充方法（V3.6.21新增）=====
+    Tensor full_fp32(const Shape& shape, float value) override;
+    Tensor full_bf16(const Shape& shape, float value) override;
+    Tensor full_int32(const Shape& shape, int32_t value) override;
+    Tensor full_int8(const Shape& shape, int8_t value) override;
+    void full_fp32_inplace(Tensor& tensor_a, float value) override;
+    void full_bf16_inplace(Tensor& tensor_a, float value) override;
+    void full_int32_inplace(Tensor& tensor_a, int32_t value) override;
+    void full_int8_inplace(Tensor& tensor_a, int8_t value) override;
 
     // ===== 随机数生成（高级接口，调用默认Generator）=====
     Tensor uniform(const Shape& shape, float min_val = 0.0f, float max_val = 1.0f,
@@ -95,6 +108,8 @@ public:
     void transfer_into(const Tensor& tensor_a, Tensor& tensor_b) override;
     void cast_into(const Tensor& tensor_a, Tensor& tensor_b,
                   StreamType stream = TR_DEFAULT_STREAM) override;
+    void trunc_cast_into(const Tensor& tensor_a, Tensor& tensor_b,
+                        StreamType stream = TR_DEFAULT_STREAM) override;
 
     // ===== 张量比较 =====
     bool equal(const Tensor& a, const Tensor& b) override;

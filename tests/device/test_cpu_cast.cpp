@@ -279,6 +279,65 @@ void test_same_dtype_error() {
 }
 
 /**
+ * @brief 测试FP32 -> BF16截断转换 (trunc_cast_into)
+ */
+void test_fp32_to_bf16_trunc() {
+    LOG_INFO << "Test FP32 -> BF16 (Truncation)";
+
+    CpuDevice& cpu = get_cpu();
+    Shape shape{4};
+
+    Tensor a = cpu.zeros(shape, DType::FP32);
+    Tensor b = cpu.empty(shape, DType::BF16);
+
+    float* a_ptr = a.typed_data<float>();
+    a_ptr[0] = 1.0f;
+    a_ptr[1] = 1.5f;
+    a_ptr[2] = 2.5f;
+    a_ptr[3] = 3.14159f;
+
+    cpu.trunc_cast_into(a, b);
+
+    [[maybe_unused]] const uint16_t* b_ptr = b.typed_data<uint16_t>();
+
+    // 验证截断转换（转换回FP32检查）
+    Tensor c = cpu.empty(shape, DType::FP32);
+    cpu.cast_into(b, c);
+    [[maybe_unused]] const float* c_ptr = c.typed_data<float>();
+
+    // 截断模式容差稍大（因为精度损失）
+    assert(std::abs(c_ptr[0] - 1.0f) < 0.1f);
+    assert(std::abs(c_ptr[1] - 1.5f) < 0.1f);
+    assert(std::abs(c_ptr[2] - 2.5f) < 0.1f);
+
+    LOG_INFO << "PASS";
+}
+
+/**
+ * @brief 测试trunc_cast_into类型错误
+ */
+void test_trunc_cast_type_error() {
+    LOG_INFO << "Test trunc_cast_into Type Error";
+
+    CpuDevice& cpu = get_cpu();
+    Shape shape{2, 2};
+
+    // 测试非FP32->BF16组合（应该抛出异常）
+    Tensor a = cpu.zeros(shape, DType::INT32);
+    Tensor b = cpu.empty(shape, DType::INT8);
+
+    [[maybe_unused]] bool caught = false;
+    try {
+        cpu.trunc_cast_into(a, b);
+    } catch (const TypeError& [[maybe_unused]] e) {
+        caught = true;
+    }
+
+    assert(caught);
+    LOG_INFO << "PASS";
+}
+
+/**
  * @brief Main函数
  */
 int main() {
@@ -286,6 +345,7 @@ int main() {
 
     test_fp32_to_int32();
     test_fp32_to_bf16();
+    test_fp32_to_bf16_trunc();
     test_bf16_to_fp32();
     test_int32_to_fp32();
     test_int32_to_int8();
@@ -293,6 +353,7 @@ int main() {
     test_int8_to_int32();
     test_empty_tensor();
     test_same_dtype_error();
+    test_trunc_cast_type_error();
 
     LOG_INFO << "=== All CPU Cast Tests Passed ===";
     return 0;

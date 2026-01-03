@@ -85,13 +85,21 @@ int main() {
         std::cout << "  Created: " << bf16_gpu.nbytes() / (1024.0 * 1024.0)
                   << " MB on GPU" << std::endl;
 
-        // 3. FP32 -> BF16
-        std::cout << "\n[3/9] Testing FP32 -> BF16..." << std::endl;
+        // 3. FP32 -> BF16 (RNE)
+        std::cout << "\n[3/9] Testing FP32 -> BF16 (RNE)..." << std::endl;
         Timer timer;
         cuda.cast_into(fp32_gpu, bf16_gpu);
         cuda.synchronize();
         double time_fp32_to_bf16 = timer.elapsed_ms();
-        print_throughput("FP32 -> BF16", num_elements, time_fp32_to_bf16);
+        print_throughput("FP32 -> BF16 (RNE)", num_elements, time_fp32_to_bf16);
+
+        // 3.5. FP32 -> BF16 (Truncation)
+        std::cout << "\n[3.5/9] Testing FP32 -> BF16 (Truncation)..." << std::endl;
+        timer.reset();
+        cuda.trunc_cast_into(fp32_gpu, bf16_gpu);
+        cuda.synchronize();
+        double time_fp32_to_bf16_trunc = timer.elapsed_ms();
+        print_throughput("FP32 -> BF16 (Trunc)", num_elements, time_fp32_to_bf16_trunc);
 
         // 4. BF16 -> FP32
         std::cout << "\n[4/9] Testing BF16 -> FP32..." << std::endl;
@@ -164,7 +172,8 @@ int main() {
                   << std::setw(18) << "Throughput" << std::endl;
         std::cout << std::string(55, '-') << std::endl;
 
-        print_throughput("FP32 -> BF16", num_elements, time_fp32_to_bf16);
+        print_throughput("FP32 -> BF16 (RNE)", num_elements, time_fp32_to_bf16);
+        print_throughput("FP32 -> BF16 (Trunc)", num_elements, time_fp32_to_bf16_trunc);
         print_throughput("BF16 -> FP32", num_elements, time_bf16_to_fp32);
         print_throughput("FP32 -> INT32", num_elements, time_fp32_to_int32);
         print_throughput("INT32 -> FP32", num_elements, time_int32_to_fp32);
@@ -173,12 +182,12 @@ int main() {
         print_throughput("INT8 -> FP32", num_elements, time_int8_to_fp32);
 
         // 计算总吞吐量
-        double total_time_ms = time_fp32_to_bf16 + time_bf16_to_fp32 +
+        double total_time_ms = time_fp32_to_bf16 + time_fp32_to_bf16_trunc + time_bf16_to_fp32 +
                                time_fp32_to_int32 + time_int32_to_fp32 +
                                time_int32_to_int8 + time_int8_to_int32 +
                                time_int8_to_fp32;
-        double total_throughput = (7.0 * static_cast<double>(num_elements)) / (total_time_ms / 1000.0);
-        double avg_giga_throughput = total_throughput / 1e9 / 7.0;
+        double total_throughput = (8.0 * static_cast<double>(num_elements)) / (total_time_ms / 1000.0);
+        double avg_giga_throughput = total_throughput / 1e9 / 8.0;
 
         std::cout << std::string(55, '-') << std::endl;
         std::cout << "  Average throughput: "

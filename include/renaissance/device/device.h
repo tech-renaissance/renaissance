@@ -144,6 +144,183 @@ public:
      */
     virtual Tensor ones(const Shape& shape, DType dtype) = 0;
 
+    /**
+     * @brief 将已有张量的所有元素置为一（原地操作）
+     * @param tensor_a 要置为一的张量（必须在此设备上）
+     * @throws DeviceError 张量不在此设备上
+     * @throws NotImplementedError 基类实现抛出此异常
+     *
+     * @note 行为特点：
+     * - 验证张量必须在当前设备上
+     * - 空张量（numel==0）静默返回，不执行任何操作
+     * - 使用高效的批量填充操作
+     */
+    virtual void ones_inplace(Tensor& tensor_a) = 0;
+
+    /**
+     * @brief 创建空张量（用于释放大张量）
+     * @return 形状为(0, 0, 0, 0)的空张量，不占用内存
+     * @throws NotImplementedError 基类实现抛出此异常
+     *
+     * @note 使用场景：按需释放大张量，配合RAII自动管理内存
+     * @note 这是本框架推荐的销毁张量的方式
+     *
+     * @code
+     * // 示例：释放大张量
+     * Tensor big_tensor = cpu.zeros({1024, 1024, 1024, 1});
+     * // 使用big_tensor...
+     * big_tensor = cpu.null_tensor();  // 释放内存，big_tensor变为空张量
+     * @endcode
+     *
+     * @remark 为什么需要这个方法？
+     * - 虽然框架遵循RAII原则，张量会自动释放
+     * - 但有时需要按需提前释放大张量（如训练中间结果）
+     * - 使用{}作用域不够灵活，null_tensor()提供了更灵活的释放方式
+     * - 赋值空张量后，原大张量的引用计数归零，内存立即释放
+     */
+    virtual Tensor null_tensor() = 0;
+
+    /**
+     * @brief 将已有张量的所有元素置零（原地操作）
+     * @param tensor_a 要置零的张量（必须在此设备上）
+     * @throws DeviceError 张量不在此设备上
+     * @throws NotImplementedError 基类实现抛出此异常
+     *
+     * @note 行为特点：
+     * - 验证张量必须在当前设备上
+     * - 空张量（numel==0）静默返回，不执行任何操作
+     * - 使用高效的批量内存操作（如memset）
+     *
+     * @code
+     * // 示例：清空已有张量
+     * Tensor tensor = cpu.zeros({256, 256, 256, 1});
+     * // 使用tensor...
+     * cpu.zeros_inplace(tensor);  // 原地清零
+     * @endcode
+     *
+     * @remark 使用场景：
+     * - 训练时清空梯度张量
+     * - 临时变量复用，避免重复分配
+     * - 配合RAII，灵活管理内存
+     */
+    virtual void zeros_inplace(Tensor& tensor_a) = 0;
+
+    // =========================================================================
+    // 全值填充方法（V3.6.21新增）
+    // =========================================================================
+
+    /**
+     * @brief 创建FP32全值张量（所有元素填充为value）
+     * @param shape 张量形状
+     * @param value 填充值
+     * @return FP32张量
+     * @throws NotImplementedError 基类实现抛出此异常
+     *
+     * @note 行为特点：
+     * - 如果shape为(0,0,0,0)，返回空张量（不占用内存）
+     * - 否则在当前设备上分配内存并填充value
+     */
+    virtual Tensor full_fp32(const Shape& shape, float value) = 0;
+
+    /**
+     * @brief 创建BF16全值张量（所有元素填充为value）
+     * @param shape 张量形状
+     * @param value 填充值（FP32类型，内部使用RNE舍入转换为BF16）
+     * @return BF16张量
+     * @throws NotImplementedError 基类实现抛出此异常
+     *
+     * @note 行为特点：
+     * - 如果shape为(0,0,0,0)，返回空张量（不占用内存）
+     * - 否则在当前设备上分配内存并填充value（RNE舍入转换为BF16）
+     */
+    virtual Tensor full_bf16(const Shape& shape, float value) = 0;
+
+    /**
+     * @brief 创建INT32全值张量（所有元素填充为value）
+     * @param shape 张量形状
+     * @param value 填充值
+     * @return INT32张量
+     * @throws NotImplementedError 基类实现抛出此异常
+     *
+     * @note 行为特点：
+     * - 如果shape为(0,0,0,0)，返回空张量（不占用内存）
+     * - 否则在当前设备上分配内存并填充value
+     */
+    virtual Tensor full_int32(const Shape& shape, int32_t value) = 0;
+
+    /**
+     * @brief 创建INT8全值张量（所有元素填充为value）
+     * @param shape 张量形状
+     * @param value 填充值
+     * @return INT8张量
+     * @throws NotImplementedError 基类实现抛出此异常
+     *
+     * @note 行为特点：
+     * - 如果shape为(0,0,0,0)，返回空张量（不占用内存）
+     * - 否则在当前设备上分配内存并填充value
+     */
+    virtual Tensor full_int8(const Shape& shape, int8_t value) = 0;
+
+    /**
+     * @brief 将FP32张量的所有元素填充为value（原地操作）
+     * @param tensor_a 目标张量（必须是FP32类型，必须在当前设备上）
+     * @param value 填充值
+     * @throws DeviceError 张量不在此设备上
+     * @throws TypeError 张量不是FP32类型
+     * @throws NotImplementedError 基类实现抛出此异常
+     *
+     * @note 行为特点：
+     * - 验证张量必须在当前设备上
+     * - 验证张量必须是FP32类型
+     * - 空张量（numel==0）静默返回，不执行任何操作
+     */
+    virtual void full_fp32_inplace(Tensor& tensor_a, float value) = 0;
+
+    /**
+     * @brief 将BF16张量的所有元素填充为value（原地操作）
+     * @param tensor_a 目标张量（必须是BF16类型，必须在当前设备上）
+     * @param value 填充值（FP32类型，内部使用RNE舍入转换为BF16）
+     * @throws DeviceError 张量不在此设备上
+     * @throws TypeError 张量不是BF16类型
+     * @throws NotImplementedError 基类实现抛出此异常
+     *
+     * @note 行为特点：
+     * - 验证张量必须在当前设备上
+     * - 验证张量必须是BF16类型
+     * - 空张量（numel==0）静默返回，不执行任何操作
+     */
+    virtual void full_bf16_inplace(Tensor& tensor_a, float value) = 0;
+
+    /**
+     * @brief 将INT32张量的所有元素填充为value（原地操作）
+     * @param tensor_a 目标张量（必须是INT32类型，必须在当前设备上）
+     * @param value 填充值
+     * @throws DeviceError 张量不在此设备上
+     * @throws TypeError 张量不是INT32类型
+     * @throws NotImplementedError 基类实现抛出此异常
+     *
+     * @note 行为特点：
+     * - 验证张量必须在当前设备上
+     * - 验证张量必须是INT32类型
+     * - 空张量（numel==0）静默返回，不执行任何操作
+     */
+    virtual void full_int32_inplace(Tensor& tensor_a, int32_t value) = 0;
+
+    /**
+     * @brief 将INT8张量的所有元素填充为value（原地操作）
+     * @param tensor_a 目标张量（必须是INT8类型，必须在当前设备上）
+     * @param value 填充值
+     * @throws DeviceError 张量不在此设备上
+     * @throws TypeError 张量不是INT8类型
+     * @throws NotImplementedError 基类实现抛出此异常
+     *
+     * @note 行为特点：
+     * - 验证张量必须在当前设备上
+     * - 验证张量必须是INT8类型
+     * - 空张量（numel==0）静默返回，不执行任何操作
+     */
+    virtual void full_int8_inplace(Tensor& tensor_a, int8_t value) = 0;
+
     // =========================================================================
     // 随机数生成（高级接口，仅FP32实现）
     // =========================================================================
@@ -315,6 +492,30 @@ public:
      */
     virtual void cast_into(const Tensor& tensor_a, Tensor& tensor_b,
                           StreamType stream = TR_DEFAULT_STREAM);
+
+    /**
+     * @brief 截断类型转换（仅支持FP32→BF16）
+     * @param tensor_a 源张量（必须是FP32）
+     * @param tensor_b 目标张量（必须是BF16）
+     * @param stream 流类型（仅GPU有效，CPU忽略）
+     * @throws TypeError 如果类型组合不是FP32→BF16
+     * @throws ValueError 如果形状不匹配或不在同一设备上
+     * @note 空张量(numel=0)允许，不执行任何操作（静默返回）
+     * @note 截断模式：直接丢弃FP32的低16位，速度比RNE舍入更快
+     * @version 3.6.19
+     * @date 2026-01-03
+     *
+     * 对比cast_into：
+     * - cast_into(FP32→BF16)：使用RNE舍入（Round to Nearest Even），精度更高但速度较慢
+     * - trunc_cast_into(FP32→BF16)：使用截断（直接丢弃低16位），速度更快但略有精度损失
+     *
+     * 使用场景：
+     * - 深度学习推理：精度要求不高的场景，可使用trunc_cast_into提升速度
+     * - 深度学习训练：建议使用cast_into保持精度
+     * - 数据预处理：对精度不敏感的数据转换
+     */
+    virtual void trunc_cast_into(const Tensor& tensor_a, Tensor& tensor_b,
+                                 StreamType stream = TR_DEFAULT_STREAM);
 
     // =========================================================================
     // 同步与调试
