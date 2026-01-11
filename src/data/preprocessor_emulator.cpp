@@ -94,7 +94,9 @@ void PreprocessorEmulator::join() {
 
     workers_.clear();
 
-    LOG_INFO << "All preprocessor workers finished";
+    // 输出统计信息
+    size_t total = get_total_processed();
+    LOG_INFO << "All preprocessor workers finished. Total samples processed: " << total;
 }
 
 void PreprocessorEmulator::worker_thread(int worker_id) {

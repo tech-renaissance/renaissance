@@ -21,6 +21,7 @@
 #include <iostream>
 #include <chrono>
 #include <filesystem>
+#include <algorithm>  // For std::transform
 
 using namespace tr::data;
 
@@ -260,6 +261,10 @@ int main(int argc, char** argv) {
     // 开始epoch并计时
     // =========================================================================
 
+    // 创建/清空洗牌样本数统计日志文件
+    std::ofstream shuffle_log("R:/renaissance/test_output.log", std::ios::out | std::ios::trunc);
+    shuffle_log.close();
+
     LOG_INFO << "Starting epoch...";
 
     auto start = std::chrono::high_resolution_clock::now();
@@ -271,8 +276,16 @@ int main(int argc, char** argv) {
     // 等待完成
     // =========================================================================
 
-    emulator.join();
-    loader->end_epoch();
+    try {
+        emulator.join();
+        loader->end_epoch();
+    } catch (const std::exception& e) {
+        LOG_ERROR << "Exception during cleanup: " << e.what();
+        return 1;
+    } catch (...) {
+        LOG_ERROR << "Unknown exception during cleanup";
+        return 1;
+    }
 
     auto end = std::chrono::high_resolution_clock::now();
 
@@ -281,13 +294,9 @@ int main(int argc, char** argv) {
     // =========================================================================
 
     double time_sec = std::chrono::duration<double>(end - start).count();
-    size_t total_bytes = calculate_total_size(
-        use_dts ? (is_train ? dataset_path + "/imagenet_train.dts"
-                            : dataset_path + "/imagenet_val.dts")
-                : (is_train ? dataset_path + "/train"
-                            : dataset_path + "/val"),
-        use_dts
-    );
+
+    // 从DataLoader获取总字节数
+    size_t total_bytes = loader->total_bytes();
     double speed_mb = total_bytes / (1024.0 * 1024.0) / time_sec;
 
     size_t total_processed = emulator.get_total_processed();
@@ -300,7 +309,7 @@ int main(int argc, char** argv) {
               << "Test Results\n"
               << "========================================\n"
               << "Load time: " << time_sec << " s\n"
-              << "Total bytes: " << total_bytes / (1024.0 * 1024 * 1024) << " GB\n"
+              << "Total bytes: " << (total_bytes / (1024.0 * 1024 * 1024)) << " GB\n"
               << "Speed: " << speed_mb << " MB/s\n"
               << "Total samples processed: " << total_processed << "\n"
               << "Samples per second: " << (total_processed / time_sec) << "\n"

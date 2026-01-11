@@ -64,12 +64,26 @@ public:
     bool load(const std::string& path, bool is_train) override;
     void begin_epoch(int epoch_id, bool shuffle = true, bool skip_first = false) override;
     void end_epoch() override;
+
+    /**
+     * @brief 获取下一个样本（流式API）
+     * @warning 返回的view.data生命周期仅到下次调用next_sample()！
+     *          批量获取时必须立即处理每个样本后再获取下一个
+     * @note 此方法使用thread_local缓冲区，不支持next_samples()批量获取
+     */
     bool next_sample(int worker_id, SampleView& view) override;
+
+    /**
+     * @brief 批量获取样本（已禁用）
+     * @throws TRException RawDataLoader不支持批量获取
+     * @note 请使用next_sample()循环获取，或使用DtsDataLoader
+     */
     size_t next_samples(int worker_id, size_t max_count,
                         std::vector<SampleView>& views) override;
 
     size_t num_samples() const override { return num_samples_; }
     size_t num_classes() const override { return num_classes_; }
+    size_t total_bytes() const override { return 0; }  // 原始目录格式无法计算
     bool is_loaded() const override { return loaded_.load(std::memory_order_acquire); }
     bool is_training() const override { return is_training_; }
 

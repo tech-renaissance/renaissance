@@ -169,6 +169,13 @@ public:
     virtual size_t num_classes() const = 0;
 
     /**
+     * @brief 获取数据集总字节数
+     * @return 总字节数
+     * @note DTS格式返回实际数据大小，原始目录返回0（需要手动计算）
+     */
+    virtual size_t total_bytes() const = 0;
+
+    /**
      * @brief 是否已加载
      */
     virtual bool is_loaded() const = 0;

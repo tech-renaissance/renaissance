@@ -251,18 +251,15 @@ bool RawDataLoader::next_sample(int worker_id, SampleView& view) {
 
 size_t RawDataLoader::next_samples(int worker_id, size_t max_count,
                                     std::vector<SampleView>& views) {
-    views.clear();
-    views.reserve(max_count);
+    // RawDataLoader使用thread_local缓冲区，不支持零拷贝批量获取
+    // 必须使用流式API逐个获取样本
+    TR_NOT_IMPLEMENTED(
+        "RawDataLoader does not support batch retrieval (next_samples). "
+        "Use next_sample() in a loop instead, or switch to DtsDataLoader for "
+        "zero-copy batch access."
+    );
 
-    SampleView view;
-    while (views.size() < max_count && next_sample(worker_id, view)) {
-        // 注意：这里存储的指针指向thread_local buffer
-        // 如果views要跨线程使用，需要深拷贝数据
-        // 目前假设views在同一线程内立即消费，所以是安全的
-        views.push_back(view);
-    }
-
-    return views.size();
+    return 0;  // unreachable
 }
 
 } // namespace data

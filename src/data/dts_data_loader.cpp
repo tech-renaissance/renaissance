@@ -14,6 +14,7 @@
 #include <cstring>
 #include <algorithm>
 #include <filesystem>
+#include <mutex>
 #include <zlib.h>
 
 namespace tr {
@@ -220,6 +221,9 @@ bool DtsDataLoader::load(const std::string& path, bool is_train) {
 
     slot_states_ = SlotStateBitmap(num_slots_);
 
+    // 存储总字节数用于计算吞吐量
+    total_bytes_ = header_.total_bytes;
+
     LOG_INFO << "Arena allocated:"
              << "\n  Slots: " << num_slots_
              << "\n  Groups: " << num_groups_
@@ -349,6 +353,7 @@ void DtsDataLoader::begin_epoch(int epoch_id, bool shuffle, bool skip_first) {
 
     for (size_t i = 0; i < num_groups_; ++i) {
         group_metas_[i].reset();
+        group_metas_[i].state.store(0, std::memory_order_relaxed);  // 初始化为EMPTY
     }
 
     // 启动IO线程
@@ -550,17 +555,21 @@ void DtsDataLoader::io_worker_func(int thread_id) {
     // 每个线程独立打开文件句柄
     FileHandle file(file_path_);
 
-    // 4MB读取缓冲区（适配L3缓存）
-    std::vector<uint8_t> io_buffer(4 * 1024 * 1024);
-
     while (!stop_flag_.load(std::memory_order_relaxed)) {
         // A. 领取任务：获取下一个待加载的Block序号
         uint32_t block_seq = next_block_seq_.fetch_add(1, std::memory_order_relaxed);
 
         if (block_seq >= header_.num_blocks) {
             // 本epoch所有BLOCK已分配完毕
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            continue;
+            // 关键修改：全量模式立即退出
+            if (full_load_mode_) {
+                LOG_DEBUG << "IO worker " << thread_id << ": all blocks loaded, exiting";
+                return;  // 立即退出
+            } else {
+                // 部分模式：持续等待环形缓冲复用
+                std::this_thread::sleep_for(std::chrono::milliseconds(1));
+                continue;
+            }
         }
 
         // B. 映射到真实Block ID
@@ -584,6 +593,12 @@ void DtsDataLoader::io_worker_func(int thread_id) {
             std::this_thread::yield();
         }
 
+        // 关键修改：首个进入该Group的IO线程重置temp_counter
+        if (offset_in_group == 0) {
+            uint32_t ring_idx = group_idx % num_groups_;
+            group_metas_[ring_idx].temp_counter.store(0, std::memory_order_release);
+        }
+
         // E. 执行I/O：读取Block到Arena
         uint8_t* dst = data_arena_ + static_cast<size_t>(slot_idx) * BLOCK_SIZE;
 
@@ -595,10 +610,16 @@ void DtsDataLoader::io_worker_func(int thread_id) {
 
         // F. CRC校验（可选）
         if (check_crc_) {
-            // TODO: 实现CRC校验
-            // if (!verify_crc(dst, BLOCK_SIZE, expected_crc)) {
-            //     TR_VALUE_ERROR("CRC-32 mismatch in Block " << block_id);
-            // }
+            // 注意：Block Header需要包含CRC字段才能启用校验
+            // 当前DTS格式未存储Block-level CRC，此功能暂未实现
+            // TODO: 修改Python导出脚本，在Block Header中添加CRC32字段
+            LOG_WARN << "CRC check enabled but Block CRC field not available in DTS format. "
+                     << "CRC verification skipped for block " << block_id;
+
+            // 计算CRC用于调试（不验证）
+            uint32_t computed_crc = crc32(0, dst, BLOCK_SIZE);
+            LOG_DEBUG << "Block " << block_id << " CRC32 (computed): 0x"
+                      << std::hex << computed_crc << std::dec;
         }
 
         // G. 解析Block头部，填充SlotMeta
@@ -609,11 +630,17 @@ void DtsDataLoader::io_worker_func(int thread_id) {
         uint32_t ring_idx = group_idx % num_groups_;
         GroupMeta& g_meta = group_metas_[ring_idx];
 
+        // 计算当前group应该包含多少个blocks（修复最后一个group的bug）
+        uint32_t total_groups = (header_.num_blocks + group_size_ - 1) / group_size_;
+        bool is_last_group = (static_cast<uint32_t>(group_idx) == total_groups - 1);
+        uint32_t expected_blocks = is_last_group ?
+            (header_.num_blocks % group_size_ == 0 ? static_cast<uint32_t>(group_size_) : header_.num_blocks % group_size_)
+            : static_cast<uint32_t>(group_size_);
+
         // 使用组内计数器（存储在GroupMeta的temp_counter中临时使用）
         uint32_t finished_count = g_meta.temp_counter.fetch_add(1, std::memory_order_acq_rel) + 1;
 
-        if (finished_count == static_cast<uint32_t>(group_size_) ||
-            (block_seq == header_.num_blocks - 1)) {
+        if (finished_count == expected_blocks) {  // 修复：只在真正完成时触发
             // 我是该组最后一个完成的线程，负责洗牌
 
             // 1. 收集组内所有样本并打乱
@@ -623,7 +650,7 @@ void DtsDataLoader::io_worker_func(int thread_id) {
                 // 不打乱：按顺序填充shuffled_locations
                 g_meta.shuffled_locations.clear();
 
-                for (int i = 0; i < group_size_; ++i) {
+                for (int i = 0; i < static_cast<int>(expected_blocks); ++i) {  // 修复：使用expected_blocks
                     uint32_t sg_idx = (group_idx * group_size_ + i) % static_cast<uint32_t>(num_slots_);
                     if (sg_idx >= num_slots_) break;  // 边界检查
 
@@ -634,20 +661,45 @@ void DtsDataLoader::io_worker_func(int thread_id) {
                 }
 
                 g_meta.total_samples = static_cast<uint32_t>(g_meta.shuffled_locations.size());
+
+                // =====================================================================
+                // 洗牌样本数统计日志 - 用于诊断样本遗漏问题（no-shuffle分支）
+                // =====================================================================
+                // 说明：每个Group收集完样本后，将该Group的样本总数写入日志文件
+                // 用途：通过对日志文件求和，验证所有Group的样本数是否等于预期总数
+                // 线程安全：此代码只在IO线程中执行，且每个Group只执行一次
+                // 输出格式：每行一个数字（样本数），无其他文字或空格
+                // =====================================================================
+                // 优化日志格式：加入group_idx便于验证（修复随机可复现性问题）
+                // 新格式：group_idx,total_samples
+                static std::mutex log_mutex;
+                static std::ofstream shuffle_log_no_shuffle("R:/renaissance/test_output.log", std::ios::app);
+                {
+                    std::lock_guard<std::mutex> lock(log_mutex);
+                    if (shuffle_log_no_shuffle.is_open()) {
+                        // 格式：group_idx,total_samples
+                        shuffle_log_no_shuffle << group_idx << "," << g_meta.total_samples << std::endl;
+                        shuffle_log_no_shuffle.flush();  // 确保立即写入磁盘
+                    }
+                }
+                // =====================================================================
             }
 
-            // 2. 重置组内计数器（为下一轮使用）
-            g_meta.temp_counter.store(0, std::memory_order_release);
-
-            // 3. 标记组内所有Slot为READY
-            for (int i = 0; i < group_size_; ++i) {
+            // 2. 标记组内所有Slot为READY（temp_counter由消费者重置）
+            for (int i = 0; i < static_cast<int>(expected_blocks); ++i) {  // 修复：使用expected_blocks
                 uint32_t sg_idx = (group_idx * group_size_ + i) % static_cast<uint32_t>(num_slots_);
                 if (sg_idx >= num_slots_) break;  // 边界检查
                 slot_states_.set_state(sg_idx, SlotStateBitmap::STATE_READY);
             }
 
-            LOG_INFO << "Group " << group_idx << " ready: "
-                      << g_meta.total_samples << " samples";
+            // 3. 最后标记Group为READY（这是消费者的开门信号）
+            g_meta.state.store(
+                static_cast<uint32_t>(GroupMeta::State::READY),
+                std::memory_order_release
+            );
+
+            // LOG_INFO << "Group " << group_idx << " ready: "
+            //           << g_meta.total_samples << " samples";
         }
     }
 
@@ -695,10 +747,27 @@ void DtsDataLoader::shuffle_group(uint64_t group_idx, uint32_t start_slot_global
     uint32_t ring_idx = group_idx % num_groups_;
     GroupMeta& g_meta = group_metas_[ring_idx];
 
-    // 1. 收集组内所有样本位置
-    g_meta.shuffled_locations.clear();
+    // 计算当前group应该包含多少个blocks（修复最后一个group的bug）
+    uint32_t total_groups = (header_.num_blocks + group_size_ - 1) / group_size_;
+    bool is_last_group = (static_cast<uint32_t>(group_idx) == total_groups - 1);
+    uint32_t expected_blocks = is_last_group ?
+        (header_.num_blocks % group_size_ == 0 ? static_cast<uint32_t>(group_size_) : header_.num_blocks % group_size_)
+        : static_cast<uint32_t>(group_size_);
 
-    for (int i = 0; i < group_size_; ++i) {
+    // 1. 预先计算总样本数（避免多次扩容）
+    size_t total_samples = 0;
+    for (int i = 0; i < static_cast<int>(expected_blocks); ++i) {  // 修复：使用expected_blocks
+        uint32_t sg_idx = (start_slot_global_idx + i) % static_cast<uint32_t>(num_slots_);
+        if (sg_idx >= num_slots_) break;
+        total_samples += slot_metas_[sg_idx].num_samples;
+    }
+
+    // 2. 一次性预留容量（零拷贝）
+    g_meta.shuffled_locations.clear();
+    g_meta.shuffled_locations.reserve(total_samples);
+
+    // 3. 批量填充样本位置
+    for (int i = 0; i < static_cast<int>(expected_blocks); ++i) {  // 修复：使用expected_blocks
         uint32_t sg_idx = (start_slot_global_idx + i) % static_cast<uint32_t>(num_slots_);
         if (sg_idx >= num_slots_) break;  // 边界检查
 
@@ -723,6 +792,28 @@ void DtsDataLoader::shuffle_group(uint64_t group_idx, uint32_t start_slot_global
     }
 
     LOG_DEBUG << "Group " << group_idx << " shuffled: " << g_meta.total_samples << " samples";
+
+    // =====================================================================
+    // 洗牌样本数统计日志 - 用于诊断样本遗漏问题
+    // =====================================================================
+    // 说明：每个Group洗牌完成后，将该Group的样本总数写入日志文件
+    // 用途：通过对日志文件求和，验证所有Group的样本数是否等于预期总数
+    // 线程安全：此代码只在IO线程中执行，且每个Group只执行一次
+    // 输出格式：每行一个数字（样本数），无其他文字或空格
+    // 优化日志格式：加入group_idx便于验证（修复随机可复现性问题）
+    // 新格式：group_idx,total_samples
+    // =====================================================================
+    static std::mutex log_mutex_shuffle;  // 独立的mutex
+    static std::ofstream shuffle_log("R:/renaissance/test_output.log", std::ios::app);
+    {
+        std::lock_guard<std::mutex> lock(log_mutex_shuffle);
+        if (shuffle_log.is_open()) {
+            // 格式：group_idx,total_samples
+            shuffle_log << group_idx << "," << g_meta.total_samples << std::endl;
+            shuffle_log.flush();  // 确保立即写入磁盘
+        }
+    }
+    // =====================================================================
 }
 
 bool DtsDataLoader::verify_crc(const uint8_t* data, size_t size, uint32_t expected_crc) {
@@ -737,8 +828,8 @@ bool DtsDataLoader::next_sample(int worker_id, SampleView& view) {
 
 bool DtsDataLoader::next_sample_impl(int worker_id, SampleView& view) {
     while (true) {
-        // 1. 获取当前读取的Group索引
-        uint64_t g_idx = read_group_idx_.load(std::memory_order_relaxed);
+        // 1. Acquire读取当前Group索引
+        uint64_t g_idx = read_group_idx_.load(std::memory_order_acquire);
         uint32_t ring_idx = g_idx % num_groups_;
 
         // 检查是否已经超过最后一个Group
@@ -750,15 +841,40 @@ bool DtsDataLoader::next_sample_impl(int worker_id, SampleView& view) {
 
         GroupMeta& g_meta = group_metas_[ring_idx];
 
-        // 2. 检查是否有数据
-        if (g_meta.total_samples == 0) {
-            // Group还未准备好，等待
+        // 2. 检查Group状态
+        uint32_t state = g_meta.state.load(std::memory_order_acquire);
+        if (state != static_cast<uint32_t>(GroupMeta::State::READY) &&
+            state != static_cast<uint32_t>(GroupMeta::State::CONSUMING)) {
+            // Group未准备好，等待
             std::this_thread::yield();
             continue;
         }
 
-        // 3. 原子获取组内样本
-        uint32_t s_idx = g_meta.consumed_count.fetch_add(1, std::memory_order_relaxed);
+        // 3. 尝试将状态从READY转为CONSUMING
+        if (state == static_cast<uint32_t>(GroupMeta::State::READY)) {
+            g_meta.state.compare_exchange_strong(
+                state,
+                static_cast<uint32_t>(GroupMeta::State::CONSUMING),
+                std::memory_order_acq_rel,
+                std::memory_order_acquire
+            );
+            // 即使CAS失败也继续，说明其他worker已转换
+        }
+
+        // ====== 关键修改：活跃读者计数器机制（修复样本遗漏bug） ======
+
+        // 4. 增加活跃读者计数（进入临界区）
+        g_meta.active_readers.fetch_add(1, std::memory_order_acq_rel);
+
+        // 5. 再次验证Group索引（防止ABA问题）
+        if (read_group_idx_.load(std::memory_order_acquire) != g_idx) {
+            // Group已被推进，减少计数并重试
+            g_meta.active_readers.fetch_sub(1, std::memory_order_release);
+            continue;
+        }
+
+        // 6. 获取样本索引
+        uint32_t s_idx = g_meta.consumed_count.fetch_add(1, std::memory_order_acq_rel);
 
         if (s_idx < g_meta.total_samples) {
             // 成功获取样本：解码位置
@@ -780,30 +896,58 @@ bool DtsDataLoader::next_sample_impl(int worker_id, SampleView& view) {
                        static_cast<size_t>(global_slot_idx) * BLOCK_SIZE +
                        s_meta.offsets[sample_idx_in_slot];
 
+            // 7. 读取完成，减少活跃读者计数
+            g_meta.active_readers.fetch_sub(1, std::memory_order_release);
+
             return true;
         }
 
-        // 4. 组已耗尽，尝试推进read_group_idx
+        // 8. 样本已耗尽，减少活跃读者计数
+        g_meta.active_readers.fetch_sub(1, std::memory_order_release);
+
+        // 9. 尝试推进read_group_idx
         uint64_t expected = g_idx;
         uint64_t next_g = g_idx + 1;
 
         if (read_group_idx_.compare_exchange_strong(expected, next_g,
                                                      std::memory_order_acq_rel,
-                                                     std::memory_order_relaxed)) {
-            // 我是最后一个离开的人，负责清理现场
+                                                     std::memory_order_acquire)) {
+            // 我是推进成功的人，负责清理
 
-            // 释放该组所有Slot
-            for (int i = 0; i < group_size_; ++i) {
+            // 10. 等待所有活跃读者完成（关键修改）
+            while (g_meta.active_readers.load(std::memory_order_acquire) > 0) {
+                std::this_thread::yield();
+            }
+
+            // 11. 现在可以安全清理了
+            g_meta.state.store(
+                static_cast<uint32_t>(GroupMeta::State::EMPTY),
+                std::memory_order_release
+            );
+
+            // ====== 修复最后一个Group的边界问题 ======
+            // 计算该Group实际包含的Blocks数量
+            bool is_last_group = (static_cast<uint32_t>(g_idx) == static_cast<uint32_t>(total_groups) - 1);
+            uint32_t blocks_in_group = is_last_group ?
+                (header_.num_blocks % group_size_ == 0 ?
+                    static_cast<uint32_t>(group_size_) :
+                    header_.num_blocks % group_size_)
+                : static_cast<uint32_t>(group_size_);
+
+            // 12. 释放该组所有Slot（使用实际blocks数）
+            for (uint32_t i = 0; i < blocks_in_group; ++i) {
                 uint32_t sg_idx = (g_idx * group_size_ + i) % static_cast<uint32_t>(num_slots_);
                 slot_states_.set_state(sg_idx, SlotStateBitmap::STATE_FREE);
                 slot_metas_[sg_idx].reset();
             }
 
-            // 重置GroupMeta
-            g_meta.reset();
+            // 13. 重置GroupMeta计数器
+            g_meta.consumed_count.store(0, std::memory_order_release);
+            g_meta.temp_counter.store(0, std::memory_order_release);
+            g_meta.total_samples = 0;
 
-            // 检查是否epoch结束
-            if (next_g >= (header_.num_blocks + group_size_ - 1) / group_size_) {
+            // 14. 检查是否epoch结束
+            if (next_g >= total_groups) {
                 return false;  // Epoch结束
             }
         }

@@ -17,6 +17,7 @@
 #include <atomic>
 #include <map>
 #include <cstdint>  // For uint8_t, uint32_t, uint64_t
+#include <cstring>  // For std::memcpy (needed on Linux/GCC)
 
 #ifdef _WIN32
     #ifndef WIN32_LEAN_AND_MEAN
@@ -84,7 +85,9 @@ struct DtsHeader {
     uint32_t crc_code;
 };
 #pragma pack(pop)  // 恢复默认对齐
-// static_assert(sizeof(DtsHeader) == 144, "DtsHeader must be exactly 144 bytes");
+
+// 验证DtsHeader大小与Python导出一致（144字节）
+static_assert(sizeof(DtsHeader) == 144, "DtsHeader must be exactly 144 bytes");
 
 // =============================================================================
 // Slot元数据（内嵌数组设计）
@@ -169,6 +172,17 @@ struct SlotMeta {
  */
 struct GroupMeta {
     /**
+     * @brief Group状态枚举
+     * @details 用于状态机管理，防止并发访问竞争
+     */
+    enum class State : uint32_t {
+        EMPTY = 0,      // 可被IO线程填充
+        FILLING = 1,    // IO线程正在填充（保留，当前未使用）
+        READY = 2,      // 可被消费
+        CONSUMING = 3   // 正在被消费
+    };
+
+    /**
      * @brief 存储打乱后的样本位置
      * @details 预分配大数组，避免运行时分配
      *
@@ -179,9 +193,11 @@ struct GroupMeta {
      */
     std::vector<uint32_t> shuffled_locations;
 
-    std::atomic<uint32_t> consumed_count{0};  // 已消费的样本数（线程安全）
-    uint32_t total_samples = 0;                // 该Group的总样本数
-    std::atomic<uint32_t> temp_counter{0};     // 临时计数器（用于IO线程同步）
+    std::atomic<uint32_t> state{0};             // Group状态（线程安全）
+    std::atomic<uint32_t> consumed_count{0};    // 已消费的样本数（线程安全）
+    std::atomic<uint32_t> active_readers{0};    // 正在读取该Group的Worker数（修复样本遗漏bug）
+    uint32_t total_samples = 0;                 // 该Group的总样本数
+    std::atomic<uint32_t> temp_counter{0};      // 临时计数器（用于IO线程同步）
 
     // 默认构造函数
     GroupMeta() = default;
@@ -189,7 +205,9 @@ struct GroupMeta {
     // 移动构造函数
     GroupMeta(GroupMeta&& other) noexcept
         : shuffled_locations(std::move(other.shuffled_locations)),
+          state(other.state.load(std::memory_order_relaxed)),
           consumed_count(other.consumed_count.load(std::memory_order_relaxed)),
+          active_readers(other.active_readers.load(std::memory_order_relaxed)),
           total_samples(other.total_samples),
           temp_counter(other.temp_counter.load(std::memory_order_relaxed)) {
     }
@@ -197,8 +215,10 @@ struct GroupMeta {
     // 移动赋值运算符
     GroupMeta& operator=(GroupMeta&& other) noexcept {
         if (this != &other) {
+            state.store(other.state.load(std::memory_order_relaxed), std::memory_order_relaxed);
             shuffled_locations = std::move(other.shuffled_locations);
             consumed_count.store(other.consumed_count.load(std::memory_order_relaxed), std::memory_order_relaxed);
+            active_readers.store(other.active_readers.load(std::memory_order_relaxed), std::memory_order_relaxed);
             total_samples = other.total_samples;
             temp_counter.store(other.temp_counter.load(std::memory_order_relaxed), std::memory_order_relaxed);
         }
@@ -216,6 +236,7 @@ struct GroupMeta {
         shuffled_locations.clear();
         shuffled_locations.shrink_to_fit();  // 释放内存
         consumed_count.store(0, std::memory_order_relaxed);
+        active_readers.store(0, std::memory_order_relaxed);
         total_samples = 0;
         temp_counter.store(0, std::memory_order_relaxed);
     }
@@ -317,6 +338,12 @@ public:
     bool is_loaded() const override { return loaded_.load(std::memory_order_acquire); }
     bool is_training() const override { return is_training_; }
 
+    /**
+     * @brief 获取数据集总字节数
+     * @return 总字节数
+     */
+    size_t total_bytes() const { return total_bytes_; }
+
 private:
     // =========================================================================
     // 配置与状态
@@ -335,6 +362,7 @@ private:
     // =========================================================================
 
     DtsHeader header_;
+    size_t total_bytes_ = 0;  // 数据集总字节数（用于计算吞吐量）
 
     // =========================================================================
     // 内存管理
