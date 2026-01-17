@@ -299,9 +299,10 @@ def extract_cudnn_version_from_path(path: str) -> str:
         # 假设cuDNN安装在CUDA目录中，先找到CUDA目录
         cuda_paths = [
             "/usr/local/cuda",
+            "/usr/local/cuda-13.1",
             "/usr/local/cuda-13.0",
-            "/usr/local/cuda-12.0",
-            "/usr/local/cuda-11.8"
+            "/usr/local/cuda-12.9",
+            "/usr/local/cuda-12.8"
         ]
 
         # 如果当前路径就是CUDA路径，直接使用

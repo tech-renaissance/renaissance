@@ -309,8 +309,8 @@ if(TR_USE_CUDA)
             set(CUDA_cublas_LIBRARY ${CUDAToolkit_ROOT}/lib64/libcublas.so)
         endif()
 
-        # 设置CUDA架构
-        set(CMAKE_CUDA_ARCHITECTURES "75;80;86;89;90" CACHE STRING "CUDA Architecture")
+        # 设置CUDA架构（支持RTX 20/30/40系列、A100/H100等）
+        set(CMAKE_CUDA_ARCHITECTURES "75;80;86;89;90" CACHE STRING "CUDA Architecture" FORCE)
 
         message(STATUS "CUDA support enabled (library-only mode)")
         message(STATUS "CUDA Toolkit: ${CUDAToolkit_ROOT}")

@@ -210,13 +210,13 @@ DEP_CONFIG = {
         "env": ["CUDA_PATH", "CUDA_HOME", "CUDA_ROOT"],
         "paths_win": [
             "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA",
-            "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v13.*"
+            "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v12.*"
         ],
-        "paths_linux": ["/usr/local/cuda", "/usr/local/cuda-13.*"],
+        "paths_linux": ["/usr/local/cuda", "/usr/local/cuda-12.*"],
         "bin_subdir": "bin",
         "version_cmd": ["nvcc", "--version"],
         "version_pattern": r"release (\d+\.\d+)",
-        "min_version": "13.0",
+        "min_version": "12.8",
         "install_hint": "https://developer.nvidia.com/cuda-toolkit"
     },
 
@@ -394,7 +394,7 @@ DEP_CONFIG = {
         "paths_linux": ["/usr/local/nccl", "/usr", "/opt/nccl", "/usr/local/cuda"],
         "version_cmd": ["grep", "-E", "NCCL_MAJOR|NCCL_MINOR|NCCL_PATCH", "{include}/nccl.h"],
         "version_pattern": r"#define NCCL_MAJOR\s+(\d+).*#define NCCL_MINOR\s+(\d+).*#define NCCL_PATCH\s+(\d+)",
-        "min_version": "2.28",
+        "min_version": "2.26",
         "install_hint": "Download from https://developer.nvidia.com/nccl"
     }
 }
@@ -422,7 +422,7 @@ INSTALL_SUGGESTIONS = {
         "both": "Download from https://developer.nvidia.com/cuda-toolkit"
     },
     "cudnn": {
-        "both": "Download cuDNN 9.17.0+ for CUDA 13.x from: https://developer.download.nvidia.com/compute/cudnn/redist/cudnn/linux-x86_64/ Then extract and copy files to CUDA directory"
+        "both": "Download cuDNN 9.17.0+ for CUDA 12.x from: https://developer.download.nvidia.com/compute/cudnn/redist/cudnn/linux-x86_64/ Then extract and copy files to CUDA directory"
     },
     "python": {
         "both": "Download from https://python.org or run: conda create -n renaissance python=3.11"
@@ -472,25 +472,25 @@ INSTALL_SUGGESTIONS = {
 
 DETAILED_INSTALL_GUIDES = {
     "cudnn": {
-        "title": "cuDNN 9.17.0+ Installation Guide (Linux x86_64, CUDA 13.x)",
+        "title": "cuDNN 9.17.0+ Installation Guide (Linux x86_64, CUDA 12.x)",
         "steps": [
             "1. Visit NVIDIA cuDNN redistribution page:",
             "   https://developer.download.nvidia.com/compute/cudnn/redist/cudnn/linux-x86_64/",
-            "2. Find cuDNN version 9.17.0 or higher for CUDA 13.x",
+            "2. Find cuDNN version 9.17.0 or higher for CUDA 12.x",
             "3. Download the file (usually .tar.xz format) named like:",
-            "   cudnn-linux-x86_64-9.17.0_cuda13-archive.tar.xz",
+            "   cudnn-linux-x86_64-9.17.0_cuda12-archive.tar.xz",
             "4. Extract the archive:",
-            "   tar -xf cudnn-linux-x86_64-9.17.0_cuda13-archive.tar.xz",
+            "   tar -xf cudnn-linux-x86_64-9.17.0_cuda12-archive.tar.xz",
             "5. Copy files to your CUDA installation directory:",
-            "   cd cudnn-linux-x86_64-9.17.0_cuda13-archive",
-            "   sudo cp include/cudnn*.h /usr/local/cuda-13.0/include",
-            "   sudo cp -P lib/libcudnn* /usr/local/cuda-13.0/lib64",
-            "   sudo chmod a+r /usr/local/cuda-13.0/include/cudnn*.h /usr/local/cuda-13.0/lib64/libcudnn*",
+            "   cd cudnn-linux-x86_64-9.17.0_cuda12-archive",
+            "   sudo cp include/cudnn*.h /usr/local/cuda-12.8/include",
+            "   sudo cp -P lib/libcudnn* /usr/local/cuda-12.8/lib64",
+            "   sudo chmod a+r /usr/local/cuda-12.8/include/cudnn*.h /usr/local/cuda-12.8/lib64/libcudnn*",
             "6. Verify installation:",
-            "   cat /usr/local/cuda-13.0/include/cudnn_version.h | grep CUDNN_MAJOR -A 2"
+            "   cat /usr/local/cuda-12.8/include/cudnn_version.h | grep CUDNN_MAJOR -A 2"
         ],
         "notes": [
-            "Make sure to use cuDNN version 9.17.0+ for CUDA 13.x compatibility",
+            "Make sure to use cuDNN version 9.17.0+ for CUDA 12.x compatibility",
             "If CUDA is installed in different location, adjust paths accordingly",
             "The cuDNN library files should match your CUDA version exactly"
         ]
