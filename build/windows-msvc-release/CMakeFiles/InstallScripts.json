@@ -1,0 +1,18 @@
+{
+	"InstallScripts" : 
+	[
+		"R:/renaissance/build/windows-msvc-release/cmake_install.cmake",
+		"R:/renaissance/build/windows-msvc-release/src/cmake_install.cmake",
+		"R:/renaissance/build/windows-msvc-release/src/base/cmake_install.cmake",
+		"R:/renaissance/build/windows-msvc-release/src/data/cmake_install.cmake",
+		"R:/renaissance/build/windows-msvc-release/src/device/cmake_install.cmake",
+		"R:/renaissance/build/windows-msvc-release/src/utils/cmake_install.cmake",
+		"R:/renaissance/build/windows-msvc-release/tests/cmake_install.cmake",
+		"R:/renaissance/build/windows-msvc-release/tests/base/cmake_install.cmake",
+		"R:/renaissance/build/windows-msvc-release/tests/data/cmake_install.cmake",
+		"R:/renaissance/build/windows-msvc-release/tests/device/cmake_install.cmake",
+		"R:/renaissance/build/windows-msvc-release/tests/utils/cmake_install.cmake",
+		"R:/renaissance/build/windows-msvc-release/tests/integration/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

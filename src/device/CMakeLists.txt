@@ -106,7 +106,7 @@ endif()
 if(TR_USE_CUDA AND DEFINED TR_CUDA_PATH)
     target_include_directories(device PRIVATE ${TR_CUDA_PATH}/include)
     # cuDNN头文件（用于CudaDevice）
-    if(DEFINED CUDNN_INCLUDE_DIR)
+    if(DEFINED CUDNN_INCLUDE_DIR AND NOT CUDNN_INCLUDE_DIR STREQUAL "")
         target_include_directories(device PRIVATE ${CUDNN_INCLUDE_DIR})
         # cuDNN 9.x版本子目录
         file(GLOB CUDNN_VERSION_DIRS "${CUDNN_INCLUDE_DIR}/*")

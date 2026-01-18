@@ -1,0 +1,149 @@
+{
+  "system": {
+    "os": "Windows",
+    "arch": "x86_64",
+    "is_windows": true,
+    "is_linux": false
+  },
+  "scene": "pc_cuda",
+  "scene_name": "PC-CUDA",
+  "build_config": {
+    "build_dir": "build",
+    "parallel_jobs": 30,
+    "cmake_generator": "Ninja",
+    "cmake_build_type": "Release",
+    "vcpkg_root": "T:\\Softwares\\vcpkg"
+  },
+  "gpu_info": {
+    "detected": true,
+    "count": 1,
+    "type": "nvidia",
+    "name": "NVIDIA GeForce RTX 4060 Laptop GPU"
+  },
+  "dependencies": {
+    "msvc": {
+      "found": true,
+      "path": "C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Tools/MSVC/14.44.35207/bin/Hostx64",
+      "version": "14.44.35207",
+      "from_vcpkg": false
+    },
+    "cmake": {
+      "found": true,
+      "path": "T:/Softwares/CMake/bin",
+      "version": "4.1.0",
+      "from_vcpkg": false
+    },
+    "ninja": {
+      "found": true,
+      "path": "B:/Softwares/JetBrains\\CLion 2025.2\\bin\\ninja\\win\\x64",
+      "version": "1.12.1",
+      "from_vcpkg": false
+    },
+    "cuda": {
+      "found": true,
+      "path": "C:\\Program Files\\NVIDIA GPU Computing Toolkit\\CUDA\\v12.8",
+      "version": "12.8",
+      "from_vcpkg": false
+    },
+    "cudnn": {
+      "found": true,
+      "path": "C:\\Program Files\\NVIDIA\\CUDNN\\v9.17",
+      "version": "9.17",
+      "from_vcpkg": false
+    },
+    "onednn": {
+      "found": true,
+      "path": "T:\\Softwares\\vcpkg\\installed\\x64-windows",
+      "version": "3.7",
+      "from_vcpkg": true
+    },
+    "xnnpack": {
+      "found": true,
+      "path": "C:\\XNNPACK",
+      "version": null,
+      "from_vcpkg": false
+    },
+    "zlib": {
+      "found": true,
+      "path": "T:\\Softwares\\vcpkg\\installed\\x64-windows",
+      "version": "1.3.1",
+      "from_vcpkg": true
+    },
+    "libcurl": {
+      "found": true,
+      "path": "T:\\Softwares\\vcpkg\\installed\\x64-windows",
+      "version": "8.16.0",
+      "from_vcpkg": true
+    },
+    "libjpeg-turbo": {
+      "found": true,
+      "path": "T:\\Softwares\\vcpkg\\installed\\x64-windows",
+      "version": "3.1.2",
+      "from_vcpkg": true
+    },
+    "mimalloc": {
+      "found": true,
+      "path": "T:\\Softwares\\vcpkg\\installed\\x64-windows",
+      "version": "2.2.3",
+      "from_vcpkg": true
+    },
+    "stb": {
+      "found": true,
+      "path": "T:\\Softwares\\vcpkg\\installed\\x64-windows",
+      "version": "2024-07-29",
+      "from_vcpkg": true
+    },
+    "simd": {
+      "found": true,
+      "path": "T:\\Softwares\\vcpkg\\installed\\x64-windows",
+      "version": "6.2.154",
+      "from_vcpkg": true
+    },
+    "python": {
+      "found": true,
+      "path": "C:\\Python314",
+      "version": "3.14.0",
+      "from_vcpkg": false
+    },
+    "numpy": {
+      "found": true,
+      "path": "C:\\Python314\\Lib\\site-packages",
+      "version": "2.3.4",
+      "from_vcpkg": false
+    }
+  },
+  "cmake_options": [
+    "-DTR_SCENE_PC_CUDA=ON",
+    "-DTR_USE_CUDA=ON",
+    "-DTR_USE_MUSA=OFF",
+    "-DTR_USE_ONEDNN=ON",
+    "-DTR_USE_XNNPACK=ON",
+    "-DTR_USE_STB=ON",
+    "-DTR_USE_LIBJPEG=ON",
+    "-DTR_USE_ZLIB=ON",
+    "-DTR_USE_LIBCURL=ON",
+    "-DTR_USE_MIMALLOC=ON",
+    "-DTR_USE_SIMD=ON"
+  ],
+  "compilation_macros": {
+    "scene_macros": [
+      "-DTR_SCENE_PC_CUDA=ON"
+    ],
+    "feature_macros": [
+      "-DTR_USE_CUDA=ON",
+      "-DTR_USE_MUSA=OFF",
+      "-DTR_USE_ONEDNN=ON",
+      "-DTR_USE_XNNPACK=ON",
+      "-DTR_USE_STB=ON",
+      "-DTR_USE_LIBJPEG=ON",
+      "-DTR_USE_ZLIB=ON",
+      "-DTR_USE_LIBCURL=ON",
+      "-DTR_USE_MIMALLOC=ON",
+      "-DTR_USE_SIMD=ON"
+    ],
+    "system_macros": {
+      "TR_NUM_GPUS": 1,
+      "TR_IS_EDGE_DEVICE": false
+    }
+  }
+}

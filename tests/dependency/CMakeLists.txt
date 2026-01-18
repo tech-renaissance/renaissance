@@ -387,7 +387,7 @@ foreach(idx RANGE 0 ${BUILD_SOURCES_LEN})
             )
 
             # 添加cuDNN精确路径（如果已配置）
-            if(DEFINED TR_CUDNN_INCLUDE_DIR)
+            if(DEFINED TR_CUDNN_INCLUDE_DIR AND NOT TR_CUDNN_INCLUDE_DIR STREQUAL "")
                 # cuDNN 9.x有版本子目录，需要同时添加父目录和版本目录
                 target_include_directories(${TEST_NAME} PRIVATE ${TR_CUDNN_INCLUDE_DIR})
                 # 尝试找到版本子目录

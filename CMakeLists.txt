@@ -382,24 +382,50 @@ if(TR_USE_CUDA)
                 PATH_SUFFIXES lib lib64
                 NO_DEFAULT_PATH
             )
-            find_path(CUDNN_INCLUDE_DIR cudnn.h
-                PATHS ${CUDNN_ROOT}
-                PATH_SUFFIXES include
-                NO_DEFAULT_PATH
-            )
+
+            # 特殊处理：系统级安装（/usr）不搜索include路径，避免污染系统头文件搜索顺序
+            if(NOT CUDNN_ROOT STREQUAL "/usr" AND
+               NOT CUDNN_ROOT STREQUAL "/usr/local" AND
+               NOT CUDNN_ROOT MATCHES "^/usr/local/cuda")
+                # 非系统安装才搜索include路径
+                find_path(CUDNN_INCLUDE_DIR cudnn.h
+                    PATHS ${CUDNN_ROOT}
+                    PATH_SUFFIXES include
+                    NO_DEFAULT_PATH
+                )
+            else()
+                # 系统安装：不设置include路径，让编译器使用默认搜索路径
+                message(STATUS "cuDNN installed in system directory, using compiler default include paths")
+                set(CUDNN_INCLUDE_DIR "")
+            endif()
         endif()
     endif()
 
-    if(CUDNN_LIBRARY AND CUDNN_INCLUDE_DIR)
-        message(STATUS "cuDNN found: ${CUDNN_LIBRARY}")
-        message(STATUS "cuDNN include: ${CUDNN_INCLUDE_DIR}")
-        add_definitions(-DTR_USE_CUDNN)
-    else()
-        message(WARNING "cuDNN not found - CUDA tests may not work")
-        if(DEFINED CUDNN_ROOT)
-            message(WARNING "  CUDNN_ROOT was set to: ${CUDNN_ROOT}")
+    # 对于系统安装，只检查库文件是否存在
+    if(CUDNN_ROOT STREQUAL "/usr" OR
+       CUDNN_ROOT STREQUAL "/usr/local" OR
+       CUDNN_ROOT MATCHES "^/usr/local/cuda")
+        # 系统安装：只检查库文件
+        if(CUDNN_LIBRARY)
+            message(STATUS "cuDNN found: ${CUDNN_LIBRARY}")
+            message(STATUS "cuDNN include: using compiler default search paths")
+            add_definitions(-DTR_USE_CUDNN)
         else()
-            message(WARNING "  CUDNN_ROOT was not defined")
+            message(WARNING "cuDNN library not found")
+        endif()
+    else()
+        # 非系统安装：检查库和头文件
+        if(CUDNN_LIBRARY AND CUDNN_INCLUDE_DIR)
+            message(STATUS "cuDNN found: ${CUDNN_LIBRARY}")
+            message(STATUS "cuDNN include: ${CUDNN_INCLUDE_DIR}")
+            add_definitions(-DTR_USE_CUDNN)
+        else()
+            message(WARNING "cuDNN not found - CUDA tests may not work")
+            if(DEFINED CUDNN_ROOT)
+                message(WARNING "  CUDNN_ROOT was set to: ${CUDNN_ROOT}")
+            else()
+                message(WARNING "  CUDNN_ROOT was not defined")
+            endif()
         endif()
     endif()
 else()

@@ -1,184 +1,223 @@
 /**
  * @file preprocessor_emulator.cpp
- * @brief 预处理器模拟器实现
- * @version 3.7.0
- * @date 2026-01-09
+ * @brief Preprocessor模拟器实现
+ * @version 3.8.0
+ * @date 2026-01-17
  * @author 技术觉醒团队
+ * @note 所属系列: data
  */
 
 #include "renaissance/data/preprocessor_emulator.h"
-#include "renaissance/base/tr_exception.h"
 #include "renaissance/base/logger.h"
+#include "renaissance/base/tr_exception.h"
+#include <sstream>
+#include <iomanip>
 #include <chrono>
-#include <algorithm>
+#include <iostream>
 
 namespace tr {
 namespace data {
 
 // =============================================================================
-// PreprocessorEmulator 实现
+// 配置接口
 // =============================================================================
 
-PreprocessorEmulator::PreprocessorEmulator(DataLoaderBase* loader, int num_workers, int simulate_ms)
-    : loader_(loader),
-      num_workers_(clamp_to_power_of_two(num_workers, 64)),
-      simulate_ms_(simulate_ms) {
+void PreprocessorEmulator::configure(const Config& config) {
+    config_ = config;
+    log_dir_ = config.log_dir;
 
-    if (loader_ == nullptr) {
-        TR_VALUE_ERROR("DataLoader pointer cannot be null");
-    }
-
-    LOG_INFO << "PreprocessorEmulator created: workers=" << num_workers_
-             << ", simulate_ms=" << simulate_ms_;
+    LOG_INFO << "PreprocessorEmulator configured: "
+             << "workers=" << config_.num_workers
+             << ", epochs=" << config_.num_epochs
+             << ", log_dir=" << config_.log_dir
+             << ", simulate_delay=" << config_.simulate_delay;
 }
 
-PreprocessorEmulator::~PreprocessorEmulator() {
-    join();
-}
+// =============================================================================
+// 运行模拟
+// =============================================================================
 
-int PreprocessorEmulator::clamp_to_power_of_two(int n, int max_val) {
-    // 钳制到最大值
-    if (n > max_val) {
-        LOG_WARN << "num_workers " << n << " exceeds maximum " << max_val
-                 << ", clamping to " << max_val;
-        n = max_val;
+void PreprocessorEmulator::run(DataLoader& loader) {
+    LOG_INFO << "Starting PreprocessorEmulator...";
+
+    // 清理旧日志
+    // TODO: 实现日志目录清理
+
+    // 启动worker线程
+    worker_threads_.clear();
+    for (int i = 0; i < config_.num_workers; ++i) {
+        worker_threads_.emplace_back(
+            &PreprocessorEmulator::worker_func, this, i, std::ref(loader));
     }
 
-    // 向下取2的幂
-    int power = 1;
-    while (power * 2 <= n) {
-        power *= 2;
-    }
-
-    if (power != n) {
-        n = power;  // 不报WARNING
-    }
-
-    return std::max(1, n);
-}
-
-void PreprocessorEmulator::start() {
-    if (loader_ == nullptr) {
-        TR_VALUE_ERROR("DataLoader not set");
-    }
-
-    if (!workers_.empty()) {
-        LOG_WARN << "Workers already started";
-        return;
-    }
-
-    LOG_INFO << "Starting " << num_workers_ << " preprocessor workers...";
-
-    stop_flag_.store(false, std::memory_order_relaxed);
-    workers_.reserve(num_workers_);
-
-    for (int i = 0; i < num_workers_; ++i) {
-        workers_.emplace_back(&PreprocessorEmulator::worker_thread, this, i);
-    }
-
-    LOG_INFO << "Preprocessor workers started";
-}
-
-void PreprocessorEmulator::join() {
-    if (workers_.empty()) {
-        return;
-    }
-
-    LOG_INFO << "Waiting for preprocessor workers to finish...";
-
-    for (auto& t : workers_) {
-        if (t.joinable()) {
-            t.join();
+    // 等待所有worker完成
+    for (auto& thread : worker_threads_) {
+        if (thread.joinable()) {
+            thread.join();
         }
     }
 
-    workers_.clear();
+    worker_threads_.clear();
 
-    // 输出统计信息
-    size_t total = get_total_processed();
-    LOG_INFO << "All preprocessor workers finished. Total samples processed: " << total;
+    LOG_INFO << "PreprocessorEmulator completed";
 }
 
-void PreprocessorEmulator::worker_thread(int worker_id) {
-    LOG_DEBUG << "Preprocessor worker " << worker_id << " started";
+// =============================================================================
+// Worker线程函数
+// =============================================================================
 
-    SampleView view;
-    size_t local_count = 0;  // 该worker处理的样本数
+void PreprocessorEmulator::worker_func(int worker_id, DataLoader& loader) {
+    LOG_INFO << "Worker " << worker_id << " started";
 
-    while (!stop_flag_.load(std::memory_order_relaxed)) {
-        // 从DataLoader获取样本
-        if (!loader_->next_sample(worker_id, view)) {
-            // Epoch结束
-            break;
+    // 打开日志文件
+    std::ostringstream oss;
+    oss << log_dir_ << "/worker_" << worker_id << "_log.txt";
+    std::string log_file_path = oss.str();
+
+    std::ofstream log_file(log_file_path);
+    if (!log_file.is_open()) {
+        TR_THROW(FileNotFoundError, "Failed to open log file: " << log_file_path);
+    }
+
+    // 记录数据集名称
+    log_file << "# Dataset: " << loader.dataset_name() << "\n";
+    log_file << "# Worker: " << worker_id << "\n";
+    log_file << "# Format: worker_id,data_size,label\n";
+    log_file.flush();
+
+    // 消费样本
+    int32_t label;
+    const uint8_t* data_ptr;
+    size_t data_size;
+    size_t total_samples = 0;
+
+    while (loader.get_next_sample(worker_id, label, data_ptr, data_size)) {
+        // 模拟预处理延迟（可选）
+        if (config_.simulate_delay) {
+            std::this_thread::sleep_for(std::chrono::microseconds(config_.delay_us));
         }
 
-        // 模拟预处理时间
-        if (simulate_ms_ > 0) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(simulate_ms_));
-        }
+        // 写入日志
+        log_file << worker_id << "," << data_size << "," << label << "\n";
+        total_samples++;
+    }
 
-        // 统计标签
-        {
-            std::lock_guard<std::mutex> lock(stats_mutex_);
-            label_counts_[view.label]++;
-        }
+    log_file.close();
 
-        // 保存指定图片（如果配置了）
-        {
-            std::lock_guard<std::mutex> lock(save_mutex_);
-            if (!save_done_.load() &&
-                worker_id == save_worker_id_ &&
-                local_count == static_cast<size_t>(save_sample_idx_)) {
+    LOG_INFO << "Worker " << worker_id << " finished: "
+             << total_samples << " samples processed";
+}
 
-                LOG_INFO << "Saving sample from worker " << worker_id
-                         << ", sample #" << local_count
-                         << ", label=" << view.label
-                         << ", size=" << view.size
-                         << " to " << save_path_;
+// =============================================================================
+// 写入日志
+// =============================================================================
 
-                std::ofstream out(save_path_, std::ios::binary);
-                out.write(reinterpret_cast<const char*>(view.data), view.size);
+void PreprocessorEmulator::write_log(int worker_id, size_t data_size, int32_t label) {
+    std::lock_guard<std::mutex> lock(log_mutex_);
 
-                if (out.good()) {
-                    LOG_INFO << "Sample saved successfully";
-                } else {
-                    LOG_ERROR << "Failed to save sample to " << save_path_;
+    // 创建日志文件
+    std::ostringstream oss;
+    oss << log_dir_ << "/worker_" << worker_id << "_log.txt";
+
+    std::ofstream log_file(oss.str(), std::ios::app);
+    if (log_file.is_open()) {
+        log_file << worker_id << "," << data_size << "," << label << "\n";
+    }
+}
+
+// =============================================================================
+// 验证可复现性
+// =============================================================================
+
+bool PreprocessorEmulator::verify_reproducibility(
+    const std::string& log_dir1,
+    const std::string& log_dir2) {
+
+    LOG_INFO << "Verifying reproducibility between "
+             << log_dir1 << " and " << log_dir2;
+
+    // 读取两次运行的日志
+    struct LogRecord {
+        int worker_id;
+        size_t data_size;
+        int32_t label;
+    };
+
+    std::vector<LogRecord> logs1, logs2;
+
+    // 辅助函数：读取日志目录
+    auto read_logs = [&](const std::string& dir) -> std::vector<LogRecord> {
+        std::vector<LogRecord> records;
+
+        // TODO: 扫描目录，读取所有worker_*.txt文件
+        // 当前简化实现：假设worker_0到worker_15
+
+        for (int i = 0; i < 16; ++i) {
+            std::ostringstream oss;
+            oss << dir << "/worker_" << i << "_log.txt";
+
+            std::ifstream file(oss.str());
+            if (!file.is_open()) {
+                LOG_WARN << "Failed to open log file: " << oss.str();
+                continue;
+            }
+
+            std::string line;
+            while (std::getline(file, line)) {
+                // 跳过注释行
+                if (line.empty() || line[0] == '#') {
+                    continue;
                 }
 
-                save_done_.store(true, std::memory_order_release);
+                // 解析: worker_id,data_size,label
+                std::istringstream iss(line);
+                char comma;
+                int worker_id;
+                size_t data_size;
+                int label;
+
+                if (iss >> worker_id >> comma >> data_size >> comma >> label) {
+                    records.push_back({worker_id, data_size, static_cast<int32_t>(label)});
+                }
             }
+
+            file.close();
         }
 
-        // 更新计数
-        ++local_count;
-        total_processed_.fetch_add(1, std::memory_order_relaxed);
+        LOG_INFO << "Read " << records.size() << " records from " << dir;
+        return records;
+    };
+
+    // 读取两次日志
+    logs1 = read_logs(log_dir1);
+    logs2 = read_logs(log_dir2);
+
+    // 验证数量
+    if (logs1.size() != logs2.size()) {
+        LOG_ERROR << "Log size mismatch: " << logs1.size() << " vs " << logs2.size();
+        return false;
     }
 
-    LOG_INFO << "Preprocessor worker " << worker_id << " finished: "
-              << local_count << " samples processed";
-}
+    LOG_INFO << "Comparing " << logs1.size() << " records...";
 
-std::map<int32_t, size_t> PreprocessorEmulator::get_label_counts() const {
-    std::lock_guard<std::mutex> lock(stats_mutex_);
-    return label_counts_;
-}
+    // 逐条对比
+    for (size_t i = 0; i < logs1.size(); ++i) {
+        if (logs1[i].worker_id != logs2[i].worker_id ||
+            logs1[i].data_size != logs2[i].data_size ||
+            logs1[i].label != logs2[i].label) {
 
-size_t PreprocessorEmulator::get_total_processed() const {
-    return total_processed_.load(std::memory_order_acquire);
-}
+            LOG_ERROR << "Mismatch at record " << i << ": "
+                     << logs1[i].worker_id << "," << logs1[i].data_size << "," << logs1[i].label
+                     << " vs "
+                     << logs2[i].worker_id << "," << logs2[i].data_size << "," << logs2[i].label;
+            return false;
+        }
+    }
 
-void PreprocessorEmulator::save_sample_image(int worker_id, int sample_idx,
-                                             const std::string& output_path) {
-    std::lock_guard<std::mutex> lock(save_mutex_);
+    LOG_INFO << "✅ Reproducibility verified! All " << logs1.size()
+             << " records match perfectly.";
 
-    save_worker_id_ = worker_id;
-    save_sample_idx_ = sample_idx;
-    save_path_ = output_path;
-    save_done_.store(false, std::memory_order_release);
-
-    LOG_INFO << "Configured to save: worker " << worker_id
-             << ", sample #" << sample_idx
-             << " -> " << output_path;
+    return true;
 }
 
 } // namespace data

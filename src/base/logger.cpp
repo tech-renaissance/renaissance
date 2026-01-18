@@ -88,7 +88,7 @@ void Logger::log(LogLevel level, const char* module, const char* file,
     if (file_stream_.is_open()) {
         file_stream_ << log_line << std::endl;
     } else {
-        if (level >= LogLevel::ERROR) {
+        if (level >= LogLevel::ERR) {
             std::cerr << log_line << std::endl;
         } else {
             std::cout << log_line << std::endl;
@@ -120,13 +120,13 @@ const char* Logger::level_to_string(LogLevel level) const noexcept {
         case LogLevel::DEBUG: return "DEBUG";
         case LogLevel::INFO:  return "INFO ";
         case LogLevel::WARN:  return "WARN ";
-        case LogLevel::ERROR: return "ERROR";
+        case LogLevel::ERR:   return "ERROR";  // 显示时仍为"ERROR"
         default: return "?????";
     }
 }
 
 void Logger::log_exception(const TRException& e) {
-    log(LogLevel::ERROR, "EXCEPTION",
+    log(LogLevel::ERR, "EXCEPTION",
         e.contexts().empty() ? "" : e.contexts()[0].file,
         0, e.what());
 }

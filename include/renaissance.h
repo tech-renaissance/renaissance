@@ -11,6 +11,16 @@
 
 #pragma once
 
+// Windows宏冲突处理（必须在任何include之前）
+#ifdef _WIN32
+    #ifndef NOMINMAX
+        #define NOMINMAX
+    #endif
+    #ifdef ERROR
+        #undef ERROR
+    #endif
+#endif
+
 // 标准库包含
 #include <iostream>
 #include <string>
@@ -47,9 +57,11 @@
 #include "renaissance/data/shape.h"
 #include "renaissance/data/storage.h"
 #include "renaissance/data/tensor.h"
-#include "renaissance/data/data_loader_base.h"
-#include "renaissance/data/dts_data_loader.h"
-#include "renaissance/data/raw_data_loader.h"
+// V3.8.0 新版DataLoader
+#include "renaissance/data/sample_window.h"
+#include "renaissance/data/data_loader.h"
+#include "renaissance/data/imagenet_loader.h"
+#include "renaissance/data/imagenet_loader_dts.h"
 #include "renaissance/data/preprocessor_emulator.h"
 
 // Device

@@ -1157,13 +1157,36 @@ def search_dependency(name: str, sys_info: Dict, suppress_print: bool = False) -
 
         # 头文件搜索（支持多个头文件）
         elif "header" in config:
-            headers = config["header"] if isinstance(config["header"], list) else [config["header"]]
-            for header in headers:
-                found_path = find_file_in_dirs(header, paths)
-                if found_path:
-                    result["path"] = found_path
-                    result["found"] = True
-                    break
+            # 特殊处理：cuDNN在Linux上的系统级安装检测
+            if not is_win and name == "cudnn":
+                # 检查 /usr/include/x86_64-linux-gnu/cudnn*.h
+                system_cudnn_paths = [
+                    "/usr/include/x86_64-linux-gnu",
+                    "/usr/include"
+                ]
+                headers = config["header"] if isinstance(config["header"], list) else [config["header"]]
+
+                for system_path in system_cudnn_paths:
+                    for header in headers:
+                        # 尝试直接匹配头文件名
+                        header_path = os.path.join(system_path, header)
+                        if os.path.exists(header_path):
+                            result["path"] = "/usr"  # 返回/usr作为CUDNN_ROOT
+                            result["found"] = True
+                            break
+
+                    if result["found"]:
+                        break
+
+            # 如果还没找到，使用常规搜索
+            if not result["found"]:
+                headers = config["header"] if isinstance(config["header"], list) else [config["header"]]
+                for header in headers:
+                    found_path = find_file_in_dirs(header, paths)
+                    if found_path:
+                        result["path"] = found_path
+                        result["found"] = True
+                        break
 
         # 库文件搜索
         elif "lib_files" in config:
@@ -1189,7 +1212,24 @@ def search_dependency(name: str, sys_info: Dict, suppress_print: bool = False) -
                     if "{path}" in arg:
                         cmd[i] = arg.replace("{path}", result["path"])
                     elif "{include}" in arg:
-                        include_path = os.path.join(result["path"], "include")
+                        # 特殊处理：系统级cuDNN安装
+                        if not is_win and name == "cudnn" and result["path"] == "/usr":
+                            # 优先尝试 /usr/include/x86_64-linux-gnu
+                            include_candidates = [
+                                "/usr/include/x86_64-linux-gnu",
+                                "/usr/include",
+                                "/usr/local/cuda/include"
+                            ]
+                            include_path = None
+                            for candidate in include_candidates:
+                                test_file = os.path.join(candidate, "cudnn_version.h")
+                                if os.path.exists(test_file):
+                                    include_path = candidate
+                                    break
+                            if not include_path:
+                                include_path = os.path.join(result["path"], "include")
+                        else:
+                            include_path = os.path.join(result["path"], "include")
                         cmd[i] = arg.replace("{include}", include_path)
 
                 # 处理可执行文件路径替换
@@ -1565,13 +1605,57 @@ def generate_cmake_config(scene: str, deps: Dict, sys_info: Dict) -> str:
     if "cudnn" in deps and deps["cudnn"]["found"]:
         cudnn_path = deps["cudnn"]["path"].replace("\\", "/")
         lines.append(f'set(TR_CUDNN_PATH "{cudnn_path}")')
-        # 确保include和lib路径
-        if sys_info["is_windows"]:
+
+        # 特殊处理：如果cuDNN安装在系统目录，需要精确设置include和lib路径
+        # 系统目录包括：/usr, /usr/local, /usr/local/cuda 等
+        is_system_install = any([
+            cudnn_path.startswith("/usr"),
+            cudnn_path.startswith("/usr/local"),
+            cudnn_path.startswith("/usr/local/cuda")
+        ])
+
+        if is_system_install and not sys_info["is_windows"]:
+            # Linux系统安装：不设置include路径，避免污染系统头文件搜索顺序
+            # 只设置library路径，头文件由编译器自动搜索
+            lines.append('# cuDNN installed in system directory, using compiler default search paths')
+            lines.append('# Not setting include paths to avoid conflicts with system headers')
+
+            # 预设置CUDNN_INCLUDE_DIR为空，防止CMakeLists.txt执行find_path
+            lines.append('# Pre-set to empty to prevent CMakeLists.txt from searching system directories')
+            lines.append('set(CUDNN_INCLUDE_DIR "")')
+            lines.append('set(TR_CUDNN_INCLUDE_DIR "")')
+
+            # 只查找库文件路径（库文件不会污染头文件搜索）
+            lines.append('if(NOT CUDNN_LIBRARY)')
+            lines.append('    find_library(CUDNN_LIBRARY')
+            lines.append('        NAMES cudnn cudnn_cnn_infer libcudnn.so.9')
+            lines.append('        PATHS')
+            lines.append('            /usr/lib/x86_64-linux-gnu')
+            lines.append('            /usr/local/cuda/lib64')
+            lines.append('            /usr/lib64')
+            lines.append('        NO_DEFAULT_PATH')
+            lines.append('    )')
+            lines.append('endif()')
+
+            # 设置TR_CUDNN_LIBRARY_DIR（用于链接）
+            lines.append('if(CUDNN_LIBRARY)')
+            lines.append('    get_filename_component(CUDNN_LIBRARY_DIR ${CUDNN_LIBRARY} DIRECTORY)')
+            lines.append('    set(TR_CUDNN_LIBRARY_DIR ${CUDNN_LIBRARY_DIR})')
+            lines.append('    message(STATUS "cuDNN library: ${CUDNN_LIBRARY}")')
+            lines.append('endif()')
+
+        elif not is_system_install:
+            # 非系统安装：显式设置路径
+            if sys_info["is_windows"]:
+                lines.append(f'set(TR_CUDNN_INCLUDE_DIR "{cudnn_path}/include")')
+                lines.append(f'set(TR_CUDNN_LIBRARY_DIR "{cudnn_path}/lib")')
+            else:
+                lines.append(f'set(TR_CUDNN_INCLUDE_DIR "{cudnn_path}/include")')
+                lines.append(f'set(TR_CUDNN_LIBRARY_DIR "{cudnn_path}/lib64")')
+        else:
+            # Windows系统安装（不太可能，但保留逻辑）
             lines.append(f'set(TR_CUDNN_INCLUDE_DIR "{cudnn_path}/include")')
             lines.append(f'set(TR_CUDNN_LIBRARY_DIR "{cudnn_path}/lib")')
-        else:
-            lines.append(f'set(TR_CUDNN_INCLUDE_DIR "{cudnn_path}/include")')
-            lines.append(f'set(TR_CUDNN_LIBRARY_DIR "{cudnn_path}/lib64")')
 
     # MUSA/muDNN路径
     if "musa" in deps and deps["musa"]["found"]:

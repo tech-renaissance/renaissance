@@ -209,7 +209,7 @@ int main(int argc, char** argv) {
 
             auto dts_loader = std::make_unique<DtsDataLoader>(
                 num_workers,
-                full_load ? LoadMode::FULL : LoadMode::PARTIAL,
+                full_load ? LoadMode::FULLY : LoadMode::PARTIAL,
                 false  // check_crc=false
             );
 

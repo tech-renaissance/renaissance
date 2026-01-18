@@ -9,6 +9,16 @@
  * @note 所属系列: base
  */
 
+// Windows宏冲突处理
+#ifdef _WIN32
+    #ifndef NOMINMAX
+        #define NOMINMAX
+    #endif
+    #ifdef ERROR
+        #undef ERROR
+    #endif
+#endif
+
 #include "renaissance.h"
 #include <cassert>
 #include <fstream>

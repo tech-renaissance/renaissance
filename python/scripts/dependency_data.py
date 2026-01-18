@@ -231,7 +231,13 @@ DEP_CONFIG = {
             "C:/Program Files/NVIDIA/CUDNN/v9.*",
             "C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/*/include"
         ],
-        "paths_linux": ["/usr/local/cuda", "/usr", "/usr/local/cuda/lib64"],
+        "paths_linux": [
+            "/usr/local/cuda",
+            "/usr/local/cuda/lib64",
+            "/usr/local/cuda/include",
+            "/usr/include/cudnn",
+            "/usr/local/cudnn"
+        ],
         "version_cmd": ["grep", "CUDNN_MAJOR", "-A", "2", "{include}/cudnn_version.h"],
         "version_pattern": r"#define CUDNN_MAJOR\s+(\d+).*#define CUDNN_MINOR\s+(\d+).*#define CUDNN_PATCHLEVEL\s+(\d+)",
         "min_version": "9.17",

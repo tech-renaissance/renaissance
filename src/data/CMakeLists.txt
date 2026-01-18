@@ -4,9 +4,9 @@ set(DATA_SOURCES
     shape.cpp
     storage.cpp
     tensor.cpp
-    dts_data_loader.cpp
-    raw_data_loader.cpp
     preprocessor_emulator.cpp
+    # V3.8.0 新版DataLoader
+    imagenet_loader_dts.cpp
 )
 
 # 创建数据库静态库

@@ -6,6 +6,16 @@
  * @author 技术觉醒团队
  */
 
+// Windows宏冲突处理
+#ifdef _WIN32
+    #ifndef NOMINMAX
+        #define NOMINMAX
+    #endif
+    #ifdef ERROR
+        #undef ERROR
+    #endif
+#endif
+
 #include "renaissance.h"
 #include <iostream>
 #include <iomanip>

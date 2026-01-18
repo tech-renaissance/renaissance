@@ -3,6 +3,12 @@ set(DATA_TEST_SOURCES
     test_shape.cpp
     test_storage_ownership.cpp
     test_print.cpp
+    # V4.0.0 DataLoader测试
+    test_dataloader_basic.cpp
+    test_reproducibility.cpp
+    test_performance.cpp
+    test_val_only.cpp
+    test_dataloader_performance.cpp
 )
 
 # 创建data测试可执行文件

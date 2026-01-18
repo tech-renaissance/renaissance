@@ -11,6 +11,13 @@
 
 #pragma once
 
+// Windows宏冲突处理：必须在任何include之前
+#ifdef _WIN32
+    #ifdef ERROR
+        #undef ERROR
+    #endif
+#endif
+
 #include <string>
 #include <mutex>
 #include <fstream>
@@ -31,7 +38,7 @@ enum class LogLevel {
     DEBUG = 0,
     INFO  = 1,
     WARN  = 2,
-    ERROR = 3
+    ERR   = 3  // 修改：ERROR -> ERR，避开Windows宏冲突
 };
 
 /**
@@ -223,7 +230,8 @@ struct NullStream {
 #endif
 
 // ERROR级别始终保留
-#define TR_LOG_ERROR(module) ::tr::detail::LogStream(::tr::LogLevel::ERROR, module, __FILE__, __LINE__)
+#define TR_LOG_ERROR(module) ::tr::detail::LogStream(::tr::LogLevel::ERR, module, __FILE__, __LINE__)
+//                                                                        ^^^
 
 // ============================================================================
 // 便捷宏（自动推断模块）
