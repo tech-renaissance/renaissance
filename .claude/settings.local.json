@@ -3,7 +3,8 @@
     "allow": [
       "Bash(ldd:*)",
       "Bash(timeout:*)",
-      "Bash(powershell.exe:*)"
+      "Bash(powershell.exe:*)",
+      "Bash(.\\build\\windows-msvc-debug\\bin\\tests\\data\\test_dataloader_performance.exe:*)"
     ],
     "deny": [],
     "ask": []

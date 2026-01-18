@@ -220,14 +220,16 @@ void ImageNetLoaderDts::begin_epoch(int epoch_id, bool is_train) {
         while (!current_set_->group_metas[0].is_ready.load(std::memory_order_acquire)) {
             std::this_thread::sleep_for(std::chrono::milliseconds(1));
         }
-        LOG_INFO << "First GROUP Pair ready with " << current_set_->group_metas[0].total_samples.load(std::memory_order_relaxed) << " samples";
+        // DEBUG: 注释掉次要日志以避免弹框
+        // LOG_INFO << "First GROUP Pair ready with " << current_set_->group_metas[0].total_samples.load(std::memory_order_relaxed) << " samples";
 
         // 如果有多个GROUP Pairs，等待第二个GROUP Pair就绪（避免后续消费时卡住）
         if (current_set_->group_metas.size() >= 2) {
             while (!current_set_->group_metas[1].is_ready.load(std::memory_order_acquire)) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(1));
             }
-            LOG_INFO << "Second GROUP Pair ready with " << current_set_->group_metas[1].total_samples.load(std::memory_order_relaxed) << " samples";
+            // DEBUG: 注释掉次要日志以避免弹框
+            // LOG_INFO << "Second GROUP Pair ready with " << current_set_->group_metas[1].total_samples.load(std::memory_order_relaxed) << " samples";
         }
     }
 }
@@ -285,16 +287,29 @@ bool ImageNetLoaderDts::get_next_sample(
             }
         } else {
             // ========== PARTIAL模式：使用二分查找计算logical pair ==========
-            // 使用std::upper_bound进行二分查找
-            auto it = std::upper_bound(ds.logical_pair_order.begin(),
-                                       ds.logical_pair_order.end(),
+            // 添加内存屏障，确保看到IO线程的更新
+            std::atomic_thread_fence(std::memory_order_acquire);
+
+            // 安全拷贝logical_pair_order，避免迭代器失效
+            std::vector<uint32_t> local_logical_pair_order;
+            {
+                // 简单的临界区保护
+                local_logical_pair_order = ds.logical_pair_order;
+            }
+
+            // 使用拷贝的vector进行二分查找
+            auto it = std::upper_bound(local_logical_pair_order.begin(),
+                                       local_logical_pair_order.end(),
                                        global_seq,
                                        [&ds](size_t seq, uint32_t lp_idx) {
                                            // 比较函数：返回true表示seq < lp_idx的累积样本数
+                                           if (lp_idx >= ds.pair_cumulative_samples.size()) {
+                                               return false;  // 越界
+                                           }
                                            return seq < ds.pair_cumulative_samples[lp_idx];
                                        });
 
-            if (it == ds.logical_pair_order.end()) {
+            if (it == local_logical_pair_order.end()) {
                 // 还没加载到这个seq，等待
                 std::this_thread::sleep_for(std::chrono::microseconds(100));
                 continue;
@@ -303,10 +318,22 @@ bool ImageNetLoaderDts::get_next_sample(
             // 找到了！获取logical pair索引
             uint32_t target_logical_pair = *it;
 
+            // 边界检查
+            if (target_logical_pair >= ds.pair_cumulative_samples.size()) {
+                LOG_ERROR << "target_logical_pair out of bounds: " << target_logical_pair
+                         << ", size: " << ds.pair_cumulative_samples.size();
+                std::this_thread::sleep_for(std::chrono::microseconds(100));
+                continue;
+            }
+
             // 计算在这个logical pair之前的累积样本数
-            if (it != ds.logical_pair_order.begin()) {
+            if (it != local_logical_pair_order.begin()) {
                 auto prev_it = std::prev(it);
-                accumulated = ds.pair_cumulative_samples[*prev_it];
+                if (*prev_it < ds.pair_cumulative_samples.size()) {
+                    accumulated = ds.pair_cumulative_samples[*prev_it];
+                } else {
+                    accumulated = 0;
+                }
             } else {
                 accumulated = 0;
             }
@@ -402,12 +429,21 @@ bool ImageNetLoaderDts::get_next_sample(
         if (consumed + 1 == gmeta.total_samples.load(std::memory_order_acquire)) {
             // ========== 这个GROUP Pair已完全消费，执行Slot回收 ==========
 
-            LOG_INFO << "Recycling slots for GROUP Pair " << target_pair_idx
-                     << " (logical_pair=" << gmeta.logical_pair_idx << ")";
+            // HOT PATH: 禁用日志以避免多线程并发输出导致Windows控制台问题
+            // LOG_DEBUG << "Recycling slots for GROUP Pair " << target_pair_idx
+            //          << " (logical_pair=" << gmeta.logical_pair_idx << ")";
 
             // ========== EXPERT_SN修改3：静态Slot映射，直接计算Slot范围 ==========
             // 每个Ring Pair固定占用2×N个Slot（2个GROUP × N个线程）
             const int N = num_load_workers_;
+
+            // 边界检查：防止target_pair_idx越界
+            if (target_pair_idx >= ds.group_metas.size()) {
+                LOG_ERROR << "Invalid target_pair_idx: " << target_pair_idx
+                         << ", group_metas.size: " << ds.group_metas.size();
+                return false;  // 安全退出
+            }
+
             uint32_t start_slot = target_pair_idx * 2 * N;  // Pair起始Slot
             uint32_t end_slot = start_slot + 2 * N;         // Pair结束Slot（不包含）
 
@@ -416,13 +452,27 @@ bool ImageNetLoaderDts::get_next_sample(
                 end_slot = ds.num_slots;
             }
 
+            // 验证start_slot也有效
+            if (start_slot >= ds.num_slots) {
+                LOG_ERROR << "Invalid start_slot: " << start_slot
+                         << ", num_slots: " << ds.num_slots
+                         << ", target_pair_idx: " << target_pair_idx;
+                return false;  // 安全退出
+            }
+
             // 直接重置整个Pair的Slot状态为EMPTY（无需遍历occupied_slots）
             for (uint32_t slot_idx = start_slot; slot_idx < end_slot; ++slot_idx) {
+                if (slot_idx >= ds.num_slots) {
+                    LOG_ERROR << "Slot index out of bounds: " << slot_idx
+                             << ", num_slots: " << ds.num_slots;
+                    break;  // 防止越界
+                }
                 ds.slot_states[slot_idx].state = SlotState::EMPTY;
             }
 
-            LOG_INFO << "Recycled " << (end_slot - start_slot) << " slots for GROUP Pair " << target_pair_idx
-                     << " (static range [" << start_slot << ", " << end_slot << "))";
+            // HOT PATH: 禁用日志
+            // LOG_DEBUG << "Recycled " << (end_slot - start_slot) << " slots for GROUP Pair " << target_pair_idx
+            //          << " (static range [" << start_slot << ", " << end_slot << "))";
         }
     }
 
@@ -648,7 +698,8 @@ void ImageNetLoaderDts::init_static_allocation(Dataset& ds) {
 // =============================================================================
 
 void ImageNetLoaderDts::perform_level2_shuffle(Dataset& ds, int epoch_id) {
-    LOG_INFO << "Performing Level 2 shuffle (Block-level) for epoch " << epoch_id;
+    // DEBUG: 注释掉次要日志以避免弹框
+    // LOG_INFO << "Performing Level 2 shuffle (Block-level) for epoch " << epoch_id;
 
     // 初始化原始顺�?
     ds.epoch_block_order.resize(ds.num_blocks);
@@ -669,10 +720,11 @@ void ImageNetLoaderDts::perform_level2_shuffle(Dataset& ds, int epoch_id) {
         std::swap(ds.epoch_block_order[i], ds.epoch_block_order[j]);
     }
 
-    LOG_INFO << "Level 2 shuffle completed: first 10 blocks = "
-             << ds.epoch_block_order[0] << ", "
-             << ds.epoch_block_order[1] << ", "
-             << ds.epoch_block_order[2] << ", ...";
+    // DEBUG: 注释掉次要日志以避免弹框
+    // LOG_INFO << "Level 2 shuffle completed: first 10 blocks = "
+    //          << ds.epoch_block_order[0] << ", "
+    //          << ds.epoch_block_order[1] << ", "
+    //          << ds.epoch_block_order[2] << ", ...";
 }
 
 // =============================================================================
@@ -822,8 +874,9 @@ void ImageNetLoaderDts::io_worker_func(int thread_id) {
                     // ========== 关键修复：分离逻辑索引和环形索引 ==========
                     uint32_t ring_pair_idx = logical_pair_idx % num_group_pairs;  // 环形Pair索引（用于访问）
 
-                    LOG_INFO << "Worker " << thread_id << " triggering sync for GROUP " << group_idx
-                             << ", logical_pair=" << logical_pair_idx << ", ring_pair=" << ring_pair_idx;
+                    // HOT PATH: 禁用日志
+                    // LOG_DEBUG << "Worker " << thread_id << " triggering sync for GROUP " << group_idx
+                    //          << ", logical_pair=" << logical_pair_idx << ", ring_pair=" << ring_pair_idx;
 
                     // 触发对(logical_group-1, logical_group)的洗牌
                     sync_and_shuffle_group(ring_pair_idx, logical_pair_idx, ds);
@@ -1118,18 +1171,30 @@ void ImageNetLoaderDts::sync_and_shuffle_group(uint32_t ring_pair_idx,
         // 记录这个logical pair的同步顺序
         ds.logical_pair_order.push_back(logical_pair_idx);
 
+        // 确保pair_cumulative_samples数组足够大（关键修复！）
+        if (logical_pair_idx >= ds.pair_cumulative_samples.size()) {
+            ds.pair_cumulative_samples.resize(logical_pair_idx + 1, 0);
+        }
+
         // 重新计算累积样本数（从当前已同步的所有pairs）
         size_t acc = 0;
         for (size_t i = 0; i < ds.logical_pair_order.size(); ++i) {
             uint32_t lp_idx = ds.logical_pair_order[i];
+            // 确保不越界
+            if (lp_idx >= ds.pair_cumulative_samples.size()) {
+                LOG_ERROR << "lp_idx out of bounds in cumulative update: " << lp_idx
+                         << ", size: " << ds.pair_cumulative_samples.size();
+                break;
+            }
             uint32_t samples = ds.logical_pair_samples[lp_idx];
             acc += samples;
             ds.pair_cumulative_samples[lp_idx] = acc;
         }
     }
 
-    LOG_INFO << "Group pair " << logical_pair_idx << " (ring " << ring_pair_idx << ") ready, "
-              << gp_meta.total_samples.load(std::memory_order_relaxed) << " samples";
+    // HOT PATH: 禁用日志
+    // LOG_DEBUG << "Group pair " << logical_pair_idx << " (ring " << ring_pair_idx << ") ready, "
+    //          << gp_meta.total_samples.load(std::memory_order_relaxed) << " samples";
 }
 
 // =============================================================================

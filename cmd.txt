@@ -1,0 +1,2 @@
+.\test_dataloader_performance.exe --dts --val --lv 0 --mode partial --workers 8 --preprocess 16
+.\test_dataloader_performance.exe --dts --val --lv 0 --mode fully --workers 8 --preprocess 16

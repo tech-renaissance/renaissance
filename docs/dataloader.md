@@ -1,24 +1,32 @@
-# DataLoader V4.0.0 技术文档
+# 技术觉醒框架 DataLoader 技术文档
 
-**版本**: V4.0.0
-**日期**: 2026-01-17
+**版本**: V3.7.3
+**日期**: 2026-01-18
 **作者**: 技术觉醒团队
-**设计者**: 总工程师姜玉麟 + AI专家团队
+**状态**: 生产就绪
+
+**更新日志**:
+- V3.7.3 (2026-01-18): 修复Debug模式迭代器失效问题，添加--mode选项
+- V3.7.2 (2026-01-18): 初始版本，完整实现DataLoader
 
 ---
 
 ## 目录
 
 1. [概述](#1-概述)
-2. [V4.0.0重大更新](#2-v40重大更新)
-3. [类层次结构](#3-类层次结构)
-4. [核心API](#4-核心api)
-5. [工作原理](#5-工作原理)
-6. [高速并行读取机制](#6-高速并行读取机制)
-7. [随机可复现性](#7-随机可复现性)
-8. [性能测试](#8-性能测试)
-9. [使用示例](#9-使用示例)
-10. [常见问题](#10-常见问题)
+2. [核心概念](#2-核心概念)
+3. [DTS文件格式](#3-dts文件格式)
+4. [架构设计](#4-架构设计)
+5. [多线程并行加载](#5-多线程并行加载)
+6. [随机可复现性](#6-随机可复现性)
+7. [加载模式](#7-加载模式)
+8. [性能优化](#8-性能优化)
+9. [线程安全](#9-线程安全)
+10. [API使用指南](#10-api使用指南)
+11. [测试与验证](#11-测试与验证)
+12. [最佳实践](#12-最佳实践)
+13. [常见问题](#13-常见问题)
+14. [更新日志](#14-更新日志)
 
 ---
 
@@ -26,795 +34,473 @@
 
 ### 1.1 设计目标
 
-DataLoader V4.0.0 是为深度学习训练场景设计的高性能数据加载器，核心目标：
+`ImageNetLoaderDts` 是技术觉醒框架的 ImageNet 数据加载器，专为深度学习训练场景设计，具有以下核心特性：
 
-- **极致性能**: 通过**静态映射**彻底消除锁竞争，实现接近硬件I/O极限的吞吐量
-- **随机可复现**: **三级随机机制**确保相同seed和epoch产生完全一致的样本序列
-- **跨平台**: 统一API，底层自动适配Windows和Linux最优实现
-- **零拷贝**: Preprocessor直接访问内部缓冲区，避免不必要的数据复制
+- ✅ **极高性能**: 2-3 GB/s 读取速度（Linux），12-15 GB/s（Windows）
+- ✅ **零锁竞争**: 静态映射设计，16线程无竞争并行
+- ✅ **随机可复现**: 三级随机机制，保证训练可重复性
+- ✅ **内存灵活**: 支持 FULLY/PARTIAL 两种加载模式
+- ✅ **跨平台统一**: Windows/Linux 相同的代码逻辑
 
-### 1.2 V4.0.0 重大突破
+### 1.2 性能指标
 
-#### 从动态分配到静态映射的彻底重构
+| 平台 | 模式 | 数据集 | 冷启动时间 | 吞吐量 | 状态 |
+|------|------|--------|-----------|--------|------|
+| **Windows** | Release | ImageNet 验证集 (6.28 GB) | 0.316 s | **19.75 GB/s** | ✅ 完美 |
+| **Windows** | Release | ImageNet 验证集 FULLY (6.28 GB) | 0.402 s | **15.56 GB/s** | ✅ 完美 |
+| **Windows** | Debug | ImageNet 验证集 (6.28 GB) | 0.425 s | **14.71 GB/s** | ✅ 无弹框 |
+| **Windows** | Debug | ImageNet 验证集 FULLY (6.28 GB) | ~0.5 s | **~14 GB/s** | ✅ 无弹框 |
+| **Linux** | Release | ImageNet 训练集 (138 GB) | ~50 s | **2.76 GB/s** | ✅ 正常 |
+| **Linux** | Release | ImageNet 验证集 (6.28 GB) | ~2.5 s | **2.5 GB/s** | ✅ 正常 |
 
-**V3.7.1的致命缺陷**：
+**对标基准**: method2_native.cpp
+- Windows: ~16 GB/s
+- Linux: 2.7 GB/s
+
+### 1.3 设计哲学
+
+> **"每个线程从一开始就已经知道了它要加载哪个 BLOCK 到哪个位置"**
+> —— 总工程师姜玉麟
+
+这句话揭示了本设计的核心：**静态映射**（Static Mapping）。与传统的动态领取任务不同，我们的设计让每个 IO 线程在启动前就已经确定了它要负责的所有 BLOCK，从而实现了零竞争。
+
+---
+
+## 2. 核心概念
+
+### 2.1 BLOCK（数据块）
+
+**定义**: BLOCK 是 DTS 文件的基本存储单位，固定大小为 **16 MB**。
+
+**特点**:
+- 每个 BLOCK 包含约 150-200 张 JPEG 图片（LV0 压缩）
+- BLOCK 内存储格式：`[block_header][jpeg_data_0][jpeg_data_1]...`
+- BLOCK 之间相互独立，可并行读取
+
+**Block Header 结构**:
 ```
-动态任务分配 → fetch_add领取BLOCK
-破坏静态映射 → 动态计算offset
-过度同步 → CAS + yield自旋
-
-实测数据:
-- Windows: 3.9 GB/s ✅
-- Linux: 302 MB/s ❌ (仅为Windows的7.7%)
-
-根本原因: 96.5%的时间浪费在不必要的同步上！
+┌─────────────────┬─────────────────┬─────────────────┬──────────────┐
+│ block_magic (4B)│ block_id (4B)   │ num_pics (4B)   │ offsets[]    │
+├─────────────────┴─────────────────┴─────────────────┼──────────────┤
+│ sizes[](num_pics×4B)              │ labels[](num_pics×4B)          │
+└────────────────────────────────────┴──────────────────────────────┘
 ```
 
-**V4.0.0的革命性改进**：
+### 2.2 GROUP（工作组）
 
+**定义**: GROUP 是由 N 个 BLOCK 组成的逻辑单位，其中 N = `num_load_workers`（1/2/4/8/16）。
+
+**核心思想**:
 ```
-原子操作总数: 从 152,737次 → 591次 (99.7%减少)
+GROUP = N 个 BLOCK 的集合
+       = N 个 IO 线程并行加载的产物
+```
 
-Linux预期性能: 从302 MB/s → 2.0-2.5 GB/s (7-8倍提升)
+**示例** (N=16):
+```
+GROUP 0: BLOCK 0,  BLOCK 1,  BLOCK 2,  ..., BLOCK 15   (线程0-15各读一个)
+GROUP 1: BLOCK 16, BLOCK 17, BLOCK 18, ..., BLOCK 31   (线程0-15各读一个)
+GROUP 2: BLOCK 32, BLOCK 33, BLOCK 34, ..., BLOCK 47   (线程0-15各读一个)
+...
+```
+
+**GROUP 的关键特性**:
+- ✅ **静态映射**: 每个线程在每个 GROUP 中的位置固定
+- ✅ **同步点**: 一个 GROUP 内的所有 BLOCK 加载完成后触发样本级洗牌
+- ✅ **洗牌单位**: 每 **2 个 GROUP** 执行一次样本级随机
+
+### 2.3 Slot（槽位）
+
+**定义**: Slot 是内存中存储一个 BLOCK 的空间。
+
+**Slot 的生命周期**:
+```
+EMPTY → LOADING → READY → EMPTY (PARTIAL 模式回收)
+```
+
+**Slot 状态枚举**:
+```cpp
+enum class SlotState {
+    EMPTY = 0,   // 空闲，可写入
+    LOADING = 1, // 正在读取
+    READY = 2    // 已就绪，可消费
+};
+```
+
+**关键优化**: Cache-Line 对齐
+```cpp
+struct alignas(64) AlignedSlotState {
+    SlotState state{SlotState::EMPTY};
+    char padding[63];  // 填充至 64 字节，防止 False Sharing
+};
+```
+
+**为什么需要对齐？**
+
+在 16 线程并发场景下，相邻的 `slot_states` 会位于同一缓存行（cache line）。当线程 0 修改 `slot_states[0]` 时，会导致缓存行失效，线程 1 修改 `slot_states[1]` 时需要重新加载，造成 **False Sharing**，性能下降 3-5 倍。
+
+通过 `alignas(64)` 确保每个 `slot_state` 独占一个缓存行，彻底消除 False Sharing。
+
+### 2.4 Pair（对）
+
+**定义**: Pair = 2 个连续的 GROUP 组成的样本级洗牌单位。
+
+**示例**:
+```
+Pair 0: [GROUP 0, GROUP 1]  → 样本合并后洗牌
+Pair 1: [GROUP 2, GROUP 3]  → 样本合并后洗牌
+Pair 2: [GROUP 4, GROUP 5]  → 样本合并后洗牌
+...
+```
+
+**为什么是 2 个 GROUP？**
+
+1. **跨 BLOCK 随机性**: 单个 GROUP 只有 N=16 个 BLOCK，样本局部性太强
+2. **性能平衡**: 2 个 GROUP 共 32 个 BLOCK，足够随机且开销可控
+3. **偶数处理**: 数据集末尾奇数 GROUP 单独处理
+
+### 2.5 环形缓冲（Ring Buffer）
+
+**定义**: PARTIAL 模式下的固定大小内存缓冲区，大小为 **8×N×16 MB**。
+
+**内存布局** (N=16):
+```
+┌──────────┬──────────┬──────────┬─────┬──────────┬──────────┐
+│ Pair 0   │ Pair 1   │ Pair 2   │ ... │ Pair 6   │ Pair 7   │
+│ 32 Slots │ 32 Slots │ 32 Slots │     │ 32 Slots │ 32 Slots │
+└──────────┴──────────┴──────────┴─────┴──────────┴──────────┘
+  Slots 0-31  32-63     64-95          192-223   224-255
+
+总计: 8 Pairs × 2 GROUPs × 16 Slots = 256 Slots = 4 GB
+```
+
+**环形映射公式**:
+```cpp
+uint32_t ring_pair_idx = logical_pair_idx % 8;
+```
+
+**Slot 回收机制** (PARTIAL 专用):
+```cpp
+// 当一个 Pair 的所有样本被消费完后
+if (consumed + 1 == total_samples) {
+    // 重置该 Pair 占用的所有 Slot 状态为 EMPTY
+    for (uint32_t slot_idx = start_slot; slot_idx < end_slot; ++slot_idx) {
+        ds.slot_states[slot_idx].state = SlotState::EMPTY;
+    }
+}
 ```
 
 ---
 
-## 2. V4.0.0 重大更新
+## 3. DTS 文件格式
 
-### 2.1 核心架构重构
-
-#### 2.1.1 从动态到静态的彻底转变
-
-**旧版（V3.7.1） - 动态任务分配**：
-```cpp
-// ❌ 错误示范
-uint32_t slot_idx = fetch_add(&next_slot, 1);  // 竞争！
-uint32_t block_id = epoch_block_order[fetch_add(&next_block, 1)];
-read_block(block_id, arena + slot_idx * BLOCK_SIZE);
-```
-
-**V4.0.0 - 静态映射**：
-```cpp
-// ✅ 正确示范
-const uint32_t my_offset = thread_id;  // 编译时确定
-
-for (uint64_t group_idx = 0; group_idx < total_groups; ++group_idx) {
-    // 静态计算我的block_seq（无竞争！）
-    uint32_t block_seq = group_idx * N + my_offset;
-
-    // 静态计算我的slot_idx（环形映射）
-    uint32_t slot_idx = block_seq % num_slots;
-
-    // 直接读取，无需任何同步！
-    read_block(block_id, arena + slot_idx * BLOCK_SIZE);
-}
-```
-
-#### 2.1.2 逻辑GROUP vs 环形缓冲的清晰分离
-
-**关键概念**（V4.0.0新增）：
+### 3.1 文件结构
 
 ```
-逻辑GROUP: 用于洗牌种子计算，范围[0, total_groups-1]
-环形Pair: 用于访问group_metas数组，PARTIAL模式下回绕复用
+┌──────────────────┬──────────────────┬──────────────────┬─────┐
+│ File Header      │ BLOCK 0          │ BLOCK 1          │ ... │
+│ (16 MB)          │ (16 MB)          │ (16 MB)          │     │
+└──────────────────┴──────────────────┴──────────────────┴─────┘
+  Offset: 0                16 MB             32 MB
 
-映射关系:
-  逻辑GROUP: 0, 1, 2, 3, ..., 8999
-  环形Pair:  0, 1, 2, 3 (PARTIAL模式，回绕)
-
-  逻辑GROUP 0-1 → 环形Pair 0
-  逻辑GROUP 2-3 → 环形Pair 1
-  ...
-   逻辑GROUP 6-7 → 环形Pair 3
-  逻辑GROUP 8-9 → 环形Pair 0 (回绕，覆盖)
+File Header = DtsHeader (144 B) + Padding
+BLOCK N    = Block Header + JPEG Data
 ```
 
-**代码实现**：
-```cpp
-// 计算逻辑Pair索引（用于种子）
-uint32_t logical_pair_idx = group_idx / 2;
-
-// 计算环形Pair索引（用于访问）
-uint32_t ring_pair_idx = logical_pair_idx % num_group_pairs;
-
-// 使用正确的索引访问对应的原子计数器
-uint32_t finished = ds.group_counters[group_idx]->fetch_add(1, ...);
-//                     ^^^^^^^^^^^^^ 使用逻辑GROUP索引
-
-// 访问环形缓冲的GroupMeta
-GroupMeta& gmeta = ds.group_metas[ring_pair_idx];
-//                          ^^^^^^^^^^ 使用环形Pair索引
-```
-
-### 2.2 新增成员变量（Bug修复）
-
-#### 2.2.1 Dataset结构体新增成员
+### 3.2 DtsHeader 结构
 
 ```cpp
-struct Dataset {
-    // 原有成员...
-    std::vector<SlotMeta> slot_metas;
-
-    // ========== V4.0.0 新增：Slot状态数组 ==========
-    std::vector<SlotState> slot_states;  // PARTIAL模式必需
-
-    // ========== V4.0.0 新增：逻辑GROUP计数器数组 ==========
-    // 注意：使用unique_ptr包装atomic，因为atomic不可复制
-    std::vector<std::unique_ptr<std::atomic<uint32_t>>> group_counters;
-
-    // ========== V4.0.0 新增：全局样本序号 ==========
-    std::atomic<size_t> global_sample_seq{0};  // get_next_sample使用
+#pragma pack(push, 1)
+struct DtsHeader {
+    char magic[4];          // ".DTS"
+    uint8_t version[4];     // [3, 0, 0, 0]
+    char dataset_type[8];   // "IMAGENET"
+    uint32_t is_training;   // 0=val, 1=train
+    uint32_t compress_level; // 0=LV0 (无损), 1=LV1, ..., 3=LV3
+    uint32_t num_classes;   // 1000
+    uint32_t num_samples;   // 样本总数
+    uint32_t total_blocks;  // 总 BLOCK 数
+    uint32_t num_blocks;    // 本文件 BLOCK 数
+    uint64_t total_bytes;   // 总字节数
+    uint32_t block_size;    // 16 MB
+    // ... 其他字段
 };
+#pragma pack(pop)
 ```
 
-#### 2.2.2 ImageNetLoaderDts类新增成员
-
+**关键验证**:
 ```cpp
-class ImageNetLoaderDts : public ImageNetLoader {
-private:
-    // ========== V4.0.0 新增：当前epoch ID ==========
-    int current_epoch_id_ = -1;  // 用于洗牌种子计算
-
-    uint64_t global_seed_ = 42;  // 全局随机种子
-    // ... 其他成员 ...
-};
+static_assert(sizeof(DtsHeader) == 144, "DtsHeader must be exactly 144 bytes");
 ```
 
-### 2.3 get_next_sample完全重写
+### 3.3 Block Header 结构
 
-#### 2.3.1 旧版本的问题
-
-**问题1: 静态窗口绑定**
-```cpp
-// ❌ 旧版本（V3.7.1）
-uint32_t window_pair_idx = preproc_worker_id % num_group_pairs;
-GroupMeta& gmeta = ds.group_metas[window_pair_idx];
-
-// 问题：每个worker只能消费一个Group Pair
-// 消费完后直接返回false，无法获取后续样本
-if (local_idx >= gmeta.total_samples) {
-    return false;  // ❌ 错误：Epoch提前结束！
-}
+```
+┌──────────────┬──────────────┬──────────────────┐
+│ magic (4B)   │ block_id (4B)│ num_pics (4B)    │
+├──────────────┴──────────────┼──────────────────┤
+│ offsets[num_pics × 4B]     │                  │
+├─────────────────────────────┤                  │
+│ sizes[num_pics × 4B]       │ JPEG 数据         │
+├─────────────────────────────┤                  │
+│ labels[num_pics × 4B]      │                  │
+└─────────────────────────────┴──────────────────┘
 ```
 
-**问题2: 无法处理跨GROUP Pair消费**
-
-```cpp
-// ❌ 旧版本无法正确处理：
-// - Worker 0消费Group Pair 0的前50%样本
-// - Worker 1消费Group Pair 0的后50%样本
-// - 但Worker 0无法继续消费Group Pair 1的样本
-// - 导致负载不均衡，部分worker空闲
-```
-
-#### 2.3.2 V4.0.0解决方案：全局样本序号
-
-```cpp
-// ✅ 新版本（V4.0.0）
-bool ImageNetLoaderDts::get_next_sample(
-    int preproc_worker_id,
-    int32_t& label,
-    const uint8_t*& data_ptr,
-    size_t& data_size) {
-
-    Dataset& ds = *current_set_;
-
-    // 1. 原子获取全局样本序号（严格按乱序后顺序）
-    size_t global_seq = ds.global_sample_seq.fetch_add(1,
-                                                   std::memory_order_relaxed);
-
-    if (global_seq >= ds.num_samples) {
-        return false;  // Epoch真正结束
-    }
-
-    // 2. 线性查找该样本所属的GROUP Pair
-    size_t accumulated = 0;
-    uint32_t target_pair_idx = 0;
-
-    for (size_t i = 0; i < ds.group_metas.size(); ++i) {
-        if (global_seq < accumulated + ds.group_metas[i].total_samples) {
-            target_pair_idx = static_cast<uint32_t>(i);
-            break;
-        }
-        accumulated += ds.group_metas[i].total_samples;
-    }
-
-    GroupMeta& gmeta = ds.group_metas[target_pair_idx];
-
-    // 3. 等待该GROUP Pair就绪
-    while (!gmeta.is_ready.load(std::memory_order_acquire)) {
-        if (stop_flag_.load(std::memory_order_relaxed)) {
-            return false;
-        }
-        std::this_thread::yield();
-    }
-
-    // 4. 计算局部索引
-    uint32_t local_idx = static_cast<uint32_t>(global_seq - accumulated);
-
-    // 5. 解码样本位置
-    uint32_t location = gmeta.shuffled_locations[local_idx];
-    uint32_t slot_idx = location >> 16;
-    uint32_t sample_idx = location & 0xFFFF;
-
-    // 6. 零拷贝返回
-    SlotMeta& smeta = ds.slot_metas[slot_idx];
-
-    label = smeta.labels[sample_idx];
-    data_size = smeta.sizes[sample_idx];
-    data_ptr = ds.arena + static_cast<size_t>(slot_idx) * BLOCK_SIZE
-             + smeta.offsets[sample_idx];
-
-    return true;
-}
-```
-
-**核心改进**：
-- ✅ 移除静态窗口绑定，每个worker可以消费任何GROUP Pair
-- ✅ 使用全局样本序号，确保严格按乱序后顺序消费
-- ✅ 线性查找GROUP Pair（PARTIAL模式只有4个Pair，性能足够）
-- ✅ 自动处理跨GROUP Pair消费，负载均衡
-
-### 2.4 BLOCK元数据解析修复
-
-#### 2.4.1 旧版本问题
-
-**旧版本错误**：
-```cpp
-// ❌ 旧版本（V3.7.1）
-// BLOCK头部结构（错误）
-// [num_samples(4B)] [offset0(4B)] [size0(4B)] [label0(4B)] [offset1(4B)] ...
-
-// 直接读取num_samples
-std::memcpy(&num_samples, ptr, sizeof(uint32_t));
-```
-
-**问题**：与【十三】中定义的DTS文件规范不符，缺少`block_magic`和`block_id`字段。
-
-#### 2.4.2 V4.0.0修复
-
-**正确实现**：
-```cpp
-void ImageNetLoaderDts::parse_block_meta(...) {
-    // DTS BLOCK头部格式（根据【十三（三）】规范）：
-    // [block_magic(4B)] [block_id(4B)] [num_pics(4B)]
-    // [offsets数组] [sizes数组] [labels数组]
-
-    const uint8_t* ptr = data;
-
-    // 1. 跳过block_magic (4B)
-    ptr += 4;
-
-    // 2. 读取block_id (4B) - 用于调试验证
-    uint32_t stored_block_id;
-    std::memcpy(&stored_block_id, ptr, sizeof(uint32_t));
-    ptr += sizeof(uint32_t);
-
-    // 3. 读取num_pics (4B) - 样本数量
-    uint32_t num_samples;
-    std::memcpy(&num_samples, ptr, sizeof(uint32_t));
-    ptr += sizeof(uint32_t);
-
-    // 4. 批量读取offsets数组
-    std::memcpy(slot_meta.offsets, ptr, num_samples * sizeof(uint32_t));
-    ptr += num_samples * sizeof(uint32_t);
-
-    // 5. 批量读取sizes数组
-    std::memcpy(slot_meta.sizes, ptr, num_samples * sizeof(uint32_t));
-    ptr += num_samples * sizeof(uint32_t);
-
-    // 6. 批量读取labels数组
-    std::memcpy(slot_meta.labels, ptr, num_samples * sizeof(int32_t));
-
-    LOG_DEBUG << "Parsed block " << stored_block_id << " in slot "
-              << slot_idx << ": " << num_samples << " samples";
-}
-```
-
-**修复结果**：
-- ✅ 严格按照【十三】规范解析
-- ✅ 正确读取block_id用于日志输出
-- ✅ 批量读取三个数组，提高效率
+**Offsets/Sizes/Labels 数组**: 快速索引，无需解析 JPEG 即可获取样本信息。
 
 ---
 
-## 3. 类层次结构
+## 4. 架构设计
 
-### 3.1 继承树
+### 4.1 类层次结构
 
 ```
 DataLoader (抽象基类)
-  │
-  ├─ ImageNetLoader (抽象类)
-  │    ├─ ImageNetLoaderDts     ← DTS格式实现 ✅ (V4.0.0完全重构)
-  │    └─ ImageNetLoaderRaw     ← Raw格式实现 (待开发)
-  │
-  ├─ MnistLoader (抽象类) - 待开发
-  │    ├─ MnistLoaderDts
-  │    └─ MnistLoaderRaw
-  │
-  └─ CifarLoader (抽象类) - 待开发
-       ├─ CifarLoaderDts
-       └─ CifarLoaderRaw
+    │
+    └─ ImageNetLoader (抽象类)
+            │
+            └─ ImageNetLoaderDts (具体实现)
 ```
 
-### 3.2 核心类详解
+**设计原则**:
+- 单例模式：全局唯一实例
+- 线程安全：所有接口均可并发调用
+- 零拷贝：返回指针直接指向内部缓冲区
 
-#### 3.2.1 DataLoader (抽象基类)
+### 4.2 核心数据结构
 
-**位置**: `include/renaissance/data/data_loader.h`
-
-**职责**:
-- 定义所有数据加载器的统一接口
-- 管理线程生命周期
-- 提供配置方法
-
-#### 3.2.2 ImageNetLoader (抽象类)
-
-**位置**: `include/renaissance/data/imagenet_loader.h`
-
-**职责**:
-- 定义ImageNet数据集的特定接口
-- 提供ImageNet常量（训练集1,281,167样本，验证集50,000样本）
-- 定义LoadMode枚举（FULLY vs PARTIAL）
-
-**关键常量**:
-```cpp
-static constexpr uint32_t TRAINING_SAMPLES = 1281167;
-static constexpr uint32_t VALIDATION_SAMPLES = 50000;
-static constexpr size_t BLOCK_SIZE = 16 * 1024 * 1024;  // 16MB
-```
-
-#### 3.2.3 ImageNetLoaderDts (具体实现)
-
-**位置**: `include/renaissance/data/imagenet_loader_dts.h`
-
-**职责**:
-- 实现.dts格式的高性能加载
-- 管理IO线程池和内存Arena
-- 实现静态映射和GROUP机制
-- 提供零拷贝样本访问接口
-
-**单例模式**:
-```cpp
-ImageNetLoaderDts& loader = ImageNetLoaderDts::getInstance();
-```
-
----
-
-## 4. 核心API
-
-### 4.1 配置接口
-
-```cpp
-void configure(
-    int num_load_workers,      // IO线程数 N (1/2/4/8/16)
-    int num_preproc_workers,   // Preprocessor线程数 M (1~64)
-    const std::string& train_path,  // 训练集.dts路径
-    const std::string& val_path,    // 验证集.dts路径
-    bool shuffle_train,        // 训练集是否乱序
-    bool shuffle_val,          // 验证集是否乱序
-    bool skip_first            // 第一个epoch不乱序
-);
-```
-
-**示例**:
-```cpp
-auto& loader = ImageNetLoaderDts::getInstance();
-loader.configure(
-    8,                          // 8个IO线程
-    16,                         // 16个Preprocessor线程
-    "/data/train_lv3.dts",     // LV3压缩格式
-    "/data/val_lv3.dts",
-    true,                       // 训练集乱序
-    false,                      // 验证集不乱序
-    false                       // 不跳过第一个epoch
-);
-```
-
-### 4.2 Epoch管理
-
-#### 4.2.1 开始Epoch
-
-```cpp
-void begin_epoch(int epoch_id, bool is_train);
-```
-
-**功能**:
-1. 保存当前epoch_id
-2. 设置当前数据集（训练集/验证集）
-3. 重置全局样本序号
-4. 执行Level 2随机（Block级shuffle）
-5. 启动IO线程池
-
-**示例**:
-```cpp
-// Epoch 0: 训练集
-loader.begin_epoch(0, true);
-
-// ... 训练过程 ...
-
-loader.end_epoch();
-
-// Epoch 1: 训练集 (会使用不同的随机种子)
-loader.begin_epoch(1, true);
-
-// ... 验证过程 ...
-loader.begin_epoch(0, false);  // epoch_id对验证集不重要
-```
-
-#### 4.2.2 结束Epoch
-
-```cpp
-void end_epoch();
-```
-
-**功能**:
-1. 停止IO线程池
-2. 释放资源
-3. 等待所有线程安全退出
-
-### 4.3 样本获取接口（零拷贝）
-
-```cpp
-bool get_next_sample(
-    int worker_id,              // Preprocessor worker ID [0, M-1]
-    int32_t& label,             // [输出] 标签 (ImageNet: 0~999)
-    const uint8_t*& data_ptr,   // [输出] JPEG数据指针（零拷贝）
-    size_t& data_size           // [输出] JPEG字节数
-);
-```
-
-**返回值**:
-- `true`: 成功获取样本
-- `false`: Epoch结束
-
-**零拷贝语义**:
-```cpp
-// ✅ 正确：直接使用指针，无需拷贝
-const uint8_t* jpeg_data;
-size_t jpeg_size;
-int32_t label;
-if (loader.get_next_sample(my_worker_id, label, jpeg_data, jpeg_size)) {
-    // 直接解码JPEG (jpeg_data指向内部arena)
-    decode_jpeg(jpeg_data, jpeg_size);
-}
-// ❌ 错误：不要保存指针！下一调用会失效
-const uint8_t* saved_ptr = jpeg_data;  // 危险！
-```
-
----
-
-## 5. 工作原理
-
-### 5.1 核心数据结构
-
-#### 5.1.1 Dataset结构
+#### 4.2.1 Dataset 结构
 
 ```cpp
 struct Dataset {
     // 模式控制
-    LoadMode mode;              // FULLY 或 PARTIAL
-    bool is_train;              // 训练集 or 验证集
+    LoadMode mode = LoadMode::FULLY;
+    bool is_train = true;
 
-    // Arena内存
-    uint8_t* arena;             // 内存池基址
-    size_t arena_size;          // 总大小
-    uint32_t num_blocks;        // BLOCK总数
-    uint32_t num_slots;         // Slot总数
-    size_t num_samples;         // 样本总数
+    // Arena 内存
+    uint8_t* arena = nullptr;          // 起始地址
+    size_t arena_size = 0;             // 总大小
+    uint32_t num_blocks = 0;           // BLOCK 总数
+    uint32_t num_slots = 0;            // Slot 总数
 
     // 静态映射表
     std::vector<uint32_t> block_to_slot;  // block_seq → slot_idx
 
-    // ========== V4.0.0 新增成员 ==========
-    std::vector<SlotState> slot_states;  // Slot状态数组
-    std::vector<std::unique_ptr<std::atomic<uint32_t>>> group_counters;  // 逻辑GROUP计数器
-    std::atomic<size_t> global_sample_seq{0};  // 全局样本序号
+    // Slot 元数据
+    std::vector<SlotMeta> slot_metas;     // 每个 Slot 的样本信息
+    std::vector<AlignedSlotState> slot_states;  // 64B 对齐的状态数组
 
-    // GROUP管理
-    std::vector<GroupMeta> group_metas;   // 环形缓冲的Group Pair元数据
+    // GROUP 计数器（64B 对齐）
+    std::vector<AlignedGroupCounter> group_counters_aligned;
 
-    // Block级乱序（Level 2随机）
+    // GROUP ready 标志（64B 对齐）
+    std::vector<GroupReadyFlag> group_ready_flags;
+
+    // Pair 同步标志（64B 对齐）
+    std::vector<AlignedPairSyncFlag> pair_sync_flags_aligned;
+
+    // GROUP Pair 元数据（环形缓冲）
+    std::vector<GroupMeta> group_metas;  // FULLY=总Pair数, PARTIAL=4
+
+    // Block 级乱序（Level 2）
     std::vector<uint32_t> epoch_block_order;
 
-    // 文件路径
-    std::string file_path;
+    // PARTIAL 模式专用
+    std::vector<uint32_t> logical_pair_samples;     // 每个 logical pair 的样本数
+    std::vector<size_t> pair_cumulative_samples;    // 累积样本数（二分查找）
+    std::vector<uint32_t> logical_pair_order;       // 同步顺序
+
+    // 全局样本序号
+    std::atomic<size_t> global_sample_seq{0};
 };
 ```
 
-#### 5.1.2 SlotMeta结构
-
-```cpp
-struct SlotMeta {
-    uint32_t num_samples;       // 该BLOCK包含的样本数
-
-    // 元数据数组（固定大小，避免堆分配）
-    uint32_t offsets[MAX_SAMPLES_PER_BLOCK];  // 样本在Block内的偏移
-    uint32_t sizes[MAX_SAMPLES_PER_BLOCK];    // 样本大小（JPEG字节数）
-    int32_t  labels[MAX_SAMPLES_PER_BLOCK];   // 样本标签
-};
-```
-
-#### 5.1.3 GroupMeta结构
+#### 4.2.2 GroupMeta 结构
 
 ```cpp
 struct GroupMeta {
-    // GROUP同步
-    std::atomic<uint32_t> loaded_count{0};  // 已加载的BLOCK数
-    std::atomic<bool> is_ready{false};      // 是否完成样本级乱序
+    std::atomic<uint32_t> loaded_count{0};    // 已加载的 Slot 数
+    std::atomic<bool> is_ready{false};         // 是否已洗牌可消费
+    std::atomic<uint32_t> consumed_count{0};   // 已消费的样本数
+    std::atomic<uint32_t> total_samples{0};    // 本 Pair 总样本数
+    uint32_t ring_group_idx = 0;               // 在环形缓冲中的索引 [0,7]
 
-    // 消费管理
-    std::atomic<uint32_t> consumed_count{0}; // 已消费的样本数
-    uint32_t total_samples{0};               // 总样本数
+    // PARTIAL 模式专用
+    uint32_t logical_pair_idx = UINT32_MAX;   // 逻辑 Pair 索引
+    std::vector<uint32_t> logical_groups;     // 包含的逻辑 GROUP 索引
+    std::vector<uint32_t> occupied_slots;     // 占用的 Slot 索引
 
-    // 样本位置数组（Fisher-Yates洗牌后）
-    std::vector<uint32_t> shuffled_locations;
-    // 格式: (slot_idx << 16) | sample_idx_in_slot
+    std::vector<uint32_t> shuffled_locations;  // 样本级乱序索引表
 };
 ```
 
-### 5.2 工作流程
-
-#### 5.2.1 初始化阶段
-
-```
-1. configure() 配置参数
-   ↓
-2. 第一次 begin_epoch() 触发加载
-   ↓
-3. parse_dts_header() 解析文件头
-   ↓
-4. allocate_arena() 分配内存
-   ├─ FULLY模式: num_blocks × 16MB
-   └─ PARTIAL模式: 8 × N × 16MB (环形缓冲)
-   ↓
-5. init_static_allocation() 初始化静态映射表
-   ├─ 计算num_slots
-   ├─ 生成 block_to_slot[] 映射
-   ├─ 初始化 slot_states[]
-   └─ 初始化 group_counters[]（使用unique_ptr包装atomic）
-   ↓
-6. perform_level2_shuffle() Block级乱序
-   └─ 生成 epoch_block_order[]
-```
-
-#### 5.2.2 运行阶段（并行加载）
-
-```
-主线程调用 begin_epoch()
-   ↓
-启动 N 个 IO 线程（io_worker_func）
-   ↓
-┌─────────────────────────────────────┐
-│  线程0             线程1    ...  线程N-1  │
-│    │                 │              │     │
-│    ▼                 ▼              ▼     │
-│  GROUP 0           GROUP 0       GROUP 0   │
-│  (slot 0)         (slot 1)      (slot N-1) │
-│    │                 │              │     │
-│    ▼                 ▼              ▼     │
-│  GROUP 1           GROUP 1       GROUP 1   │
-│  (slot N)        (slot N+1)    (slot 2N-1)│
-│    │                 │              │     │
-│    ...               ...            ...   │
-│                                      │     │
-│  静态映射公式:                         │
-│  block_seq = group_idx × N + thread_id     │
-└─────────────────────────────────────┘
-   ↓
-每完成2个GROUP，执行样本级乱序
-   ↓
-标记 is_ready = true
-```
-
-#### 5.2.3 消费阶段（Preprocessor）
-
-```
-Preprocessor Worker i 调用 get_next_sample(i, ...)
-   ↓
-1. 全局样本序号: global_seq++
-   ↓
-2. 线性查找该样本所属的GROUP Pair
-   ↓
-3. 等待 group_metas[target_pair_idx].is_ready == true
-   ↓
-4. 计算局部索引: local_idx = global_seq - accumulated
-   ↓
-5. 解码位置: location = shuffled_locations[local_idx]
-   ↓
-6. 零拷贝返回: label, data_ptr, data_size
-```
-
 ---
 
-## 6. 高速并行读取机制
+## 5. 多线程并行加载
 
-### 6.1 静态映射公式（核心）
+### 5.1 静态映射公式
 
-**核心思想**: 每个线程从一开始就知道自己要加载哪些BLOCK到哪些Slot
-
+**核心公式**:
 ```cpp
-// IO线程ID ∈ [0, N-1]
-const uint32_t my_offset = thread_id;  // 编译时确定，不可更改
+// 计算线程在每个 GROUP 中的固定位置
+const int N = num_load_workers_;
+const uint32_t my_offset = thread_id;  // [0, N-1]
 
-// 对于第 group_idx 个GROUP（逻辑GROUP索引）
+// 遍历所有 GROUP
 for (uint64_t group_idx = 0; group_idx < total_groups; ++group_idx) {
-    // 静态计算我的 block_seq
+    // 静态计算我负责的 block_seq
     uint32_t block_seq = group_idx * N + my_offset;
 
-    // 静态计算我的 slot_idx（环形映射）
-    uint32_t slot_idx = block_seq % num_slots;
+    if (block_seq >= num_blocks) break;
 
-    // 直接读取，无需任何同步！
-    read_block(block_id, arena + slot_idx * BLOCK_SIZE);
+    // 映射到真实 Block ID（Level 2 随机）
+    uint32_t block_id = epoch_block_order[block_seq];
+
+    // 静态计算目标 Slot（环形映射）
+    uint32_t slot_idx = block_to_slot[block_seq];  // = block_seq % num_slots
+
+    // 加载 BLOCK 到 Slot...
 }
 ```
 
-**示例 (N=8)**:
+**示例** (N=16, 391 BLOCKs):
 ```
-线程0的任务: block_seq = 0, 8, 16, 24, ...
-           → slot_idx = 0, 8, 16, 24, ...
-
-线程1的任务: block_seq = 1, 9, 17, 25, ...
-           → slot_idx = 1, 9, 17, 25, ...
-
+线程 0: block_seq = 0, 16, 32, 48, ..., 400 → slot_idx = 0, 16, 32, 48, ...
+线程 1: block_seq = 1, 17, 33, 49, ..., 401 → slot_idx = 1, 17, 33, 49, ...
+线程 2: block_seq = 2, 18, 34, 50, ..., 402 → slot_idx = 2, 18, 34, 50, ...
 ...
-
-线程7的任务: block_seq = 7, 15, 23, 31, ...
-           → slot_idx = 7, 15, 23, 31, ...
+线程15: block_seq = 15, 31, 47, 63, ..., 415 → slot_idx = 15, 31, 47, 63, ...
 ```
 
-### 6.2 零竞争保证
+**零竞争保证**:
+- ✅ 不同线程永远访问不同的 `slot_idx`
+- ✅ 无需 CAS，直接设置状态
+- ✅ 无需 yield，无需等待
+- ✅ 完全并行，零同步开销
 
-**关键设计**：
+### 5.2 IO 线程工作流程
 
-1. **不同线程永远不会访问同一Slot**
-   ```
-   线程i访问的slot_idx集合 = {i, i+N, i+2N, ...}
-   线程j访问的slot_idx集合 = {j, j+N, j+2N, ...}
+```
+┌─────────────────────────────────────────────────────────────┐
+│ IO Worker Function (静态映射)                                │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  1. 计算我的 offset = thread_id                             │
+│  2. 打开独立文件句柄                                          │
+│  3. 遍历所有 GROUP:                                         │
+│     ├─ 计算我的 block_seq = group_idx × N + offset         │
+│     ├─ 如果 PARTIAL: 等待 Slot 状态为 EMPTY                │
+│     ├─ 设置 Slot 状态 = LOADING (直接赋值，无 CAS)          │
+│     ├─ 读取 BLOCK 到 Slot (ReadFile/pread, 4MB chunks)     │
+│     ├─ 解析 Block Header                                    │
+│     ├─ 设置 Slot 状态 = READY                               │
+│     └─ GROUP 同步 (唯一原子操作点)                          │
+│        └─ 如果我是本 GROUP 最后一个完成的线程:               │
+│           ├─ 标记本 GROUP ready                             │
+│           ├─ 检查配对 GROUP 是否也 ready                    │
+│           └─ 如果两个 GROUP 都 ready:                       │
+│              └─ CAS 触发 Pair 同步与洗牌                     │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+```
 
-   当 i ≠ j 时，这两个集合**不相交** ✅
-   ```
+### 5.3 GROUP 同步机制
 
-2. **无需CAS，无需锁，无需yield**
+**两级同步**:
+
+1. **GROUP 级别**:
    ```cpp
-   // ❌ 旧版（动态分配）
-   uint32_t slot_idx = fetch_add(&next_slot, 1);  // 竞争！
+   // 每个线程完成自己的 BLOCK 后
+   uint32_t finished = group_counters_aligned[group_idx].value.fetch_add(1, acq_rel) + 1;
 
-   // ✅ 新版（静态映射）
-   uint32_t slot_idx = block_seq % num_slots;     // 无竞争！
-   ```
-
-3. **唯一的原子操作**: GROUP同步
-   ```cpp
-   // 每个GROUP的唯一同步点
-   // 注意：使用逻辑GROUP索引访问group_counters
-   uint32_t finished = ds.group_counters[group_idx]->fetch_add(1,
-                                                               acq_rel) + 1;
-   if (finished == N) {
-       // 最后一个线程负责洗牌
-       sync_and_shuffle_group(ring_pair_idx, logical_pair_idx, ds);
+   if (finished == expected_threads) {
+       // 我是本 GROUP 最后一个完成的线程
+       group_ready_flags[group_idx].ready.store(true, release);
    }
    ```
 
-### 6.3 跨平台I/O优化
+2. **Pair 级别**:
+   ```cpp
+   // 计算配对的 GROUP
+   uint32_t pair_start = (group_idx / 2) * 2;
+   uint32_t pair_end = pair_start + 1;
 
-#### 6.3.1 内存分配
+   // 检查两个 GROUP 是否都完成
+   bool group0_ready = group_ready_flags[pair_start].ready.load(acquire);
+   bool group1_ready = group_ready_flags[pair_end].ready.load(acquire);
 
-| 平台 | API | 对齐 |
-|------|-----|------|
-| Windows | `VirtualAlloc()` | 64KB (自动) |
-| Linux | `posix_memalign()` | 4KB (手动) |
+   if (group0_ready && group1_ready) {
+       // CAS 确保只有一个线程触发同步
+       if (pair_sync_flags_aligned[logical_pair_idx].value.compare_exchange_strong(...)) {
+           sync_and_shuffle_group(ring_pair_idx, logical_pair_idx, ds);
+       }
+   }
+   ```
 
-#### 6.3.2 文件读取
+**为什么需要两级同步？**
 
-**关键优化**: 4MB分块读取，避免单次调用过大
+- 单级 GROUP 同步：无法知道何时两个 GROUP 都完成
+- Pair 级同步：确保样本级洗牌在正确的时机触发
 
+**为什么使用 CAS？**
+
+- 防止同一个 Pair 被多次同步
+- 在 16 线程场景下，GROUP 25 可能比 GROUP 24 先完成，CAS 保证只有一个线程触发同步
+
+### 5.4 Cache-Line 对齐优化
+
+**问题场景** (未对齐):
+```
+线程 0: group_counters[0].fetch_add(1)  → 缓存行 0 失效
+线程 1: group_counters[1].fetch_add(1)  → 缓存行 0 失效 (False Sharing!)
+...
+```
+
+**解决方案** (64B 对齐):
 ```cpp
-void read_block_native(FileHandle file, uint32_t block_id,
-                       uint8_t* dst) {
-    constexpr size_t CHUNK_SIZE = 4 * 1024 * 1024;  // 4MB
-
-    size_t remaining = BLOCK_SIZE;
-    size_t current_offset = 0;
-
-    while (remaining > 0) {
-        size_t to_read = std::min(CHUNK_SIZE, remaining);
-
-#ifdef _WIN32
-        SetFilePointerEx(hFile, offset + current_offset, nullptr, FILE_BEGIN);
-        ReadFile(hFile, dst + current_offset, to_read, &bytes_read, nullptr);
-#else
-        pread(fd, dst + current_offset, to_read,
-               file_offset + current_offset);
-#endif
-
-        remaining -= to_read;
-        current_offset += to_read;
-    }
-}
+struct alignas(64) AlignedGroupCounter {
+    std::atomic<uint32_t> value{0};
+    char padding[60];  // 填充至 64 字节
+};
 ```
 
-### 6.4 内存布局
-
-#### FULLY模式（完整缓冲）
-
-```
-Arena:
-┌────────────────────────────────────────────────┐
-│ BLOCK 0 │ BLOCK 1 │ BLOCK 2 │ ... │ BLOCK K-1 │
-│ 16MB    │ 16MB    │ 16MB    │     │ 16MB      │
-└────────────────────────────────────────────────┘
-  Slot 0    Slot 1    Slot 2         Slot K-1
-
-K = num_blocks (验证集: 391, 训练集: ~9000)
-```
-
-#### PARTIAL模式（环形缓冲）
-
-```
-Arena (8×N×16MB):
-┌─────────────────────────────────────────────┐
-│ GROUP 0        │ GROUP 1        │ ...      │
-│ N×16MB         │ N×16MB         │          │
-├────────────────┼────────────────┼──────────┤
-│ GROUP 2        │ GROUP 3        │ ...      │
-│ N×16MB         │ N×16MB         │          │
-├────────────────┼────────────────┼──────────┤
-│ GROUP 4        │ GROUP 5        │ ...      │
-│ N×16MB         │ N×16MB         │          │
-├────────────────┼────────────────┼──────────�
-│ GROUP 6        │ GROUP 7        │          │
-│ N×16MB         │ N×16MB         │          │
-└────────────────┴────────────────┴──────────┘
-  ←─────────── 回绕 ──────────────→
-```
+**性能提升**:
+- Linux: 302 MB/s → **2.5 GB/s** (8.3x 提升)
+- Windows: 3.9 GB/s → **13 GB/s** (3.3x 提升)
 
 ---
 
-## 7. 随机可复现性
+## 6. 随机可复现性
 
-### 7.1 三级随机机制
+### 6.1 三级随机机制
 
 ```
-┌─────────────────────────────────────────────────┐
-│ Level 1: DTS导出时 (Python shuffle)              │
-│            ↓                                     │
-│ Level 2: Block级乱序 (epoch开始时)               │
-│   seed = global_seed ^ (epoch_id << 32)         │
-│   算法: Philox RNG + Fisher-Yates               │
-│            ↓                                     │
-│ Level 3: Sample级乱序 (每2个GROUP)               │
-│   seed = global_seed ^ (epoch_id << 32)
-│          ^ (logical_pair_idx << 16)            │
-│   算法: Philox RNG + Fisher-Yates               │
-└─────────────────────────────────────────────────┘
+Level 1: .dts 导出时 (Python shuffle)
+         ↓
+Level 2: begin_epoch() 时，Block 级 shuffle
+         ↓
+Level 3: 每 2 个 GROUP，样本级 shuffle
 ```
 
-### 7.2 Level 2: Block级乱序
+### 6.2 Level 2: Block 级随机
 
-**时机**: `begin_epoch()` 时执行一次
-
-**种子生成**:
-```cpp
-uint64_t seed = global_seed_ ^ (static_cast<uint64_t>(current_epoch_id_) << 32);
-```
-
-**Philox RNG + Fisher-Yates**:
+**实现** (Fisher-Yates + Philox RNG):
 ```cpp
 void perform_level2_shuffle(Dataset& ds, int epoch_id) {
-    // 1. 初始化原始顺序
+    // 初始化原始顺序
     ds.epoch_block_order.resize(ds.num_blocks);
     for (uint32_t i = 0; i < ds.num_blocks; ++i) {
         ds.epoch_block_order[i] = i;
     }
 
-    // 2. Fisher-Yates洗牌（使用Philox RNG）
+    // 生成确定性种子
+    uint64_t seed = global_seed_ ^ (static_cast<uint64_t>(epoch_id) << 32);
+
+    // Fisher-Yates 洗牌
     for (uint32_t i = ds.num_blocks - 1; i > 0; --i) {
         uint32_t r[4];
-        detail::philox_generate_4x32(seed, i, r);
+        tr::detail::philox_generate_4x32(seed, i, r);
         uint32_t j = r[0] % (i + 1);
         std::swap(ds.epoch_block_order[i], ds.epoch_block_order[j]);
     }
@@ -824,543 +510,970 @@ void perform_level2_shuffle(Dataset& ds, int epoch_id) {
 **可复现性保证**:
 ```
 相同 global_seed + 相同 epoch_id
- ↓
+  ↓
 相同 seed
- ↓
+  ↓
 相同 epoch_block_order[]
- ↓
-相同 BLOCK读取序列
+  ↓
+静态映射: 线程 i 读取 epoch_block_order[i, i+N, i+2N, ...]
+  ↓
+相同的 GROUP 组成
 ```
 
-### 7.3 Level 3: Sample级乱序
+### 6.3 Level 3: 样本级随机（每 2 个 GROUP）
 
-**时机**: 每完成2个GROUP加载后
-
-**种子生成**（V4.0.0修复）:
-```cpp
-// 判断是否需要乱序
-bool should_shuffle = ds.is_train ? shuffle_train_ : shuffle_val_;
-if (skip_first_ && current_epoch_id_ == 0) {
-    should_shuffle = false;
-}
-
-if (should_shuffle) {
-    // 生成洗牌种子（使用逻辑Pair索引）
-    uint64_t shuffle_seed = global_seed_
-                            ^ (static_cast<uint64_t>(current_epoch_id_) << 32)
-                            ^ (static_cast<uint64_t>(logical_pair_idx) << 16);
-
-    perform_group_shuffle(gp_meta, shuffle_seed);
-}
-```
-
-**GROUP Pair洗牌**:
+**实现**:
 ```cpp
 void sync_and_shuffle_group(uint32_t ring_pair_idx,
                             uint32_t logical_pair_idx,
                             Dataset& ds) {
-    const int N = num_load_workers_;
-    GroupMeta& gp_meta = ds.group_metas[ring_pair_idx];
-
-    // 1. 收集2个GROUP的所有样本
+    // 1. 收集两个 GROUP 内所有样本
     for (int g = 0; g < 2; ++g) {
         uint64_t logical_group = logical_pair_idx * 2 + g;
 
         for (int offset = 0; offset < N; ++offset) {
             uint32_t block_seq = logical_group * N + offset;
+            uint32_t slot_idx = block_to_slot[block_seq];
+            SlotMeta& smeta = slot_metas[slot_idx];
 
-            if (block_seq >= ds.num_blocks) {
-                break;  // 边界检查
-            }
-
-            uint32_t slot_idx = ds.block_to_slot[block_seq];
-            SlotMeta& smeta = ds.slot_metas[slot_idx];
-
-            // 收集该Slot的所有样本
+            // 收集该 Slot 的所有样本
             for (uint32_t i = 0; i < smeta.num_samples; ++i) {
                 // 编码: (slot_idx << 16) | sample_idx
-                uint32_t location = (slot_idx << 16) | i;
-                gp_meta.shuffled_locations.push_back(location);
+                shuffled_locations.push_back((slot_idx << 16) | i);
             }
         }
     }
 
-    // 2. Fisher-Yates洗牌
+    // 2. Fisher-Yates 洗牌
     if (should_shuffle) {
-        perform_group_shuffle(gp_meta, shuffle_seed);
+        uint64_t shuffle_seed = global_seed_ ^
+                                (static_cast<uint64_t>(current_epoch_id_) << 32) ^
+                                (static_cast<uint64_t>(logical_pair_idx) << 16);
+
+        for (uint32_t i = total_samples - 1; i > 0; --i) {
+            uint32_t r[4];
+            tr::detail::philox_generate_4x32(shuffle_seed, i, r);
+            uint32_t j = r[0] % (i + 1);
+            std::swap(shuffled_locations[i], shuffled_locations[j]);
+        }
     }
 
     // 3. 标记就绪
-    gp_meta.consumed_count.store(0, std::memory_order_relaxed);
-    gp_meta.is_ready.store(true, std::memory_order_release);
-
-    LOG_DEBUG << "Group pair " << logical_pair_idx
-              << " (ring " << ring_pair_idx << ") shuffled, "
-              << gp_meta.total_samples << " samples ready";
+    is_ready.store(true, release);
 }
 ```
 
-**Philox RNG 优势**:
-- **确定性**: 相同输入→相同输出（不受线程调度影响）
-- **高性能**: 仅需整数运算，无需浮点
-- **长周期**: 2^128 周期，避免重复
+**可复现性公式**:
+```
+相同 global_seed
+  + 相同 epoch_id
+  + 相同 logical_pair_idx
+  ↓
+相同 shuffle_seed
+  ↓
+相同 shuffled_locations[]
+  ↓
+完全相同的样本序列 ✅
+```
+
+### 6.4 验证方法
+
+**PreprocessorEmulator**:
+```cpp
+// 模拟 M 个 Preprocessor Worker
+for (int worker_id = 0; worker_id < M; ++worker_id) {
+    threads.emplace_back([&]() {
+        while (loader.get_next_sample(worker_id, label, data_ptr, data_size)) {
+            // 记录日志: worker_id,data_size,label
+            log_file << worker_id << "," << data_size << "," << label << "\n";
+        }
+    });
+}
+```
+
+**验证脚本** (Python):
+```python
+# 读取两次运行的日志
+logs1 = read_logs("run1/")
+logs2 = read_logs("run2/")
+
+# 对比
+if logs1 == logs2:
+    print("✅ 完全可复现！")
+else:
+    print("❌ 不可复现！")
+```
 
 ---
 
-## 8. 性能测试
+## 7. 加载模式
 
-### 8.1 编译测试
+### 7.1 FULLY vs PARTIAL
 
-**测试目标**：
-- ✅ Windows Debug编译通过
-- ✅ 所有核心库编译通过
-- ✅ 测试程序编译通过
-- ✅ 无编译错误和警告
+| 特性 | FULLY | PARTIAL |
+|------|-------|---------|
+| **内存占用** | num_blocks × 16 MB | 8 × N × 16 MB (固定) |
+| **适用场景** | 内存充足，多次 epoch | 内存受限，单次 epoch |
+| **Arena 大小** (训练集) | ~144 GB | 2 GB (N=16) |
+| **Slot 数量** | num_blocks (~9000) | 8 × N (128) |
+| **环形缓冲** | ❌ 否 | ✅ 是 |
+| **Slot 回收** | ❌ 否 | ✅ 是 |
 
-**编译命令**:
-```cmd
-cmake -G Ninja -S . -B build/windows-msvc-debug -DCMAKE_BUILD_TYPE=Debug
-cmake --build build/windows-msvc-debug --parallel 30
+### 7.2 逻辑索引 vs 环形索引
+
+**问题**: PARTIAL 模式下，内存只能容纳 8 个 Pair，但数据集有 ~4500 个 Pair。
+
+**解决方案**: 分离逻辑索引和环形索引。
+
+```cpp
+// 逻辑 Pair 索引: 用于种子计算和累积样本数
+uint32_t logical_pair_idx = group_idx / 2;  // [0, 4499]
+
+// 环形 Pair 索引: 用于访问内存中的 GroupMeta
+uint32_t ring_pair_idx = logical_pair_idx % 8;  // [0, 7]
+
+// 示例:
+// Pair 0   → ring_pair_idx = 0
+// Pair 1   → ring_pair_idx = 1
+// ...
+// Pair 7   → ring_pair_idx = 7
+// Pair 8   → ring_pair_idx = 0 (回绕，覆盖 Pair 0 的数据)
+// Pair 9   → ring_pair_idx = 1 (覆盖 Pair 1 的数据)
 ```
 
-### 8.2 性能基准测试
+### 7.3 PARTIAL 模式 Slot 回收
 
-#### 8.2.1 测试工具
+**回收时机**: 当一个 Pair 的所有样本被消费完后。
 
-**PreprocessorEmulator**:
-- 位置: `tests/data/test_reproducibility.cpp`
-- 功能: 模拟Preprocessor并行消费所有样本并记录日志
-- 验证: `verify_reproducibility("run1_logs", "run2_logs")`
-
-**test_performance.cpp**:
-- 位置: `tests/data/test_performance.cpp`
-- 功能: 测试完整epoch的读取速度
-
-#### 8.2.2 测试方法
-
-**1. 性能测试**:
 ```cpp
-#include "renaissance.h"
+// 在 get_next_sample() 中
+uint32_t consumed = gmeta.consumed_count.fetch_add(1, acq_rel);
 
-int main() {
-    auto& loader = tr::data::ImageNetLoaderDts::getInstance();
+if (consumed + 1 == gmeta.total_samples.load(acquire)) {
+    // 这个 Pair 已完全消费，执行 Slot 回收
 
-    loader.configure(
-        8,                          // 8个IO线程（最优性价比）
-        16,                         // 16个Preprocessor线程
-        "/data/train_lv3.dts",
-        "/data/val_lv3.dts",
-        false,                      // 不乱序，测试纯IO性能
-        false,
-        false
-    );
+    // 静态计算 Slot 范围
+    const int N = num_load_workers_;
+    uint32_t start_slot = ring_pair_idx * 2 * N;  // Pair 起始 Slot
+    uint32_t end_slot = start_slot + 2 * N;         // Pair 结束 Slot
 
-    loader.begin_epoch(0, false);  // 验证集
-
-    size_t total_bytes = 0;
-    size_t total_samples = 0;
-
-    auto start = std::chrono::high_resolution_clock::now();
-
-    // 并行消费
-    #pragma omp parallel for num_threads(16)
-    for (int worker_id = 0; worker_id < 16; ++worker_id) {
-        int32_t label;
-        const uint8_t* data_ptr;
-        size_t data_size;
-
-        while (loader.get_next_sample(worker_id, label, data_ptr, data_size)) {
-            total_samples++;
-            total_bytes += data_size;
-        }
+    // 重置整个 Pair 的 Slot 状态为 EMPTY
+    for (uint32_t slot_idx = start_slot; slot_idx < end_slot; ++slot_idx) {
+        ds.slot_states[slot_idx].state = SlotState::EMPTY;
     }
-
-    auto end = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double> elapsed = end - start;
-
-    double total_gb = total_bytes / (1024.0 * 1024 * 1024);
-    double throughput = total_gb / elapsed.count();
-
-    std::cout << "=== Performance Results ===" << std::endl;
-    std::cout << "Total time: " << elapsed.count() << " s" << std::endl;
-    std::cout << "Total samples: " << total_samples << std::endl;
-    std::cout << "Total bytes: " << total_gb << " GB" << std::endl;
-    std::cout << "Throughput: " << throughput << " GB/s" << std::endl;
-
-    loader.end_epoch();
-
-    return 0;
 }
 ```
 
-**预期结果**:
-- Linux (验证集): 2.0-2.5 GB/s ✅
-- Windows (验证集): 12-15 GB/s ✅
+**为什么是静态计算？**
 
-**2. 随机可复现性测试**:
-```cpp
-void verify_reproducibility() {
-    auto& loader = tr::data::ImageNetLoaderDts::getInstance();
-
-    loader.configure(8, 16, "/data/train.dts", "/data/val.dts",
-                    true, false, false);
-
-    // 第一次运行
-    loader.begin_epoch(0, true);
-    tr::data::PreprocessorEmulator emulator1;
-    tr::data::PreprocessorEmulator::Config config;
-    config.num_workers = 16;
-    config.log_dir = "run1_logs";
-    config.simulate_delay = false;  // 不模拟延迟，测试纯读取速度
-    emulator1.configure(config);
-    emulator1.run(loader);
-    loader.end_epoch();
-
-    // 第二次运行（相同参数）
-    loader.begin_epoch(0, true);
-    tr::data::PreprocessorEmulator emulator2;
-    config.log_dir = "run2_logs";
-    emulator2.configure(config);
-    emulator2.run(loader);
-    loader.end_epoch();
-
-    // 验证
-    bool ok = tr::data::PreprocessorEmulator::verify_reproducibility(
-        "run1_logs", "run2_logs"
-    );
-
-    std::cout << (ok ? "✅ 可复现" : "❌ 不可复现") << std::endl;
-}
+在静态映射下，每个 Pair 固定占用 2×N 个连续 Slot：
 ```
-
-**预期结果**:
-- 两次运行完全一致 ✅
-- 日志记录: worker_id, data_size, label
-- 验证工具自动对比两次日志
-
-**日志格式**:
-```
-0,45678,123
-0,52134,456
-1,38901,789
+Pair 0: Slots 0-31
+Pair 1: Slots 32-63
+Pair 2: Slots 64-95
 ...
 ```
 
----
+无需遍历 `occupied_slots`，直接计算范围即可。
 
-## 9. 使用示例
+### 7.4 PARTIAL 模式二分查找优化
 
-### 9.1 基础使用
+**问题**: Preprocessor 需要根据 `global_seq` 快速找到对应的 GROUP Pair。
 
+**FULLY 模式**: 线性查找即可（Pair 数量少）。
+**PARTIAL 模式**: 需要二分查找（Pair 数量多，且不断同步新的）。
+
+**实现**:
 ```cpp
-#include "renaissance.h"
-
-int main() {
-    // 1. 获取单例
-    auto& loader = tr::data::ImageNetLoaderDts::getInstance();
-
-    // 2. 配置
-    loader.configure(
-        8,                          // 8个IO线程（最优性价比）
-        16,                         // 16个Preprocessor线程
-        "/data/ImageNet/train_lv3.dts",
-        "/data/ImageNet/val_lv3.dts",
-        true,                       // 训练集乱序
-        false,                      // 验证集不乱序
-        false                       // 不跳过第一个epoch
-    );
-
-    // 3. 训练循环
-    for (int epoch = 0; epoch < 90; ++epoch) {
-        loader.begin_epoch(epoch, true);
-
-        // 并行消费（16个Preprocessor线程）
-        #pragma omp parallel for num_threads(16)
-        for (int worker_id = 0; worker_id < 16; ++worker_id) {
-            int32_t label;
-            const uint8_t* data_ptr;
-            size_t data_size;
-
-            while (loader.get_next_sample(worker_id, label, data_ptr, data_size)) {
-                // 预处理+训练
-                process_sample(data_ptr, data_size, label);
-            }
-        }
-
-        loader.end_epoch();
+// 1. 使用 std::upper_bound 进行二分查找
+auto it = std::upper_bound(
+    ds.logical_pair_order.begin(),
+    ds.logical_pair_order.end(),
+    global_seq,
+    [&ds](size_t seq, uint32_t lp_idx) {
+        return seq < ds.pair_cumulative_samples[lp_idx];
     }
+);
 
-    return 0;
+if (it == ds.logical_pair_order.end()) {
+    // 还没加载到这个 seq，等待
+    std::this_thread::sleep_for(std::chrono::microseconds(100));
+    continue;
+}
+
+// 2. 找到了！获取 logical pair 索引
+uint32_t target_logical_pair = *it;
+
+// 3. 计算累积样本数
+size_t accumulated = 0;
+if (it != ds.logical_pair_order.begin()) {
+    accumulated = ds.pair_cumulative_samples[*std::prev(it)];
+}
+
+// 4. 在环形缓冲中查找这个 logical pair
+for (size_t i = 0; i < ds.group_metas.size(); ++i) {
+    if (ds.group_metas[i].logical_pair_idx == target_logical_pair) {
+        target_pair_idx = i;
+        break;
+    }
 }
 ```
 
-### 9.2 验证集测试
+**累积样本数更新** (在 `sync_and_shuffle_group` 中):
+```cpp
+// 记录同步顺序
+ds.logical_pair_order.push_back(logical_pair_idx);
+
+// 重新计算累积样本数
+size_t acc = 0;
+for (size_t i = 0; i < ds.logical_pair_order.size(); ++i) {
+    uint32_t lp_idx = ds.logical_pair_order[i];
+    acc += ds.logical_pair_samples[lp_idx];
+    ds.pair_cumulative_samples[lp_idx] = acc;
+}
+```
+
+**时间复杂度**:
+- 线性查找: O(total_pairs) ≈ O(4500)
+- 二分查找: O(log(synced_pairs)) ≈ O(log(100))
+
+---
+
+## 8. 性能优化
+
+### 8.1 避免False Sharing
+
+**对齐清单**:
+
+| 数据结构 | 对齐方式 | 大小 | 原因 |
+|---------|---------|------|------|
+| `slot_states` | `alignas(64)` | 64 B | 16 线程并发修改 |
+| `group_counters_aligned` | `alignas(64)` | 64 B | 16 线程并发递增 |
+| `group_ready_flags` | `alignas(64)` | 64 B | 16 线程并发设置 |
+| `pair_sync_flags_aligned` | `alignas(64)` | 64 B | 8 线程并发 CAS |
+
+**性能对比** (Linux, 16 线程):
+```
+未对齐: 302 MB/s (3.5% 时间在 I/O，96.5% 在同步)
+对齐后: 2.5 GB/s (I/O 瓶颈，同步开销 < 10%)
+提升: 8.3x ✅
+```
+
+### 8.2 平台特定 I/O
+
+**Windows**:
+```cpp
+HANDLE hFile = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, ...);
+
+// 4MB chunks
+while (remaining > 0) {
+    DWORD to_read = std::min(remaining, CHUNK_SIZE);
+    DWORD bytes_read = 0;
+    ReadFile(hFile, ptr, to_read, &bytes_read, NULL);
+    ptr += bytes_read;
+    remaining -= bytes_read;
+}
+```
+
+**Linux**:
+```cpp
+int fd = open(path.c_str(), O_RDONLY);  // 注意：不使用 O_DIRECT
+
+// 4MB chunks
+while (remaining > 0) {
+    size_t to_read = std::min(remaining, CHUNK_SIZE);
+    ssize_t bytes_read = pread(fd, ptr, to_read, current_offset);
+    ptr += bytes_read;
+    current_offset += bytes_read;
+    remaining -= bytes_read;
+}
+```
+
+**为什么 Linux 不使用 O_DIRECT？**
+
+1. **兼容性**: 某些文件系统（NFS）不支持 O_DIRECT
+2. **对齐限制**: O_DIRECT 要求 I/O 大小和地址必须对齐到 512B/4KB
+3. **性能实测**: method2_native 验证了不使用 O_DIRECT 更快
+4. **页缓存**: OS 页缓存可以提升后续 epoch 性能
+
+### 8.3 内存分配策略
+
+**Windows**: `VirtualAlloc`
+```cpp
+ds.arena = static_cast<uint8_t*>(
+    VirtualAlloc(NULL, ds.arena_size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE)
+);
+```
+
+**Linux**: `posix_memalign` (4KB 对齐)
+```cpp
+int ret = posix_memalign(reinterpret_cast<void**>(&ds.arena), 4096, ds.arena_size);
+```
+
+**为什么需要对齐？**
+
+- **性能**: 对齐的内存访问更快（CPU 缓存行友好）
+- **兼容性**: 某些平台（如 ARM）要求对齐
+- **实测**: 4KB 对齐是最优选择（对比过 64B, 512B, 4KB, 16KB）
+
+---
+
+## 9. 线程安全
+
+### 9.1 竞态条件修复（V3.7.3）
+
+**问题描述**: Debug模式下的断言失败
+
+```
+Debug Assertion Failed!
+File: ...vector
+Line: 209
+Expression: vector iterators in range are from different containers
+```
+
+**根本原因**: 多线程竞态条件导致迭代器失效
+
+- **IO线程** (N个): 在`sync_and_shuffle_group`中通过`push_back`修改`ds.logical_pair_order`
+- **Preprocess线程** (M个): 在`get_next_sample`中使用`std::upper_bound`读取`ds.logical_pair_order`
+- 当`push_back`触发vector重新分配时，正在进行的`upper_bound`迭代器失效
+
+**修复方案**: 拷贝优先于锁
 
 ```cpp
-void test_validation_set() {
-    auto& loader = tr::data::ImageNetLoaderDts::getInstance();
+// ========== PARTIAL模式：避免迭代器失效 ==========
+// 添加内存屏障，确保看到IO线程的更新
+std::atomic_thread_fence(std::memory_order_acquire);
 
-    loader.configure(
-        8, 16,
-        "/data/train_lv3.dts",
-        "/data/val_lv3.dts",
-        false, false, false
-    );
+// 安全拷贝logical_pair_order，避免迭代器失效
+std::vector<uint32_t> local_logical_pair_order;
+{
+    // 拷贝操作（C++保证异常安全）
+    local_logical_pair_order = ds.logical_pair_order;
+}
 
-    loader.begin_epoch(0, false);  // 验证集
+// 使用拷贝的vector进行二分查找（避免并发修改）
+auto it = std::upper_bound(local_logical_pair_order.begin(),
+                           local_logical_pair_order.end(),
+                           global_seq,
+                           [&ds](size_t seq, uint32_t lp_idx) {
+                               if (lp_idx >= ds.pair_cumulative_samples.size()) {
+                                   return false;
+                               }
+                               return seq < ds.pair_cumulative_samples[lp_idx];
+                           });
+```
 
-    size_t total_samples = 0;
-    size_t total_bytes = 0;
+**关键点**:
+1. ✅ **拷贝vector**: 避免在搜索过程中vector被修改
+2. ✅ **内存屏障**: 确保看到最新的数据
+3. ✅ **边界检查**: Lambda函数中检查索引越界
+4. ✅ **异常安全**: 拷贝操作失败不影响原数据
 
-    for (int worker_id = 0; worker_id < 16; ++worker_id) {
+### 9.2 边界检查增强
+
+**Slot回收边界检查** (imagenet_loader_dts.cpp:414-443):
+```cpp
+// 边界检查：防止target_pair_idx越界
+if (target_pair_idx >= ds.group_metas.size()) {
+    LOG_ERROR << "Invalid target_pair_idx: " << target_pair_idx
+             << ", group_metas.size: " << ds.group_metas.size();
+    return false;
+}
+
+uint32_t start_slot = target_pair_idx * 2 * N;
+uint32_t end_slot = start_slot + 2 * N;
+
+// 验证start_slot也有效
+if (start_slot >= ds.num_slots) {
+    LOG_ERROR << "Invalid start_slot: " << start_slot
+             << ", num_slots: " << ds.num_slots;
+    return false;
+}
+
+// Slot级别边界检查
+for (uint32_t slot_idx = start_slot; slot_idx < end_slot; ++slot_idx) {
+    if (slot_idx >= ds.num_slots) {
+        LOG_ERROR << "Slot index out of bounds: " << slot_idx;
+        break;
+    }
+    ds.slot_states[slot_idx].state = SlotState::EMPTY;
+}
+```
+
+**累积样本数组边界检查** (imagenet_loader_dts.cpp:1166-1184):
+```cpp
+// 确保pair_cumulative_samples数组足够大
+if (logical_pair_idx >= ds.pair_cumulative_samples.size()) {
+    ds.pair_cumulative_samples.resize(logical_pair_idx + 1, 0);
+}
+
+// 重新计算累积样本数
+size_t acc = 0;
+for (size_t i = 0; i < ds.logical_pair_order.size(); ++i) {
+    uint32_t lp_idx = ds.logical_pair_order[i];
+    // 确保不越界
+    if (lp_idx >= ds.pair_cumulative_samples.size()) {
+        LOG_ERROR << "lp_idx out of bounds in cumulative update: " << lp_idx;
+        break;
+    }
+    uint32_t samples = ds.logical_pair_samples[lp_idx];
+    acc += samples;
+    ds.pair_cumulative_samples[lp_idx] = acc;
+}
+```
+
+### 9.3 线程安全设计原则
+
+1. **拷贝优于锁**: 对于读多写少的场景，拷贝数据比加锁更高效
+2. **防御性编程**: 多层边界检查，即使看起来"不可能"发生
+3. **内存屏障**: 在跨线程共享数据时使用正确的内存序
+4. **异常安全**: 拷贝操作失败不影响原数据
+5. **日志辅助**: 关键操作添加LOG_ERROR，便于调试
+
+---
+
+## 13. API 使用指南
+
+### 10.1 基本使用流程
+
+```cpp
+#include "renaissance/data/imagenet_loader_dts.h"
+
+using namespace tr::data;
+
+// 1. 获取单例
+auto& loader = ImageNetLoaderDts::getInstance();
+
+// 2. 设置加载模式（可选）
+loader.set_train_mode(LoadMode::FULLY);   // 训练集全量加载
+loader.set_val_mode(LoadMode::PARTIAL);   // 验证集部分加载
+
+// 3. 配置加载器
+loader.configure(
+    8,                  // num_load_workers (N)
+    16,                 // num_preproc_workers (M)
+    "T:/dataset/imagenet/imagenet_train_lv0.dts",  // train_path
+    "T:/dataset/imagenet/imagenet_val_lv0.dts",    // val_path
+    true,               // shuffle_train
+    false,              // shuffle_val
+    false               // skip_first (第一个 epoch 也乱序)
+);
+
+// 4. 开始 Epoch
+loader.begin_epoch(0, true);  // epoch_id=0, is_train
+
+// 5. 多线程消费样本
+std::vector<std::thread> preprocess_threads;
+for (int worker_id = 0; worker_id < 16; ++worker_id) {
+    preprocess_threads.emplace_back([worker_id, &loader]() {
         int32_t label;
         const uint8_t* data_ptr;
         size_t data_size;
 
         while (loader.get_next_sample(worker_id, label, data_ptr, data_size)) {
-            total_samples++;
-            total_bytes += data_size;
+            // 预处理 data_ptr（JPEG 字节流）
+            // data_size: JPEG 字节数
+            // label: 标签 [0, 999]
         }
-    }
+    });
+}
 
-    std::cout << "Total samples: " << total_samples << std::endl;
-    std::cout << "Total bytes: " << (total_bytes / (1024.0 * 1024.0))
-              << " MB" << std::endl;
+// 等待完成
+for (auto& t : preprocess_threads) {
+    t.join();
+}
 
-    // 期望: total_samples == 50000
+// 6. 结束 Epoch
+loader.end_epoch();
+```
+
+### 10.2 API 接口详解
+
+#### 10.2.1 configure()
+
+```cpp
+void configure(
+    int num_load_workers,       // DataLoader 线程数 N: 1/2/4/8/16
+    int num_preproc_workers,    // Preprocessor 线程数 M: [1, 64]
+    const std::string& train_path,
+    const std::string& val_path,
+    bool shuffle_train = true,
+    bool shuffle_val = false,
+    bool skip_first = false
+);
+```
+
+**参数说明**:
+- `num_load_workers`: IO 线程数，建议 8 或 16
+- `num_preproc_workers`: 预处理线程数，建议 16 或 32
+- `shuffle_train`: 训练集是否乱序（默认 true）
+- `shuffle_val`: 验证集是否乱序（默认 false）
+- `skip_first`: 第一个 epoch 是否跳过乱序（默认 false）
+
+**推荐配置**:
+```cpp
+// 高性能配置（服务器）
+loader.configure(16, 32, train_path, val_path);
+
+// 平衡配置（工作站）
+loader.configure(8, 16, train_path, val_path);
+
+// 低资源配置（笔记本）
+loader.configure(4, 8, train_path, val_path);
+```
+
+#### 10.2.2 begin_epoch()
+
+```cpp
+void begin_epoch(int epoch_id, bool is_train);
+```
+
+**功能**:
+1. 切换训练/验证集
+2. 执行 Level 2 随机（Block 级）
+3. 重置 GROUP 状态
+4. 启动 IO 线程
+5. 等待前几个 GROUP Pairs 就绪
+
+**示例**:
+```cpp
+// 训练
+loader.begin_epoch(0, true);
+
+// 验证
+loader.begin_epoch(0, false);
+```
+
+#### 10.2.3 get_next_sample()
+
+```cpp
+bool get_next_sample(
+    int preproc_worker_id,   // Worker ID [0, M-1]
+    int32_t& label,          // [OUT] 标签 [0, 999]
+    const uint8_t*& data_ptr,// [OUT] JPEG 数据指针
+    size_t& data_size        // [OUT] JPEG 字节数
+);
+```
+
+**返回值**:
+- `true`: 成功获取样本
+- `false`: Epoch 结束
+
+**线程安全**: 多个 Preprocessor Worker 可并发调用
+
+**零拷贝**: `data_ptr` 直接指向内部缓冲区，无需 memcpy
+
+**示例**:
+```cpp
+int32_t label;
+const uint8_t* data_ptr;
+size_t data_size;
+
+while (loader.get_next_sample(worker_id, label, data_ptr, data_size)) {
+    // 解码 JPEG
+    // data_ptr 指向 JPEG 字节流
+    // data_size 是 JPEG 字节数
+    // label 是图片标签
 }
 ```
 
-### 9.3 性能测试
+#### 10.2.4 end_epoch()
 
 ```cpp
-void test_performance() {
-    auto& loader = tr::data::ImageNetLoaderDts::getInstance();
+void end_epoch();
+```
 
-    loader.configure(
-        8, 16,
-        "/data/val_lv3.dts",
-        "/data/train_lv3.dts",
-        false, false, false
-    );
+**功能**:
+1. 停止 IO 线程
+2. 清理资源
 
-    loader.begin_epoch(0, false);
+**注意**: 必须在每个 epoch 结束时调用。
 
-    auto start = std::chrono::high_resolution_clock::now();
+---
 
-    size_t total_bytes = 0;
-    size_t total_samples = 0;
+## 13. 测试与验证
 
-    // 并行消费
-    #pragma omp parallel for num_threads(16)
-    for (int worker_id = 0; worker_id < 16; ++worker_id) {
-        int32_t label;
-        const uint8_t* data_ptr;
-        size_t data_size;
+### 10.1 性能测试
 
-        while (loader.get_next_sample(worker_id, label, data_ptr, data_size)) {
-            total_samples++;
-            total_bytes += data_size;
-        }
-    }
+**测试程序**: `tests/data/test_dataloader_performance.cpp`
 
-    auto end = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double> elapsed = end - start;
+**运行示例**:
+```bash
+# Linux - PARTIAL模式（环形缓冲）
+./test_dataloader_performance --dts --val --lv 0 --mode partial --workers 8 --preprocess 16
 
-    double total_gb = total_bytes / (1024.0 * 1024 * 1024);
-    double throughput = total_gb / elapsed.count();
+# Linux - FULLY模式（全量加载）
+./test_dataloader_performance --dts --val --lv 0 --mode fully --workers 8 --preprocess 16
 
-    std::cout << "=== Performance Test Results ===" << std::endl;
-    std::cout << "Total time: " << elapsed.count() << " s" << std::endl;
-    std::cout << "Total samples: " << total_samples << std::endl;
-    std::cout << "Total bytes: " << total_gb << " GB" << std::endl;
-    std::cout << "Throughput: " << throughput << " GB/s" << std::endl;
+# Windows - PARTIAL模式
+test_dataloader_performance.exe --dts --val --lv 0 --mode partial --workers 8 --preprocess 16
+
+# Windows - FULLY模式
+test_dataloader_performance.exe --dts --val --lv 0 --mode fully --workers 8 --preprocess 16
+```
+
+**命令行选项**:
+- `--dts`: 使用DTS格式（必需）
+- `--train` / `--val`: 加载训练集或验证集
+- `--lv <0-3>`: DTS压缩级别
+- `--mode <partial/fully>`: 加载模式（V3.7.3新增）
+- `--workers <N>`: DataLoader线程数
+- `--preprocess <N>`: Preprocessor线程数
+- `--path <PATH>`: 数据集路径
+- `--shuffle`: 启用乱序
+
+**期望输出**:
+```
+========================================
+Performance Test Results
+========================================
+Load time:     2.534 s
+Total bytes:   6.283 GB
+Total samples: 50000
+Throughput:    2.479 GB/s
+               2537.834 MB/s
+Samples/sec:   19731.945
+========================================
+```
+
+### 10.2 随机可复现性测试
+
+**测试程序**: `tests/data/test_reproducibility.cpp`
+
+**运行示例**:
+```bash
+# 第一次运行
+./test_reproducibility --seed 42 --epoch 0 --log_dir run1
+
+# 第二次运行（相同参数）
+./test_reproducibility --seed 42 --epoch 0 --log_dir run2
+
+# 对比日志
+python scripts/verify_reproducibility.py run1 run2
+```
+
+**期望输出**:
+```
+✅ Reproducibility verified! All 1281167 records match perfectly.
+```
+
+### 10.3 压力测试
+
+**多 Epoch 测试**:
+```cpp
+for (int epoch = 0; epoch < 10; ++epoch) {
+    loader.begin_epoch(epoch, true);
+
+    // 消费所有样本...
 
     loader.end_epoch();
-
-    // 期望: throughput >= 2.0 (Linux) or >= 12.0 (Windows)
 }
 ```
 
-### 9.4 随机可复现性验证
-
+**PARTIAL 模式测试**:
 ```cpp
-void verify_reproducibility() {
-    auto& loader = tr::data::ImageNetLoaderDts::getInstance();
+loader.set_train_mode(LoadMode::PARTIAL);
+loader.set_val_mode(LoadMode::PARTIAL);
+loader.configure(...);
+// 验证环形缓冲正确回绕
+```
 
-    loader.configure(8, 16, "/data/train.dts", "/data/val.dts",
-                    true, false, false);
+---
 
-    // 第一次运行
+## 13. 最佳实践
+
+### 11.1 线程数配置
+
+**推荐配置**:
+
+| 场景 | `num_load_workers` | `num_preproc_workers` | 总线程数 |
+|------|-------------------|---------------------|---------|
+| **高性能服务器** (32+ CPU) | 16 | 32 | 48 |
+| **工作站** (16-32 CPU) | 8 | 16 | 24 |
+| **笔记本** (8-16 CPU) | 4 | 8 | 12 |
+| **低资源** (4-8 CPU) | 2 | 4 | 6 |
+
+**原则**:
+- `num_preproc_workers` ≈ 2 × `num_load_workers`
+- 避免超过 CPU 核心数（超线程会导致性能下降）
+
+### 11.2 加载模式选择
+
+**FULLY 模式**:
+- ✅ 内存充足 (> 150 GB)
+- ✅ 多 epoch 训练
+- ✅ 需要最快速度（稳态无 I/O）
+
+**PARTIAL 模式**:
+- ✅ 内存受限 (< 16 GB)
+- ✅ 单 epoch 验证
+- ✅ 数据集远大于内存
+
+**示例**:
+```cpp
+// 最终演示（服务器）
+loader.set_train_mode(LoadMode::FULLY);
+loader.set_val_mode(LoadMode::FULLY);
+
+// 开发调试（笔记本）
+loader.set_train_mode(LoadMode::PARTIAL);
+loader.set_val_mode(LoadMode::PARTIAL);
+```
+
+### 11.3 乱序配置
+
+**训练集**:
+```cpp
+loader.configure(..., true, false, false);  // shuffle_train=true
+```
+
+**验证集**:
+```cpp
+loader.configure(..., true, false, false);  // shuffle_val=false
+```
+
+**Warm-up Epoch**:
+```cpp
+loader.configure(..., true, false, true);   // skip_first=true
+```
+
+### 11.4 错误处理
+
+**正确做法**:
+```cpp
+try {
+    auto& loader = ImageNetLoaderDts::getInstance();
+    loader.configure(...);
+
     loader.begin_epoch(0, true);
-    tr::data::PreprocessorEmulator emulator1;
-    tr::data::PreprocessorEmulator::Config config;
-    config.num_workers = 16;
-    config.log_dir = "run1_logs";
-    config.simulate_delay = false;
-    emulator1.configure(config);
-    emulator1.run(loader);
+
+    // 消费样本...
+
     loader.end_epoch();
 
-    // 第二次运行（相同参数）
-    loader.begin_epoch(0, true);
-    tr::data::PreprocessorEmulator emulator2;
-    config.log_dir = "run2_logs";
-    emulator2.configure(config);
-    emulator2.run(loader);
-    loader.end_epoch();
-
-    // 验证
-    bool ok = tr::data::PreprocessorEmulator::verify_reproducibility(
-        "run1_logs", "run2_logs"
-    );
-
-    std::cout << (ok ? "✅ 可复现" : "❌ 不可复现") << std::endl;
+} catch (const tr::TRException& e) {
+    LOG_ERROR << "DataLoader failed: " << e.what();
+    // 处理错误...
 }
 ```
 
+**常见异常**:
+- `ValueError`: 参数错误（workers 超出范围）
+- `FileNotFoundError`: DTS 文件不存在
+- `MemoryError`: 内存分配失败
+
 ---
 
-## 10. 常见问题
+## 13. 常见问题
 
-### Q1: 如何选择LoadMode？
+### Q1: 为什么需要等待前几个 GROUP Pairs 就绪？
 
-**FULLY模式** (推荐用于演示):
-- 优点: 最快（每个epoch仅加载一次）
-- 缺点: 内存占用大（LV3训练集~144GB）
-- 适用: 内存足够，追求极致性能
+**A**: 为了避免 Preprocessor 线程启动时没有数据可读，造成忙等待。
 
-**PARTIAL模式**:
-- 优点: 内存占用小（固定2GB）
-- 缺点: 每个epoch需要重新加载
-- 适用: 内存受限，或数据集过大
-
-**组合模式**:
-- 训练FULLY + 验证FULLY: 各占一块内存
-- 训练PARTIAL + 验证FULLY: 训练集环形缓冲，验证集完整缓冲
-- 训练PARTIAL + 验证PARTIAL: 共用环形缓冲（时间分离，天然简单）
-
-### Q2: 如何选择线程数？
-
-**IO线程数 N** (1/2/4/8/16):
-- 建议: 8 (性价比最高)
-- SSD: N=8 已接近饱和
-- HDD: 可考虑N=16
-
-**Preprocessor线程数 M** (1~64):
-- 建议: 16-32
-- 过小: 无法及时消费数据
-- 过大: 上下文切换开销
-
-### Q3: 为什么验证集建议不乱序？
-
-**不乱序的好处**:
-- 便于调试（相同类别的图片连续）
-- 评估更稳定（减少样本顺序方差）
-
-**何时乱序**:
-- 需要评估模型对样本顺序的鲁棒性
-- 验证数据增强策略
-
-### Q4: 如何调试随机性问题？
-
-**步骤**:
-1. 使用固定的global_seed (默认42)
-2. 记录epoch_id
-3. 运行PreprocessorEmulator验证
-4. 对比两次运行的日志
-
-### Q5: PARTIAL模式下Slot回收如何处理？
-
-**当前状态** (V4.0.0):
-- PARTIAL模式下，当GROUP Pair的所有样本被消费完后，需要将对应的Slot状态重置为EMPTY
-- 否则IO线程无法覆盖这些Slot
-
-**未来优化** (后续版本):
-- 当`consumed_count == total_samples`时，释放该GROUP Pair占用的所有Slot
-- 设置`slot_states[slot_idx] = SlotState::EMPTY`
-- 允许IO线程覆盖这些Slot
-
-**当前解决方案**:
-- 优先使用FULLY模式（推荐）
-- PARTIAL模式暂不支持完整的循环加载
-
-### Q6: 内存不足怎么办？
-
-**方案1**: 使用PARTIAL模式
 ```cpp
-loader.set_mode(LoadMode::PARTIAL, LoadMode::PARTIAL);
-// 训练集: 环形缓冲 (2GB)
-// 验证集: 环形缓冲 (2GB)
-// 注意：训练和验证时间分离，不会冲突
+// begin_epoch() 中
+while (!group_metas[0].is_ready.load()) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+}
 ```
 
-**方案2**: 使用更高压缩比的DTS版本
-- LV0: 无压缩 (~144GB)
-- LV1: 轻度压缩 (~100GB)
-- LV2: 中度压缩 (~60GB)
-- LV3: 重度压缩 (~40GB) ← 推荐
+### Q2: 为什么 Slot 回收是静态计算而非遍历 `occupied_slots`？
 
-**方案3**: 减小IO线程数
-- N=16 → 2GB
-- N=8 → 1GB
-- N=4 → 512MB
+**A**: 在静态映射下，每个 Pair 固定占用 2×N 个连续 Slot，无需动态记录。
 
-### Q7: 如何扩展到其他数据集？
+### Q3: 为什么 Linux 不使用 O_DIRECT？
 
-**实现步骤**:
-1. 继承 `DataLoader` 基类
-2. 实现 `configure()`, `begin_epoch()`, `end_epoch()`, `get_next_sample()`
-3. 根据数据格式设计内存布局
-4. 实现静态映射（如果有类似BLOCK的概念）
+**A**:
+1. 兼容性问题（NFS 等文件系统不支持）
+2. 对齐限制复杂
+3. 实测性能不如页缓存
+4. method2_native 验证了最优方案
 
-**示例**: MNIST (手写数字)
+### Q4: 为什么需要 Cache-Line 对齐？
+
+**A**: 避免多线程修改相邻变量时的 **False Sharing**，可提升 8 倍性能。
+
+### Q5: FULLY 和 PARTIAL 模式的 GroupMeta 数量不同？
+
+**A**:
+- **FULLY**: 每个逻辑 Pair 对应一个 GroupMeta（~4500 个）
+- **PARTIAL**: 环形缓冲只有 8 个 Pair（8 个 GroupMeta）
+
+### Q6: 为什么需要 `logical_pair_idx` 和 `ring_pair_idx` 分离？
+
+**A**: PARTIAL 模式下，环形缓冲只能容纳 8 个 Pair，但数据集有 4500 个 Pair。逻辑索引用于种子计算，环形索引用于内存访问。
+
+### Q7: 如何验证随机可复现性？
+
+**A**: 使用 `PreprocessorEmulator` 运行两次，对比日志。
+
 ```cpp
-class MnistLoaderDts : public DataLoader {
-public:
-    void configure(...) override {
-        // MNIST全集很小（~50MB），直接FULLY模式
-        mode_ = LoadMode::FULLY;
-        // 无需IO线程，一次性加载
-    }
+PreprocessorEmulator emulator;
+emulator.configure({...});
+emulator.run(loader);
 
-    bool get_next_sample(...) override {
-        // 直接从内存返回像素
-    }
-};
+// 对比两次运行的日志
+bool matched = PreprocessorEmulator::verify_reproducibility("run1", "run2");
 ```
 
+### Q8: 性能测试结果异常（< 1 GB/s）？
+
+**A**: 检查以下几点：
+1. 是否使用了页缓存（Linux: `sync && echo 3 | sudo tee /proc/sys/vm/drop_caches`）
+2. 线程数是否合理（8/16）
+3. 文件系统是否支持高并发 I/O（NFS 会很慢）
+4. 是否开启了编译优化（`-O3`）
+
+### Q9: 如何调试 GROUP 同步问题？
+
+**A**: 开启 DEBUG 日志：
+```cpp
+// io_worker_func() 中
+LOG_DEBUG << "Worker " << thread_id << " triggering sync for GROUP "
+          << group_idx << ", logical_pair=" << logical_pair_idx;
+```
+
+### Q10: 支持 Raw 模式（散装 JPEG）吗？
+
+**A**: 当前版本专注于 DTS 格式。Raw 模式计划在后续版本实现。
+
+### Q11: Debug模式为什么会出现"vector iterators in range are from different containers"断言失败？（V3.7.3已修复）
+
+**A**: 这是多线程竞态条件导致的迭代器失效问题。
+
+**问题原因**:
+- IO线程通过`push_back`修改`ds.logical_pair_order`
+- Preprocess线程使用`std::upper_bound`读取`ds.logical_pair_order`
+- `push_back`触发vector重新分配时，`upper_bound`的迭代器失效
+
+**修复方案** (V3.7.3):
+```cpp
+// 拷贝vector避免并发修改
+std::vector<uint32_t> local_logical_pair_order;
+local_logical_pair_order = ds.logical_pair_order;
+
+// 使用拷贝的vector进行搜索
+auto it = std::upper_bound(local_logical_pair_order.begin(),
+                           local_logical_pair_order.end(),
+                           global_seq,
+                           [&ds](size_t seq, uint32_t lp_idx) { ... });
+```
+
+**状态**: ✅ 已在V3.7.3中修复
+
+### Q12: 如何选择Debug模式还是Release模式？
+
+**A**:
+- **Debug模式**: 用于开发和调试，有完整的符号信息和边界检查（14.71 GB/s）
+- **Release模式**: 用于性能测试和生产部署，无调试开销（19.75 GB/s）
+
+**推荐**: 性能测试和生产环境使用Release模式。
+
 ---
 
-## 版本历史
+## 附录 A: 性能基准测试
 
-| 版本 | 日期 | 主要变更 |
-|------|------|---------|
-| V4.0.0 | 2026-01-17 | 静态映射设计，Linux性能提升7-8倍，重构get_next_sample |
-| V3.8.0 | 2026-01-15 | 修复LOG_ERROR宏冲突，编译通过 |
-| V3.7.1 | 2026-01-15 | 回滚旧设计，准备V4.0.0重构 |
-| V3.6.37 | 2025-12-27 | 初次DataLoader尝试（存在性能问题） |
+### A.1 测试环境
+
+| 平台 | CPU | 内存 | 存储 |
+|------|-----|------|------|
+| **Linux** | AMD EPYC 7763 (64核) | 512 GB DDR4 | NVMe SSD (3.5 GB/s) |
+| **Windows** | AMD Ryzen 9 7950X (16核) | 128 GB DDR5 | NVMe SSD (7 GB/s) |
+
+### A.2 ImageNet 验证集 (50,000 样本, 6.28 GB)
+
+| 平台 | 线程配置 | 冷启动时间 | 吞吐量 | 效率 |
+|------|---------|-----------|--------|------|
+| **Linux** | 8 IO + 16 Pre | 2.53 s | **2.48 GB/s** | **91.8%** |
+| **Linux** | 16 IO + 32 Pre | 2.51 s | **2.50 GB/s** | **92.6%** |
+| **Windows** | 8 IO + 16 Pre | 0.48 s | **13.1 GB/s** | **81.9%** |
+| **Windows** | 16 IO + 32 Pre | 0.47 s | **13.4 GB/s** | **83.8%** |
+
+**对标**: method2_native (2.7 GB/s Linux, ~16 GB/s Windows)
+
+### A.3 ImageNet 训练集 (1,281,167 样本, 138 GB)
+
+| 平台 | 线程配置 | 冷启动时间 | 吞吐量 |
+|------|---------|-----------|--------|
+| **Linux** | 16 IO + 32 Pre | 50.2 s | **2.75 GB/s** |
+| **Windows** | 16 IO + 32 Pre | 10.1 s | **13.7 GB/s** |
 
 ---
 
-## 编译状态 (V4.0.0)
+## 附录 B: 术语对照表
 
-### Windows (MSVC 2022, Debug)
-
-**总体编译状态**: ✅ 成功 (100%)
-
-| 模块 | 状态 | 备注 |
+| 术语 | 英文 | 定义 |
 |------|------|------|
-| 核心库 (base) | ✅ | 100%通过 |
-| 核心库 (data) | ✅ | 100%通过 |
-| 核心库 (device) | ✅ | 100%通过 |
-| 核心库 (utils) | ✅ | 100%通过 |
-| DataLoader核心 | ✅ | imagenet_loader_dts.cpp编译成功 |
-| 测试 (110/114) | ✅ | 96.5%通过 |
-| LOG_ERROR修复 | ✅ | 改为LogLevel::ERR |
+| **数据块** | BLOCK | 16 MB 固定大小存储单位 |
+| **工作组** | GROUP | N 个 BLOCK 组成的逻辑单位 |
+| **槽位** | Slot | 内存中存储一个 BLOCK 的空间 |
+| **对** | Pair | 2 个 GROUP 组成的样本级洗牌单位 |
+| **环形缓冲** | Ring Buffer | PARTIAL 模式下的固定大小内存缓冲 |
+| **静态映射** | Static Mapping | 每个线程负责固定的 GROUP offset |
+| **逻辑索引** | Logical Index | 用于种子计算的 Pair 索引 |
+| **环形索引** | Ring Index | 用于访问内存的 Pair 索引 |
 
 ---
 
-**文档维护**: 技术觉醒团队
-**最后更新**: 2026-01-17
-**反馈渠道**: 项目Issues / 内部技术讨论组
+## 附录 C: 参考资料
+
+1. **EXPERT_0.md**: 原始设计方案（已废弃）
+2. **【十三】.md**: DTS 文件格式规范
+3. **【二十】.md**: 总工程师姜玉麟的设计意见
+4. **method2_native.cpp**: 性能基准测试程序
+5. **Philox RNG**: 随机数生成器算法
+
+---
+
+## 14. 更新日志
+
+### V3.7.3 (2026-01-18)
+
+**关键修复**:
+1. ✅ **修复Debug模式弹框问题**
+   - 问题：多线程竞态条件导致vector迭代器失效
+   - 修复：PARTIAL模式下拷贝logical_pair_order避免并发修改
+   - 结果：Debug模式无弹框，14.71 GB/s
+
+2. ✅ **添加--mode命令行选项**
+   - 支持`--mode partial`（环形缓冲，1GB内存）
+   - 支持`--mode fully`（全量加载，6.4GB内存）
+   - 智能模式设置：只对测试数据集使用FULLY
+
+3. ✅ **增强边界检查**
+   - Slot回收：3层边界检查防止越界
+   - 累积样本数组：动态resize确保足够大
+   - Lambda函数：索引越界检查
+
+4. ✅ **优化日志输出**
+   - 注释掉热路径中的LOG_INFO（6条）
+   - 减少多线程并发输出到控制台
+   - 提升Debug模式性能
+
+**测试结果** (Windows, ImageNet验证集):
+| 模式 | 加载模式 | 吞吐量 | 弹框 |
+|------|----------|--------|------|
+| Release | PARTIAL | **19.75 GB/s** | ✅ 无 |
+| Release | FULLY | **15.56 GB/s** | ✅ 无 |
+| Debug | PARTIAL | **14.71 GB/s** | ✅ 无 |
+
+**代码变更**:
+- `src/data/imagenet_loader_dts.cpp`: 竞态条件修复，边界检查增强
+- `tests/data/test_dataloader_performance.cpp`: 添加--mode选项
+- `docs/dataloader.md`: 添加线程安全章节，更新性能指标
+
+### V3.7.2 (2026-01-18)
+
+**初始版本**:
+- 完整实现ImageNetLoaderDts
+- 支持FULLY/PARTIAL加载模式
+- 静态映射并行读取
+- 三级随机机制
+- Cache-Line对齐优化
+- 文档：完整技术文档取代EXPERT_0.md
+
+---
+
+**文档状态**: ✅ 生产就绪
+**维护者**: 技术觉醒团队
+**反馈**: 请在项目 Issues 中提交问题和建议。
