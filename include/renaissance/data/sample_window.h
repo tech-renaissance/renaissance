@@ -13,7 +13,6 @@
 #include <cstddef>
 
 namespace tr {
-namespace data {
 
 /**
  * @brief 样本窗口（Preprocessor读取接口）
@@ -37,5 +36,4 @@ struct SampleWindow {
         : data(ptr), size(sz), label(lbl), ready(r) {}
 };
 
-} // namespace data
 } // namespace tr

@@ -13,7 +13,6 @@
 #include <string>
 
 namespace tr {
-namespace data {
 
 /**
  * @class ImageNetLoader
@@ -86,5 +85,4 @@ protected:
     LoadMode val_mode_ = LoadMode::FULLY;    ///< 验证集加载模�?
 };
 
-} // namespace data
 } // namespace tr

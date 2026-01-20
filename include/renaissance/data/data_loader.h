@@ -9,13 +9,12 @@
 
 #pragma once
 
-#include "renaissance/data/load_mode.h"
+#include "renaissance/base/global_config.h"
 #include "renaissance/data/sample_window.h"
 #include <string>
 #include <cstdint>
 
 namespace tr {
-namespace data {
 
 /**
  * @class DataLoader
@@ -138,5 +137,4 @@ protected:
     bool is_training_mode_ = true;  ///< 当前处于训练/验证模式
 };
 
-} // namespace data
 } // namespace tr

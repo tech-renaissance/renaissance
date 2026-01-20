@@ -10,7 +10,6 @@
 #include <iostream>
 
 using namespace tr;
-using namespace tr::data;
 
 int main() {
     std::cout << "=== DataLoader Basic Compilation Test ===" << std::endl;

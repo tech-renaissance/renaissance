@@ -2,17 +2,66 @@
 
 ## 省流摘要
 
-无限循环问题很可能是CMakeLists.txt的时间戳导致。主要是因为修改了系统时间、或者是代码移动到了系统时间不同的另一台机器。如果是在Linux碰到无限循环，以下一行命令就可解决：
+无限循环问题很可能是CMakeLists.txt的时间戳导致。主要是因为修改了系统时间、或者是代码移动到了系统时间不同的另一台机器。
 
+### 最常见场景（2026-01-18更新）
+
+**从其他电脑复制文件后出现无限循环**：
 ```shell
-find ~/R/renaissance -name "CMakeLists.txt" -exec touch {} \; 
+# 方案1：快速方案（修改时间戳）
+find . -name "CMakeLists.txt" -exec touch -t 202601181300 {} \;
+
+# 方案2：彻底方案（清理重配，推荐）
+rm -rf build && mkdir build && cd build && cmake ..
+```
+
+### 其他场景
+
+**系统时间被修改或时间戳混乱**：
+```shell
+find ~/R/renaissance -name "CMakeLists.txt" -exec touch {} \;
 ```
 
 
 
 ## 问题描述
 
-在使用CLion进行项目清理时，出现CMake无限循环问题。具体表现为：
+### 场景A：从其他电脑复制文件（2026-01-18新增）
+
+**发生环境**：Linux Ubuntu 24.04 LTS服务器
+
+**操作过程**：
+1. 从另一台电脑复制项目文件到新服务器
+2. 解压后运行`./build.sh`或`cmake ..`
+3. CMake配置完成后立即出现无限循环
+
+**具体表现**：
+```bash
+-- Configuring done (0.1s)
+-- Generating done (0.2s)
+-- Build files have been written to: /root/epfs/R/renaissance/build
+[0/1] Re-running CMake...
+-- cuDNN library: /usr/lib/x86_64-linux-gnu/libcudnn.so
+-- Workspace directory ensured: /root/epfs/R/renaissance/workspace
+...（配置输出完全相同，重复出现）...
+-- Configuring done (0.2s)
+-- Generating done (0.2s)
+-- Build files have been written to: /root/epfs/R/renaissance/build
+[0/1] Re-running CMake...
+...（无限循环，Ctrl+C无法中断）...
+```
+
+**关键特征**：
+- 所有CMakeLists.txt文件时间戳完全相同（例如都是2026-01-18 13:49:46）
+- CMakeLists.txt时间戳晚于build目录中的CMakeCache.txt
+- 偶发性，相同文件有时引发有时不引发
+- 只在文件复制/解压操作后出现
+
+---
+
+### 场景B：在使用CLion进行项目清理时，出现CMake无限循环问题（原有场景）
+
+具体表现为：
 
 ```
 [0/1] Re-running CMake...
@@ -27,7 +76,39 @@ CMake不断重新配置项目，导致清理操作无法完成。
 
 ### 根本原因
 
-CMake无限循环主要由**三个不同的问题**引起：
+CMake无限循环主要由**四个不同的问题**引起：
+
+#### 0. 从其他电脑复制文件导致时间戳异常（2026-01-18新增）
+
+**问题根源**：
+项目文件（包括所有CMakeLists.txt）从另一台电脑复制过来，解压后所有文件的时间戳都被设置为同一时间（例如13:49:46），这比build目录中已有的CMakeCache.txt（13:44:10）要新。
+
+**触发机制**：
+1. 文件复制操作（如scp、tar xzf）会将所有文件时间戳设置为复制时的时间
+2. 如果build目录中已有旧的配置文件，其时间戳较早
+3. Ninja构建系统检测到CMakeLists.txt的时间戳比build.ninja和CMakeCache.txt新
+4. Ninja认为CMake配置文件已被修改，触发重新配置
+5. CMake重新运行后生成新的build.ninja和CMakeCache.txt
+6. 但由于所有CMakeLists.txt时间戳仍然异常，循环继续
+7. 形成**无限循环**
+
+**时间戳检查示例**：
+```bash
+$ ls -la --time-style=full-iso CMakeLists.txt build/CMakeCache.txt
+-rw-rw-rw- 1 root root 21715 2026-01-18 13:49:46.658979341 +0800 CMakeLists.txt
+-rw-r--r-- 1 root root 19712 2026-01-18 13:44:10.046460248 +0800 build/CMakeCache.txt
+#       ↑ CMakeLists.txt较新，触发重新配置
+```
+
+**为什么偶发性？**
+因为只有满足以下条件才会触发：
+1. 从其他系统复制文件，时间戳被批量重置
+2. build目录中已有旧的配置文件
+3. 复制后的时间戳晚于build目录中的文件
+
+如果复制后立即清理build目录重新配置，就不会出现此问题。
+
+---
 
 #### 1. 工作区目录创建问题（已修复）
 
@@ -129,6 +210,110 @@ ninja: error: manifest 'build.ninja' still dirty after 100 tries, perhaps system
 3. 尝试删除build目录后重新配置，观察问题是否仍然存在
 
 ## 解决方案
+
+### 0. 解决从其他电脑复制文件的时间戳问题（2026-01-18新增）
+
+**问题**：从其他电脑复制文件后，CMakeLists.txt时间戳晚于build目录，导致无限循环
+
+#### 方案1：修改时间戳（快速方案）
+
+**原理**：将所有CMakeLists.txt的时间戳改为早于build目录的时间
+
+**执行步骤**：
+```bash
+# 1. 将所有CMakeLists.txt时间戳改为2026-01-18 13:00:00
+find /root/epfs/R/renaissance -name "CMakeLists.txt" -exec touch -t 202601181300 {} \;
+
+# 2. 验证时间戳
+ls -la --time-style=full-iso CMakeLists.txt build/CMakeCache.txt
+# 应该看到：CMakeLists.txt 13:00:00  <  CMakeCache.txt 13:44:10
+
+# 3. 重新构建
+cmake --build build
+```
+
+**优点**：
+- ✅ 快速，不删除build目录
+- ✅ 保留已有的编译结果
+- ✅ 适合build目录已有正确配置的情况
+
+**缺点**：
+- ❌ 治标不治本，只是绕过问题
+- ❌ 如果build目录配置本身有问题，无法解决
+
+---
+
+#### 方案2：清理重配（彻底方案）✅ 推荐
+
+**原理**：删除build目录，重新配置，让时间戳自然正确
+
+**执行步骤**：
+```bash
+# 1. 完全删除build目录
+rm -rf build
+
+# 2. 重新创建并配置
+mkdir build && cd build
+cmake ..
+
+# 3. 开始构建
+cmake --build . -j$(nproc)
+```
+
+**优点**：
+- ✅ 彻底解决问题
+- ✅ 时间戳自然正确
+- ✅ 避免潜在的配置冲突
+- ✅ 更可靠、更推荐
+
+**缺点**：
+- ❌ 需要重新编译（首次较慢）
+- ❌ 如果build目录有重要的中间文件，会丢失
+
+---
+
+#### 预防措施
+
+**从其他系统复制文件后的最佳实践**：
+```bash
+# 复制文件后，立即清理build目录
+scp -r user@remote:/path/to/renaissance .
+cd renaissance
+rm -rf build  # 关键：清理build目录
+mkdir build && cd build
+cmake ..
+```
+
+**自动化脚本建议**（在build.sh中添加时间戳检查）：
+```bash
+#!/bin/bash
+# 检查CMakeLists.txt是否比build目录新
+if [ "CMakeLists.txt" -nt "build/CMakeCache.txt" 2>/dev/null ]; then
+    echo "[INFO] CMakeLists.txt updated, cleaning build directory..."
+    rm -rf build
+fi
+
+mkdir -p build && cd build
+cmake ..
+cmake --build . -j$(nproc)
+```
+
+**文件复制操作的时间戳行为对比**：
+
+| 操作 | 时间戳行为 | 推荐度 |
+|------|-----------|--------|
+| `cp -p` | 保留原始时间戳 ✓ | ⭐⭐⭐⭐⭐ |
+| `cp`（无-p） | 使用当前时间 ✗ | ⭐⭐ |
+| `scp` | 使用当前时间 ✗ | ⭐⭐ |
+| `tar xzf` | 保留归档内时间 ⚠️ | ⭐⭐⭐ |
+| `rsync -a` | 保留原始时间戳 ✓ | ⭐⭐⭐⭐⭐ |
+
+**建议**：
+- 跨机器复制使用`rsync -a`保留时间戳
+- 如果无法保留，复制后立即清理build目录
+- 避免使用不带-p的cp命令
+
+---
 
 ### 1. 修复工作区目录创建
 
@@ -499,9 +684,9 @@ cmake --build . --target test_cuda_gemm_framework --config Release
 
 ---
 
-*文档版本：V2.0*
+*文档版本：V3.1*
 *创建日期：2025-10-29*
-*最后更新：2025-10-31*
+*最后更新：2026-01-18*
 *作者：技术觉醒团队*
 
 ## 更新历史
@@ -527,3 +712,14 @@ cmake --build . --target test_cuda_gemm_framework --config Release
 - **新增**：增强CMake配置参数组合
 - **新增**：时间戳强制更新解决方案
 - **更新**：双平台（Linux + Windows）构建稳定性最佳实践
+
+### V3.1 (2026-01-18)
+- **新增**：从其他电脑复制文件导致的时间戳异常问题
+- **场景**：项目文件从另一台电脑复制/解压到新服务器，所有CMakeLists.txt时间戳相同
+- **问题表现**：CMakeLists.txt时间戳（13:49:46）晚于build目录CMakeCache.txt（13:44:10）
+- **新增**：两个解决方案
+  - 方案1：`find . -name "CMakeLists.txt" -exec touch -t 202601181300 {} \;` （快速方案）
+  - 方案2：`rm -rf build && mkdir build && cd build && cmake ..` （彻底方案）
+- **新增**：文件复制时的时间戳行为对比表（cp、scp、tar、rsync）
+- **新增**：预防措施：复制后立即清理build目录
+- **更新**：自动化脚本建议（build.sh中添加时间戳检查）

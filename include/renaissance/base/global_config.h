@@ -9,6 +9,8 @@
 
 #pragma once
 
+#include <cstdint>
+
 namespace tr {
 
 /**
@@ -31,6 +33,16 @@ enum class StreamType : int32_t {
     transfer_stream = 1, ///< 传输流（H2D/D2H数据传输）
     compute_stream = 2,  ///< 计算流（kernel计算）
     comm_stream = 3      ///< 通信流（NCCL集合通信）
+};
+
+/**
+ * @brief 数据加载模式
+ * @details 控制数据集的内存加载策略
+ */
+enum class LoadMode {
+    AUTO,       ///< 自动选择（根据内存判断）
+    FULLY,      ///< 全量加载：整个数据集一次性加载到内存
+    PARTIAL     ///< 部分加载：使用环形缓冲区循环加载
 };
 
 } // namespace tr

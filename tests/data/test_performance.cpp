@@ -12,7 +12,6 @@
 #include <iomanip>
 
 using namespace tr;
-using namespace tr::data;
 
 // 简单的性能计时器
 class Timer {

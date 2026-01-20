@@ -1,0 +1,16 @@
+.\test_dataloader_performance --dts --val --lv 0 --mode partial --workers 8 --preprocess 16 --path "T:/dataset/imagenet/"
+.\test_dataloader_performance --dts --val --lv 0 --mode fully --workers 8 --preprocess 16 --path "T:/dataset/imagenet/"
+
+.\test_reproducibility --dts --val --lv 0 --mode partial --workers 8 --preprocess 2 --path "T:/dataset/imagenet/"
+.\test_reproducibility --dts --val --lv 0 --mode fully --workers 8 --preprocess 2 --path "T:/dataset/imagenet/"
+
+
+
+
+
+
+./test_dataloader_performance --dts --val --lv 0 --mode partial --workers 8 --preprocess 2 --path "/root/epfs/dataset/imagenet/"
+./test_dataloader_performance --dts --val --lv 0 --mode fully --workers 8 --preprocess 2 --path "/root/epfs/dataset/imagenet/"
+
+./test_reproducibility --dts --val --lv 0 --mode partial --workers 8 --preprocess 2 --path "/root/epfs/dataset/imagenet/"
+./test_reproducibility --dts --val --lv 0 --mode fully --workers 8 --preprocess 2 --path "/root/epfs/dataset/imagenet/"

@@ -17,7 +17,6 @@
 #include <fstream>
 
 namespace tr {
-namespace data {
 
 /**
  * @class PreprocessorEmulator
@@ -61,16 +60,6 @@ public:
      */
     void run(DataLoader& loader);
 
-    /**
-     * @brief 验证可复现性（静态方法）
-     * @param log_dir1 第一次运行的日志目录
-     * @param log_dir2 第二次运行的日志目录
-     * @return 是否完全可复现
-     */
-    static bool verify_reproducibility(
-        const std::string& log_dir1,
-        const std::string& log_dir2);
-
 private:
     /**
      * @brief Worker线程函数
@@ -88,5 +77,4 @@ private:
     std::mutex log_mutex_;
 };
 
-} // namespace data
 } // namespace tr

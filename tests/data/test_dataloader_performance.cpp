@@ -19,13 +19,13 @@
     #endif
 #endif
 
-#include "renaissance.h"
 #include <iostream>
 #include <chrono>
 #include <string>
 #include <iomanip>
+#include "renaissance.h"
 
-using namespace tr::data;
+using namespace tr;
 
 // =============================================================================
 // 配置
@@ -52,12 +52,13 @@ void print_usage(const char* program_name) {
               << "  --path <PATH>        Dataset path (default: " << DEFAULT_DATASET_PATH << ")\n"
               << "  --workers <N>        Number of loader workers (default: " << DEFAULT_WORKERS << ")\n"
               << "  --preprocess <N>     Number of preprocess workers (default: " << DEFAULT_PREPROCESS << ")\n"
+              << "  --mode <MODE>        Load mode: partial or fully (default: partial)\n"
               << "  --shuffle            Enable shuffle (default: disabled for performance test)\n"
               << "  --help               Show this help message\n\n"
               << "Examples:\n"
-              << "  " << program_name << " --dts --val --lv 0\n"
-              << "  " << program_name << " --dts --train --lv 3 --workers 16\n"
-              << "  " << program_name << " --dts --val --lv 0 --path /data/imagenet\n";
+              << "  " << program_name << " --dts --val --lv 0 --mode partial\n"
+              << "  " << program_name << " --dts --train --lv 3 --workers 16 --mode fully\n"
+              << "  " << program_name << " --dts --val --lv 0 --path /data/imagenet --mode fully\n";
 }
 
 /**
@@ -96,6 +97,7 @@ int main(int argc, char** argv) {
     std::string dataset_path = DEFAULT_DATASET_PATH;
     int num_workers = DEFAULT_WORKERS;
     int num_preprocess = DEFAULT_PREPROCESS;
+    std::string mode_str = "partial";  // 默认 partial 模式
     bool shuffle = false;
 
     for (int i = 1; i < argc; ++i) {
@@ -130,6 +132,12 @@ int main(int argc, char** argv) {
                 std::cerr << "Error: Preprocess workers must be between 1 and 64\n";
                 return 1;
             }
+        } else if (arg == "--mode" && i + 1 < argc) {
+            mode_str = argv[++i];
+            if (mode_str != "partial" && mode_str != "fully") {
+                std::cerr << "Error: Mode must be 'partial' or 'fully'\n";
+                return 1;
+            }
         } else if (arg == "--shuffle") {
             shuffle = true;
         } else {
@@ -152,6 +160,7 @@ int main(int argc, char** argv) {
               << "Compression LV: " << lv << "\n"
               << "Loader workers: " << num_workers << "\n"
               << "Preprocess workers: " << num_preprocess << "\n"
+              << "Load mode: " << mode_str << "\n"
               << "Shuffle: " << (shuffle ? "enabled" : "disabled") << "\n"
               << "========================================\n\n";
 
@@ -177,10 +186,16 @@ int main(int argc, char** argv) {
     try {
         auto& loader = ImageNetLoaderDts::getInstance();
 
-        // 设置加载模式
-        // 测试：验证集也使用PARTIAL模式（环形缓冲）
-        loader.set_train_mode(LoadMode::PARTIAL);
-        loader.set_val_mode(LoadMode::PARTIAL);
+        // 设置加载模式（根据命令行参数）
+        LoadMode mode = (mode_str == "fully") ? LoadMode::FULLY : LoadMode::PARTIAL;
+        // 只对当前测试的数据集设置 FULLY，另一个数据集使用 PARTIAL 以节省内存
+        if (is_train) {
+            loader.set_train_mode(mode);
+            loader.set_val_mode(LoadMode::PARTIAL);  // 验证集始终 PARTIAL
+        } else {
+            loader.set_train_mode(LoadMode::PARTIAL);  // 训练集始终 PARTIAL
+            loader.set_val_mode(mode);
+        }
 
         // 配置加载器
         // 注意：必须提供训练集和验证集的完整路径，即使只测试其中一个
@@ -268,8 +283,9 @@ int main(int argc, char** argv) {
         LOG_ERROR << "Standard exception: " << e.what();
         return 1;
     } catch (...) {
-        std::cerr << "Unknown exception caught" << std::endl;
-        LOG_ERROR << "Unknown exception";
+        // 捕获所有其他异常，包括可能的Windows SEH异常
+        std::cerr << "Unknown exception caught - This may be a segmentation fault or access violation" << std::endl;
+        LOG_ERROR << "Unknown exception - possibly memory access violation";
         return 1;
     }
 }

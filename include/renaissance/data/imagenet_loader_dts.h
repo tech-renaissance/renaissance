@@ -31,7 +31,6 @@
 #endif
 
 namespace tr {
-namespace data {
 
 // =============================================================================
 // 常量定义
@@ -145,7 +144,7 @@ struct GroupMeta {
     uint32_t ring_group_idx = 0;               ///< 在环形缓冲中的索引[0,7]
 
     // ========== P1修复：PARTIAL模式Slot回收支持 ==========
-    uint32_t logical_pair_idx = UINT32_MAX;   ///< 逻辑Pair索引（用于Slot回收）
+    std::atomic<uint32_t> logical_pair_idx{UINT32_MAX};   ///< 逻辑Pair索引（用于Slot回收，原子变量）
     std::vector<uint32_t> logical_groups;     ///< 本Pair包含的逻辑GROUP索引列表
     std::vector<uint32_t> occupied_slots;     ///< 本Pair占用的Slot索引列表
 
@@ -163,7 +162,7 @@ struct GroupMeta {
           shuffled_locations(std::move(other.shuffled_locations)),
           total_samples(other.total_samples.load()),
           ring_group_idx(other.ring_group_idx),
-          logical_pair_idx(other.logical_pair_idx),
+          logical_pair_idx(other.logical_pair_idx.load()),
           logical_groups(std::move(other.logical_groups)),
           occupied_slots(std::move(other.occupied_slots)) {}
 
@@ -175,7 +174,7 @@ struct GroupMeta {
             shuffled_locations = std::move(other.shuffled_locations);
             total_samples.store(other.total_samples.load());
             ring_group_idx = other.ring_group_idx;
-            logical_pair_idx = other.logical_pair_idx;
+            logical_pair_idx.store(other.logical_pair_idx.load());
             logical_groups = std::move(other.logical_groups);
             occupied_slots = std::move(other.occupied_slots);
         }
@@ -382,9 +381,6 @@ private:
         // 解决workers=16时GROUP 25在GROUP 24完成前触发同步的问题
         std::vector<std::unique_ptr<std::atomic<uint32_t>>> pair_counters;
 
-        // ========== Bug 4修复：全局样本序号 ==========
-        std::atomic<size_t> global_sample_seq{0};  ///< get_next_sample使用
-
         // ========== P1修复：PARTIAL模式Logical Pair样本数追踪 ==========
         std::vector<uint32_t> logical_pair_samples;  ///< 每个logical pair的样本数
 
@@ -429,8 +425,70 @@ private:
 
     uint64_t global_seed_ = 42;  ///< 全局随机种子
 
-    // ========== Bug 8修复：当前epoch ID ==========
-    int current_epoch_id_ = -1;  ///< 当前epoch ID（用于洗牌种子）
+    // =========================================================================
+    // 【关键】当前Epoch ID - 用于三级随机的Level 3（样本级shuffle）
+    // =========================================================================
+    /**
+     * @brief 当前epoch ID
+     * @details 用于计算样本级shuffle的种子，是三级随机机制的Level 3关键参数
+     *
+     * **为什么需要current_epoch_id_？**
+     *
+     * DataLoader实现了三级随机机制：
+     * - Level 1: DTS导出时Python shuffle（一次性）
+     * - Level 2: begin_epoch()时Block级shuffle（使用epoch_id）
+     * - Level 3: 每2个GROUP的样本级shuffle（使用epoch_id + logical_pair_idx）
+     *
+     * **样本级shuffle的种子计算公式**：
+     * ```cpp
+     * // 在sync_and_shuffle_group()中计算（imagenet_loader_dts.cpp:1135-1137）
+     * uint64_t shuffle_seed = global_seed_ ^
+     *                         (static_cast<uint64_t>(current_epoch_id_) << 32) ^
+     *                         (static_cast<uint64_t>(logical_pair_idx) << 16);
+     * ```
+     *
+     * **设计目的**：
+     * 1. **不同epoch不同序列**：current_epoch_id_确保每个epoch的样本shuffle不同
+     * 2. **跨epoch可复现**：相同的epoch_id + 相同的logical_pair_idx → 相同的shuffle序列
+     * 3. **细粒度随机性**：logical_pair_idx让每个pair都有独特的shuffle
+     *
+     * **可复现性保证**：
+     * ```
+     * 运行1 (epoch=0, seed=42): Pair 0的shuffle序列 → [A, B, C, D, ...]
+     * 运行2 (epoch=0, seed=42): Pair 0的shuffle序列 → [A, B, C, D, ...]  ✅ 完全相同
+     *
+     * 运行1 (epoch=1, seed=42): Pair 0的shuffle序列 → [E, F, G, H, ...]
+     * 运行2 (epoch=1, seed=42): Pair 0的shuffle序列 → [E, F, G, H, ...]  ✅ 完全相同
+     * ```
+     *
+     * **使用位置**：
+     * - begin_epoch(): 设置为当前epoch_id
+     * - sync_and_shuffle_group(): 用于计算Level 3 shuffle的种子
+     */
+    int current_epoch_id_ = -1;  ///< 当前epoch ID（用于Level 3样本级shuffle的种子计算）
+
+    // =========================================================================
+    // 【新增】Preprocessor Worker状态管理（静态映射）
+    // =========================================================================
+
+    /**
+     * @brief Preprocessor Worker的独立状态
+     * @details 每个Worker维护自己的消费进度，实现静态映射
+     *
+     * 核心思想：Worker i 在第k次调用时读取全局样本序号 = i + k × M
+     * 这样确保相同参数下多次运行，Worker i总是读取相同的样本序列
+     */
+    struct WorkerState {
+        uint32_t current_pair_idx = 0;      ///< 当前消费的Pair索引（在group_metas中的索引）
+        uint32_t local_sample_idx = 0;      ///< 在当前Pair内的局部索引（步长=M）
+
+        WorkerState() = default;
+    };
+
+    std::vector<WorkerState> worker_states_;  ///< 每个Preprocessor Worker的状态 [M个]
+
+    int num_load_workers_ = 8;       ///< IO线程数（从configure保存）
+    int num_preproc_workers_ = 16;   ///< Preprocessor线程数（从configure保存）
 
     // =========================================================================
     // 核心内部方法
@@ -536,5 +594,4 @@ private:
     void advance_to_next_group(int preproc_worker_id);
 };
 
-} // namespace data
 } // namespace tr

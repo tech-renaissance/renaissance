@@ -1,9 +1,10 @@
 {
   "permissions": {
     "allow": [
-      "Bash(ldd:*)",
-      "Bash(timeout:*)",
-      "Bash(powershell.exe:*)"
+      "Bash(powershell.exe -Command \"& { cmd /c ''call \"\"C:\\Program Files\\Microsoft Visual Studio\\2022\\Community\\VC\\Auxiliary\\Build\\vcvars64.bat\"\" && cmake --build build/windows-msvc-debug --target test_reproducibility --parallel 30'' }\")",
+      "Bash(./build/windows-msvc-debug/bin/tests/data/test_reproducibility.exe:*)",
+      "Bash(/dev/null)",
+      "Bash(./build/windows-msvc-release/bin/tests/data/test_dataloader_performance.exe:*)"
     ],
     "deny": [],
     "ask": []
