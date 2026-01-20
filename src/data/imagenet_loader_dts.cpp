@@ -623,7 +623,7 @@ void ImageNetLoaderDts::perform_level2_shuffle(Dataset& ds, int epoch_id) {
         ds.epoch_block_order[i] = i;
     }
 
-    // 使用Philox RNG生成确定性种�?
+    // 使用Philox RNG生成确定性种子
     uint64_t seed = global_seed_ ^ (static_cast<uint64_t>(epoch_id) << 32);
 
     // Fisher-Yates洗牌

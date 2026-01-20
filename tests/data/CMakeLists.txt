@@ -6,6 +6,7 @@ set(DATA_TEST_SOURCES
     # V4.0.0 DataLoader测试
     test_dataloader_basic.cpp
     test_reproducibility.cpp
+    test_reproducibility_epoch.cpp
     test_performance.cpp
     test_val_only.cpp
     test_dataloader_performance.cpp

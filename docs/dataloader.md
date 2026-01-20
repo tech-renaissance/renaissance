@@ -1,11 +1,12 @@
 # 技术觉醒框架 DataLoader 技术文档
 
-**版本**: V3.8.1
+**版本**: V3.8.2
 **日期**: 2026-01-20
 **作者**: 技术觉醒团队
 **状态**: ✅ 生产就绪 (FULLY + PARTIAL模式)
 
 **更新日志**:
+- V3.8.2 (2026-01-20): ✅ **实现跨epoch随机可复现性**，新增test_reproducibility_epoch测试；验证shuffle状态下可复现性
 - V3.8.1 (2026-01-20): ✅ **修复PARTIAL模式样本读取不完整问题 (Quest #001)**，实现环形消费逻辑
 - V3.8.0 (2026-01-18): ✅ 修复随机可复现性问题，实现Preprocessor侧静态映射；❌ 发现PARTIAL模式样本读取不完整问题
 - V3.7.3 (2026-01-18): 修复Debug模式迭代器失效问题，添加--mode选项
@@ -756,6 +757,115 @@ if logs1 == logs2:
     print("✅ 完全可复现！")
 else:
     print("❌ 不可复现！")
+```
+
+### 6.5 跨Epoch随机可复现性
+
+**V3.8.2新增功能**
+
+#### 6.5.1 测试方法
+
+DataLoader支持两种可复现性测试场景：
+
+**场景1：单次运行可复现性** (`test_reproducibility.cpp`)
+- 测试目标：相同配置下多次运行产生相同结果
+- 测试方法：运行程序两次，比较日志文件
+- Shuffle状态：默认启用（训练集和验证集都shuffle）
+- 适用场景：验证随机状态下的可复现性
+
+```bash
+# 第一次运行
+./test_reproducibility.exe --dts --val --lv 0
+# 保存日志到 run1/
+
+# 第二次运行（相同参数）
+./test_reproducibility.exe --dts --val --lv 0
+# 保存日志到 run2/
+
+# 比较日志
+diff run1/worker_0.log run2/worker_0.log
+```
+
+**场景2：跨epoch可复现性** (`test_reproducibility_epoch.cpp`)
+- 测试目标：不同epoch之间产生相同结果（FULLY模式）
+- 测试方法：连续运行2个epoch，自动比较日志
+- Shuffle状态：默认禁用（`shuffle=false`）
+- 适用场景：验证数据复用的正确性
+
+```bash
+# 运行2个epoch并自动比较
+./test_reproducibility_epoch.exe --dts --val --lv 0
+```
+
+#### 6.5.2 可复现性保证
+
+**Level 2可复现性**（Block级）:
+```
+相同 global_seed + 相同 epoch_id + 相同 is_train
+  ↓
+相同 seed
+  ↓
+相同 epoch_block_order[]
+```
+
+**Level 3可复现性**（Sample级）:
+```
+相同 global_seed
+  + 相同 epoch_id
+  + 相同 logical_pair_idx
+  ↓
+相同 shuffle_seed
+  ↓
+相同 shuffled_locations[]
+```
+
+**Preproducer静态映射**:
+```
+Worker i 在第k次调用读取：
+  global_sample_idx = i + k × M
+```
+
+#### 6.5.3 测试结果 (V3.8.2)
+
+**验证集测试** (FULLY模式，无shuffle):
+| 压缩级别 | Epoch 1样本数 | Epoch 2样本数 | 可复现性 |
+|---------|-------------|-------------|---------|
+| LV0     | 50,000      | 50,000      | ✅ 完全一致 |
+| LV3     | 50,000      | 50,000      | ✅ 完全一致 |
+
+**验证集测试** (PARTIAL模式，启用shuffle):
+| 测试组 | Worker数 | 两次运行对比 | 结果 |
+|-------|---------|-------------|------|
+| LV0   | 16      | run1 vs run2 | ✅ 16/16匹配 |
+| LV3   | 16      | run3 vs run4 | ✅ 16/16匹配 |
+
+**训练集测试** (PARTIAL模式，启用shuffle):
+| 测试组 | Worker数 | 两次运行对比 | 结果 |
+|-------|---------|-------------|------|
+| LV0   | 16      | run5 vs run6 | ✅ 16/16匹配 |
+
+**结论**:
+- ✅ 验证集在shuffle状态下完全可复现
+- ✅ 训练集在shuffle状态下完全可复现
+- ✅ 第一个epoch参与shuffle，可复现性依然成立
+- ✅ LV0和LV3两种压缩级别都支持可复现性
+
+#### 6.5.4 设计要点
+
+**为什么验证集也需要shuffle？**
+
+传统观点认为验证集不需要shuffle，但我们的设计支持验证集shuffle，原因：
+1. **可复现性测试**：验证shuffle逻辑的正确性
+2. **调试便利性**：在小数据集上快速验证
+3. **灵活性**：用户可以通过配置控制
+
+**默认配置建议**:
+```cpp
+// 训练场景
+loader.configure(..., true, true, false);  // 训练集shuffle，验证集也shuffle
+
+// 推理场景
+loader.configure(..., false, false, false); // 都不shuffle
 ```
 
 ---

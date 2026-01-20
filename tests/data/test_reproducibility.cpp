@@ -50,7 +50,8 @@ void print_usage(const char* program_name) {
               << "  --workers <N>        Number of loader workers (default: " << DEFAULT_WORKERS << ")\n"
               << "  --preprocess <N>     Number of preprocess workers (default: " << DEFAULT_PREPROCESS << ")\n"
               << "  --mode <MODE>        Load mode: partial or fully (default: partial)\n"
-              << "  --shuffle            Enable shuffle (default: enabled for reproducibility test)\n"
+              << "  --shuffle            Enable shuffle for both train and val (default: enabled)\n"
+              << "  --no-shuffle         Disable shuffle\n"
               << "  --help               Show this help message\n\n"
               << "Examples:\n"
               << "  " << program_name << " --dts --val --lv 0 --mode partial --shuffle\n"
@@ -59,7 +60,10 @@ void print_usage(const char* program_name) {
               << "Log Output:\n"
               << "  Logs are saved to TR_WORKSPACE directory (defined at compile time)\n"
               << "  Each worker creates a file: worker_0.log, worker_1.log, ...\n"
-              << "  Format: worker_id,data_size,label\n";
+              << "  Format: worker_id,data_size,label\n\n"
+              << "Test Purpose:\n"
+              << "  Verifies that DataLoader produces identical results across multiple runs\n"
+              << "  when shuffle is ENABLED (true random reproducibility test)\n";
 }
 
 // =============================================================================
@@ -187,9 +191,9 @@ int main(int argc, char** argv) {
             num_preprocess,
             train_file,    // train_path (训练集文件)
             val_file,      // val_path (验证集文件)
-            shuffle,       // shuffle_train
-            false,         // shuffle_val (验证集默认不乱序)
-            false          // skip_first (第一个epoch也乱序，除非--skip-first)
+            shuffle,       // shuffle_train (训练集乱序)
+            shuffle,       // shuffle_val (验证集也乱序，测试随机可复现性)
+            false          // skip_first (第一个epoch也乱序，不跳过)
         );
 
         // =========================================================================
