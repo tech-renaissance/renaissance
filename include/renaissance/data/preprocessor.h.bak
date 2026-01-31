@@ -1,0 +1,139 @@
+/**
+ * @file preprocessor.h
+ * @brief 图像预处理器（V4.0 - 姜总工的新设计）
+ * @version 4.0.0
+ * @date 2026-01-22
+ * @author 技术觉醒团队
+ * @note 所属系列: data
+ * @note 替代旧的PreprocessorEmulator
+ */
+
+#pragma once
+
+#include "renaissance/data/data_loader.h"
+#include <turbojpeg.h>  // tjhandle类型
+#include <string>
+#include <vector>
+#include <thread>
+#include <atomic>
+#include <fstream>
+#include <mutex>
+
+namespace tr {
+
+/**
+ * @class Preprocessor
+ * @brief 图像预处理器（姜总工的V4.0设计）
+ *
+ * 核心特性：
+ * - M个worker严格按顺序领取样本
+ * - Worker i的第k次调用 → 读取第 (i + k×M) 个样本
+ * - 跨Buffer自动连续
+ * - 最后每个worker读取的样本数几乎相同（最多差1）
+ *
+ * 功能：
+ * - 验证数据完整性（总样本数）
+ * - 输出CSV日志（可选）：worker_id,size,label
+ * - 用于验证随机可复现性
+ *
+ * 日志格式：
+ * - 不记录日志：只输出统计信息（每个worker的样本数）
+ * - 记录日志：输出CSV文件到log_dir
+ */
+class Preprocessor {
+public:
+    /**
+     * @brief 配置参数
+     */
+    struct Config {
+        int num_workers = 16;              ///< Worker数量M
+        std::string log_dir = TR_WORKSPACE;  ///< CSV输出目录
+        bool enable_logging = false;        ///< 是否记录日志（false=只计数）
+        bool simulate_delay = false;        ///< 是否模拟预处理延迟
+        uint64_t delay_us = 100;           ///< 延迟时间（微秒）
+        bool jpeg_decode = true;            ///< 是否执行JPEG解码（第二步功能，默认开启）
+
+        Config() = default;
+    };
+
+    /**
+     * @brief 统计信息
+     */
+    struct Stats {
+        size_t total_samples = 0;          ///< 总样本数
+        size_t buffer_count = 0;           ///< 处理的buffer数量
+        std::vector<size_t> per_worker;    ///< 每个Worker的样本数
+
+        void print() const;
+    };
+
+    /**
+     * @brief 获取单例
+     */
+    static Preprocessor& getInstance();
+
+    /**
+     * @brief 配置预处理器
+     */
+    void configure(const Config& config);
+
+    /**
+     * @brief 运行预处理（阻塞直到Epoch结束）
+     * @param loader 数据加载器引用
+     */
+    void run(DataLoader& loader);
+
+    /**
+     * @brief 获取统计信息
+     */
+    Stats get_stats() const;
+
+    /**
+     * @brief 重置状态
+     */
+    void reset();
+
+private:
+    /**
+     * @brief Worker解码缓冲区
+     */
+    struct WorkerDecodeBuffer {
+        uint8_t* memory = nullptr;      ///< 128MB解码缓冲区
+        size_t size = 128 * 1024 * 1024; ///< 128MB
+        tjhandle handle = nullptr;       ///< turbojpeg解压器（持久复用）
+
+        ~WorkerDecodeBuffer() {
+            if (memory) {
+                free(memory);
+            }
+            // 注意：handle的释放由free_decode_buffers()统一管理
+        }
+    };
+
+    /**
+     * @brief Worker线程函数（姜总工的静态领取设计）
+     */
+    void worker_func(int worker_id, DataLoader& loader);
+
+    /**
+     * @brief 分配解码缓冲区
+     */
+    void allocate_decode_buffers();
+
+    /**
+     * @brief 释放解码缓冲区
+     */
+    void free_decode_buffers();
+
+    Config config_;
+    std::vector<std::thread> worker_threads_;
+    std::vector<WorkerDecodeBuffer> worker_decode_buffers_;  ///< 每个worker的128MB解码缓冲区
+
+    // 统计信息（使用互斥锁保护）
+    std::atomic<size_t> total_samples_{0};
+    size_t buffer_count_{0};                    ///< 处理的buffer数量
+    std::vector<size_t> worker_sample_counts_;  // 非原子，只在run()结束时读取
+    std::mutex stats_mutex_;  // 保护worker_sample_counts_的写入
+};
+
+} // namespace tr

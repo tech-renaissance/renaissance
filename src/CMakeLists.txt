@@ -103,6 +103,26 @@ if(ZLIB_FOUND)
     message(STATUS "Renaissance library: zlib linked (for DTS CRC verification)")
 endif()
 
+# 添加Simd库支持（用于Preprocessor的图像处理操作）
+if(DEFINED TR_SIMD_INCLUDE_DIR AND DEFINED TR_SIMD_LIBRARY_DIR)
+    target_include_directories(renaissance INTERFACE ${TR_SIMD_INCLUDE_DIR})
+    target_link_directories(renaissance INTERFACE ${TR_SIMD_LIBRARY_DIR})
+    target_link_libraries(renaissance INTERFACE Simd)
+    message(STATUS "Renaissance library: Simd linked (for Preprocessor image transforms)")
+else()
+    message(WARNING "TR_SIMD paths not defined - Preprocessor image transforms will not be available")
+endif()
+
+# 添加libjpeg-turbo支持（用于Preprocessor的JPEG解码）
+if(DEFINED TR_JPEG_INCLUDE_DIR AND DEFINED TR_JPEG_LIBRARY_DIR)
+    target_include_directories(renaissance INTERFACE ${TR_JPEG_INCLUDE_DIR})
+    target_link_directories(renaissance INTERFACE ${TR_JPEG_LIBRARY_DIR})
+    target_link_libraries(renaissance INTERFACE turbojpeg)
+    message(STATUS "Renaissance library: turbojpeg linked (for Preprocessor JPEG decode)")
+else()
+    message(WARNING "TR_JPEG paths not defined - Preprocessor JPEG decode will not be available")
+endif()
+
 # 添加CUDA支持（base模块的cuda_arena需要）
 if(TR_USE_CUDA)
     if(DEFINED TR_CUDA_PATH)

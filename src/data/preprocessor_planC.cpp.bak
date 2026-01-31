@@ -1,0 +1,340 @@
+/**
+ * @file preprocessor.cpp
+ * @brief 图像预处理器实现（V4.0 - 姜总工的新设计）
+ * @version 4.0.0
+ * @date 2026-01-22
+ * @author 技术觉醒团队
+ */
+
+#include "renaissance/data/preprocessor.h"
+#include "renaissance/base/logger.h"
+#include "renaissance/base/tr_exception.h"
+#include <turbojpeg.h>
+#include <sstream>
+#include <iomanip>
+#include <chrono>
+#include <iostream>
+#include <filesystem>
+
+namespace tr {
+
+// =============================================================================
+// 单例
+// =============================================================================
+
+Preprocessor& Preprocessor::getInstance() {
+    static Preprocessor instance;
+    return instance;
+}
+
+// =============================================================================
+// 配置接口
+// =============================================================================
+
+void Preprocessor::configure(const Config& config) {
+    config_ = config;
+
+    // 初始化统计数组
+    worker_sample_counts_.clear();
+    worker_sample_counts_.resize(config_.num_workers, 0);
+
+    // 分配解码缓冲区（如果启用解码）
+    if (config_.jpeg_decode) {
+        allocate_decode_buffers();
+    }
+
+    // 创建日志目录（如果启用日志）
+    if (config_.enable_logging) {
+        try {
+            std::filesystem::create_directories(config_.log_dir);
+            LOG_INFO << "Log directory created: " << config_.log_dir;
+        } catch (const std::exception& e) {
+            TR_VALUE_ERROR("Failed to create log directory: " << config_.log_dir
+                          << "\n  Error: " << e.what());
+        }
+    }
+
+    LOG_INFO << "Preprocessor configured: workers=" << config_.num_workers
+             << ", enable_logging=" << (config_.enable_logging ? "true" : "false")
+             << ", jpeg_decode=" << (config_.jpeg_decode ? "true" : "false")
+             << ", log_dir=" << config_.log_dir;
+}
+
+// =============================================================================
+// 运行预处理
+// =============================================================================
+
+void Preprocessor::run(DataLoader& loader) {
+    LOG_INFO << "Preprocessor starting with " << config_.num_workers << " workers";
+
+    // 记录开始时间（整个epoch）
+    auto epoch_start_time = std::chrono::high_resolution_clock::now();
+
+    // 重置统计
+    total_samples_.store(0, std::memory_order_relaxed);
+    std::fill(worker_sample_counts_.begin(), worker_sample_counts_.end(), 0);
+
+    // 清空旧的日志文件（如果启用日志）
+    if (config_.enable_logging) {
+        LOG_INFO << "Clearing old log files in: " << config_.log_dir;
+        for (int i = 0; i < config_.num_workers; ++i) {
+            std::ostringstream oss;
+            oss << config_.log_dir << "/worker_" << i << ".csv";
+            std::string log_path = oss.str();
+
+            // 以空模式打开文件，会清空内容
+            std::ofstream(log_path, std::ios::out | std::ios::trunc).close();
+        }
+    }
+
+    int buffer_count = 0;
+
+    // 重置buffer计数
+    buffer_count_ = 0;
+
+    // =========================================================================
+    // 主循环：读取buffer → JOIN → 触发加载下一个buffer → 读取buffer → JOIN...
+    // =========================================================================
+
+    do {
+        buffer_count++;
+        LOG_INFO << "=== Buffer " << buffer_count << ": Starting worker threads ===";
+
+        // 启动M个Worker线程读取当前的ready_buffer
+        worker_threads_.clear();
+        worker_threads_.reserve(config_.num_workers);
+
+        for (int i = 0; i < config_.num_workers; ++i) {
+            worker_threads_.emplace_back(
+                &Preprocessor::worker_func,
+                this,
+                i,
+                std::ref(loader)
+            );
+        }
+
+        // 等待所有Worker完成（JOIN）
+        for (auto& t : worker_threads_) {
+            if (t.joinable()) {
+                t.join();
+            }
+        }
+
+        worker_threads_.clear();
+
+        LOG_INFO << "=== Buffer " << buffer_count << ": All workers finished ===";
+
+        // 触发DataLoader加载下一个buffer（会等待当前buffer被消费完）
+        if (loader.has_more_buffers()) {
+            LOG_INFO << "Triggering next buffer load...";
+            loader.load_next_buffer();
+        } else {
+            LOG_INFO << "No more buffers to load, epoch completed";
+            break;
+        }
+
+    } while (true);
+
+    // 记录结束时间（整个epoch）
+    auto epoch_end_time = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double> elapsed = epoch_end_time - epoch_start_time;
+
+    // 输出统计信息
+    size_t total = total_samples_.load(std::memory_order_acquire);
+    buffer_count_ = buffer_count;  // 保存buffer计数到成员变量
+    LOG_INFO << "Preprocessor completed: " << total << " total samples";
+    LOG_INFO << "Total buffers processed: " << buffer_count;
+    LOG_INFO << "Total epoch time: " << elapsed.count() << " seconds";
+
+    // 验证每个worker的样本数（整个epoch的累积）
+    size_t min_count = SIZE_MAX;
+    size_t max_count = 0;
+    for (int i = 0; i < config_.num_workers; ++i) {
+        size_t count = worker_sample_counts_[i];
+        min_count = std::min(min_count, count);
+        max_count = std::max(max_count, count);
+        LOG_DEBUG << "Worker " << i << ": " << count << " samples (total)";
+    }
+
+    LOG_INFO << "Worker sample distribution (whole epoch): min=" << min_count
+             << ", max=" << max_count
+             << ", diff=" << (max_count - min_count);
+
+    // 验证样本数均匀性（姜总工的要求：最多相差1）
+    if (max_count - min_count > 1) {
+        LOG_WARN << "Worker sample distribution is not uniform: difference="
+                 << (max_count - min_count) << " (expected <= 1)";
+    }
+}
+
+// =============================================================================
+// Worker线程函数（姜总工的静态领取设计）
+// =============================================================================
+
+void Preprocessor::worker_func(int worker_id, DataLoader& loader) {
+    LOG_INFO << "Preprocessor Worker " << worker_id << " started";
+
+    // 打开CSV日志文件（如果启用）
+    // 注意：使用追加模式，因为在PARTIAL模式下，worker会被多次调用（每个buffer一次）
+    std::ofstream log_file;
+    if (config_.enable_logging) {
+        std::ostringstream oss;
+        oss << config_.log_dir << "/worker_" << worker_id << ".csv";
+        std::string log_path = oss.str();
+
+        // 使用追加模式（append），避免覆盖之前buffer的日志
+        log_file.open(log_path, std::ios::out | std::ios::app);
+        if (!log_file.is_open()) {
+            TR_FILE_NOT_FOUND("Failed to open log file: " << log_path);
+        }
+
+        LOG_DEBUG << "Worker " << worker_id << " logging to: " << log_path << " (append mode)";
+    }
+
+    size_t local_count = 0;
+    int32_t label;
+    const uint8_t* data_ptr;
+    size_t data_size;
+
+    // =========================================================================
+    // 静态领取循环（姜总工的核心设计）
+    // =========================================================================
+    // Worker i的第k次调用 → 读取第 (i + k×M) 个样本
+    // get_next_sample()内部已经实现了这个逻辑
+    // =========================================================================
+
+    while (loader.get_next_sample(worker_id, label, data_ptr, data_size)) {
+        int first_byte = -1;  // 默认值-1表示不解码
+
+        // JPEG解码（如果启用）
+        if (config_.jpeg_decode) {
+            // ✅ 复用持久handle（避免每次创建/销毁）
+            tjhandle handle = worker_decode_buffers_[worker_id].handle;
+            if (handle) {
+                // 解码到worker专属的128MB缓冲区
+                uint8_t* decode_buffer = worker_decode_buffers_[worker_id].memory;
+
+                // ✅ 【方案A优化】直接调用tjDecompress2，省去重复的Header解析
+                // width/pitch/height设为0，让libjpeg-turbo自动检测
+                // 这样避免了tjDecompressHeader3的5-15μs开销
+                int ret = tjDecompress2(
+                    handle,
+                    data_ptr, static_cast<unsigned long>(data_size),
+                    decode_buffer,
+                    0, 0, 0,  // width=0, pitch=0, height=0 → 自动检测
+                    TJPF_RGB,
+                    TJFLAG_FASTDCT  // 移除TJFLAG_NOREALLOC，避免潜在问题
+                );
+
+                if (ret == 0) {
+                    // 记录解码后第一个字节
+                    first_byte = static_cast<int>(decode_buffer[0]);
+                } else {
+                    // 解码失败，记录错误但继续
+                    LOG_WARN << "JPEG decode failed for worker " << worker_id;
+                }
+            }
+        }
+
+        // 模拟预处理延迟（可选）
+        if (config_.simulate_delay) {
+            std::this_thread::sleep_for(
+                std::chrono::microseconds(config_.delay_us)
+            );
+        }
+
+        // 写入CSV日志：worker_id,size,label,first_byte
+        if (config_.enable_logging) {
+            log_file << worker_id << "," << data_size << "," << label << "," << first_byte << "\n";
+        }
+
+        local_count++;
+        total_samples_.fetch_add(1, std::memory_order_relaxed);
+    }
+
+    // 保存此worker的样本数（累加到整个epoch的总数，使用互斥锁保护）
+    {
+        std::lock_guard<std::mutex> lock(stats_mutex_);
+        worker_sample_counts_[worker_id] += local_count;  // 累加，不覆盖
+    }
+
+    if (log_file.is_open()) {
+        log_file.close();
+    }
+
+    LOG_INFO << "Preprocessor Worker " << worker_id << " finished: "
+             << local_count << " samples";
+}
+
+// =============================================================================
+// 解码缓冲区管理
+// =============================================================================
+
+void Preprocessor::allocate_decode_buffers() {
+    free_decode_buffers();  // 先释放旧的
+
+    worker_decode_buffers_.resize(config_.num_workers);
+
+    for (int i = 0; i < config_.num_workers; ++i) {
+        // 分配内存
+        worker_decode_buffers_[i].memory = static_cast<uint8_t*>(
+            malloc(worker_decode_buffers_[i].size)
+        );
+
+        if (!worker_decode_buffers_[i].memory) {
+            TR_MEMORY_ERROR("Failed to allocate decode buffer for worker " << i
+                           << "\n  Requested size: " << worker_decode_buffers_[i].size);
+        }
+
+        // ✅ 创建持久handle（只创建一次，循环中复用）
+        worker_decode_buffers_[i].handle = tjInitDecompress();
+        if (!worker_decode_buffers_[i].handle) {
+            TR_MEMORY_ERROR("Failed to initialize turbojpeg handle for worker " << i);
+        }
+
+        LOG_DEBUG << "Allocated 128MB decode buffer and handle for worker " << i;
+    }
+
+    LOG_INFO << "Allocated " << config_.num_workers
+             << " decode buffers (128MB each + persistent handle, total "
+             << (config_.num_workers * 128) << "MB)";
+}
+
+void Preprocessor::free_decode_buffers() {
+    for (auto& buf : worker_decode_buffers_) {
+        // ✅ 销毁持久handle
+        if (buf.handle) {
+            tjDestroy(buf.handle);
+            buf.handle = nullptr;
+        }
+
+        if (buf.memory) {
+            free(buf.memory);
+            buf.memory = nullptr;
+        }
+    }
+    worker_decode_buffers_.clear();
+
+    LOG_DEBUG << "Freed all decode buffers and handles";
+}
+
+// =============================================================================
+// 统计信息
+// =============================================================================
+
+Preprocessor::Stats Preprocessor::get_stats() const {
+    Stats stats;
+    stats.total_samples = total_samples_.load(std::memory_order_acquire);
+    stats.buffer_count = buffer_count_;
+    stats.per_worker = worker_sample_counts_;  // 复制（非原子）
+    return stats;
+}
+
+void Preprocessor::reset() {
+    total_samples_.store(0, std::memory_order_relaxed);
+    buffer_count_ = 0;
+    std::fill(worker_sample_counts_.begin(), worker_sample_counts_.end(), 0);
+    LOG_DEBUG << "Preprocessor stats reset";
+}
+
+} // namespace tr

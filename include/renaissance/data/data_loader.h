@@ -10,9 +10,9 @@
 #pragma once
 
 #include "renaissance/base/global_config.h"
-#include "renaissance/data/sample_window.h"
 #include <string>
 #include <cstdint>
+#include <stdexcept>
 
 namespace tr {
 
@@ -52,7 +52,8 @@ public:
         const std::string& val_path,
         bool shuffle_train = true,
         bool shuffle_val = false,
-        bool skip_first = false) = 0;
+    bool skip_first = false,
+    bool verify_crc = false) = 0;
 
     // =========================================================================
     // 生命周期管理
@@ -91,8 +92,26 @@ public:
         const uint8_t*& data_ptr,
         size_t& data_size) = 0;
 
+    /**
+     * @brief Load next buffer (PARTIAL mode only)
+     * @details Wait for current buffer to be consumed, then load next buffer
+     *          Default implementation: throws exception (only PARTIAL mode needs this)
+     */
+    virtual void load_next_buffer() {
+        throw std::runtime_error("load_next_buffer() not implemented for this DataLoader");
+    }
+
+    /**
+     * @brief Check if there are more buffers to load (PARTIAL mode only)
+     * @return true=more buffers, false=completed
+     * @details Default implementation: returns false (only PARTIAL mode needs this)
+     */
+    virtual bool has_more_buffers() const {
+        return false;
+    }
+
     // =========================================================================
-    // 状态查�?
+    // 状态查询
     // =========================================================================
 
     /**
@@ -125,9 +144,26 @@ public:
     virtual void set_train_mode(LoadMode mode) = 0;
 
     /**
-     * @brief 设置验证集加载模�?
+     * @brief 设置验证集加载模式
      */
     virtual void set_val_mode(LoadMode mode) = 0;
+
+    // =========================================================================
+    // CRC-32验证
+    // =========================================================================
+
+    /**
+     * @brief 验证DTS文件的CRC-32校验码
+     * @param file_path DTS文件路径
+     * @return true=验证通过, false=验证失败
+     * @throws TRException 如果文件读取失败
+     *
+     * @note 这是一个public方法，允许用户在任何时候调用
+     * @note CRC计算范围：从header之后到文件末尾（跳过header）
+     *       - MNIST/CIFAR: 跳过前256字节
+     *       - ImageNet: 跳过前16MB
+     */
+    virtual bool verify_dts_crc(const std::string& file_path) const = 0;
 
 protected:
     int num_load_workers_ = 8;      ///< N: DataLoader线程�?

@@ -1,17 +1,22 @@
 /**
  * @file imagenet_loader_dts.cpp
- * @brief ImageNet .dts格式数据加载器实现
- * @version 3.7.2
- * @date 2026-01-17
+ * @brief ImageNet数据加载器（DTS格式）实现 - V4.0彻底重写
+ * @version 4.0.0
+ * @date 2026-01-22
  * @author 技术觉醒团队
- * @note 所属系列: data
  */
 
 #include "renaissance/data/imagenet_loader_dts.h"
 #include "renaissance/base/logger.h"
 #include "renaissance/base/tr_exception.h"
-#include "renaissance/base/rng.h"
 #include "renaissance/base/philox.h"
+#include "renaissance/base/rng.h"
+
+#include <fstream>
+#include <cstring>
+#include <thread>
+#include <algorithm>
+#include <chrono>
 
 #ifdef _WIN32
     #include <windows.h>
@@ -21,14 +26,26 @@
     #include <sys/mman.h>
 #endif
 
-#include <cstring>
-#include <algorithm>
-#include <thread>
+// zlib用于CRC-32验证
+#include <zlib.h>
 
 namespace tr {
 
 // =============================================================================
-// 静态单例实�?
+// Buffer::reset()实现
+// =============================================================================
+
+void Buffer::reset() {
+    total_samples = 0;
+    consumed_count.store(0, std::memory_order_relaxed);
+    shuffled_locations.clear();
+    state = BufferState::EMPTY;
+    // 注意：不清空slot_metas，固定大小，可复用
+    LOG_DEBUG << "Buffer reset to EMPTY state";
+}
+
+// =============================================================================
+// 单例模式实现
 // =============================================================================
 
 ImageNetLoaderDts& ImageNetLoaderDts::getInstance() {
@@ -37,408 +54,272 @@ ImageNetLoaderDts& ImageNetLoaderDts::getInstance() {
 }
 
 ImageNetLoaderDts::~ImageNetLoaderDts() {
-    end_epoch();
+    LOG_INFO << "ImageNetLoaderDts V4.0 destroying...";
 
-    // 释放训练集内�?
-    if (train_set_.arena != nullptr) {
+    // 释放训练集内存
+    free_buffers(train_set_);
+
+    // 释放验证集内存
+    free_buffers(val_set_);
+
+    // 释放共享缓冲区内存（如果分配了）
+    if (shared_buffers_allocated_) {
+        // 释放共享Buffer A
+        if (shared_buffer_A_.data != nullptr) {
 #ifdef _WIN32
-        VirtualFree(train_set_.arena, 0, MEM_RELEASE);
+            VirtualFree(shared_buffer_A_.data, 0, MEM_RELEASE);
 #else
-        free(train_set_.arena);
+            free(shared_buffer_A_.data);
 #endif
-        train_set_.arena = nullptr;
+            shared_buffer_A_.data = nullptr;
+            LOG_DEBUG << "Shared buffer A freed";
+        }
+
+        // 释放共享Buffer B
+        if (shared_buffer_B_.data != nullptr) {
+#ifdef _WIN32
+            VirtualFree(shared_buffer_B_.data, 0, MEM_RELEASE);
+#else
+            free(shared_buffer_B_.data);
+#endif
+            shared_buffer_B_.data = nullptr;
+            LOG_DEBUG << "Shared buffer B freed";
+        }
+
+        shared_buffers_allocated_ = false;
     }
 
-    // 释放验证集内�?
-    if (val_set_.arena != nullptr) {
-#ifdef _WIN32
-        VirtualFree(val_set_.arena, 0, MEM_RELEASE);
-#else
-        free(val_set_.arena);
-#endif
-        val_set_.arena = nullptr;
-    }
+    LOG_INFO << "ImageNetLoaderDts V4.0 destroyed";
 }
 
 // =============================================================================
-// 配置接口
+// Day 1: 数据结构与内存管理
 // =============================================================================
 
-void ImageNetLoaderDts::configure(
-    int num_load_workers,
-    int num_preproc_workers,
-    const std::string& train_path,
-    const std::string& val_path,
-    bool shuffle_train,
-    bool shuffle_val,
-    bool skip_first) {
+void ImageNetLoaderDts::allocate_buffers(Dataset& ds) {
+    LOG_INFO << "Allocating buffers for "
+             << (ds.is_train ? "train" : "val") << " set (mode="
+             << (ds.mode == LoadMode::FULLY ? "FULLY" : "PARTIAL") << ")";
 
-    // 参数验证
-    TR_CHECK(num_load_workers == 1 || num_load_workers == 2 ||
-             num_load_workers == 4 || num_load_workers == 8 || num_load_workers == 16,
-             ValueError,
-             "num_load_workers must be 1, 2, 4, 8, or 16, got " << num_load_workers);
+    if (ds.mode == LoadMode::PARTIAL) {
+        // =====================================================================
+        // PARTIAL模式：双缓冲
+        // =====================================================================
 
-    TR_CHECK(num_preproc_workers >= 1 && num_preproc_workers <= 64,
-             ValueError,
-             "num_preproc_workers must be in [1, 64], got " << num_preproc_workers);
+        // 检查是否应该使用共享缓冲区
+        if (use_shared_buffers_) {
+            // 使用共享缓冲区
+            LOG_INFO << "PARTIAL mode: using SHARED buffers";
 
-    TR_CHECK(!train_path.empty(), ValueError, "train_path must not be empty");
-    TR_CHECK(!val_path.empty(), ValueError, "val_path must not be empty");
+            // 只分配一次共享缓冲区
+            if (!shared_buffers_allocated_) {
+                size_t buffer_capacity = static_cast<size_t>(prefetch_factor_) *
+                                         num_load_workers_ * block_size_;
+                size_t num_slots = static_cast<size_t>(prefetch_factor_) * num_load_workers_;
 
-    // 保存配置
-    num_load_workers_ = num_load_workers;
-    num_preproc_workers_ = num_preproc_workers;
-    shuffle_train_ = shuffle_train;
-    shuffle_val_ = shuffle_val;
-    skip_first_ = skip_first;
+                LOG_INFO << "Allocating shared dual buffers";
+                LOG_INFO << "  Buffer capacity: " << (buffer_capacity / (1024.0 * 1024.0)) << " MB";
+                LOG_INFO << "  Number of slots: " << num_slots;
 
-    // =========================================================================
-    // 【新增】初始化Preprocessor Worker状态（静态映射）
-    // =========================================================================
+                // ---------- Shared Buffer A ----------
+                shared_buffer_A_.capacity = buffer_capacity;
+                shared_buffer_A_.data = allocate_aligned_memory(buffer_capacity);
+                shared_buffer_A_.slot_metas.resize(num_slots);
+                shared_buffer_A_.state = BufferState::EMPTY;
 
-    worker_states_.clear();
-    worker_states_.resize(num_preproc_workers);
-    for (int i = 0; i < num_preproc_workers; ++i) {
-        worker_states_[i].current_pair_idx = 0;
-        worker_states_[i].local_sample_idx = i;  // Worker i 从索引i开始
-    }
+                LOG_INFO << "  Shared Buffer A allocated: "
+                         << (buffer_capacity / (1024.0 * 1024.0)) << " MB";
 
-    LOG_INFO << "Initialized " << num_preproc_workers << " worker states for static mapping";
+                // ---------- Shared Buffer B ----------
+                shared_buffer_B_.capacity = buffer_capacity;
+                shared_buffer_B_.data = allocate_aligned_memory(buffer_capacity);
+                shared_buffer_B_.slot_metas.resize(num_slots);
+                shared_buffer_B_.state = BufferState::EMPTY;
 
-    train_set_.file_path = train_path;
-    val_set_.file_path = val_path;
-    train_set_.is_train = true;
-    val_set_.is_train = false;
+                LOG_INFO << "  Shared Buffer B allocated: "
+                         << (buffer_capacity / (1024.0 * 1024.0)) << " MB";
 
-    // 设置加载模式（重要：必须复制到Dataset结构体中）
-    train_set_.mode = train_mode_;
-    val_set_.mode = val_mode_;
+                shared_ready_buffer_ = nullptr;
+                shared_buffers_allocated_ = true;
 
-    // 模式修正：如果违规设定（训练集FULLY、验证集PARTIAL），自动转换
-    if (train_mode_ == LoadMode::FULLY && val_mode_ == LoadMode::PARTIAL) {
-        LOG_WARN << "Invalid mode combination (train=FULLY, val=PARTIAL), converting to both FULLY";
-        val_mode_ = LoadMode::FULLY;
-    }
+                LOG_INFO << "Shared dual buffers allocated successfully";
+            }
 
-    LOG_INFO << "ImageNetLoaderDts configured: "
-             << "load_workers=" << num_load_workers_
-             << ", preproc_workers=" << num_preproc_workers_
-             << ", shuffle_train=" << shuffle_train_
-             << ", shuffle_val=" << shuffle_val
-             << ", skip_first=" << skip_first_;
+            // 让当前数据集的 buffer_A 和 buffer_B 指向共享缓冲区
+            // 注意：不分配新内存，只是指针指向
+            ds.buffer_A.data = shared_buffer_A_.data;
+            ds.buffer_A.capacity = shared_buffer_A_.capacity;
+            ds.buffer_A.state = shared_buffer_A_.state;
+            // 注意：slot_metas 不能直接指向，需要单独管理
+            // 这里我们让 ds.buffer_A.slot_metas 是一个独立的副本
+            // 但在实际使用时，会使用 shared_buffer_A_.slot_metas
 
-    // 初始化数据集
-    if (!init_dataset(train_set_, train_path, true)) {
-        TR_THROW(ValueError, "Failed to initialize training set: " << train_path);
-    }
+            ds.buffer_B.data = shared_buffer_B_.data;
+            ds.buffer_B.capacity = shared_buffer_B_.capacity;
+            ds.buffer_B.state = shared_buffer_B_.state;
 
-    if (!init_dataset(val_set_, val_path, false)) {
-        TR_THROW(ValueError, "Failed to initialize validation set: " << val_path);
-    }
+            ds.ready_buffer = shared_ready_buffer_;
 
-    loaded_.store(true, std::memory_order_release);
+            LOG_INFO << "Dataset configured to use shared buffers";
 
-    LOG_INFO << "ImageNetLoaderDts loaded successfully";
-}
+        } else {
+            // 不使用共享缓冲区，各自独立分配
+            size_t buffer_capacity = static_cast<size_t>(prefetch_factor_) *
+                                     num_load_workers_ * block_size_;
+            size_t num_slots = static_cast<size_t>(prefetch_factor_) * num_load_workers_;
 
-// =============================================================================
-// 生命周期管理
-// =============================================================================
+            LOG_INFO << "PARTIAL mode: allocating independent dual buffers";
+            LOG_INFO << "  Buffer capacity: " << (buffer_capacity / (1024.0 * 1024.0)) << " MB";
+            LOG_INFO << "  Number of slots: " << num_slots;
 
-void ImageNetLoaderDts::begin_epoch(int epoch_id, bool is_train) {
-    TR_CHECK(loaded_.load(std::memory_order_acquire), ValueError,
-             "DataLoader not loaded, call configure() first");
+            // ---------- Buffer A ----------
+            ds.buffer_A.capacity = buffer_capacity;
+            ds.buffer_A.data = allocate_aligned_memory(buffer_capacity);
+            ds.buffer_A.slot_metas.resize(num_slots);
+            ds.buffer_A.state = BufferState::EMPTY;
 
-    LOG_INFO << "Beginning epoch " << epoch_id
-             << " (" << (is_train ? "train" : "val") << ")";
+            LOG_INFO << "  Buffer A allocated: "
+                     << (buffer_capacity / (1024.0 * 1024.0)) << " MB";
 
-    // 设置当前数据�?
-    current_set_ = is_train ? &train_set_ : &val_set_;
-    is_training_mode_ = is_train;
-    // ========== Bug 8修复：保存当前epoch ID ==========
-    current_epoch_id_ = epoch_id;
+            // ---------- Buffer B ----------
+            ds.buffer_B.capacity = buffer_capacity;
+            ds.buffer_B.data = allocate_aligned_memory(buffer_capacity);
+            ds.buffer_B.slot_metas.resize(num_slots);
+            ds.buffer_B.state = BufferState::EMPTY;
 
-    // =========================================================================
-    // 【修改】重置所有Worker状态（替换global_sample_seq）
-    // =========================================================================
+            LOG_INFO << "  Buffer B allocated: "
+                     << (buffer_capacity / (1024.0 * 1024.0)) << " MB";
 
-    // ❌ 删除：重置全局样本序号（已不再使用）
-    // current_set_->global_sample_seq.store(0, std::memory_order_relaxed);
+            ds.ready_buffer = nullptr;
 
-    // ✅ 新增：重置每个Worker的状态
-    for (int i = 0; i < num_preproc_workers_; ++i) {
-        worker_states_[i].current_pair_idx = 0;
-        worker_states_[i].local_sample_idx = i;  // Worker i 从索引i开始
-    }
+            LOG_INFO << "Independent dual buffers allocated successfully";
+        }
 
-    LOG_INFO << "Reset " << num_preproc_workers_ << " worker states for epoch " << epoch_id;
-
-    // 是否需要乱�?
-    bool should_shuffle = is_train ? shuffle_train_ : shuffle_val_;
-    if (skip_first_ && epoch_id == 0) {
-        should_shuffle = false;
-    }
-
-    // 执行Level 2随机（Block级）
-    if (should_shuffle) {
-        perform_level2_shuffle(*current_set_, epoch_id);
     } else {
-        // 不乱序：保持原始顺序
-        current_set_->epoch_block_order.resize(current_set_->num_blocks);
-        for (uint32_t i = 0; i < current_set_->num_blocks; ++i) {
-            current_set_->epoch_block_order[i] = i;
+        // =====================================================================
+        // FULLY模式：单个大Arena
+        // =====================================================================
+        ds.full_arena_size = ds.num_blocks * block_size_;
+        ds.full_slot_metas.resize(ds.num_blocks);
+
+        LOG_INFO << "FULLY mode: allocating single arena";
+        LOG_INFO << "  Arena size: "
+                 << (ds.full_arena_size / (1024.0 * 1024.0 * 1024.0)) << " GB";
+        LOG_INFO << "  Number of slots: " << ds.num_blocks;
+
+        // 内存充足性检查（仅在Windows上做保守检查，Linux不限制）
+#ifdef _WIN32
+        size_t required_gb = ds.full_arena_size / (1024 * 1024 * 1024);
+        // Windows上保留32GB余量给系统（更保守）
+        if (required_gb > 32) {
+            TR_MEMORY_ERROR("FULLY mode requires " << required_gb << " GB memory"
+                           << ", but available memory is insufficient"
+                           << "\n  Dataset: " << (ds.is_train ? "Training" : "Validation")
+                           << " (" << (ds.dataset_size_bytes / (1024.0 * 1024.0 * 1024.0)) << " GB)"
+                           << "\n  Required: " << required_gb << " GB"
+                           << "\n  Recommended: Use PARTIAL mode or smaller dataset");
         }
-    }
+#endif
+        // Linux上不做硬编码限制，让OS处理内存分配
 
-    // 重置GROUP状态
-    for (auto& gmeta : current_set_->group_metas) {
-        gmeta.loaded_count.store(0, std::memory_order_relaxed);
-        gmeta.is_ready.store(false, std::memory_order_relaxed);
-        gmeta.consumed_count.store(0, std::memory_order_relaxed);
-        gmeta.total_samples.store(0, std::memory_order_relaxed);  // 重置total_samples
-        gmeta.shuffled_locations.clear();  // 清空之前的乱序索引
-    }
+        ds.full_arena = allocate_aligned_memory(ds.full_arena_size);
 
-    // ========== P0修复：重置GROUP计数器和Pair计数器 ==========
-    // 这对于多epoch训练至关重要，否则第二个及后续epoch的计数器值会出错
-    for (auto& counter : current_set_->group_counters) {
-        counter->store(0, std::memory_order_relaxed);
-    }
-    // ========== P0修复：重置64字节对齐的GROUP计数器 ==========
-    for (auto& counter : current_set_->group_counters_aligned) {
-        counter.value.store(0, std::memory_order_relaxed);
-    }
-
-    for (auto& counter : current_set_->pair_counters) {
-        counter->store(0, std::memory_order_relaxed);
-    }
-
-    // ========== 二分查找优化：重置累积样本数数组 ==========
-    std::fill(current_set_->logical_pair_samples.begin(), current_set_->logical_pair_samples.end(), 0);
-    std::fill(current_set_->pair_cumulative_samples.begin(), current_set_->pair_cumulative_samples.end(), 0);
-    current_set_->logical_pair_order.clear();
-
-    // ========== GROUP级别ready标志：重置所有GROUP的ready状态 ==========
-    for (auto& flag : current_set_->group_ready_flags) {
-        flag.ready.store(false, std::memory_order_relaxed);
-    }
-
-    // ========== Pair同步标志：重置所有Pair的同步状态 ==========
-    for (auto& flag_ptr : current_set_->pair_sync_flags) {
-        flag_ptr->store(false, std::memory_order_relaxed);
-    }
-    // ========== P0修复：重置64字节对齐的Pair同步标志 ==========
-    for (auto& flag : current_set_->pair_sync_flags_aligned) {
-        flag.value.store(false, std::memory_order_relaxed);
-    }
-
-    // 启动IO线程
-    launch_io_workers();
-
-    // ========== 关键修复：等待前几个GROUP Pairs就绪 ==========
-    // 这样可以确保preprocess线程开始消费时，至少有数据可用
-    // 并且total_samples已经被正确设置
-    if (!current_set_->group_metas.empty()) {
-        // 等待第一个GROUP Pair就绪
-        while (!current_set_->group_metas[0].is_ready.load(std::memory_order_acquire)) {
-            std::this_thread::sleep_for(std::chrono::milliseconds(1));
-        }
-        // DEBUG: 注释掉次要日志以避免弹框
-        // LOG_INFO << "First GROUP Pair ready with " << current_set_->group_metas[0].total_samples.load(std::memory_order_relaxed) << " samples";
-
-        // 如果有多个GROUP Pairs，等待第二个GROUP Pair就绪（避免后续消费时卡住）
-        if (current_set_->group_metas.size() >= 2) {
-            while (!current_set_->group_metas[1].is_ready.load(std::memory_order_acquire)) {
-                std::this_thread::sleep_for(std::chrono::milliseconds(1));
-            }
-            // DEBUG: 注释掉次要日志以避免弹框
-            // LOG_INFO << "Second GROUP Pair ready with " << current_set_->group_metas[1].total_samples.load(std::memory_order_relaxed) << " samples";
-        }
+        LOG_INFO << "Full arena allocated successfully: "
+                 << (ds.full_arena_size / (1024.0 * 1024.0 * 1024.0)) << " GB";
     }
 }
 
-void ImageNetLoaderDts::end_epoch() {
-    LOG_INFO << "Ending epoch";
+uint8_t* ImageNetLoaderDts::allocate_aligned_memory(size_t size) {
+    uint8_t* ptr = nullptr;
 
-    // 停止IO线程
-    stop_io_workers();
+#ifdef _WIN32
+    ptr = static_cast<uint8_t*>(
+        VirtualAlloc(NULL, size, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE)
+    );
+    if (ptr == nullptr) {
+        TR_MEMORY_ERROR("VirtualAlloc failed: size=" << size
+                        << " (" << (size / (1024.0 * 1024.0)) << " MB)"
+                        << "\n  Error code: " << GetLastError());
+    }
+    LOG_DEBUG << "VirtualAlloc succeeded: " << (size / (1024.0 * 1024.0)) << " MB";
+#else
+    int ret = posix_memalign(
+        reinterpret_cast<void**>(&ptr),
+        4096,  // 4KB对齐
+        size
+    );
+    if (ret != 0 || ptr == nullptr) {
+        TR_MEMORY_ERROR("posix_memalign failed: size=" << size
+                        << " (" << (size / (1024.0 * 1024.0)) << " MB)"
+                        << "\n  Return code: " << ret);
+    }
+    LOG_DEBUG << "posix_memalign succeeded: " << (size / (1024.0 * 1024.0)) << " MB";
+#endif
+
+    return ptr;
 }
 
-// =============================================================================
-// 样本获取接口（Preprocessor调用�?
-// =============================================================================
+void ImageNetLoaderDts::free_buffers(Dataset& ds) {
+    LOG_INFO << "Freeing buffers for "
+             << (ds.is_train ? "train" : "val") << " set";
 
-bool ImageNetLoaderDts::get_next_sample(
-    int preproc_worker_id,
-    int32_t& label,
-    const uint8_t*& data_ptr,
-    size_t& data_size) {
-
-    Dataset& ds = *current_set_;
-    const int M = num_preproc_workers_;
-
-    // =========================================================================
-    // 参数验证
-    // =========================================================================
-
-    TR_CHECK(preproc_worker_id >= 0 && preproc_worker_id < M,
-             ValueError,
-             "Invalid preproc_worker_id: " << preproc_worker_id
-                 << ", must be in [0, " << M << ")");
-
-    // =========================================================================
-    // 【核心修复】获取该Worker的独立状态（静态映射）
-    // =========================================================================
-
-    WorkerState& my_state = worker_states_[preproc_worker_id];
-
-    // ========================================================================
-    // 【核心修复】使用环形映射+验证替代线性遍历
-    // ========================================================================
-
-    while (true) {
-        // 1. 获取当前worker想要消费的logical_pair_idx
-        uint32_t target_logical_pair = my_state.current_pair_idx;
-
-        // 2. 计算总的logical pair数,检查是否epoch结束
-        const int N = num_load_workers_;
-        uint32_t total_groups = (ds.num_blocks + N - 1) / N;
-        uint32_t total_logical_pairs = (total_groups + 1) / 2;
-
-        if (target_logical_pair >= total_logical_pairs) {
-            return false;  // Epoch结束,所有logical pair都已处理
-        }
-
-        // 3. 【关键】环形映射：计算物理位置
-        uint32_t num_ring_pairs = static_cast<uint32_t>(ds.group_metas.size());
-        uint32_t ring_pair_idx = target_logical_pair % num_ring_pairs;
-        GroupMeta& gmeta = ds.group_metas[ring_pair_idx];
-
-        // 4. 【关键】等待并验证数据
-        while (true) {
-            // 4a. 等待这个物理槽位ready
-            if (!gmeta.is_ready.load(std::memory_order_acquire)) {
-                if (stop_flag_.load(std::memory_order_relaxed)) return false;
-                std::this_thread::sleep_for(std::chrono::microseconds(100));
-                continue;
+    if (ds.mode == LoadMode::PARTIAL) {
+        // 检查是否使用共享缓冲区
+        if (use_shared_buffers_) {
+            // 共享缓冲区模式：不释放ds.buffer_A.data和ds.buffer_B.data
+            // 因为它们指向shared_buffer，会在析构函数中统一释放
+            LOG_DEBUG << "Using shared buffers, skipping dataset buffer release";
+            ds.buffer_A.data = nullptr;
+            ds.buffer_B.data = nullptr;
+        } else {
+            // 独立缓冲区模式：释放Buffer A
+            if (ds.buffer_A.data != nullptr) {
+#ifdef _WIN32
+                VirtualFree(ds.buffer_A.data, 0, MEM_RELEASE);
+#else
+                free(ds.buffer_A.data);
+#endif
+                ds.buffer_A.data = nullptr;
+                LOG_DEBUG << "Buffer A freed";
             }
 
-            // 4b. 【关键】验证槽位里的是不是我想要的那个logical_pair
-            uint32_t stored_logical_pair = gmeta.logical_pair_idx.load(std::memory_order_acquire);
-            if (stored_logical_pair == target_logical_pair) {
-                break;  // ✅ 是我要的数据,跳出等待循环
-            }
-
-            // 4c. 不是我要的数据(旧数据或被覆盖了),继续等待
-            if (stop_flag_.load(std::memory_order_relaxed)) return false;
-            std::this_thread::sleep_for(std::chrono::microseconds(100));
-        }
-
-        // 5. 检查当前Pair是否已消费完
-        uint32_t total_samples_in_pair = gmeta.total_samples.load(std::memory_order_acquire);
-        if (my_state.local_sample_idx >= total_samples_in_pair) {
-            // 这个Pair消费完了,推进到下一个logical Pair
-            my_state.current_pair_idx++;
-            my_state.local_sample_idx = preproc_worker_id;  // 重置局部索引
-            continue;  // 返回循环顶部,处理下一个Pair
-        }
-
-        // ====================================================================
-        // 到这里,说明找到了正确的数据且未消费完
-        // ====================================================================
-
-        // 6. 解码样本位置
-        uint32_t local_idx = static_cast<uint32_t>(my_state.local_sample_idx);
-
-        TR_CHECK(local_idx < gmeta.shuffled_locations.size(), ValueError,
-                 "local_idx " << local_idx << " >= shuffled_locations.size() "
-                 << gmeta.shuffled_locations.size());
-
-        uint32_t location = gmeta.shuffled_locations[local_idx];
-        uint32_t slot_idx = location >> 16;
-        uint32_t sample_idx = location & 0xFFFF;
-
-        TR_CHECK(slot_idx < ds.num_slots, ValueError,
-                 "slot_idx " << slot_idx << " >= num_slots " << ds.num_slots);
-
-        // 7. 返回数据(零拷贝)
-        SlotMeta& smeta = ds.slot_metas[slot_idx];
-        label = smeta.labels[sample_idx];
-        data_size = smeta.sizes[sample_idx];
-        data_ptr = ds.arena + static_cast<size_t>(slot_idx) * BLOCK_SIZE + smeta.offsets[sample_idx];
-
-        // 8. 推进局部索引(静态步长=M)
-        my_state.local_sample_idx += M;
-
-        // ========================================================================
-        // PARTIAL模式的Slot回收逻辑
-        // ========================================================================
-
-        if (ds.mode == LoadMode::PARTIAL) {
-            uint32_t consumed = gmeta.consumed_count.fetch_add(1, std::memory_order_acq_rel);
-
-            if (consumed + 1 == total_samples_in_pair) {
-                // 这个Pair已完全消费,回收其占用的所有Slots
-                // ========== 使用occupied_slots而非静态计算 ==========
-                for (uint32_t slot_idx_to_recycle : gmeta.occupied_slots) {
-                    if (slot_idx_to_recycle < ds.num_slots) {
-                        ds.slot_states[slot_idx_to_recycle].state = SlotState::EMPTY;
-                    }
-                }
-
-                // 注意：不重置is_ready，由IO线程在下次加载时覆盖
+            // 释放Buffer B
+            if (ds.buffer_B.data != nullptr) {
+#ifdef _WIN32
+                VirtualFree(ds.buffer_B.data, 0, MEM_RELEASE);
+#else
+                free(ds.buffer_B.data);
+#endif
+                ds.buffer_B.data = nullptr;
+                LOG_DEBUG << "Buffer B freed";
             }
         }
 
-        return true;
-    }
-}
-
-// =============================================================================
-// 内部方法：数据集初始�?
-// =============================================================================
-
-bool ImageNetLoaderDts::init_dataset(Dataset& ds, const std::string& path, bool is_train) {
-    LOG_INFO << "Initializing dataset: " << path
-             << " (" << (is_train ? "train" : "val") << ")";
-
-    // 解析DTS文件�?
-    DtsHeader header;
-    if (!parse_dts_header(ds, header)) {
-        LOG_ERROR << "Failed to parse DTS header: " << path;
-        return false;
+    } else {
+        // 释放FULLY Arena
+        if (ds.full_arena != nullptr) {
+#ifdef _WIN32
+            VirtualFree(ds.full_arena, 0, MEM_RELEASE);
+#else
+            free(ds.full_arena);
+#endif
+            ds.full_arena = nullptr;
+            LOG_DEBUG << "Full arena freed";
+        }
     }
 
-    // 验证文件�?
-    if (std::memcmp(header.magic, ".DTS", 4) != 0) {
-        LOG_ERROR << "Invalid magic number in DTS file";
-        return false;
-    }
-
-    if (header.is_training != static_cast<uint32_t>(is_train)) {
-        LOG_ERROR << "Dataset type mismatch";
-        return false;
-    }
-
-    // 保存元数�?
-    ds.num_blocks = header.num_blocks;
-    ds.num_samples = header.num_samples;  // ========== Bug 5修复 ==========
-
-    // 分配Arena内存
-    allocate_arena(ds);
-
-    // 初始化静态分配表
-    init_static_allocation(ds);
-
-    LOG_INFO << "Dataset initialized: "
-             << ds.num_blocks << " blocks, "
-             << "arena_size=" << (ds.arena_size / (1024.0 * 1024.0 * 1024.0)) << " GB";
-
-    return true;
+    LOG_INFO << "Buffers freed successfully";
 }
 
 bool ImageNetLoaderDts::parse_dts_header(Dataset& ds, DtsHeader& header) {
+    /**
+     * 解析DTS文件头（照搬旧版实现）
+     *
+     * 读取DTS文件的前144字节（DtsHeader）
+     * 验证魔数（".DTS"）
+     * 提取元数据：num_blocks, num_samples等
+     */
+
 #ifdef _WIN32
     FileHandle file(ds.file_path);
     HANDLE hFile = file.get();
@@ -478,408 +359,746 @@ bool ImageNetLoaderDts::parse_dts_header(Dataset& ds, DtsHeader& header) {
     return true;
 }
 
-void ImageNetLoaderDts::allocate_arena(Dataset& ds) {
-    // 计算Arena大小
-    if (ds.mode == LoadMode::FULLY) {
-        // FULLY模式：整个数据集
-        ds.arena_size = static_cast<size_t>(ds.num_blocks) * BLOCK_SIZE;
+// =============================================================================
+// 配置接口实现
+// =============================================================================
+
+void ImageNetLoaderDts::configure(int num_load_workers, int num_preproc_workers,
+                                  const std::string& train_path,
+                                  const std::string& val_path,
+                                  bool shuffle_train, bool shuffle_val,
+                                  bool skip_first, bool verify_crc) {
+    LOG_INFO << "Configuring ImageNetLoaderDts V4.0";
+    LOG_INFO << "  IO workers (N): " << num_load_workers;
+    LOG_INFO << "  Preprocessor workers (M): " << num_preproc_workers;
+    LOG_INFO << "  Train path: " << train_path;
+    LOG_INFO << "  Val path: " << val_path;
+    LOG_INFO << "  Shuffle train: " << (shuffle_train ? "true" : "false");
+    LOG_INFO << "  Shuffle val: " << (shuffle_val ? "true" : "false");
+    LOG_INFO << "  Skip first: " << (skip_first ? "true" : "false");
+    LOG_INFO << "  Verify CRC: " << (verify_crc ? "true" : "false");
+
+    // 参数验证
+    TR_CHECK(num_load_workers >= 1 && num_load_workers <= 16, ValueError,
+             "num_load_workers must be in [1, 16], got " << num_load_workers);
+    TR_CHECK(num_preproc_workers >= 1 && num_preproc_workers <= 256, ValueError,
+             "num_preproc_workers must be in [1, 256], got " << num_preproc_workers);
+
+    // 验证2的幂（姜总工推荐）
+    if ((num_load_workers & (num_load_workers - 1)) != 0) {
+        LOG_WARN << "num_load_workers is not a power of 2: " << num_load_workers;
+    }
+
+    // 保存配置
+    num_load_workers_ = num_load_workers;
+    num_preproc_workers_ = num_preproc_workers;
+    shuffle_train_ = shuffle_train;
+    shuffle_val_ = shuffle_val;
+    skip_first_ = skip_first;
+    verify_crc_ = verify_crc;
+
+    // 确定预取系数（姜总工推荐）
+    if (num_load_workers_ == 1) {
+        prefetch_factor_ = 2;  // N=1时，PF最小为2
     } else {
-        // PARTIAL模式�?×N×16MB环形缓冲
-        size_t num_groups = 8;
-        size_t group_size = num_load_workers_;
-        ds.arena_size = num_groups * group_size * BLOCK_SIZE;
+        prefetch_factor_ = 4;  // 默认值
     }
 
-    LOG_INFO << "Allocating arena: "
-             << (ds.arena_size / (1024.0 * 1024.0)) << " MB ("
-             << (ds.mode == LoadMode::FULLY ? "FULLY" : "PARTIAL") << " mode)";
+    LOG_INFO << "  Prefetch factor (PF): " << prefetch_factor_;
 
-#ifdef _WIN32
-    ds.arena = static_cast<uint8_t*>(
-        VirtualAlloc(
-            NULL,
-            ds.arena_size,
-            MEM_COMMIT | MEM_RESERVE,
-            PAGE_READWRITE
-        )
-    );
-
-    if (ds.arena == nullptr) {
-        TR_MEMORY_ERROR("VirtualAlloc failed: size=" << ds.arena_size);
+    // 初始化Worker状态
+    worker_states_.resize(num_preproc_workers_);
+    for (int i = 0; i < num_preproc_workers_; ++i) {
+        worker_states_[i].consuming_buffer = nullptr;
+        worker_states_[i].local_idx = 0;
+        worker_states_[i].global_seq = 0;  // 初始化为0（不是i！）
     }
 
-#else
-    int ret = posix_memalign(
-        reinterpret_cast<void**>(&ds.arena),
-        4096,  // 4KB对齐
-        ds.arena_size
-    );
+    // 配置数据集
+    train_set_.is_train = true;
+    train_set_.file_path = train_path;
 
-    if (ret != 0 || ds.arena == nullptr) {
-        TR_MEMORY_ERROR("posix_memalign failed: size=" << ds.arena_size << ", ret=" << ret);
-    }
-#endif
+    val_set_.is_train = false;
+    val_set_.file_path = val_path;
 
-    LOG_INFO << "Arena allocated at " << static_cast<void*>(ds.arena);
-}
-
-void ImageNetLoaderDts::init_static_allocation(Dataset& ds) {
-    // 计算总Slot�?
-    uint32_t num_slots;
-    if (ds.mode == LoadMode::FULLY) {
-        num_slots = ds.num_blocks;
-    } else {
-        // PARTIAL模式�?×N个Slots
-        num_slots = 8 * num_load_workers_;
-    }
-
-    ds.num_slots = num_slots;
-    ds.block_to_slot.resize(ds.num_blocks);
-
-    // 静态映射：block_seq �?slot_idx
-    for (uint32_t block_seq = 0; block_seq < ds.num_blocks; ++block_seq) {
-        ds.block_to_slot[block_seq] = block_seq % num_slots;
-    }
-
-    // 初始化Slot元数据数组
-    ds.slot_metas.resize(num_slots);
-
-    // ========== Bug 1修复：初始化Slot状态数组 ==========
-    // ========== P0修复：使用AlignedSlotState包装，防止False Sharing ==========
-    ds.slot_states.resize(num_slots, AlignedSlotState(SlotState::EMPTY));
-
-    // ========== Bug 2修复：初始化逻辑GROUP计数器 ==========
-    uint32_t total_groups = (ds.num_blocks + num_load_workers_ - 1) / num_load_workers_;
-    // 使用unique_ptr包装atomic，因为atomic不可复制
-    ds.group_counters.clear();
-    ds.group_counters.reserve(total_groups);
-    for (uint32_t i = 0; i < total_groups; ++i) {
-        ds.group_counters.push_back(std::make_unique<std::atomic<uint32_t>>(0));
-    }
-
-    // ========== P0修复：初始化64字节对齐的GROUP计数器（替代未对齐版本） ==========
-    ds.group_counters_aligned.clear();
-    ds.group_counters_aligned.resize(total_groups);
-
-    // ========== GROUP级别ready标志：初始化 ==========
-    ds.group_ready_flags.clear();
-    ds.group_ready_flags.resize(total_groups);
-
-    // ========== Pair同步标志：初始化（使用unique_ptr） ==========
-    uint32_t total_logical_pairs = (total_groups + 1) / 2;
-    ds.pair_sync_flags.clear();
-    ds.pair_sync_flags.reserve(total_logical_pairs);
-    for (uint32_t i = 0; i < total_logical_pairs; ++i) {
-        ds.pair_sync_flags.push_back(std::make_unique<std::atomic<bool>>(false));
-    }
-
-    // ========== P0修复：初始化64字节对齐的Pair同步标志（替代未对齐版本） ==========
-    ds.pair_sync_flags_aligned.clear();
-    ds.pair_sync_flags_aligned.resize(total_logical_pairs);
-
-    // ========== P0修复：初始化GROUP Pair计数器 ==========
-    // 注意：pair_counters的大小应该是总逻辑Pair数，而不是环形缓冲大小
-    // 因为logical_pair_idx可以取值到(total_groups+1)/2-1
-    ds.pair_counters.clear();
-    ds.pair_counters.reserve(total_logical_pairs);
-    for (uint32_t i = 0; i < total_logical_pairs; ++i) {
-        ds.pair_counters.push_back(std::make_unique<std::atomic<uint32_t>>(0));
-    }
-
-    // ========== alignas(64)对齐counter：初始化（替代pair_counters） ==========
-    ds.pair_counters_aligned.clear();
-    ds.pair_counters_aligned.resize(total_logical_pairs);
-
-    // 初始化GROUP元数据（环形缓冲，PARTIAL模式只有4对）
-    uint32_t num_groups = (ds.num_blocks + num_load_workers_ - 1) / num_load_workers_;
-    uint32_t ring_buffer_pairs = (ds.mode == LoadMode::FULLY) ?
-        total_logical_pairs : 4;  // PARTIAL模式：环形缓冲只有4对GROUP
-
-    ds.group_metas.resize(ring_buffer_pairs);
-
-    // ========== 二分查找优化：初始化累积样本数数组 ==========
-    // 预分配空间，避免动态扩容
-    ds.logical_pair_samples.resize(total_logical_pairs, 0);
-    ds.pair_cumulative_samples.resize(total_logical_pairs, 0);
-    ds.logical_pair_order.clear();
-
-    LOG_INFO << "Static allocation initialized: "
-             << num_slots << " slots, "
-             << num_groups << " groups, "
-             << ring_buffer_pairs << " group pairs";
-}
-
-// =============================================================================
-// 内部方法：Level 2随机（Block级）
-// =============================================================================
-
-void ImageNetLoaderDts::perform_level2_shuffle(Dataset& ds, int epoch_id) {
-    // DEBUG: 注释掉次要日志以避免弹框
-    // LOG_INFO << "Performing Level 2 shuffle (Block-level) for epoch " << epoch_id;
-
-    // 初始化原始顺�?
-    ds.epoch_block_order.resize(ds.num_blocks);
-    for (uint32_t i = 0; i < ds.num_blocks; ++i) {
-        ds.epoch_block_order[i] = i;
-    }
-
-    // 使用Philox RNG生成确定性种子
-    uint64_t seed = global_seed_ ^ (static_cast<uint64_t>(epoch_id) << 32);
-
-    // Fisher-Yates洗牌
-    Generator rng(seed);
-
-    for (uint32_t i = ds.num_blocks - 1; i > 0; --i) {
-        uint32_t r[4];
-        tr::detail::philox_generate_4x32(seed, i, r);
-        uint32_t j = r[0] % (i + 1);
-        std::swap(ds.epoch_block_order[i], ds.epoch_block_order[j]);
-    }
-
-    // DEBUG: 注释掉次要日志以避免弹框
-    // LOG_INFO << "Level 2 shuffle completed: first 10 blocks = "
-    //          << ds.epoch_block_order[0] << ", "
-    //          << ds.epoch_block_order[1] << ", "
-    //          << ds.epoch_block_order[2] << ", ...";
-}
-
-// =============================================================================
-// 内部方法：IO线程管理
-// =============================================================================
-
-void ImageNetLoaderDts::launch_io_workers() {
-    LOG_INFO << "Launching " << num_load_workers_ << " IO workers";
-
-    stop_flag_.store(false, std::memory_order_relaxed);
-
-    for (int i = 0; i < num_load_workers_; ++i) {
-        io_threads_.emplace_back([this, i]() { io_worker_func(i); });
-    }
-
-    LOG_INFO << "IO workers launched";
-}
-
-void ImageNetLoaderDts::stop_io_workers() {
-    LOG_INFO << "Stopping IO workers";
-
-    stop_flag_.store(true, std::memory_order_release);
-
-    for (auto& thread : io_threads_) {
-        if (thread.joinable()) {
-            thread.join();
+    // CRC-32验证（如果启用）
+    if (verify_crc_) {
+        LOG_INFO << "Performing CRC-32 verification...";
+        if (!train_path.empty()) {
+            if (!verify_dts_crc(train_path)) {
+                TR_VALUE_ERROR("CRC-32 verification failed for train set: " << train_path);
+            }
+        }
+        if (!val_path.empty()) {
+            if (!verify_dts_crc(val_path)) {
+                TR_VALUE_ERROR("CRC-32 verification failed for val set: " << val_path);
+            }
         }
     }
 
-    io_threads_.clear();
+    // 解析训练集DTS文件头（如果路径非空）
+    if (!train_path.empty()) {
+        LOG_INFO << "Parsing training set DTS header...";
+        DtsHeader train_header;
+        if (!parse_dts_header(train_set_, train_header)) {
+            TR_FILE_NOT_FOUND("Failed to parse training set DTS header: " << train_path);
+        }
 
-    LOG_INFO << "IO workers stopped";
+        // 验证魔数
+        if (std::memcmp(train_header.magic, ".DTS", 4) != 0) {
+            TR_VALUE_ERROR("Invalid magic number in training set DTS file");
+        }
+
+        // 验证数据集类型
+        if (train_header.is_training != 1) {
+            TR_VALUE_ERROR("Training set file is marked as validation set");
+        }
+
+        // 保存元数据
+        train_set_.num_blocks = train_header.num_blocks;
+        train_set_.num_samples = train_header.num_samples;
+        // 实际IO数据量 = num_blocks * BLOCK_SIZE（不包含文件头）
+        train_set_.dataset_size_bytes = static_cast<uint64_t>(train_header.num_blocks) * BLOCK_SIZE;
+
+        LOG_INFO << "Training set: "
+                 << train_set_.num_blocks << " blocks, "
+                 << train_set_.num_samples << " samples, "
+                 << (train_set_.dataset_size_bytes / (1024.0 * 1024.0)) << " MB";
+    } else {
+        LOG_INFO << "Training set path not provided, skipping";
+    }
+
+    // 解析验证集DTS文件头（如果路径非空）
+    if (!val_path.empty()) {
+        LOG_INFO << "Parsing validation set DTS header...";
+        DtsHeader val_header;
+        if (!parse_dts_header(val_set_, val_header)) {
+            TR_FILE_NOT_FOUND("Failed to parse validation set DTS header: " << val_path);
+        }
+
+        // 验证魔数
+        if (std::memcmp(val_header.magic, ".DTS", 4) != 0) {
+            TR_VALUE_ERROR("Invalid magic number in validation set DTS file");
+        }
+
+        // 验证数据集类型
+        if (val_header.is_training != 0) {
+            TR_VALUE_ERROR("Validation set file is marked as training set");
+        }
+
+        // 保存元数据
+        val_set_.num_blocks = val_header.num_blocks;
+        val_set_.num_samples = val_header.num_samples;
+        // 实际IO数据量 = num_blocks * BLOCK_SIZE（不包含文件头）
+        val_set_.dataset_size_bytes = static_cast<uint64_t>(val_header.num_blocks) * BLOCK_SIZE;
+
+        LOG_INFO << "Validation set: "
+                 << val_set_.num_blocks << " blocks, "
+                 << val_set_.num_samples << " samples, "
+                 << (val_set_.dataset_size_bytes / (1024.0 * 1024.0)) << " MB";
+    } else {
+        LOG_INFO << "Validation set path not provided, skipping";
+    }
+
+    LOG_INFO << "Configuration completed";
+}
+
+void ImageNetLoaderDts::set_train_mode(LoadMode mode) {
+    LOG_INFO << "Setting train mode: "
+             << (mode == LoadMode::FULLY ? "FULLY" : "PARTIAL");
+    train_set_.mode = mode;
+
+    // 检测是否需要使用共享缓冲区
+    // 条件：train PARTIAL + val PARTIAL + 两者都配置了路径
+    if (train_set_.mode == LoadMode::PARTIAL &&
+        val_set_.mode == LoadMode::PARTIAL &&
+        !train_set_.file_path.empty() && !val_set_.file_path.empty()) {
+        if (!use_shared_buffers_) {
+            LOG_INFO << "Enabling shared buffers (train PARTIAL + val PARTIAL)";
+            use_shared_buffers_ = true;
+        }
+    } else {
+        if (use_shared_buffers_) {
+            LOG_INFO << "Disabling shared buffers";
+            use_shared_buffers_ = false;
+        }
+    }
+}
+
+void ImageNetLoaderDts::set_val_mode(LoadMode mode) {
+    LOG_INFO << "Setting val mode: "
+             << (mode == LoadMode::FULLY ? "FULLY" : "PARTIAL");
+
+    // 检测非法组合：train FULLY + val PARTIAL + 两者都配置了路径
+    if (train_set_.mode == LoadMode::FULLY && mode == LoadMode::PARTIAL &&
+        !train_set_.file_path.empty() && !val_set_.file_path.empty()) {
+        LOG_WARN << "Invalid combination: train FULLY + val PARTIAL is not supported";
+        LOG_WARN << "Converting to: train FULLY + val FULLY";
+        mode = LoadMode::FULLY;
+    }
+
+    val_set_.mode = mode;
+
+    // 检测是否需要使用共享缓冲区
+    // 条件：train PARTIAL + val PARTIAL + 两者都配置了路径
+    if (train_set_.mode == LoadMode::PARTIAL &&
+        val_set_.mode == LoadMode::PARTIAL &&
+        !train_set_.file_path.empty() && !val_set_.file_path.empty()) {
+        if (!use_shared_buffers_) {
+            LOG_INFO << "Enabling shared buffers (train PARTIAL + val PARTIAL)";
+            use_shared_buffers_ = true;
+        }
+    } else {
+        if (use_shared_buffers_) {
+            LOG_INFO << "Disabling shared buffers";
+            use_shared_buffers_ = false;
+        }
+    }
 }
 
 // =============================================================================
-// IO线程函数（静态映射）
+// 生命周期管理（Day 4: PARTIAL主循环）
 // =============================================================================
 
-void ImageNetLoaderDts::io_worker_func(int thread_id) {
+void ImageNetLoaderDts::begin_epoch(int epoch_id, bool is_train) {
+    /**
+     * 开始Epoch（新架构V4.0）
+     *
+     * 流程：
+     * 1. 设置当前数据集
+     * 2. Level 2随机（Block级）
+     * 3. 启动第一个buffer的加载
+     */
+
+    LOG_INFO << "Beginning epoch " << epoch_id
+             << " (" << (is_train ? "train" : "val") << ")";
+
+    // 1. 设置当前数据集
+    current_set_ = is_train ? &train_set_ : &val_set_;
+    current_epoch_id_.store(epoch_id, std::memory_order_relaxed);
+
+    // 2. 检查PARTIAL模式双缓冲是否已分配
+    if (current_set_->mode == LoadMode::PARTIAL) {
+        // PARTIAL模式：检查双缓冲是否已分配
+        if (current_set_->buffer_A.data == nullptr ||
+            current_set_->buffer_B.data == nullptr) {
+            LOG_INFO << "PARTIAL mode buffers not allocated, allocating now...";
+            allocate_buffers(*current_set_);
+        }
+    }
+    // FULLY模式的内存分配在下面的模式检查分支中进行（Line 532）
+
+    // 3. Level 2随机（Block级）
+    bool should_shuffle = is_train ? shuffle_train_ : shuffle_val_;
+    if (should_shuffle) {
+        perform_level2_shuffle(*current_set_, epoch_id);
+    } else {
+        // 不乱序：保持原始顺序
+        if (current_set_->epoch_block_order.size() != current_set_->num_blocks) {
+            current_set_->epoch_block_order.resize(current_set_->num_blocks);
+            for (uint32_t i = 0; i < current_set_->num_blocks; ++i) {
+                current_set_->epoch_block_order[i] = i;
+            }
+        }
+    }
+
+    // 4. 根据模式启动加载
+    if (current_set_->mode == LoadMode::FULLY) {
+        // FULLY模式：PARTIAL的扩展版 - 多缓冲同步加载（姜总工的设计）
+        //
+        // 关键差异：
+        // - PARTIAL: 2个buffer循环复用（A → B → A → B...）
+        // - FULLY:  多个buffer顺序使用（0 → 1 → 2 → ... → k），不覆盖
+        // - 第二个epoch: FULLY不清空buffer，只需全局shuffle
+        //
+        // 相同之处：
+        // - 都使用同步JOIN机制
+        // - 每个buffer加载完成后JOIN，然后shuffle
+        // - get_next_sample只从ready的buffer读取
+        // - 样本未就绪返回false让worker JOIN
+
+        // 初始化worker状态（关键：global_seq必须重置为0）
+        for (int i = 0; i < num_preproc_workers_; ++i) {
+            worker_states_[i].consuming_buffer = nullptr;
+            worker_states_[i].local_idx = 0;
+            worker_states_[i].global_seq = 0;  // 每个epoch开始时重置
+        }
+
+        // 第一次：分配内存并准备buffer_metas
+        if (current_set_->full_arena == nullptr) {
+            LOG_INFO << "FULLY mode: first epoch, allocating memory and loading buffers";
+
+            // 1. 分配full_arena
+            allocate_buffers(*current_set_);
+
+            // 2. Level 2 shuffle（Block级）
+            bool should_shuffle = is_train ? shuffle_train_ : shuffle_val_;
+            if (should_shuffle) {
+                perform_level2_shuffle(*current_set_, epoch_id);
+            } else {
+                // 不乱序：保持原始顺序
+                if (current_set_->epoch_block_order.size() != current_set_->num_blocks) {
+                    current_set_->epoch_block_order.resize(current_set_->num_blocks);
+                    for (uint32_t i = 0; i < current_set_->num_blocks; ++i) {
+                        current_set_->epoch_block_order[i] = i;
+                    }
+                }
+            }
+
+            // 3. 准备buffer_metas数组（预分配，避免resize时的并发问题）
+            const int N = num_load_workers_;
+            const int blocks_per_buffer = N * prefetch_factor_;
+            int total_buffers = (current_set_->num_blocks + blocks_per_buffer - 1) / blocks_per_buffer;
+
+            current_set_->buffer_metas.clear();
+            current_set_->buffer_metas.reserve(total_buffers);
+
+            for (int i = 0; i < total_buffers; ++i) {
+                current_set_->buffer_metas.emplace_back();
+                Dataset::BufferMeta& buffer_meta = current_set_->buffer_metas.back();
+                buffer_meta.ready = std::make_unique<std::atomic<bool>>(false);
+                buffer_meta.shuffled_locations.clear();
+                buffer_meta.slot_metas.clear();
+            }
+
+            // 4. 同步加载第一个buffer（使用PARTIAL相同的机制）
+            current_set_->current_ready_buffer_seq = 0;
+            load_one_buffer_batch_fully(*current_set_, 0);
+            LOG_INFO << "FULLY mode: first buffer loaded, ready for consumption";
+
+        } else {
+            // 后续epoch：不清空buffer，只需全局重洗牌
+            LOG_INFO << "FULLY mode: subsequent epoch " << epoch_id << ", shuffling existing data";
+
+            // ✅ 关键修复：重置worker状态（global_seq必须重置为0）
+            for (int i = 0; i < num_preproc_workers_; ++i) {
+                worker_states_[i].consuming_buffer = nullptr;
+                worker_states_[i].local_idx = 0;
+                worker_states_[i].global_seq = 0;  // 每个epoch开始时重置
+            }
+            LOG_INFO << "FULLY mode: worker states reset for epoch " << epoch_id;
+
+            // ✅ 关键修复：重置cumulative_samples（否则has_more_buffers会返回false）
+            current_set_->cumulative_samples = 0;
+            LOG_INFO << "FULLY mode: cumulative_samples reset to 0 for epoch " << epoch_id;
+
+            // 全局样本级洗牌
+            bool should_shuffle = is_train ? shuffle_train_ : shuffle_val_;
+            if (should_shuffle) {
+                shuffle_full_dataset(*current_set_, epoch_id);
+            }
+
+            // ✅ 关键修复：将所有buffer标记为ready（数据已在内存中，无需重新加载）
+            for (size_t i = 0; i < current_set_->buffer_metas.size(); ++i) {
+                current_set_->buffer_metas[i].ready->store(true, std::memory_order_release);
+                LOG_INFO << "FULLY mode: buffer " << i << " marked as ready (epoch " << epoch_id << ")";
+            }
+
+            // 重置当前buffer序号
+            current_set_->current_ready_buffer_seq = 0;
+
+            LOG_INFO << "FULLY mode: epoch " << epoch_id << " shuffled successfully, all buffers ready";
+        }
+
+    } else {
+        // PARTIAL模式：启动双缓冲加载（姜总工的同步设计）
+
+        // 在共享缓冲区模式下，确保使用共享缓冲区
+        Buffer* actual_buffer_A = &current_set_->buffer_A;
+        Buffer* actual_buffer_B = &current_set_->buffer_B;
+        if (use_shared_buffers_) {
+            actual_buffer_A = &shared_buffer_A_;
+            actual_buffer_B = &shared_buffer_B_;
+            LOG_INFO << "Using shared buffers for PARTIAL mode";
+        }
+
+        // 重置dataset状态
+        current_set_->current_buffer_seq = 0;
+        current_set_->next_start_group_idx = 0;
+        current_set_->is_last_buffer = false;
+        current_set_->buffer_sample_offsets.clear();
+        current_set_->cumulative_samples = 0;  // 重置累积样本数
+
+        // 重置worker状态（关键：global_seq必须重置为0）
+        for (int i = 0; i < num_preproc_workers_; ++i) {
+            worker_states_[i].consuming_buffer = nullptr;
+            worker_states_[i].local_idx = 0;
+            worker_states_[i].global_seq = 0;  // 每个epoch开始时重置
+        }
+
+        // 加载第一个buffer（buffer_A），同步JOIN
+        load_one_buffer_batch(actual_buffer_A, *current_set_, 0);
+        LOG_INFO << "Buffer A loaded: " << actual_buffer_A->total_samples << " samples";
+
+        // 更新下一个buffer的起始索引
+        const int N = num_load_workers_;
+        const int PF = prefetch_factor_;
+        uint32_t groups_per_buffer = PF * N;
+        current_set_->next_start_group_idx = groups_per_buffer;
+
+        // 检查是否还有更多samples（检查实际加载的samples数量）
+        // 注意：应该检查cumulative_samples是否已经达到num_samples
+        LOG_INFO << "Buffer check: cumulative_samples=" << current_set_->cumulative_samples
+                 << ", num_samples=" << current_set_->num_samples
+                 << ", next_start_group_idx=" << current_set_->next_start_group_idx;
+        if (current_set_->cumulative_samples >= current_set_->num_samples) {
+            // 已经加载了所有samples，标记为最后一个buffer
+            current_set_->is_last_buffer = true;
+            LOG_INFO << "Buffer A is the last buffer";
+        }
+
+        // 设置ready_buffer指向buffer_A
+        current_set_->ready_buffer = actual_buffer_A;
+    }
+
+    LOG_INFO << "Epoch " << epoch_id << " started successfully";
+}
+
+void ImageNetLoaderDts::end_epoch() {
+    /**
+     * 结束Epoch（新架构V4.0）
+     *
+     * 流程：
+     * 1. 停止IO线程（设置stop_flag）
+     * 2. 等待所有IO线程结束
+     * 3. 重置buffer状态
+     */
+
+    LOG_INFO << "Ending epoch";
+
+    if (current_set_ == nullptr) {
+        LOG_WARN << "No current dataset to end";
+        return;
+    }
+
+    if (current_set_->mode == LoadMode::PARTIAL) {
+        // PARTIAL模式：重置双缓冲状态
+        if (use_shared_buffers_) {
+            // 共享缓冲区模式：重置共享缓冲区
+            shared_buffer_A_.reset();
+            shared_buffer_B_.reset();
+            shared_ready_buffer_ = nullptr;
+        } else {
+            // 独立缓冲区模式：重置dataset的缓冲区
+            current_set_->buffer_A.reset();
+            current_set_->buffer_B.reset();
+            current_set_->ready_buffer = nullptr;
+        }
+    } else {
+        // FULLY模式：保持数据在内存中（不清空），供下一个epoch使用
+        LOG_DEBUG << "FULLY mode: keeping data in memory for next epoch";
+    }
+
+    current_set_ = nullptr;
+
+    LOG_INFO << "Epoch ended successfully";
+}
+
+// =============================================================================
+// 样本获取接口（Day 6: 严格按顺序领取）
+// =============================================================================
+
+bool ImageNetLoaderDts::get_next_sample(int preproc_worker_id, int32_t& label,
+                                        const uint8_t*& data_ptr, size_t& data_size) {
+    /**
+     * 获取下一个样本（严格按顺序领取）
+     *
+     * 领取策略（姜总工V4.0架构）：
+     * - Worker i的第k次调用 → 读取第 (i + k×M) 个样本
+     * - M = num_preproc_workers_
+     * - i = preproc_worker_id
+     *
+     * 示例（M=8）：
+     * - Worker 0: 样本0, 8, 16, 24, ...
+     * - Worker 1: 样本1, 9, 17, 25, ...
+     * - Worker 7: 样本7, 15, 23, 31, ...
+     *
+     * FULLY模式：
+     * - 从full_shuffled_locations中严格按顺序读取
+     *
+     * PARTIAL模式：
+     * - 从ready_buffer的shuffled_locations中严格按顺序读取
+     *
+     * 返回true表示成功，false表示epoch结束
+     */
+
+    if (current_set_ == nullptr) {
+        TR_VALUE_ERROR("No current dataset, call begin_epoch() first");
+        return false;
+    }
+
+    const int M = num_preproc_workers_;
+
+    // FULLY模式（PARTIAL的扩展版 - 多缓冲版本）
+    if (current_set_->mode == LoadMode::FULLY) {
+        /**
+         * FULLY模式：PARTIAL的扩展版
+         *
+         * 核心逻辑（与PARTIAL完全相同）：
+         * 1. Worker按静态步长M领取样本：第k次调用 → 样本 (worker_id + k×M)
+         * 2. 只从当前ready的buffer读取
+         * 3. 当样本超出当前buffer范围时，返回false（worker JOIN）
+         * 4. worker重启后，加载下一个buffer并继续消费
+         *
+         * 与PARTIAL的唯一差异：
+         * - PARTIAL: 2个buffer循环（A ↔ B）
+         * - FULLY: 多个buffer顺序（0 → 1 → 2 → ...）
+         */
+
+        WorkerState& my_state = worker_states_[preproc_worker_id];
+
+        // 1. 计算全局样本序号（静态公式）
+        size_t global_sample_idx = static_cast<size_t>(preproc_worker_id) +
+                                   static_cast<size_t>(my_state.global_seq) * M;
+
+        // 2. 【关键修复】检查全局边界（所有epoch都必须检查！）
+        if (global_sample_idx >= current_set_->num_samples) {
+            return false;  // Epoch结束
+        }
+
+        // 3. 获取当前ready的buffer
+        size_t current_buffer_seq = current_set_->current_ready_buffer_seq;
+
+        if (current_buffer_seq >= current_set_->buffer_metas.size()) {
+            // 没有更多buffer了
+            return false;
+        }
+
+        const Dataset::BufferMeta& buffer_meta = current_set_->buffer_metas[current_buffer_seq];
+
+        // 4. 计算当前buffer的样本范围
+        size_t buffer_start = buffer_meta.load_start_offset;
+        size_t buffer_end = buffer_start + buffer_meta.total_samples;
+
+        // 5. 【关键】检查样本是否在当前buffer范围内
+        if (global_sample_idx < buffer_start || global_sample_idx >= buffer_end) {
+            // 样本不在当前buffer中，需要加载下一个buffer
+            // 返回false让worker JOIN，主线程会加载下一个buffer
+            LOG_DEBUG << "Worker " << preproc_worker_id
+                     << " sample " << global_sample_idx
+                     << " outside buffer range [" << buffer_start << ", " << buffer_end
+                     << "), returning false to load next buffer";
+            return false;
+        }
+
+        // 6. 等待buffer变为READY（与PARTIAL完全相同的逻辑）
+        while (!buffer_meta.ready->load(std::memory_order_acquire)) {
+            std::this_thread::sleep_for(std::chrono::microseconds(100));
+        }
+
+        // 7. 从buffer_meta中获取样本
+        size_t local_idx = global_sample_idx - buffer_start;
+
+        TR_CHECK(local_idx < buffer_meta.shuffled_locations.size(), ValueError,
+                 "local_idx " << local_idx << " >= shuffled_locations.size() "
+                 << buffer_meta.shuffled_locations.size());
+
+        uint32_t location = buffer_meta.shuffled_locations[local_idx];
+        uint32_t slot_idx = location >> 16;
+        uint32_t sample_idx = location & 0xFFFF;
+
+        TR_CHECK(slot_idx < buffer_meta.slot_metas.size(), ValueError,
+                 "slot_idx " << slot_idx << " >= slot_metas.size() "
+                 << buffer_meta.slot_metas.size());
+
+        // 8. 计算实际的全局slot_idx
+        size_t global_slot_idx = static_cast<size_t>(buffer_meta.start_block) + slot_idx;
+
+        // 9. 返回数据（零拷贝）
+        const SlotMeta& smeta = buffer_meta.slot_metas[slot_idx];
+        label = smeta.labels[sample_idx];
+        data_size = smeta.sizes[sample_idx];
+        data_ptr = current_set_->full_arena +
+                   global_slot_idx * block_size_ +
+                   smeta.offsets[sample_idx];
+
+        // 10. 推进索引（与PARTIAL完全相同）
+        my_state.global_seq++;
+
+        return true;
+    }
+
+    // PARTIAL模式
+    else {
+        /**
+         * PARTIAL模式：双缓冲JOIN切换（姜总工的设计）
+         *
+         * 核心逻辑：
+         * 1. Worker按静态步长M领取样本：第k次调用 → 样本 (worker_id + k×M)
+         * 2. 只从ready_buffer读取，不跨buffer
+         * 3. 当样本超出当前buffer范围时，返回false（worker JOIN）
+         * 4. 下次worker重新启动时，global_seq继续累积，从下一个buffer读取
+         *
+         * 关键：worker的global_seq在begin_epoch时初始化为0，之后永不重置
+         *       这样可以跨buffer累积，保证严格顺序
+         */
+
+        WorkerState& my_state = worker_states_[preproc_worker_id];
+
+        // 1. 计算全局样本序号（静态公式）
+        size_t global_sample_idx = static_cast<size_t>(preproc_worker_id) +
+                                   static_cast<size_t>(my_state.global_seq) * M;
+
+        // 2. 检查是否已读完所有样本
+        if (global_sample_idx >= current_set_->num_samples) {
+            return false;  // Epoch结束
+        }
+
+        // 3. 只从ready_buffer读取（不自动判断A或B）
+        Buffer* ready_buffer = current_set_->ready_buffer;
+        if (ready_buffer == nullptr) {
+            LOG_ERROR << "ready_buffer is null";
+            return false;
+        }
+
+        // 4. 计算ready_buffer的样本范围
+        size_t buffer_start = ready_buffer->load_start_offset;
+        size_t buffer_end = buffer_start + ready_buffer->total_samples;
+
+        // 5. 检查样本是否在当前buffer范围内
+        if (global_sample_idx < buffer_start || global_sample_idx >= buffer_end) {
+            // 样本不在当前buffer中，返回false让worker JOIN
+            // 下次worker重新启动时，会从下一个buffer继续读取
+            LOG_DEBUG << "Worker " << preproc_worker_id
+                     << " sample " << global_sample_idx
+                     << " outside buffer range [" << buffer_start << ", " << buffer_end
+                     << "), returning false to JOIN";
+            return false;
+        }
+
+        // 6. 计算在buffer内的局部索引
+        size_t buffer_local_idx = global_sample_idx - buffer_start;
+
+        // 7. 等待buffer就绪（理论上READY了，但确保状态一致）
+        while (ready_buffer->state != BufferState::READY) {
+            std::this_thread::sleep_for(std::chrono::microseconds(100));
+        }
+
+        // 8. 从shuffled_locations中获取样本位置
+        TR_CHECK(buffer_local_idx < ready_buffer->shuffled_locations.size(), ValueError,
+                 "buffer_local_idx " << buffer_local_idx << " >= shuffled_locations.size() "
+                 << ready_buffer->shuffled_locations.size());
+
+        uint32_t location = ready_buffer->shuffled_locations[buffer_local_idx];
+        uint32_t slot_idx = location >> 16;
+        uint32_t sample_idx = location & 0xFFFF;
+
+        TR_CHECK(slot_idx < ready_buffer->slot_metas.size(), ValueError,
+                 "slot_idx " << slot_idx << " >= slot_metas.size() "
+                 << ready_buffer->slot_metas.size());
+
+        // 9. 返回数据（零拷贝）
+        const SlotMeta& smeta = ready_buffer->slot_metas[slot_idx];
+        label = smeta.labels[sample_idx];
+        data_size = smeta.sizes[sample_idx];
+        data_ptr = ready_buffer->data +
+                   static_cast<size_t>(slot_idx) * block_size_ +
+                   smeta.offsets[sample_idx];
+
+        // 10. 推进索引（不重置，跨buffer累积）
+        my_state.global_seq++;
+
+        return true;
+    }
+}
+
+// =============================================================================
+// Day 2: IO核心（沿用旧版Native I/O + 静态分配）
+// =============================================================================
+
+void ImageNetLoaderDts::io_worker_func_batched(int thread_id, Buffer& buffer,
+                                                uint32_t start_group_idx, Dataset& ds) {
+    /**
+     * IO线程批量工作函数（新架构V4.0）
+     *
+     * 静态分配策略（姜总工的核心设计）：
+     * - 每个线程负责PF个连续的slot
+     * - Thread k负责：Slot [k×PF, k×PF+1, ..., k×PF+PF-1]
+     * - 对应的group索引：start_group_idx, start_group_idx+1, ..., start_group_idx+PF-1
+     * - Block索引：group_idx × N + thread_id
+     *
+     * 内存布局（N=8, PF=4）：
+     *   Thread 0: Slot 0,1,2,3   (连续64MB)
+     *   Thread 1: Slot 4,5,6,7   (连续64MB)
+     *   Thread 7: Slot 28,29,30,31 (连续64MB)
+     *
+     * 优点：
+     * - 每个线程的内存连续（缓存友好）
+     * - 零竞争：每个线程只操作自己的slot
+     * - Join同步：无需原子操作
+     */
+
     const int N = num_load_workers_;
-    const uint32_t my_offset = thread_id;  // 我在每个GROUP的固定位置
+    const int PF = prefetch_factor_;
 
-    Dataset& ds = *current_set_;
+    LOG_DEBUG << "IO worker " << thread_id << " started (start_group_idx=" << start_group_idx << ")";
 
-    // 打开独立文件句柄
+    // 打开文件（每个线程独立打开，避免锁竞争）
     FileHandle file(ds.file_path);
 
-    // 计算总GROUP数（逻辑GROUP）
-    uint32_t total_groups = (ds.num_blocks + N - 1) / N;
+    // 遍历PF个groups（每个线程负责PF个连续slot）
+    for (int local_idx = 0; local_idx < PF; ++local_idx) {
+        // 计算group索引
+        uint32_t group_idx = start_group_idx + local_idx;
 
-    // 计算环形Pair数
-    uint32_t num_group_pairs = static_cast<uint32_t>(ds.group_metas.size());
-
-    // ========================================================================
-    // 静态遍历我负责的所有BLOCK
-    // ========================================================================
-
-    for (uint64_t group_idx = 0; group_idx < total_groups; ++group_idx) {
-        if (stop_flag_.load(std::memory_order_relaxed)) {
-            break;
+        // 检查是否超出范围
+        if (group_idx >= ds.epoch_block_order.size()) {
+            break;  // 没有更多groups了
         }
 
-        // A. 静态计算我的block_seq（使用逻辑GROUP索引）
-        uint32_t block_seq = group_idx * N + my_offset;
+        // 计算逻辑block序号
+        uint32_t block_seq = group_idx * N + thread_id;
 
+        // 检查block_seq是否超出范围
         if (block_seq >= ds.num_blocks) {
-            break;  // 超出范围
+            break;  // 超出数据集范围
         }
 
-        // B. 映射到真实的Block ID（Level 2随机）
+        // 获取真实block ID（经过Level 2 shuffle）
         uint32_t block_id = ds.epoch_block_order[block_seq];
 
-        // C. 静态计算slot_idx（环形映射）
-        uint32_t slot_idx = ds.block_to_slot[block_seq];
+        // 【关键】计算slot索引（姜总工的连续布局设计）
+        // Thread k的PF个slot是连续的：k×PF, k×PF+1, ..., k×PF+PF-1
+        uint32_t slot_idx = thread_id * PF + local_idx;
 
-        // D. 【PARTIAL模式】等待Slot被消费完
-        if (ds.mode == LoadMode::PARTIAL) {
-            // 等待该Slot变为EMPTY
-            while (ds.slot_states[slot_idx].state != SlotState::EMPTY) {
-                if (stop_flag_.load(std::memory_order_relaxed)) {
-                    return;
-                }
-                std::this_thread::yield();
-            }
-        }
+        TR_CHECK(slot_idx < buffer.slot_metas.size(), ValueError,
+                 "slot_idx " << slot_idx << " >= slot_metas.size() " << buffer.slot_metas.size());
 
-        // E. 【零竞争】直接设置状态（无需CAS）
-        ds.slot_states[slot_idx].state = SlotState::LOADING;
+        // 计算目标地址（静态偏移）
+        uint8_t* dst = buffer.data + static_cast<size_t>(slot_idx) * block_size_;
 
-        // F. 执行I/O（Native API）
-        uint8_t* dst = ds.arena + static_cast<size_t>(slot_idx) * BLOCK_SIZE;
-        read_block_native(file.get(), block_id, dst);
+        // 执行I/O（Native API）
+        read_block_native(file, block_id, dst);
 
-        // G. 解析BLOCK元数据
-        parse_block_meta(slot_idx, dst, ds, ds.slot_metas[slot_idx]);
+        // 解析BLOCK元数据
+        parse_block_meta(slot_idx, dst, ds, buffer.slot_metas[slot_idx]);
 
-        // H. 设置状态为READY（表示单个Slot的IO完成）
-        ds.slot_states[slot_idx].state = SlotState::READY;
-
-        // I. GROUP同步（唯一的原子操作点）
-        // ========== P0修复：使用64字节对齐的GROUP计数器（防止False Sharing） ==========
-        uint32_t finished = ds.group_counters_aligned[group_idx].value.fetch_add(1,
-                                                                               std::memory_order_acq_rel) + 1;
-        //                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ 使用对齐版本，每个元素独占64字节缓存行
-
-        // 计算本GROUP的实际线程数（最后一组可能不足N个）
-        uint32_t expected_threads = std::min(N,
-                                             static_cast<int>(ds.num_blocks - group_idx * N));
-
-        if (finished == expected_threads) {
-            // J. 我是本GROUP最后一个完成的线程
-
-            // ========== GROUP级别ready标志：标记本GROUP完成 ==========
-            ds.group_ready_flags[group_idx].ready.store(true, std::memory_order_release);
-
-            // ========== 关键修复：检查配对的GROUP是否也完成 ==========
-            // 计算配对的GROUP索引
-            uint32_t pair_start = (group_idx / 2) * 2;  // Pair的第一个GROUP索引
-            uint32_t pair_end = pair_start + 1;         // Pair的第二个GROUP索引
-
-            // 检查两个GROUP是否都完成
-            bool group0_ready = ds.group_ready_flags[pair_start].ready.load(std::memory_order_acquire);
-
-            bool group1_ready;
-            if (pair_end < (ds.num_blocks + N - 1) / N) {
-                // 如果第二个GROUP存在，检查它是否ready
-                group1_ready = ds.group_ready_flags[pair_end].ready.load(std::memory_order_acquire);
-            } else {
-                // 如果第二个GROUP不存在（最后一对，奇数个GROUP），认为它ready
-                group1_ready = true;
-            }
-
-            // ========== 只有当两个GROUP都完成时，才触发同步 ==========
-            if (group0_ready && group1_ready) {
-                // 使用CAS确保只有一个线程触发同步（避免重复同步）
-                uint32_t logical_pair_idx = group_idx / 2;
-                bool expected = false;
-                // ========== P0修复：使用64字节对齐的Pair同步标志（防止False Sharing） ==========
-                if (ds.pair_sync_flags_aligned[logical_pair_idx].value.compare_exchange_strong(
-                        expected, true,
-                        std::memory_order_acq_rel,
-                        std::memory_order_relaxed)) {
-                    //   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ 使用对齐版本，每个元素独占64字节缓存行
-
-                    // ========== 成功CAS：我是唯一触发同步的线程 ==========
-
-                    // ========== 关键修复：分离逻辑索引和环形索引 ==========
-                    uint32_t ring_pair_idx = logical_pair_idx % num_group_pairs;  // 环形Pair索引（用于访问）
-
-                    // HOT PATH: 禁用日志
-                    // LOG_DEBUG << "Worker " << thread_id << " triggering sync for GROUP " << group_idx
-                    //          << ", logical_pair=" << logical_pair_idx << ", ring_pair=" << ring_pair_idx;
-
-                    // 触发对(logical_group-1, logical_group)的洗牌
-                    sync_and_shuffle_group(ring_pair_idx, logical_pair_idx, ds);
-                    //                      ^^^^^^^^^^^^^  ^^^^^^^^^^^^^^^
-                    //                      内存位置        种子计算
-                }
-                // 如果CAS失败，说明其他线程已经触发同步，我什么都不做
-            }
-        }
+        LOG_DEBUG << "Worker " << thread_id << " loaded block " << block_id
+                  << " (seq=" << block_seq << ") to slot " << slot_idx;
     }
 
     LOG_DEBUG << "IO worker " << thread_id << " finished";
 }
 
-// =============================================================================
-// FileHandle实现
-// =============================================================================
+void ImageNetLoaderDts::read_block_native(FileHandle& file, uint32_t block_id, uint8_t* dst) {
+    /**
+     * 使用平台Native API读取单个BLOCK（16MB）
+     * Windows: ReadFile + 4MB chunks
+     * Linux: pread + 4MB chunks
+     */
 
-#ifdef _WIN32
-
-ImageNetLoaderDts::FileHandle::FileHandle(const std::string& path) {
-    handle = CreateFileW(
-        std::wstring(path.begin(), path.end()).c_str(),
-        GENERIC_READ,
-        FILE_SHARE_READ,
-        NULL,
-        OPEN_EXISTING,
-        FILE_ATTRIBUTE_NORMAL,
-        NULL
-    );
-
-    if (handle == INVALID_HANDLE_VALUE) {
-        TR_FILE_NOT_FOUND("Failed to open file: " << path);
-    }
-}
-
-ImageNetLoaderDts::FileHandle::~FileHandle() {
-    if (handle != INVALID_HANDLE_VALUE) {
-        CloseHandle(handle);
-    }
-}
-
-#else
-
-ImageNetLoaderDts::FileHandle::FileHandle(const std::string& path) {
-    // ========== P0修复：移除O_DIRECT，让OS自动优化I/O策略 ==========
-    // 理由：
-    // 1. O_DIRECT在某些文件系统不支持（如NFS、某些网络文件系统）
-    // 2. O_DIRECT要求I/O大小和内存地址必须对齐到扇区大小（512B或4KB）
-    // 3. method2_native.cpp的最终方案也没有使用O_DIRECT
-    // 4. 让OS页缓存管理热点数据，可以提升后续epoch的性能
-    fd = open(path.c_str(), O_RDONLY);
-    if (fd < 0) {
-        TR_FILE_NOT_FOUND("Failed to open file: " << path << ", errno=" << errno);
-    }
-}
-
-ImageNetLoaderDts::FileHandle::~FileHandle() {
-    if (fd >= 0) {
-        close(fd);
-    }
-}
-
-#endif
-
-// =============================================================================
-// 平台特定BLOCK读取
-// =============================================================================
-
-void ImageNetLoaderDts::read_block_native(
-#ifdef _WIN32
-    HANDLE hFile,
-#else
-    int fd,
-#endif
-    uint32_t block_id,
-    uint8_t* dst) {
-
-    constexpr size_t CHUNK_SIZE = 4 * 1024 * 1024;  // 4MB
+    constexpr size_t CHUNK_SIZE = 4 * 1024 * 1024;  // 4MB chunks（沿用旧版）
     size_t file_offset = FILE_HEADER_SIZE + static_cast<size_t>(block_id) * BLOCK_SIZE;
 
 #ifdef _WIN32
+    HANDLE hFile = file.get();
+
     LARGE_INTEGER offset;
     offset.QuadPart = file_offset;
 
     if (!SetFilePointerEx(hFile, offset, NULL, FILE_BEGIN)) {
-        TR_THROW(DeviceError, "SetFilePointerEx failed: block_id=" << block_id);
+        TR_DEVICE_ERROR("SetFilePointerEx failed: block_id=" << block_id
+                        << ", Error code: " << GetLastError());
     }
 
     size_t remaining = BLOCK_SIZE;
@@ -890,11 +1109,12 @@ void ImageNetLoaderDts::read_block_native(
         DWORD bytes_read = 0;
 
         if (!ReadFile(hFile, ptr, to_read, &bytes_read, NULL)) {
-            TR_THROW(DeviceError, "ReadFile failed: block_id=" << block_id);
+            TR_DEVICE_ERROR("ReadFile failed: block_id=" << block_id
+                            << ", Error code: " << GetLastError());
         }
 
         if (bytes_read == 0) {
-            TR_THROW(ValueError, "ReadFile unexpected EOF: block_id=" << block_id);
+            TR_VALUE_ERROR("ReadFile unexpected EOF: block_id=" << block_id);
         }
 
         ptr += bytes_read;
@@ -902,6 +1122,7 @@ void ImageNetLoaderDts::read_block_native(
     }
 
 #else
+    int fd = file.get();
     size_t remaining = BLOCK_SIZE;
     uint8_t* ptr = dst;
     off_t current_offset = file_offset;
@@ -911,11 +1132,12 @@ void ImageNetLoaderDts::read_block_native(
         ssize_t bytes_read = pread(fd, ptr, to_read, current_offset);
 
         if (bytes_read < 0) {
-            TR_THROW(DeviceError, "pread failed: block_id=" << block_id << ", errno=" << errno);
+            TR_DEVICE_ERROR("pread failed: block_id=" << block_id
+                            << ", errno=" << errno);
         }
 
         if (bytes_read == 0) {
-            TR_THROW(ValueError, "pread unexpected EOF: block_id=" << block_id);
+            TR_VALUE_ERROR("pread unexpected EOF: block_id=" << block_id);
         }
 
         ptr += bytes_read;
@@ -925,238 +1147,820 @@ void ImageNetLoaderDts::read_block_native(
 #endif
 }
 
-// =============================================================================
-// BLOCK元数据解�?
-// =============================================================================
-
 void ImageNetLoaderDts::parse_block_meta(uint32_t slot_idx, const uint8_t* data,
-                                         Dataset& ds, SlotMeta& slot_meta) {
-    // ========================================================================
-    // DTS BLOCK头部格式（根据【十三（三）】规范）：
-    // [block_magic(4B)] [block_id(4B)] [num_pics(4B)]
-    // [offsets数组] [sizes数组] [labels数组]
-    // ========================================================================
+                                        Dataset& ds, SlotMeta& slot_meta) {
+    /**
+     * 解析BLOCK元数据（DTS格式）
+     *
+     * DTS BLOCK头部格式：
+     * [block_magic(4B)] [block_id(4B)] [num_pics(4B)]
+     * [offsets数组] [sizes数组] [labels数组]
+     */
 
     const uint8_t* ptr = data;
+    const uint8_t* const end = data + BLOCK_SIZE;
 
-    // 1. 跳过block_magic (4B) - 通常是"LV1B"或类似
+    // 边界检查函数
+    auto check_boundary = [&](size_t size) -> void {
+        if (ptr + size > end) {
+            TR_VALUE_ERROR("Block header overflow at slot " << slot_idx
+                           << " (offset=" << (ptr - data) << ", size=" << size << ")");
+        }
+    };
+
+    // 1. 读取block_magic (4B)
+    char magic[4];
+    check_boundary(4);
+    std::memcpy(magic, ptr, 4);
     ptr += 4;
+
+    // 验证magic number
+    if (std::memcmp(magic, "LV0B", 4) != 0 &&
+        std::memcmp(magic, "LV1B", 4) != 0 &&
+        std::memcmp(magic, "LV2B", 4) != 0 &&
+        std::memcmp(magic, "LV3B", 4) != 0) {
+        TR_VALUE_ERROR("Invalid block magic at slot " << slot_idx
+                       << ": " << magic[0] << magic[1] << magic[2] << magic[3]);
+    }
 
     // 2. 读取block_id (4B) - 用于调试验证
     uint32_t stored_block_id;
+    check_boundary(sizeof(uint32_t));
     std::memcpy(&stored_block_id, ptr, sizeof(uint32_t));
     ptr += sizeof(uint32_t);
 
     // 3. 读取num_pics (4B) - 样本数量
     uint32_t num_samples;
+    check_boundary(sizeof(uint32_t));
     std::memcpy(&num_samples, ptr, sizeof(uint32_t));
     ptr += sizeof(uint32_t);
 
-    if (num_samples > MAX_SAMPLES_PER_BLOCK) {
-        TR_THROW(ValueError, "Block " << stored_block_id
-                         << " has too many samples: " << num_samples
-                         << " > " << MAX_SAMPLES_PER_BLOCK);
+    // 验证num_samples合理性
+    if (num_samples > MAX_SAMPLES_PER_BLOCK_SAFE) {
+        TR_VALUE_ERROR("Block " << stored_block_id << " has invalid num_samples: "
+                       << num_samples << " > " << MAX_SAMPLES_PER_BLOCK_SAFE);
     }
 
     slot_meta.num_samples = num_samples;
+    slot_meta.block_id = stored_block_id;
 
-    // 4. 批量读取offsets数组（num_samples个uint32_t）
-    std::memcpy(slot_meta.offsets, ptr, num_samples * sizeof(uint32_t));
-    ptr += num_samples * sizeof(uint32_t);
+    // 4. 批量读取offsets数组
+    size_t offsets_size = num_samples * sizeof(uint32_t);
+    check_boundary(offsets_size);
+    std::memcpy(slot_meta.offsets, ptr, offsets_size);
+    ptr += offsets_size;
 
-    // 5. 批量读取sizes数组（num_samples个uint32_t）
-    std::memcpy(slot_meta.sizes, ptr, num_samples * sizeof(uint32_t));
-    ptr += num_samples * sizeof(uint32_t);
+    // 5. 批量读取sizes数组
+    size_t sizes_size = num_samples * sizeof(uint32_t);
+    check_boundary(sizes_size);
+    std::memcpy(slot_meta.sizes, ptr, sizes_size);
+    ptr += sizes_size;
 
-    // 6. 批量读取labels数组（num_samples个int32_t）
-    std::memcpy(slot_meta.labels, ptr, num_samples * sizeof(int32_t));
-    // ptr += num_samples * sizeof(int32_t);  // 已到尾部，无需再推进
+    // 6. 批量读取labels数组
+    size_t labels_size = num_samples * sizeof(int32_t);
+    check_boundary(labels_size);
+    std::memcpy(slot_meta.labels, ptr, labels_size);
+    ptr += labels_size;
+
+    // 7. 验证offset范围
+    for (uint32_t i = 0; i < num_samples; ++i) {
+        if (slot_meta.offsets[i] >= BLOCK_SIZE) {
+            TR_VALUE_ERROR("Sample " << i << " offset out of bounds in block "
+                           << stored_block_id << ": " << slot_meta.offsets[i]
+                           << " >= " << BLOCK_SIZE);
+        }
+        if (slot_meta.offsets[i] + slot_meta.sizes[i] > BLOCK_SIZE) {
+            TR_VALUE_ERROR("Sample " << i << " size overflow in block "
+                           << stored_block_id << ": offset=" << slot_meta.offsets[i]
+                           << ", size=" << slot_meta.sizes[i]);
+        }
+    }
 
     LOG_DEBUG << "Parsed block " << stored_block_id << " in slot " << slot_idx
               << ": " << num_samples << " samples";
 }
 
 // =============================================================================
-// GROUP同步与样本级随机（Level 3�?
+// Day 3: 打乱核心（沿用旧版Philox RNG + Fisher-Yates）
 // =============================================================================
 
-void ImageNetLoaderDts::sync_and_shuffle_group(uint32_t ring_pair_idx,
-                                                uint32_t logical_pair_idx,
-                                                Dataset& ds) {
-    const int N = num_load_workers_;
-    GroupMeta& gp_meta = ds.group_metas[ring_pair_idx];
-    //                        ^^^^^^^^^^^^^ 使用环形索引访问
+void ImageNetLoaderDts::collect_sample_locations(Buffer& buffer) {
+    /**
+     * 收集buffer中所有样本的位置信息
+     *
+     * 编码方式: (slot_idx << 16) | sample_idx
+     * - 高16位: slot_idx (在buffer.slot_metas中的索引)
+     * - 低16位: sample_idx (在slot内的样本索引)
+     */
 
-    // ========== 关键修复：先设置is_ready=false，防止consumer读到中间状态 ==========
-    gp_meta.is_ready.store(false, std::memory_order_release);
+    buffer.shuffled_locations.clear();
+    buffer.total_samples = 0;
 
-    // 清空之前的乱序索引和元数据
-    gp_meta.shuffled_locations.clear();
-    gp_meta.logical_groups.clear();
-    gp_meta.occupied_slots.clear();
-    gp_meta.total_samples.store(0, std::memory_order_relaxed);
+    // 遍历所有slot
+    for (size_t slot_idx = 0; slot_idx < buffer.slot_metas.size(); ++slot_idx) {
+        const SlotMeta& smeta = buffer.slot_metas[slot_idx];
 
-    // ========== P1修复：记录逻辑Pair索引（使用原子存储）==========
-    gp_meta.logical_pair_idx.store(logical_pair_idx, std::memory_order_relaxed);
-
-    // ========================================================================
-    // A. 收集两个GROUP内所有样本
-    // ========================================================================
-
-    for (int g = 0; g < 2; ++g) {
-        uint64_t logical_group = logical_pair_idx * 2 + g;
-        //         ^^^^^^^^^^^^^^^ 使用逻辑Pair索引
-
-        if (logical_group >= (ds.num_blocks + N - 1) / N) {
-            break;  // 超出范围
+        // 如果slot为空（没有加载block），跳过
+        if (smeta.num_samples == 0) {
+            continue;
         }
 
-        // ========== P1修复：记录逻辑GROUP索引 ==========
-        gp_meta.logical_groups.push_back(static_cast<uint32_t>(logical_group));
-
-        for (int offset = 0; offset < N; ++offset) {
-            uint32_t block_seq = logical_group * N + offset;
-
-            if (block_seq >= ds.num_blocks) {
-                break;  // 边界检查
-            }
-
-            uint32_t slot_idx = ds.block_to_slot[block_seq];
-
-            // ========== P1修复：记录占用的Slot索引（去重）==========
-            // 只有当slot_idx不在occupied_slots中时才添加
-            bool already_recorded = false;
-            for (uint32_t existing_slot : gp_meta.occupied_slots) {
-                if (existing_slot == slot_idx) {
-                    already_recorded = true;
-                    break;
-                }
-            }
-            if (!already_recorded) {
-                gp_meta.occupied_slots.push_back(slot_idx);
-            }
-
-            // 从slot_metas获取样本数量
-            SlotMeta& smeta = ds.slot_metas[slot_idx];
-            uint32_t num_samples = smeta.num_samples;
-
-            // 收集该Slot的所有样本
-            for (uint32_t i = 0; i < num_samples; ++i) {
-                // 编码: (slot_idx << 16) | sample_idx
-                uint32_t location = (slot_idx << 16) | i;
-                gp_meta.shuffled_locations.push_back(location);
-            }
+        // 收集该slot的所有样本
+        for (uint32_t sample_idx = 0; sample_idx < smeta.num_samples; ++sample_idx) {
+            // 编码位置信息
+            uint32_t location = (static_cast<uint32_t>(slot_idx) << 16) | sample_idx;
+            buffer.shuffled_locations.push_back(location);
+            buffer.total_samples++;
         }
     }
 
-    gp_meta.total_samples.store(static_cast<uint32_t>(gp_meta.shuffled_locations.size()), std::memory_order_relaxed);
-
-    // ========================================================================
-    // B. Fisher-Yates洗牌（Philox RNG）
-    // ========================================================================
-
-    // ========== Bug 10修复：计算should_shuffle ==========
-    bool should_shuffle = ds.is_train ? shuffle_train_ : shuffle_val_;
-    if (skip_first_ && current_epoch_id_ == 0) {
-        should_shuffle = false;
-    }
-
-    if (should_shuffle) {
-        // 生成洗牌种子（使用逻辑Pair索引）
-        uint64_t shuffle_seed = global_seed_ ^
-                                (static_cast<uint64_t>(current_epoch_id_) << 32) ^
-                                (static_cast<uint64_t>(logical_pair_idx) << 16);
-        //                                              ^^^^^^^^^^^^^^^ 使用逻辑索引
-
-        perform_group_shuffle(gp_meta, shuffle_seed);
-    }
-
-    // ========================================================================
-    // C. 重置消费计数，标记就绪
-    // ========================================================================
-
-    gp_meta.consumed_count.store(0, std::memory_order_relaxed);
-    gp_meta.is_ready.store(true, std::memory_order_release);
-
-    // ========== P1修复：记录Logical Pair样本数（用于PARTIAL模式查找） ==========
-    if (ds.mode == LoadMode::PARTIAL) {
-        // 确保logical_pair_samples数组足够大
-        if (logical_pair_idx >= ds.logical_pair_samples.size()) {
-            ds.logical_pair_samples.resize(logical_pair_idx + 1, 0);
-        }
-        ds.logical_pair_samples[logical_pair_idx] = gp_meta.total_samples.load(std::memory_order_relaxed);
-
-        // ========== 二分查找优化：更新累积样本数数组 ==========
-        // 记录这个logical pair的同步顺序
-        ds.logical_pair_order.push_back(logical_pair_idx);
-
-        // 确保pair_cumulative_samples数组足够大（关键修复！）
-        if (logical_pair_idx >= ds.pair_cumulative_samples.size()) {
-            ds.pair_cumulative_samples.resize(logical_pair_idx + 1, 0);
-        }
-
-        // 重新计算累积样本数（从当前已同步的所有pairs）
-        size_t acc = 0;
-        for (size_t i = 0; i < ds.logical_pair_order.size(); ++i) {
-            uint32_t lp_idx = ds.logical_pair_order[i];
-            // 确保不越界
-            if (lp_idx >= ds.pair_cumulative_samples.size()) {
-                LOG_ERROR << "lp_idx out of bounds in cumulative update: " << lp_idx
-                         << ", size: " << ds.pair_cumulative_samples.size();
-                break;
-            }
-            uint32_t samples = ds.logical_pair_samples[lp_idx];
-            acc += samples;
-            ds.pair_cumulative_samples[lp_idx] = acc;
-        }
-    }
-
-    // HOT PATH: 禁用日志
-    // LOG_DEBUG << "Group pair " << logical_pair_idx << " (ring " << ring_pair_idx << ") ready, "
-    //          << gp_meta.total_samples.load(std::memory_order_relaxed) << " samples";
+    LOG_DEBUG << "Collected " << buffer.total_samples << " samples from buffer";
 }
 
-// =============================================================================
-// GROUP洗牌实现
-// =============================================================================
+void ImageNetLoaderDts::shuffle_samples(std::vector<uint32_t>& locations, uint64_t seed) {
+    /**
+     * 使用Fisher-Yates算法 + Philox RNG进行样本级打乱
+     *
+     * Philox RNG特点：
+     * - 计数器型RNG，种子由counter决定
+     * - 相同的counter总是产生相同的随机数序列
+     * - 适合并行和可复现的shuffle
+     */
 
-void ImageNetLoaderDts::perform_group_shuffle(GroupMeta& gmeta, uint64_t seed) {
-    uint32_t n = gmeta.total_samples.load(std::memory_order_relaxed);
+    uint32_t n = static_cast<uint32_t>(locations.size());
 
     if (n <= 1) {
-        return;  // 无需洗牌
+        return;  // 无需打乱
     }
 
-    // Fisher-Yates洗牌（使用Philox RNG�?
+    // Fisher-Yates洗牌（从后往前）
+    for (uint32_t i = n - 1; i > 0; --i) {
+        // 使用Philox生成随机数
+        uint32_t r[4];
+        tr::detail::philox_generate_4x32(seed, i, r);
+
+        // 取模获取随机索引
+        uint32_t j = r[0] % (i + 1);
+
+        // 交换
+        std::swap(locations[i], locations[j]);
+    }
+
+    LOG_DEBUG << "Shuffled " << n << " samples with seed=" << seed;
+}
+
+void ImageNetLoaderDts::perform_level2_shuffle(Dataset& ds, int epoch_id) {
+    /**
+     * Level 2随机：Block级随机（epoch开始时执行一次）
+     *
+     * 使用Philox RNG对epoch_block_order进行打乱
+     * - 种子: global_seed ^ (epoch_id << 32)
+     * - 打乱整个block顺序数组
+     */
+
+    if (ds.epoch_block_order.empty()) {
+        // 首次初始化：按顺序排列
+        ds.epoch_block_order.resize(ds.num_blocks);
+        for (uint32_t i = 0; i < ds.num_blocks; ++i) {
+            ds.epoch_block_order[i] = i;
+        }
+    }
+
+    // 生成Level 2种子（使用全局Generator的seed）
+    uint64_t base_seed = tr::get_default_generator().seed();
+    uint64_t seed = base_seed ^ (static_cast<uint64_t>(epoch_id) << 32);
+
+    // Fisher-Yates打乱block顺序
+    uint32_t n = static_cast<uint32_t>(ds.epoch_block_order.size());
     for (uint32_t i = n - 1; i > 0; --i) {
         uint32_t r[4];
         tr::detail::philox_generate_4x32(seed, i, r);
         uint32_t j = r[0] % (i + 1);
-        std::swap(gmeta.shuffled_locations[i], gmeta.shuffled_locations[j]);
+        std::swap(ds.epoch_block_order[i], ds.epoch_block_order[j]);
     }
 
-    LOG_DEBUG << "Group shuffle completed: " << n << " samples";
+    LOG_DEBUG << "Level 2 shuffle completed: " << n << " blocks, seed=" << seed;
 }
 
 // =============================================================================
-// 辅助方法：获取worker窗口
+// FULLY模式实现（一次性加载 + 流式洗牌）
 // =============================================================================
 
-GroupMeta& ImageNetLoaderDts::get_worker_window(int preproc_worker_id) {
-    Dataset& ds = *current_set_;
-    uint32_t num_group_pairs = static_cast<uint32_t>(ds.group_metas.size());
-    uint32_t window_idx = preproc_worker_id % num_group_pairs;
-    return ds.group_metas[window_idx];
+void ImageNetLoaderDts::shuffle_full_dataset(Dataset& ds, int epoch_id) {
+    /**
+     * FULLY模式：全局样本级洗牌（第二个及后续epoch）
+     *
+     * 流程：
+     * 1. 计算洗牌种子：base_seed ^ (epoch_id << 32)
+     * 2. 对full_shuffled_locations进行Fisher-Yates洗牌
+     * 3. 完成（不重新加载数据）
+     *
+     * 特点：
+     * - 零IO开销：数据已在内存中
+     * - O(n)复杂度：Fisher-Yates算法
+     * - 跨epoch一致性：使用epoch_id组合种子
+     */
+
+    if (ds.full_shuffled_locations.empty()) {
+        TR_VALUE_ERROR("full_shuffled_locations is empty, call load_full_dataset() first");
+    }
+
+    LOG_INFO << "Shuffling full dataset: " << ds.full_total_samples
+             << " samples, epoch_id=" << epoch_id;
+
+    // 1. 生成洗牌种子（与PARTIAL的Level 3一致）
+    uint64_t base_seed = tr::get_default_generator().seed();
+    uint64_t shuffle_seed = base_seed ^ (static_cast<uint64_t>(epoch_id) << 32);
+
+    // 2. Fisher-Yates全局洗牌
+    uint32_t n = ds.full_total_samples;
+    for (uint32_t i = n - 1; i > 0; --i) {
+        // 生成4个随机数（Philox算法）
+        uint32_t r[4];
+        tr::detail::philox_generate_4x32(shuffle_seed, i, r);
+
+        // 取模获取随机索引
+        uint32_t j = r[0] % (i + 1);
+
+        // 交换
+        std::swap(ds.full_shuffled_locations[i], ds.full_shuffled_locations[j]);
+    }
+
+    LOG_INFO << "Full dataset shuffled: " << n << " samples, seed=" << shuffle_seed;
 }
 
 // =============================================================================
-// 辅助方法：推进到下一个GROUP
+// Day 4: PARTIAL主循环（双缓冲+Join同步）
 // =============================================================================
 
-void ImageNetLoaderDts::advance_to_next_group(int preproc_worker_id) {
-    // TODO: 实现GROUP推进逻辑
-    // 这需要更复杂的状态管理，当前简化实�?
-    LOG_WARN << "advance_to_next_group not implemented yet";
+void ImageNetLoaderDts::load_one_buffer_batch(Buffer* buffer, Dataset& ds, uint32_t start_group_idx) {
+    /**
+     * 加载一个buffer（新架构V4.0核心）
+     *
+     * 流程：
+     * 1. 创建N个IO线程
+     * 2. 每个线程加载PF×1个blocks（静态分配）
+     * 3. Join所有线程（OS级内存屏障）
+     * 4. 收集样本位置
+     * 5. 打乱样本（Level 3 shuffle）
+     * 6. 标记buffer为READY
+     *
+     * 特点：
+     * - 零竞争：每个线程只操作自己的slot
+     * - Join同步：所有线程完成后join，无需原子操作
+     * - 批量打乱：整个buffer一起打乱
+     */
+
+    if (buffer == nullptr) {
+        TR_VALUE_ERROR("buffer is null");
+    }
+
+    if (buffer->state != BufferState::EMPTY) {
+        TR_VALUE_ERROR("buffer state is not EMPTY: " << static_cast<int>(buffer->state));
+    }
+
+    const int N = num_load_workers_;
+    const int PF = prefetch_factor_;
+
+    LOG_DEBUG << "Loading buffer: start_group_idx=" << start_group_idx
+              << ", N=" << N << ", PF=" << PF;
+
+    // 1. 设置buffer状态为LOADING
+    buffer->state = BufferState::LOADING;
+
+    // 2. 创建N个IO线程
+    std::vector<std::thread> io_threads;
+    io_threads.reserve(N);
+
+    for (int thread_id = 0; thread_id < N; ++thread_id) {
+        io_threads.emplace_back([this, thread_id, buffer, &ds, start_group_idx]() {
+            this->io_worker_func_batched(thread_id, *buffer, start_group_idx, ds);
+        });
+    }
+
+    // 3. Join所有线程（OS级内存屏障）
+    for (auto& thread : io_threads) {
+        thread.join();
+    }
+
+    // 4. Join后，主线程单线程操作（零竞争）
+    buffer->state = BufferState::LOADED;
+
+    // 5. 收集样本位置
+    collect_sample_locations(*buffer);
+
+    // 6. 打乱样本（Level 3 shuffle）
+    bool should_shuffle = ds.is_train ? shuffle_train_ : shuffle_val_;
+    if (should_shuffle) {
+        // 生成shuffle种子（使用全局Generator的seed）
+        // 使用: base_seed ^ (epoch_id << 32) ^ (start_group_idx << 16)
+        uint64_t base_seed = tr::get_default_generator().seed();
+        uint64_t seed = base_seed ^
+                        (static_cast<uint64_t>(current_epoch_id_.load(std::memory_order_relaxed)) << 32) ^
+                        (static_cast<uint64_t>(start_group_idx) << 16);
+
+        buffer->state = BufferState::SHUFFLING;
+        shuffle_samples(buffer->shuffled_locations, seed);
+    }
+
+    // 7. 标记buffer为READY
+    buffer->state = BufferState::READY;
+    buffer->consumed_count.store(0, std::memory_order_relaxed);
+
+    // 8. 设置本次加载的起始偏移量和buffer序号（用于PARTIAL模式跨buffer定位）
+    if (buffer->total_samples > 0) {
+        // 每次加载都更新load_start_offset（本次加载的起始位置）
+        buffer->load_start_offset = ds.cumulative_samples;
+
+        // 每次加载都更新buffer_seq
+        buffer->buffer_seq++;
+
+        LOG_DEBUG << "Buffer loaded: seq=" << buffer->buffer_seq
+                  << ", range=[" << buffer->load_start_offset
+                  << ", " << (buffer->load_start_offset + buffer->total_samples) << ")";
+    }
+
+    // 9. 更新累积样本数
+    ds.cumulative_samples += buffer->total_samples;
+
+    // 10. 设置reload_needed标志（表示这个buffer可以被重新加载了）
+    // 使用store(true)确保原子操作
+    buffer->reload_needed.store(true, std::memory_order_release);
+
+    LOG_DEBUG << "Buffer loaded and ready: " << buffer->total_samples
+              << " samples, seq=" << buffer->buffer_seq
+              << ", load_start_offset=" << buffer->load_start_offset;
+}
+
+void ImageNetLoaderDts::load_one_buffer_batch_fully(Dataset& ds, uint32_t buffer_seq) {
+    /**
+     * FULLY模式：加载单个buffer（PARTIAL的扩展版）
+     *
+     * 流程（与PARTIAL的load_one_buffer_batch完全相同）：
+     * 1. 创建N个IO线程
+     * 2. 每个线程加载PF×1个blocks（静态分配）
+     * 3. Join所有线程（OS级内存屏障）
+     * 4. 收集样本位置
+     * 5. 打乱样本（Level 3 shuffle）
+     * 6. 标记buffer为READY
+     *
+     * 唯一差异：
+     * - PARTIAL: 加载到Buffer* (buffer_A或buffer_B)
+     * - FULLY: 加载到Dataset::BufferMeta& (buffer_metas[buffer_seq])
+     */
+
+    const int N = num_load_workers_;
+    const int PF = prefetch_factor_;
+    int blocks_per_buffer = N * PF;
+
+    LOG_DEBUG << "Loading FULLY buffer " << buffer_seq
+              << ", N=" << N << ", PF=" << PF;
+
+    // 检查buffer_seq是否有效
+    if (buffer_seq >= ds.buffer_metas.size()) {
+        TR_VALUE_ERROR("buffer_seq " << buffer_seq << " >= buffer_metas.size() " << ds.buffer_metas.size());
+    }
+
+    Dataset::BufferMeta& buffer_meta = ds.buffer_metas[buffer_seq];
+
+    // 计算当前buffer包含的blocks范围
+    int start_block = buffer_seq * blocks_per_buffer;
+    int end_block = std::min(start_block + blocks_per_buffer, static_cast<int>(ds.num_blocks));
+    int blocks_in_this_buffer = end_block - start_block;
+
+    if (blocks_in_this_buffer == 0) {
+        // 没有blocks需要加载
+        buffer_meta.ready->store(true, std::memory_order_release);
+        return;
+    }
+
+    // 准备slot_metas
+    buffer_meta.slot_metas.clear();
+    buffer_meta.slot_metas.resize(blocks_in_this_buffer);
+
+    // 准备临时Buffer用于加载
+    Buffer temp_buffer;
+    temp_buffer.data = ds.full_arena + static_cast<size_t>(buffer_seq) * blocks_per_buffer * block_size_;
+    temp_buffer.slot_metas = buffer_meta.slot_metas;
+    temp_buffer.shuffled_locations.clear();
+
+    // 1. 创建N个IO线程
+    std::vector<std::thread> io_threads;
+    io_threads.reserve(N);
+
+    for (int thread_id = 0; thread_id < N; ++thread_id) {
+        io_threads.emplace_back([this, thread_id, start_block, end_block, &temp_buffer, &ds, buffer_seq, N]() {
+            FileHandle file(ds.file_path);
+
+            // 当前线程负责的blocks（stride为N）
+            for (int block_seq = start_block + thread_id; block_seq < end_block; block_seq += N) {
+                // 获取真实block ID（经过Level 2 shuffle）
+                uint32_t block_id = ds.epoch_block_order[block_seq];
+
+                // 计算目标地址（在buffer内的相对位置）
+                int local_block_seq = block_seq - start_block;
+                uint8_t* dst = temp_buffer.data + static_cast<size_t>(local_block_seq) * block_size_;
+
+                // 执行I/O
+                read_block_native(file, block_id, dst);
+
+                // 解析元数据
+                parse_block_meta(local_block_seq, dst, ds, temp_buffer.slot_metas[local_block_seq]);
+            }
+        });
+    }
+
+    // 2. Join所有线程（OS级内存屏障）
+    for (auto& thread : io_threads) {
+        thread.join();
+    }
+
+    // 3. 将填充好的slot_metas复制回buffer_meta
+    buffer_meta.slot_metas = temp_buffer.slot_metas;
+
+    // 4. 同时填充ds.full_slot_metas（用于后续epoch的全局shuffle复用）
+    for (int i = 0; i < blocks_in_this_buffer; ++i) {
+        int global_block_idx = start_block + i;
+        ds.full_slot_metas[global_block_idx] = buffer_meta.slot_metas[i];
+    }
+
+    // 5. 收集样本位置
+    collect_sample_locations(temp_buffer);
+    buffer_meta.shuffled_locations = temp_buffer.shuffled_locations;
+    buffer_meta.total_samples = temp_buffer.total_samples;
+
+    // 6. 设置buffer的load_start_offset和start_block
+    if (ds.cumulative_samples == 0) {
+        buffer_meta.load_start_offset = 0;
+    } else {
+        buffer_meta.load_start_offset = ds.cumulative_samples;
+    }
+    buffer_meta.start_block = start_block;
+
+    // 7. 更新累积样本数
+    ds.cumulative_samples += buffer_meta.total_samples;
+
+    // 8. 打乱样本（Level 3 shuffle）
+    bool should_shuffle = ds.is_train ? shuffle_train_ : shuffle_val_;
+    if (should_shuffle) {
+        // 生成shuffle种子
+        uint64_t base_seed = tr::get_default_generator().seed();
+        uint64_t seed = base_seed ^
+                        (static_cast<uint64_t>(current_epoch_id_.load(std::memory_order_relaxed)) << 32) ^
+                        (static_cast<uint64_t>(buffer_seq) << 16);
+
+        shuffle_samples(buffer_meta.shuffled_locations, seed);
+    }
+
+    // 9. 标记buffer为READY
+    buffer_meta.ready->store(true, std::memory_order_release);
+
+    LOG_INFO << "FULLY buffer " << buffer_seq << " READY: "
+             << buffer_meta.total_samples << " samples (offset=" << buffer_meta.load_start_offset << ")";
+}
+
+void ImageNetLoaderDts::load_next_buffer() {
+    /**
+     * 加载下一个buffer（姜总工的同步设计）
+     *
+     * 流程：
+     * 1. 找到当前ready_buffer和下一个buffer
+     * 2. 同步加载下一个buffer
+     * 3. 更新ready_buffer指针
+     * 4. 重置旧的buffer为EMPTY
+     *
+     * 注意：不需要等待consumed_count，因为每个worker静态分配，读完后自动退出
+     */
+
+    if (current_set_ == nullptr) {
+        TR_VALUE_ERROR("current_set_ is null");
+    }
+
+    // FULLY模式：加载下一个buffer（与PARTIAL相同的机制）
+    if (current_set_->mode == LoadMode::FULLY) {
+        // 检查是否还有更多buffer
+        size_t next_buffer_seq = current_set_->current_ready_buffer_seq + 1;
+
+        if (next_buffer_seq >= current_set_->buffer_metas.size()) {
+            // 没有更多buffer了
+            LOG_DEBUG << "FULLY mode: no more buffers to load";
+            current_set_->is_last_buffer = true;
+            return;
+        }
+
+        LOG_INFO << "FULLY mode: advancing to next buffer " << next_buffer_seq;
+
+        // ✅ 关键修复：检查下一个buffer是否已经是ready状态（第二个epoch情况）
+        if (current_set_->buffer_metas[next_buffer_seq].ready->load(std::memory_order_acquire)) {
+            // 下一个buffer已经是ready（数据已在内存中），只需切换指针
+            LOG_INFO << "FULLY mode: buffer " << next_buffer_seq << " already loaded (reusing existing data)";
+        } else {
+            // 下一个buffer未ready，需要加载
+            load_one_buffer_batch_fully(*current_set_, next_buffer_seq);
+            LOG_INFO << "FULLY mode: buffer " << next_buffer_seq << " loaded from storage";
+        }
+
+        // 更新当前buffer序号
+        current_set_->current_ready_buffer_seq = next_buffer_seq;
+
+        LOG_INFO << "FULLY mode: now reading from buffer " << next_buffer_seq;
+        return;
+    }
+
+    // 在共享缓冲区模式下，使用共享缓冲区指针
+    Buffer* actual_buffer_A = &current_set_->buffer_A;
+    Buffer* actual_buffer_B = &current_set_->buffer_B;
+    if (use_shared_buffers_) {
+        actual_buffer_A = &shared_buffer_A_;
+        actual_buffer_B = &shared_buffer_B_;
+    }
+
+    // 1. 找到当前ready_buffer和下一个buffer
+    Buffer* current_buffer = current_set_->ready_buffer;
+    Buffer* next_buffer = nullptr;
+
+    if (current_buffer == actual_buffer_A) {
+        next_buffer = actual_buffer_B;
+    } else if (current_buffer == actual_buffer_B) {
+        next_buffer = actual_buffer_A;
+    } else {
+        TR_VALUE_ERROR("Invalid ready_buffer pointer");
+    }
+
+    // 2. 检查是否还有更多groups需要加载
+    if (!has_more_buffers()) {
+        // 没有更多数据了
+        LOG_INFO << "No more buffers to load, epoch completed";
+        current_set_->is_last_buffer = true;
+        return;
+    }
+
+    // 3. 计算下一个group索引
+    const int N = num_load_workers_;
+    const int PF = prefetch_factor_;
+    uint32_t groups_per_buffer = PF * N;
+    uint32_t start_group_idx = current_set_->next_start_group_idx;
+
+    // 4. 检查是否已加载所有samples（更准确的判断）
+    if (current_set_->cumulative_samples >= current_set_->num_samples) {
+        // 所有samples都已加载
+        LOG_WARN << "No more samples to load, marking as last buffer";
+        current_set_->is_last_buffer = true;
+        return;
+    }
+
+    // 5. 更新下一个buffer的起始索引
+    current_set_->next_start_group_idx += groups_per_buffer;
+
+    // 6. 同步加载下一个buffer（JOIN完成）
+    LOG_INFO << "Loading next buffer: "
+             << (next_buffer == actual_buffer_A ? "A" : "B")
+             << ", start_group_idx=" << start_group_idx;
+
+    load_one_buffer_batch(next_buffer, *current_set_, start_group_idx);
+
+    LOG_INFO << "Next buffer loaded: "
+             << (next_buffer == actual_buffer_A ? "A" : "B")
+             << ", total_samples=" << next_buffer->total_samples
+             << ", range=[" << next_buffer->load_start_offset
+             << ", " << (next_buffer->load_start_offset + next_buffer->total_samples) << ")";
+
+    // 7. 更新ready_buffer指针
+    current_set_->ready_buffer = next_buffer;
+
+    // 8. 现在重置旧的buffer为EMPTY
+    LOG_INFO << "Resetting old buffer to EMPTY: "
+             << (current_buffer == actual_buffer_A ? "A" : "B");
+    current_buffer->reset();
+}
+
+bool ImageNetLoaderDts::has_more_buffers() const {
+    /**
+     * 检查是否还有更多buffer需要加载
+     */
+    if (current_set_ == nullptr) {
+        return false;
+    }
+
+    if (current_set_->mode == LoadMode::PARTIAL) {
+        // PARTIAL模式：检查是否已经标记为最后一个buffer
+        if (current_set_->is_last_buffer) {
+            return false;
+        }
+
+        // 检查是否已加载所有samples（更准确的判断）
+        if (current_set_->cumulative_samples >= current_set_->num_samples) {
+            return false;
+        }
+
+        return true;
+    } else {
+        // FULLY模式：与PARTIAL模式相同的逻辑（多buffer版本）
+        // 检查是否还有更多buffer需要加载
+        size_t current_buffer_seq = current_set_->current_ready_buffer_seq;
+
+        if (current_buffer_seq + 1 >= current_set_->buffer_metas.size()) {
+            // 已经是最后一个buffer了
+            return false;
+        }
+
+        // 检查是否已加载所有samples
+        if (current_set_->cumulative_samples >= current_set_->num_samples) {
+            return false;
+        }
+
+        return true;
+    }
+}
+
+// =============================================================================
+// Day 5: FULLY模式改造
+// =============================================================================
+
+void ImageNetLoaderDts::load_full_dataset(Dataset& ds) {
+    /**
+     * FULLY模式：一次性加载整个数据集
+     *
+     * 流程：
+     * 1. 创建N个IO线程
+     * 2. 每个线程加载num_blocks/N个blocks
+     * 3. Join所有线程
+     * 4. 收集样本位置
+     * 5. 打乱样本
+     * 6. 标记为READY
+     */
+
+    if (ds.full_arena == nullptr) {
+        TR_VALUE_ERROR("FULLY mode arena not allocated");
+    }
+
+    const int N = num_load_workers_;
+
+    LOG_INFO << "Loading full dataset: " << ds.num_blocks << " blocks with " << N << " workers";
+
+    // 1. 创建N个IO线程
+    // 注意：FULLY模式不使用io_worker_func_batched，因为它的slot布局不适合一次性加载所有blocks
+    // 相反，我们直接在这里实现简单的stride加载
+
+    std::vector<std::thread> io_threads;
+    io_threads.reserve(N);
+
+    // 2. 每个线程负责stride为N的blocks
+    // Thread i加载: i, i+N, i+2N, ...
+    for (int thread_id = 0; thread_id < N; ++thread_id) {
+        io_threads.emplace_back([this, thread_id, N, &ds]() {
+            FileHandle file(ds.file_path);
+
+            // 遍历所有属于这个线程的blocks
+            for (uint32_t block_seq = thread_id; block_seq < ds.num_blocks; block_seq += N) {
+                // 获取真实block ID（经过Level 2 shuffle）
+                uint32_t block_id = ds.epoch_block_order[block_seq];
+
+                // 计算目标地址（block_seq连续排列）
+                uint8_t* dst = ds.full_arena + static_cast<size_t>(block_seq) * block_size_;
+
+                // 执行I/O
+                read_block_native(file, block_id, dst);
+
+                // 解析元数据到slot_metas[block_seq]
+                parse_block_meta(block_seq, dst, ds, ds.full_slot_metas[block_seq]);
+            }
+
+            LOG_DEBUG << "IO worker " << thread_id << " finished";
+        });
+    }
+
+    // 3. Join所有线程
+    for (auto& thread : io_threads) {
+        thread.join();
+    }
+
+    // 4. 收集样本位置到Dataset
+    // 创建临时Buffer来复用collect_sample_locations函数
+    Buffer temp_buffer_for_collect;
+    temp_buffer_for_collect.slot_metas = ds.full_slot_metas;
+    temp_buffer_for_collect.shuffled_locations = ds.full_shuffled_locations;
+    collect_sample_locations(temp_buffer_for_collect);
+    ds.full_shuffled_locations = temp_buffer_for_collect.shuffled_locations;
+    ds.full_total_samples = temp_buffer_for_collect.total_samples;
+
+    // 5. 打乱样本（Level 3 shuffle）
+    bool should_shuffle = ds.is_train ? shuffle_train_ : shuffle_val_;
+    if (should_shuffle) {
+        // 使用全局Generator的seed
+        uint64_t base_seed = tr::get_default_generator().seed();
+        uint64_t seed = base_seed ^
+                        (static_cast<uint64_t>(current_epoch_id_.load(std::memory_order_relaxed)) << 32);
+        shuffle_samples(ds.full_shuffled_locations, seed);
+    }
+
+    LOG_INFO << "Full dataset loaded: " << ds.full_total_samples << " samples";
+}
+
+void ImageNetLoaderDts::perform_incremental_shuffle(Dataset::BufferMeta& buffer_meta, uint32_t buffer_seq) {
+    /**
+     * 对单个buffer进行增量shuffle
+     */
+
+    bool should_shuffle = current_set_->is_train ? shuffle_train_ : shuffle_val_;
+    if (!should_shuffle) {
+        return;  // 不需要shuffle
+    }
+
+    if (buffer_meta.shuffled_locations.size() <= 1) {
+        return;  // 样本太少，无需shuffle
+    }
+
+    // 生成shuffle种子
+    uint64_t base_seed = tr::get_default_generator().seed();
+    uint64_t seed = base_seed ^
+                    (static_cast<uint64_t>(current_epoch_id_.load(std::memory_order_relaxed)) << 32) ^
+                    (static_cast<uint64_t>(buffer_seq) << 16);
+
+    // 使用shuffle_samples函数
+    shuffle_samples(buffer_meta.shuffled_locations, seed);
+
+    LOG_DEBUG << "Incremental shuffle: buffer " << buffer_seq << ", " << buffer_meta.shuffled_locations.size() << " samples";
+}
+
+// =============================================================================
+// CRC-32验证（沿用旧版实现）
+// =============================================================================
+
+bool ImageNetLoaderDts::verify_dts_crc(const std::string& file_path) const {
+    LOG_INFO << "Verifying CRC-32 for: " << file_path;
+
+    auto start_time = std::chrono::steady_clock::now();
+
+    // 1. 打开文件
+    std::ifstream file(file_path, std::ios::binary);
+    if (!file) {
+        TR_FILE_NOT_FOUND("Cannot open DTS file for CRC verification: " << file_path);
+    }
+
+    // 2. 读取文件头(16MB)
+    constexpr size_t HEADER_SIZE = 16 * 1024 * 1024;  // 16 MB
+    std::vector<uint8_t> header(HEADER_SIZE);
+    file.read(reinterpret_cast<char*>(header.data()), HEADER_SIZE);
+    if (!file) {
+        TR_VALUE_ERROR("Failed to read DTS header (file too small?): " << file_path);
+    }
+
+    // 3. 解析CRC字段(offset 140, 根据DtsHeader结构)
+    constexpr size_t CRC_OFFSET = 140;  // DtsHeader.crc_code在结构体中的偏移
+    uint32_t stored_crc;
+    std::memcpy(&stored_crc, header.data() + CRC_OFFSET, sizeof(uint32_t));
+
+    LOG_INFO << "Stored CRC-32: 0x" << std::hex << stored_crc << std::dec;
+
+    // 4. 计算剩余数据的CRC-32(跳过16MB文件头)
+    uLong computed_crc = crc32(0L, Z_NULL, 0);  // 初始化CRC
+
+    constexpr size_t BUFFER_SIZE = 1024 * 1024;  // 1 MB缓冲区
+    std::vector<uint8_t> buffer(BUFFER_SIZE);
+    size_t total_bytes = 0;
+
+    LOG_INFO << "Computing CRC-32 for data payload (this may take a while)...";
+
+    while (file) {
+        file.read(reinterpret_cast<char*>(buffer.data()), BUFFER_SIZE);
+        std::streamsize bytes_read = file.gcount();
+
+        if (bytes_read > 0) {
+            computed_crc = crc32(computed_crc, buffer.data(), bytes_read);
+            total_bytes += bytes_read;
+        }
+
+        // 每100MB打印一次进度
+        if (total_bytes % (100 * 1024 * 1024) < BUFFER_SIZE) {
+            LOG_INFO << "CRC verification progress: "
+                     << (total_bytes / (1024 * 1024)) << " MB";
+        }
+    }
+
+    auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::steady_clock::now() - start_time
+    ).count();
+
+    LOG_INFO << "Computed CRC-32: 0x" << std::hex << computed_crc << std::dec
+             << " (verified " << (total_bytes / (1024 * 1024)) << " MB in "
+             << elapsed << " s)";
+
+    // 5. 比对CRC并返回结果
+    if (computed_crc != stored_crc) {
+        LOG_ERROR << "CRC-32 verification FAILED for: " << file_path
+                  << "\n  Expected: 0x" << std::hex << stored_crc
+                  << "\n  Computed: 0x" << computed_crc << std::dec
+                  << "\n\nPossible causes:\n"
+                  << "  1. Incomplete download or transfer\n"
+                  << "  2. Disk corruption\n"
+                  << "  3. File was modified after creation\n"
+                  << "Please re-download or regenerate the DTS file.";
+        return false;
+    }
+
+    LOG_INFO << "[PASS] CRC-32 verification PASSED";
+    return true;
 }
 
 } // namespace tr

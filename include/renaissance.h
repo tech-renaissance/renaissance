@@ -48,6 +48,7 @@
 #endif
 
 #include "renaissance/base/rng.h"
+#include "renaissance/base/global_registry.h"
 
 #ifdef TR_USE_LIBCURL
 #include "renaissance/base/downloader.h"
@@ -58,11 +59,17 @@
 #include "renaissance/data/storage.h"
 #include "renaissance/data/tensor.h"
 // V3.8.0 新版DataLoader
-#include "renaissance/data/sample_window.h"
 #include "renaissance/data/data_loader.h"
 #include "renaissance/data/imagenet_loader.h"
 #include "renaissance/data/imagenet_loader_dts.h"
-#include "renaissance/data/preprocessor_emulator.h"
+#include "renaissance/data/imagenet_loader_raw.h"
+#include "renaissance/data/mnist_loader_dts.h"
+#include "renaissance/data/mnist_loader_raw.h"
+#include "renaissance/data/cifar_loader_dts.h"
+#include "renaissance/data/cifar_loader_raw.h"
+#include "renaissance/data/preprocessor.h"
+// V3.9.0 公共组件
+#include "renaissance/data/file_handle.h"
 
 // Device
 #include "renaissance/device/device.h"

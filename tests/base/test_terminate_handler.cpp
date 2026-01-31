@@ -20,9 +20,6 @@ void test_simple_exception() {
 
     // 直接抛出异常，不写try-catch
     TR_VALUE_ERROR("Test exception with no try-catch: x=" << 42 << ", y=" << 3.14);
-
-    // 下面不会执行
-    std::cout << "This line should never be printed!" << std::endl;
 }
 
 // 测试2：Context Chain（多层调用）

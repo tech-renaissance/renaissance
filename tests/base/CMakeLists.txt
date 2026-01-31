@@ -52,6 +52,9 @@ add_executable(test_cpu_arena test_cpu_arena.cpp)
 
 add_executable(test_memory_plan test_memory_plan.cpp)
 
+# 创建GlobalRegistry测试可执行文件
+add_executable(test_global_registry test_global_registry.cpp)
+
 # 创建Downloader测试可执行文件（需要libcurl）
 if(TR_USE_LIBCURL)
     add_executable(test_downloader test_downloader.cpp)
@@ -97,6 +100,10 @@ set_target_properties(test_memory_plan PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/base
 )
 
+set_target_properties(test_global_registry PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/base
+)
+
 if(TR_USE_LIBCURL)
     set_target_properties(test_downloader PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/base
@@ -138,6 +145,9 @@ if(WIN32)
     set_target_properties(test_memory_plan PROPERTIES
         WIN32_EXECUTABLE FALSE
     )
+    set_target_properties(test_global_registry PROPERTIES
+        WIN32_EXECUTABLE FALSE
+    )
     if(TR_USE_LIBCURL)
         set_target_properties(test_downloader PROPERTIES
             WIN32_EXECUTABLE FALSE
@@ -164,6 +174,7 @@ if(MSVC)
     target_compile_options(test_arena PRIVATE /W4 /utf-8)
     target_compile_options(test_cpu_arena PRIVATE /W4 /utf-8)
     target_compile_options(test_memory_plan PRIVATE /W4 /utf-8)
+    target_compile_options(test_global_registry PRIVATE /W4 /utf-8)
     if(TR_USE_LIBCURL)
         target_compile_options(test_downloader PRIVATE /W4 /utf-8)
     endif()
@@ -180,6 +191,7 @@ else()
     target_compile_options(test_arena PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(test_cpu_arena PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(test_memory_plan PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(test_global_registry PRIVATE -Wall -Wextra -Wpedantic)
     if(TR_USE_LIBCURL)
         target_compile_options(test_downloader PRIVATE -Wall -Wextra -Wpedantic)
     endif()
@@ -200,6 +212,7 @@ target_compile_definitions(test_memory_alignment PRIVATE TR_LOG_LEVEL=0)
 target_compile_definitions(test_arena PRIVATE TR_LOG_LEVEL=0)
 target_compile_definitions(test_cpu_arena PRIVATE TR_LOG_LEVEL=0)
 target_compile_definitions(test_memory_plan PRIVATE TR_LOG_LEVEL=0)
+target_compile_definitions(test_global_registry PRIVATE TR_LOG_LEVEL=0)
 if(TR_USE_LIBCURL)
     target_compile_definitions(test_downloader PRIVATE TR_LOG_LEVEL=0)
 endif()
@@ -218,6 +231,7 @@ target_link_libraries(test_memory_alignment PRIVATE renaissance)
 target_link_libraries(test_arena PRIVATE renaissance)
 target_link_libraries(test_cpu_arena PRIVATE renaissance)
 target_link_libraries(test_memory_plan PRIVATE renaissance)
+target_link_libraries(test_global_registry PRIVATE renaissance)
 if(TR_USE_LIBCURL)
     target_link_libraries(test_downloader PRIVATE renaissance)
 endif()

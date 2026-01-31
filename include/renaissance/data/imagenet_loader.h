@@ -44,7 +44,8 @@ public:
         const std::string& val_path,
         bool shuffle_train = true,
         bool shuffle_val = false,
-        bool skip_first = false) = 0;
+    bool skip_first = false,
+    bool verify_crc = false) = 0;
 
     // =========================================================================
     // 数据集信息查�?

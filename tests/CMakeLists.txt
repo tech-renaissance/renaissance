@@ -143,6 +143,42 @@ else()
 endif()
 
 # ============================================================================
+# 包含simd子目录（SIMD性能测试）
+# ============================================================================
+
+# 注意：simd测试当前已开启
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/simd AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/simd)
+    add_subdirectory(simd)
+    message(STATUS "Including simd tests")
+else()
+    message(STATUS "SIMD tests directory not found")
+endif()
+
+# ============================================================================
+# 包含numa子目录（NUMA特性测试）
+# ============================================================================
+
+# 注意：numa测试当前已开启
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/numa AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/numa)
+    add_subdirectory(numa)
+    message(STATUS "Including numa tests")
+else()
+    message(STATUS "NUMA tests directory not found")
+endif()
+
+# ============================================================================
+# 包含loading子目录（快速二进制文件加载性能测试）
+# ============================================================================
+
+# 注意：loading测试当前已开启
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/loading AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/loading)
+    add_subdirectory(loading)
+    message(STATUS "Including loading tests")
+else()
+    message(STATUS "Loading tests directory not found")
+endif()
+
+# ============================================================================
 # 输出单元测试信息
 # ============================================================================
 

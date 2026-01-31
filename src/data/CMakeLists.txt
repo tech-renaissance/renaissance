@@ -4,9 +4,19 @@ set(DATA_SOURCES
     shape.cpp
     storage.cpp
     tensor.cpp
-    preprocessor_emulator.cpp
+    preprocessor.cpp
     # V3.8.0 新版DataLoader
     imagenet_loader_dts.cpp
+    # V3.9.0 MNIST和CIFAR DTS Loader
+    mnist_loader_dts.cpp
+    cifar_loader_dts.cpp
+    # V4.0.0 ImageNet Raw Loader
+    imagenet_loader_raw.cpp
+    # V4.0.0 MNIST and CIFAR Raw Loader
+    mnist_loader_raw.cpp
+    cifar_loader_raw.cpp
+    # V3.9.0 公共组件
+    file_handle.cpp
 )
 
 # 创建数据库静态库

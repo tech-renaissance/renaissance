@@ -4,12 +4,34 @@ set(DATA_TEST_SOURCES
     test_storage_ownership.cpp
     test_print.cpp
     # V4.0.0 DataLoader测试
-    test_dataloader_basic.cpp
-    test_reproducibility.cpp
-    test_reproducibility_epoch.cpp
     test_performance.cpp
-    test_val_only.cpp
-    test_dataloader_performance.cpp
+    # V4.0.0 PARTIAL模式测试
+    test_partial_mode.cpp
+    # V4.1.0 Preprocessor功能测试（decode + crop）
+    test_preproc.cpp
+    # V4.0.0 FULLY模式测试
+    test_fully_mode.cpp
+    # V4.0.0 可复现性测试（使用新的Preprocessor）
+    test_reproducibility.cpp
+    # V4.0.0 跨epoch可复现性测试（FULLY模式）
+    test_cross_epoch_reproducibility.cpp
+    # V3.8.3 CRC-32验证测试
+    test_crc_verification.cpp
+    # V3.9.0 MNIST和CIFAR DTS测试
+    test_mnist_dts.cpp
+    test_cifar_dts.cpp
+    # V4.0.0 MNIST和CIFAR RAW测试
+    test_mnist_raw.cpp
+    test_cifar_raw.cpp
+    # V4.0.0 MNIST和CIFAR RAW可复现性测试
+    test_mnist_cifar_raw_reproducibility.cpp
+    # V4.0.0 共享缓冲区测试
+    test_shared_buffers.cpp
+    # V1.0.0 ImageNet RAW Loader测试
+    test_raw_partial_mode.cpp
+    test_raw_fully_mode.cpp
+    test_raw_reproducibility.cpp
+    test_raw_cross_epoch_reproducibility.cpp
 )
 
 # 创建data测试可执行文件

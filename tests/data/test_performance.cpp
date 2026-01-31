@@ -98,23 +98,23 @@ int main(int argc, char* argv[]) {
 
         // 简单判断（不考虑平台差异）
         if (throughput_gb_s >= 2.0) {
-            std::cout << "\n✅ TEST PASSED: Throughput meets minimum target!" << std::endl;
+            std::cout << "\nTEST PASSED: Throughput meets minimum target!" << std::endl;
             return 0;
         } else {
-            std::cout << "\n⚠️  TEST WARNING: Throughput below target" << std::endl;
+            std::cout << "\nWARNING: Throughput below target" << std::endl;
             std::cout << "   Expected: ≥2.0 GB/s, Got: " << throughput_gb_s << " GB/s" << std::endl;
             return 0;  // 不算失败，因为可能是硬件限制
         }
 
     } catch (const TRException& e) {
-        std::cout << "\n✗ TEST FAILED with exception:" << std::endl;
+        std::cout << "\nTEST FAILED with exception:" << std::endl;
         std::cout << "  Type: " << e.type() << std::endl;
         std::cout << "  Message: " << e.message() << std::endl;
         std::cout << "\nFull what(): " << e.what() << std::endl;
         return 1;
 
     } catch (...) {
-        std::cout << "\n✗ TEST FAILED: Unknown exception" << std::endl;
+        std::cout << "\nTEST FAILED: Unknown exception" << std::endl;
         return 1;
     }
 

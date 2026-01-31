@@ -119,6 +119,7 @@ TR_DEFINE_EXCEPTION(ZeroDivisionError);
 TR_DEFINE_EXCEPTION(ShapeError);
 TR_DEFINE_EXCEPTION(DeviceError);
 TR_DEFINE_EXCEPTION(MemoryError);
+TR_DEFINE_EXCEPTION(TimeoutError);  // P0-2修复：添加超时异常
 
 #undef TR_DEFINE_EXCEPTION
 
