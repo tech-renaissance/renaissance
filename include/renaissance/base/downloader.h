@@ -13,6 +13,9 @@
 
 #include <string>
 #include <filesystem>
+#include <functional>
+
+#include <curl/curl.h>
 
 namespace tr {
 
@@ -107,10 +110,40 @@ public:
      */
     bool already_exists() const;
 
+    /**
+     * @brief 设置进度回调函数
+     *
+     * @param callback 进度回调函数，参数为 (已下载字节数, 总字节数, 0~100进度百分比)
+     *
+     * @note
+     * - 如果不设置，默认使用LOG_INFO每10%打印一次进度
+     * - 设置为nullptr禁用进度显示
+     * - 回调函数在下载线程中调用，应保持轻量
+     *
+     * @code
+     * // 自定义进度回调
+     * downloader.set_progress_callback([](size_t downloaded, size_t total, int percent) {
+     *     std::cout << "\rProgress: " << percent << "%" << std::flush;
+     * });
+     * @endcode
+     */
+    void set_progress_callback(std::function<void(size_t, size_t, int)> callback);
+
 private:
     std::string url_;               ///< 主下载URL
     std::string spare_url_;         ///< 备用下载URL
     bool file_already_exists_;      ///< 标记：文件是否已存在而跳过下载
+    std::function<void(size_t, size_t, int)> progress_callback_;  ///< 进度回调函数
+
+    /**
+     * @brief 进度数据结构（用于libcurl进度回调）
+     */
+    struct ProgressData {
+        size_t downloaded_bytes = 0;  ///< 已下载字节数
+        size_t total_bytes = 0;       ///< 总字节数
+        int last_reported_percent = -1;  ///< 上次报告的进度百分比
+        std::function<void(size_t, size_t, int)>* user_callback = nullptr;  ///< 用户回调指针
+    };
 
     /**
      * @brief 从URL中提取文件名
@@ -155,6 +188,27 @@ private:
      * - 将数据写入到ofstream中
      */
     static size_t write_callback(void* contents, size_t size, size_t nmemb, void* userp);
+
+    /**
+     * @brief libcurl进度回调函数（静态方法）
+     *
+     * @param clientp 用户指针（指向ProgressData）
+     * @param dltotal 总字节数（如果未知则为0）
+     * @param dlnow 已下载字节数
+     * @param ultotal 上传总字节数（不使用，为0）
+     * @param ulnow 已上传字节数（不使用，为0）
+     * @return 0表示继续下载，非0表示中止下载
+     *
+     * @details
+     * - libcurl会定期调用此函数报告下载进度
+     * - 调用用户回调函数（如果设置了）
+     * - 默认每10%打印一次进度到LOG_INFO
+     */
+    static int progress_callback(void* clientp,
+                                curl_off_t dltotal,
+                                curl_off_t dlnow,
+                                curl_off_t ultotal,
+                                curl_off_t ulnow);
 };
 
 } // namespace tr

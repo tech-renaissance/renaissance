@@ -85,6 +85,28 @@ public:
      */
     bool verify_dts_crc(const std::string& file_path) const override;
 
+    // =========================================================================
+    // 数据集下载
+    // =========================================================================
+
+    /**
+     * @brief 下载数据集（如果尚未下载）- 根据路径自动检测CIFAR类型
+     * @param save_path 数据集保存路径（路径名需包含'cifar-10'或'cifar-100'）
+     * @throws TRException 如果下载失败或无法检测数据集类型
+     * @note CIFAR-10 DTS文件：cifar10_train.dts, cifar10_test.dts
+     * @note CIFAR-100 DTS文件：cifar100_train.dts, cifar100_test.dts
+     */
+    void download(const std::string& save_path) override;
+
+    /**
+     * @brief 下载数据集（如果尚未下载）- 显式指定CIFAR类型
+     * @param save_path 数据集保存路径
+     * @param dataset_type 数据集类型（DatasetType::cifar_10 或 DatasetType::cifar_100）
+     * @throws TRException 如果下载失败或dataset_type无效
+     * @note 推荐使用此方法以明确指定要下载的数据集类型
+     */
+    void download(const std::string& save_path, DatasetType dataset_type);
+
 private:
     CifarLoaderDts() = default;
     ~CifarLoaderDts();

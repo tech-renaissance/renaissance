@@ -12,6 +12,7 @@
 #include "renaissance/base/philox.h"
 #include "renaissance/base/rng.h"
 
+#include <iostream>
 #include <fstream>
 #include <cstring>
 #include <thread>
@@ -1202,7 +1203,7 @@ void ImageNetLoaderRaw::begin_epoch(int epoch_id, bool is_train) {
             // 后续epoch：不清空buffer，只需全局重洗牌
             LOG_INFO << "FULLY mode: subsequent epoch " << epoch_id << ", shuffling existing data";
 
-            // ✅ 关键修复：重置worker状态（global_seq必须重置为0）
+            // 关键修复：重置worker状态（global_seq必须重置为0）
             for (int i = 0; i < num_preproc_workers_; ++i) {
                 worker_states_[i].consuming_buffer = nullptr;
                 worker_states_[i].local_idx = 0;
@@ -1210,7 +1211,7 @@ void ImageNetLoaderRaw::begin_epoch(int epoch_id, bool is_train) {
             }
             LOG_INFO << "RAW FULLY mode: worker states reset for epoch " << epoch_id;
 
-            // ✅ 关键修复：重置cumulative_samples（否则has_more_buffers会返回false）
+            // 关键修复：重置cumulative_samples（否则has_more_buffers会返回false）
             current_set_->cumulative_samples = 0;
             LOG_INFO << "RAW FULLY mode: cumulative_samples reset to 0 for epoch " << epoch_id;
 
@@ -1222,7 +1223,7 @@ void ImageNetLoaderRaw::begin_epoch(int epoch_id, bool is_train) {
                 LOG_INFO << "FULLY mode: subsequent epoch " << epoch_id << ", reusing existing data (no shuffle)";
             }
 
-            // ✅ 关键修复：将所有buffer标记为ready（数据已在内存中，无需重新加载）
+            // 关键修复：将所有buffer标记为ready（数据已在内存中，无需重新加载）
             for (size_t i = 0; i < current_set_->buffer_metas.size(); ++i) {
                 current_set_->buffer_metas[i].ready->store(true, std::memory_order_release);
                 LOG_INFO << "FULLY mode: buffer " << i << " marked as ready (epoch " << epoch_id << ")";
@@ -1747,7 +1748,7 @@ void ImageNetLoaderRaw::load_next_buffer() {
         uint32_t next_buffer_seq = current_set_->current_ready_buffer_seq + 1;
         LOG_INFO << "RAW FULLY mode: advancing to next buffer " << next_buffer_seq;
 
-        // ✅ 关键修复：检查下一个buffer是否已经是ready状态（第二个epoch情况）
+        // 关键修复：检查下一个buffer是否已经是ready状态（第二个epoch情况）
         if (current_set_->buffer_metas[next_buffer_seq].ready->load(std::memory_order_acquire)) {
             // 下一个buffer已经是ready（数据已在内存中），只需切换指针
             LOG_INFO << "RAW FULLY mode: buffer " << next_buffer_seq << " already loaded (reusing existing data)";
@@ -2231,6 +2232,18 @@ void ImageNetLoaderRaw::shuffle_full_dataset(RawDataset& ds, int epoch_id) {
     }
 
     LOG_INFO << "Full dataset shuffled: " << n << " samples, seed=" << shuffle_seed;
+}
+
+// =============================================================================
+// 数据集下载
+// =============================================================================
+
+void ImageNetLoaderRaw::download(const std::string& save_path) {
+    (void)save_path;  // Unused parameter
+
+    std::cout << "ImageNet dataset is not available for automatic download." << std::endl;
+    std::cout << "Please download the dataset from the official source:" << std::endl;
+    std::cout << "  https://image-net.org/" << std::endl;
 }
 
 } // namespace tr

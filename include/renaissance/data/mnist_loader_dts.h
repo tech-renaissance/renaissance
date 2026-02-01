@@ -82,6 +82,20 @@ public:
      */
     bool verify_dts_crc(const std::string& file_path) const override;
 
+    // =========================================================================
+    // 数据集下载
+    // =========================================================================
+
+    /**
+     * @brief 下载数据集（如果尚未下载）
+     * @param save_path 数据集保存路径
+     * @throws NotImplementedError 当前未实现
+     * @throws TRException 如果下载失败
+     * @todo 实现MNIST数据集下载功能
+     * @note MNIST官方下载地址：http://yann.lecun.com/exdb/mnist/
+     */
+    void download(const std::string& save_path) override;
+
 private:
     MnistLoaderDts() = default;
     ~MnistLoaderDts();

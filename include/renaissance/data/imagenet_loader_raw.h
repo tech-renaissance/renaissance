@@ -342,6 +342,20 @@ public:
     bool verify_dts_crc(const std::string& file_path) const override;
 
     // =========================================================================
+    // 数据集下载
+    // =========================================================================
+
+    /**
+     * @brief 下载数据集（如果尚未下载）
+     * @param save_path 数据集保存路径
+     * @throws NotImplementedError ImageNet数据集过大，不提供下载功能
+     * @throws TRException 如果下载失败
+     * @todo ImageNet数据集过大（约150GB），不建议提供自动下载功能
+     * @note ImageNet需要手动注册下载：https://www.image-net.org/download.php
+     */
+    void download(const std::string& save_path) override;
+
+    // =========================================================================
     // 数据集大小查询
     // =========================================================================
 

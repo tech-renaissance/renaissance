@@ -32,6 +32,10 @@ set(DATA_TEST_SOURCES
     test_raw_fully_mode.cpp
     test_raw_reproducibility.cpp
     test_raw_cross_epoch_reproducibility.cpp
+    # V3.10.0 SampleLoader测试
+    test_sample_loader.cpp
+    # V3.11.0 下载功能测试
+    test_download.cpp
 )
 
 # 创建data测试可执行文件

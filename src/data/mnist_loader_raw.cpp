@@ -13,11 +13,15 @@
     #endif
 #endif
 
+#include <iostream>
+#include <filesystem>
+
 #include "renaissance/data/mnist_loader_raw.h"
 #include "renaissance/base/logger.h"
 #include "renaissance/base/tr_exception.h"
 #include "renaissance/base/philox.h"
 #include "renaissance/base/rng.h"
+#include "renaissance/base/downloader.h"
 
 #include <fstream>
 #include <cstring>
@@ -26,6 +30,8 @@
 #include <chrono>
 #include <cstdint>
 #include <iostream>
+#include <filesystem>
+#include <vector>
 
 #ifdef _WIN32
     #include <windows.h>
@@ -493,6 +499,67 @@ bool MnistLoaderRaw::verify_dts_crc(const std::string& file_path) const {
     TR_NOT_IMPLEMENTED("CRC-32 verification is not supported for RAW MNIST loader"
                       << "\n  RAW files do not contain CRC-32 checksums"
                       << "\n  Use verify_raw_files() instead to verify file integrity");
+}
+
+// =============================================================================
+// 数据集下载
+// =============================================================================
+
+void MnistLoaderRaw::download(const std::string& save_path) {
+
+    // 定义必需的文件
+    const std::vector<std::string> targets = {
+        "train-images-idx3-ubyte.gz",
+        "train-labels-idx1-ubyte.gz",
+        "t10k-images-idx3-ubyte.gz",
+        "t10k-labels-idx1-ubyte.gz"
+    };
+
+    // 定义下载URL（首选 + 备用）
+    const std::string primary_url = "https://tech-renaissance.cn/download/mnist/";
+    const std::string spare_url = "https://ossci-datasets.s3.amazonaws.com/mnist/";
+
+    // 创建目录（如果不存在）
+    std::filesystem::create_directories(save_path);
+
+    // 检查哪些文件已存在
+    std::vector<std::string> missing_files;
+    for (const auto& target : targets) {
+        std::string full_path = save_path + "/" + target;
+        if (std::filesystem::exists(full_path)) {
+            std::cout << "File already exists at " << full_path << "\n";
+        } else {
+            missing_files.push_back(target);
+        }
+    }
+
+    // 如果所有文件都存在，直接返回
+    if (missing_files.empty()) {
+        std::cout << "MNIST dataset has been downloaded to " << save_path << "\n";
+        return;
+    }
+
+    // 下载缺失的文件
+    Downloader downloader;
+    downloader.set_url(primary_url, spare_url);
+
+    for (const auto& target : missing_files) {
+        std::string full_url = primary_url + target;
+        std::string full_spare_url = spare_url + target;
+        std::cout << "Downloading " << target << " from " << full_url << "\n";
+
+        downloader.set_url(full_url, full_spare_url);
+
+        bool success = downloader.download_to(save_path, target, false);  // 不覆盖
+        if (!success) {
+            TR_VALUE_ERROR("Failed to download " << target
+                          << "\n  Please download manually from:"
+                          << "\n    " << primary_url
+                          << "\n    " << spare_url);
+        }
+    }
+
+    std::cout << "MNIST dataset has been downloaded to " << save_path << "\n";
 }
 
 } // namespace tr

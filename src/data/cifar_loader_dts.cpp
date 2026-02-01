@@ -13,17 +13,22 @@
     #endif
 #endif
 
+#include <iostream>
+#include <filesystem>
+
 #include "renaissance/data/cifar_loader_dts.h"
 #include "renaissance/base/logger.h"
 #include "renaissance/base/tr_exception.h"
 #include "renaissance/base/philox.h"
 #include "renaissance/base/rng.h"
+#include "renaissance/base/downloader.h"
 
 #include <fstream>
 #include <cstring>
 #include <thread>
 #include <algorithm>
 #include <chrono>
+#include <filesystem>
 
 #ifdef _WIN32
     #include <windows.h>
@@ -554,6 +559,119 @@ int CifarLoaderDts::detect_dataset_type(const std::string& dts_path) {
                        << "\n  Expected: ' CIFAR10' or 'CIFAR100'"
                        << "\n  File: " << dts_path);
         return 0;  // Never reached
+    }
+}
+
+// =============================================================================
+// 数据集下载
+// =============================================================================
+
+void CifarLoaderDts::download(const std::string& save_path, DatasetType dataset_type) {
+
+    // 定义必需的DTS文件
+    const std::vector<std::string> targets_cifar10 = {
+        "cifar10_train.dts",
+        "cifar10_test.dts"
+    };
+
+    const std::vector<std::string> targets_cifar100 = {
+        "cifar100_train.dts",
+        "cifar100_test.dts"
+    };
+
+    // 定义下载URL（无备用URL）
+    const std::string primary_url_cifar10 = "https://tech-renaissance.cn/download/cifar-10/";
+    const std::string primary_url_cifar100 = "https://tech-renaissance.cn/download/cifar-100/";
+    const std::string spare_url = "";  // 无备用URL
+
+    // 创建目录（如果不存在）
+    std::filesystem::create_directories(save_path);
+
+    // 根据dataset_type选择下载哪个数据集
+    if (dataset_type == DatasetType::cifar_10) {
+        std::vector<std::string> missing_files;
+        for (const auto& target : targets_cifar10) {
+            std::string full_path = save_path + "/" + target;
+            if (std::filesystem::exists(full_path)) {
+                std::cout << "File already exists at " << full_path << "\n";
+            } else {
+                missing_files.push_back(target);
+            }
+        }
+
+        if (!missing_files.empty()) {
+            Downloader downloader;
+            downloader.set_url(primary_url_cifar10, spare_url);
+
+            for (const auto& target : missing_files) {
+                std::string full_url = primary_url_cifar10 + target;
+                std::cout << "Downloading " << target << " from " << full_url << "\n";
+
+                downloader.set_url(full_url, spare_url);
+
+                bool success = downloader.download_to(save_path, target, false);
+                if (!success) {
+                    TR_VALUE_ERROR("Failed to download " << target
+                                  << "\n  Please download manually from:"
+                                  << "\n    " << primary_url_cifar10);
+                }
+            }
+        }
+
+        std::cout << "CIFAR-10 dataset (DTS format) has been downloaded to " << save_path << "\n";
+
+    } else if (dataset_type == DatasetType::cifar_100) {
+        std::vector<std::string> missing_files;
+        for (const auto& target : targets_cifar100) {
+            std::string full_path = save_path + "/" + target;
+            if (std::filesystem::exists(full_path)) {
+                std::cout << "File already exists at " << full_path << "\n";
+            } else {
+                missing_files.push_back(target);
+            }
+        }
+
+        if (!missing_files.empty()) {
+            Downloader downloader;
+            downloader.set_url(primary_url_cifar100, spare_url);
+
+            for (const auto& target : missing_files) {
+                std::string full_url = primary_url_cifar100 + target;
+                std::cout << "Downloading " << target << " from " << full_url << "\n";
+
+                downloader.set_url(full_url, spare_url);
+
+                bool success = downloader.download_to(save_path, target, false);
+                if (!success) {
+                    TR_VALUE_ERROR("Failed to download " << target
+                                  << "\n  Please download manually from:"
+                                  << "\n    " << primary_url_cifar100);
+                }
+            }
+        }
+
+        std::cout << "CIFAR-100 dataset (DTS format) has been downloaded to " << save_path << "\n";
+
+    } else {
+        TR_VALUE_ERROR("Invalid dataset_type: " << static_cast<int>(dataset_type)
+                      << "\n  Expected: DatasetType::cifar_10 or DatasetType::cifar_100");
+    }
+
+}
+
+void CifarLoaderDts::download(const std::string& save_path) {
+    // 从路径中自动检测CIFAR类型（向后兼容）
+    std::string dirname = std::filesystem::path(save_path).filename().string();
+
+    if (dirname == "cifar-10") {
+        download(save_path, DatasetType::cifar_10);
+    } else if (dirname == "cifar-100") {
+        download(save_path, DatasetType::cifar_100);
+    } else {
+        TR_VALUE_ERROR("Invalid directory name: '" << dirname
+                      << "'\n  Expected: 'cifar-10' or 'cifar-100'"
+                      << "\n  Full path: " << save_path
+                      << "\n  Alternatively, use download(save_path, dataset_type) to explicitly specify dataset type");
     }
 }
 

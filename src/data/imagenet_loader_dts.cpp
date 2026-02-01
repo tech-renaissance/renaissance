@@ -12,6 +12,7 @@
 #include "renaissance/base/philox.h"
 #include "renaissance/base/rng.h"
 
+#include <iostream>
 #include <fstream>
 #include <cstring>
 #include <thread>
@@ -670,7 +671,7 @@ void ImageNetLoaderDts::begin_epoch(int epoch_id, bool is_train) {
             // 后续epoch：不清空buffer，只需全局重洗牌
             LOG_INFO << "FULLY mode: subsequent epoch " << epoch_id << ", shuffling existing data";
 
-            // ✅ 关键修复：重置worker状态（global_seq必须重置为0）
+            // 关键修复：重置worker状态（global_seq必须重置为0）
             for (int i = 0; i < num_preproc_workers_; ++i) {
                 worker_states_[i].consuming_buffer = nullptr;
                 worker_states_[i].local_idx = 0;
@@ -678,7 +679,7 @@ void ImageNetLoaderDts::begin_epoch(int epoch_id, bool is_train) {
             }
             LOG_INFO << "FULLY mode: worker states reset for epoch " << epoch_id;
 
-            // ✅ 关键修复：重置cumulative_samples（否则has_more_buffers会返回false）
+            // 关键修复：重置cumulative_samples（否则has_more_buffers会返回false）
             current_set_->cumulative_samples = 0;
             LOG_INFO << "FULLY mode: cumulative_samples reset to 0 for epoch " << epoch_id;
 
@@ -688,7 +689,7 @@ void ImageNetLoaderDts::begin_epoch(int epoch_id, bool is_train) {
                 shuffle_full_dataset(*current_set_, epoch_id);
             }
 
-            // ✅ 关键修复：将所有buffer标记为ready（数据已在内存中，无需重新加载）
+            // 关键修复：将所有buffer标记为ready（数据已在内存中，无需重新加载）
             for (size_t i = 0; i < current_set_->buffer_metas.size(); ++i) {
                 current_set_->buffer_metas[i].ready->store(true, std::memory_order_release);
                 LOG_INFO << "FULLY mode: buffer " << i << " marked as ready (epoch " << epoch_id << ")";
@@ -1650,7 +1651,7 @@ void ImageNetLoaderDts::load_next_buffer() {
 
         LOG_INFO << "FULLY mode: advancing to next buffer " << next_buffer_seq;
 
-        // ✅ 关键修复：检查下一个buffer是否已经是ready状态（第二个epoch情况）
+        // 关键修复：检查下一个buffer是否已经是ready状态（第二个epoch情况）
         if (current_set_->buffer_metas[next_buffer_seq].ready->load(std::memory_order_acquire)) {
             // 下一个buffer已经是ready（数据已在内存中），只需切换指针
             LOG_INFO << "FULLY mode: buffer " << next_buffer_seq << " already loaded (reusing existing data)";
@@ -1961,6 +1962,21 @@ bool ImageNetLoaderDts::verify_dts_crc(const std::string& file_path) const {
 
     LOG_INFO << "[PASS] CRC-32 verification PASSED";
     return true;
+}
+
+// =============================================================================
+// 数据集下载
+// =============================================================================
+
+void ImageNetLoaderDts::download(const std::string& save_path) {
+    (void)save_path;  // Unused parameter
+
+    std::cout << "ImageNet dataset in DTS format is not available for automatic download." << std::endl;
+    std::cout << "Please download the DTS files from the official source:" << std::endl;
+    std::cout << "  https://tech-renaissance.cn/download/imagenet/" << std::endl;
+    std::cout << "After downloading, place the .dts files in the following location:" << std::endl;
+    std::cout << "  " << save_path << "/imagenet_train_lv[0-3].dts" << std::endl;
+    std::cout << "  " << save_path << "/imagenet_val_lv[0-3].dts" << std::endl;
 }
 
 } // namespace tr

@@ -104,7 +104,7 @@ void Preprocessor::run(DataLoader& loader) {
     // Step 1.2：持久线程池模式（替代原来的创建-销毁模式）
     // =========================================================================
 
-    // ✅ 启动持久线程池（只执行一次）
+    // 启动持久线程池（只执行一次）
     start_worker_pool(loader);
 
     LOG_INFO << "Persistent worker pool started, entering main loop";
@@ -113,10 +113,10 @@ void Preprocessor::run(DataLoader& loader) {
         buffer_count++;
         LOG_INFO << "=== Buffer " << buffer_count << ": Notifying workers ===";
 
-        // ✅ 通知worker开始新buffer
+        // 通知worker开始新buffer
         notify_workers_new_buffer();
 
-        // ✅ 等待worker完成当前buffer
+        // 等待worker完成当前buffer
         wait_workers_complete_buffer();
 
         LOG_INFO << "=== Buffer " << buffer_count << ": All workers finished ===";
@@ -132,7 +132,7 @@ void Preprocessor::run(DataLoader& loader) {
 
     } while (true);
 
-    // ✅ 停止线程池
+    // 停止线程池
     stop_worker_pool();
 
     // 记录结束时间（整个epoch）
@@ -208,7 +208,7 @@ void Preprocessor::worker_func(int worker_id, DataLoader& loader) {
 
         // JPEG解码（如果启用）
         if (config_.jpeg_decode) {
-            // ✅ 复用持久handle（避免每次创建/销毁）
+            // 复用持久handle（避免每次创建/销毁）
             tjhandle handle = worker_decode_buffers_[worker_id].handle;
             if (handle) {
                 int width, height, subsamp, colorspace;
@@ -598,7 +598,7 @@ void Preprocessor::wait_workers_complete_buffer() {
 // ---------------------------------------------------------------------------
 
 void Preprocessor::worker_func_persistent(int worker_id, DataLoader& loader) {
-    // ✅ 修复：不直接调用worker_func()，而是实现持久循环逻辑
+    // 修复：不直接调用worker_func()，而是实现持久循环逻辑
 
     // 打开CSV日志文件（如果启用）
     std::ofstream log_file;

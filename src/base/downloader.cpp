@@ -18,6 +18,7 @@
 #include <filesystem>
 #include <sstream>
 #include <iomanip>
+#include <functional>
 
 namespace tr {
 
@@ -31,6 +32,7 @@ Downloader::Downloader()
     : url_()
     , spare_url_()
     , file_already_exists_(false)
+    , progress_callback_(nullptr)
 {
     // 全局初始化libcurl（仅第一次调用时生效）
     static bool curl_initialized = false;
@@ -149,6 +151,10 @@ bool Downloader::already_exists() const {
     return file_already_exists_;
 }
 
+void Downloader::set_progress_callback(std::function<void(size_t, size_t, int)> callback) {
+    progress_callback_ = callback;
+}
+
 //==============================================================================
 // 私有方法
 //==============================================================================
@@ -190,6 +196,10 @@ bool Downloader::download_impl(const std::string& url, const std::string& full_p
         return false;
     }
 
+    // 准备进度数据
+    ProgressData progress_data;
+    progress_data.user_callback = &progress_callback_;
+
     // 配置libcurl选项
     curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
     curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, Downloader::write_callback);
@@ -201,6 +211,9 @@ bool Downloader::download_impl(const std::string& url, const std::string& full_p
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, 1L);       // 验证SSL证书
     curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, 2L);       // 验证SSL主机
     curl_easy_setopt(curl, CURLOPT_USERAGENT, "renAIssance/3.6.12");  // 用户代理
+    curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);           // 启用进度回调
+    curl_easy_setopt(curl, CURLOPT_XFERINFOFUNCTION, Downloader::progress_callback);  // 进度回调
+    curl_easy_setopt(curl, CURLOPT_XFERINFODATA, &progress_data);  // 进度数据
 
     // 禁用信号（多线程安全）
     curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
@@ -252,6 +265,42 @@ size_t Downloader::write_callback(void* contents, size_t size, size_t nmemb, voi
     }
 
     return 0;  // 写入失败
+}
+
+int Downloader::progress_callback(void* clientp,
+                                   curl_off_t dltotal,
+                                   curl_off_t dlnow,
+                                   curl_off_t ultotal,
+                                   curl_off_t ulnow) {
+    (void)ultotal;  // Unused
+    (void)ulnow;     // Unused
+
+    ProgressData* progress = static_cast<ProgressData*>(clientp);
+
+    // 如果不知道总大小，不显示进度
+    if (dltotal <= 0) {
+        return 0;  // 继续下载
+    }
+
+    // 计算进度百分比
+    int percent = static_cast<int>((dlnow * 100) / dltotal);
+
+    // 如果用户设置了自定义回调
+    if (progress->user_callback && *progress->user_callback) {
+        (*progress->user_callback)(static_cast<size_t>(dlnow),
+                                   static_cast<size_t>(dltotal),
+                                   percent);
+    } else {
+        // 默认：每10%打印一次进度
+        if (percent >= progress->last_reported_percent + 10 ||
+            percent == 100) {
+            LOG_INFO << "Downloading: " << percent << "%"
+                     << " (" << dlnow << " / " << dltotal << " bytes)";
+            progress->last_reported_percent = percent;
+        }
+    }
+
+    return 0;  // 继续下载
 }
 
 } // namespace tr

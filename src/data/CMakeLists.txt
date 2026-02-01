@@ -15,6 +15,8 @@ set(DATA_SOURCES
     # V4.0.0 MNIST and CIFAR Raw Loader
     mnist_loader_raw.cpp
     cifar_loader_raw.cpp
+    # V3.10.0 SampleLoader
+    sample_loader.cpp
     # V3.9.0 公共组件
     file_handle.cpp
 )

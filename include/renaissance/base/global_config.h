@@ -35,6 +35,14 @@ enum class StreamType : int32_t {
     comm_stream = 3      ///< 通信流（NCCL集合通信）
 };
 
+enum class DatasetType : int32_t {
+    no_dataset = 0,
+    imagenet = 1,
+    mnist = 2,
+    cifar_10 = 3,
+    cifar_100 = 4
+};
+
 /**
  * @brief 数据加载模式
  * @details 控制数据集的内存加载策略
@@ -52,3 +60,9 @@ enum class LoadMode {
 #define TR_TRANSFER_STREAM  tr::StreamType::transfer_stream
 #define TR_COMPUTE_STREAM   tr::StreamType::compute_stream
 #define TR_COMM_STREAM      tr::StreamType::comm_stream
+
+#define TR_NO_DATASET   tr::DatasetType::no_dataset
+#define TR_IMAGENET  tr::DatasetType::imagenet
+#define TR_MNIST   tr::DatasetType::mnist
+#define TR_CIFAR_10      tr::DatasetType::cifar_10
+#define TR_CIFAR_100      tr::DatasetType::cifar_100

@@ -3,7 +3,6 @@
 set(BASE_SOURCES
     logger.cpp
     tr_exception.cpp
-    global_registry.cpp
     device_type.cpp
     dtype.cpp
     memory_arena.cpp
