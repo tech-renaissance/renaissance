@@ -1700,6 +1700,7 @@ def generate_cmake_config(scene: str, deps: Dict, sys_info: Dict) -> str:
         "mimalloc": "mimalloc",       # vcpkg包名: mimalloc
         "zlib": "zlib",              # vcpkg包名: zlib
         "libcurl": "CURL",           # vcpkg包名: curl
+        "libarchive": "LIBARCHIVE",  # vcpkg包名: libarchive
         "libjpeg-turbo": "JPEG",     # vcpkg包名: libjpeg-turbo
         "stb": "STB",               # vcpkg包名: stb
         "simd": "Simd"              # vcpkg包名: simd
@@ -1722,6 +1723,7 @@ def generate_cmake_config(scene: str, deps: Dict, sys_info: Dict) -> str:
                     # Windows下使用packages目录，需要映射到实际的vcpkg包名
                     vcpkg_package_name = {
                         "libcurl": "curl",
+                        "libarchive": "libarchive",
                         "libjpeg-turbo": "libjpeg-turbo",
                         "onednn": "onednn",
                         "xnnpack": "xnnpack",
@@ -1749,6 +1751,7 @@ def generate_cmake_config(scene: str, deps: Dict, sys_info: Dict) -> str:
                         # 映射依赖名到vcpkg包名
                         vcpkg_package_name = {
                             "libcurl": "curl",
+                            "libarchive": "libarchive",
                             "libjpeg-turbo": "libjpeg-turbo",
                             "onednn": "onednn",
                             "xnnpack": "xnnpack",
@@ -1782,6 +1785,7 @@ def generate_cmake_config(scene: str, deps: Dict, sys_info: Dict) -> str:
                     # 检查packages目录
                     vcpkg_package_name = {
                         "libcurl": "curl",
+                        "libarchive": "libarchive",
                         "libjpeg-turbo": "libjpeg-turbo",
                         "onednn": "onednn",
                         "xnnpack": "xnnpack",
@@ -2141,6 +2145,8 @@ def get_installed_triplet(dep_name: str, sys_info: Dict) -> str:
         possible_names = ["onednn"]
     elif dep_name == "libcurl":
         possible_names = ["curl"]
+    elif dep_name == "libarchive":
+        possible_names = ["libarchive"]
     elif dep_name == "libjpeg-turbo":
         possible_names = ["libjpeg-turbo"]
     elif dep_name == "xnnpack":

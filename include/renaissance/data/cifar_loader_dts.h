@@ -1,10 +1,10 @@
 /**
  * @file cifar_loader_dts.h
- * @brief CIFAR-10/100数据加载器（DTS格式）- FULLY模式专用
+ * @brief CIFAR-10/100数据加载器（DTS格式�? FULLY模式专用
  * @version 1.0.0
  * @date 2026-01-23
- * @author 技术觉醒团队
- * @note 所属系统: data
+ * @author 技术觉醒团�?
+ * @note 所属系�? data
  */
 
 #pragma once
@@ -20,20 +20,20 @@ namespace tr {
 
 /**
  * @class CifarLoaderDts
- * @brief CIFAR-10/100数据加载器（DTS格式，FULLY模式）
+ * @brief CIFAR-10/100数据加载器（DTS格式，FULLY模式�?
  *
  * 核心特性：
  * - FULLY模式强制：一次性加载全部数据到内存
- * - 单线程IO：加载时间<1秒
+ * - 单线程IO：加载时�?1�?
  * - 零拷贝：直接返回内存指针给Preprocessor
- * - 样本级随机：Philox PRNG保证可复现性
+ * - 样本级随机：Philox PRNG保证可复现�?
  * - 自动检测：configure()时自动识别CIFAR-10还是CIFAR-100
  *
  * 数据集信息：
  * - 训练集：50,000样本
  * - 验证集：10,000样本
- * - 图像尺寸：32×32×3 (RGB)
- * - 样本大小：3072 bytes
+ * - 图像尺寸�?2×32×3 (RGB)
+ * - 样本大小�?072 bytes
  * - 总大小：~146 MB (train) + ~30 MB (val)
  */
 class CifarLoaderDts : public DataLoader {
@@ -54,13 +54,14 @@ public:
 
     void begin_epoch(int epoch_id, bool is_train) override;
     void end_epoch() override;
+    void reset_after_warmup() override;
     bool get_next_sample(int preproc_worker_id,
                          int32_t& label,
                          const uint8_t*& data_ptr,
                          size_t& data_size) override;
 
     // ========================================================================
-    // 数据集信息
+    // 数据集信�?
     // ========================================================================
 
     const char* dataset_name() const override {
@@ -78,20 +79,20 @@ public:
     // ========================================================================
 
     /**
-     * @brief 验证DTS文件的CRC-32完整性
+     * @brief 验证DTS文件的CRC-32完整�?
      * @param file_path DTS文件路径
      * @return true=验证通过, false=验证失败
-     * @override 实现基类DataLoader的纯虚函数
+     * @override 实现基类DataLoader的纯虚函�?
      */
     bool verify_dts_crc(const std::string& file_path) const override;
 
     // =========================================================================
-    // 数据集下载
+    // 数据集下�?
     // =========================================================================
 
     /**
-     * @brief 下载数据集（如果尚未下载）- 根据路径自动检测CIFAR类型
-     * @param save_path 数据集保存路径（路径名需包含'cifar-10'或'cifar-100'）
+     * @brief 下载数据集（如果尚未下载�? 根据路径自动检测CIFAR类型
+     * @param save_path 数据集保存路径（路径名需包含'cifar-10'�?cifar-100'�?
      * @throws TRException 如果下载失败或无法检测数据集类型
      * @note CIFAR-10 DTS文件：cifar10_train.dts, cifar10_test.dts
      * @note CIFAR-100 DTS文件：cifar100_train.dts, cifar100_test.dts
@@ -99,13 +100,32 @@ public:
     void download(const std::string& save_path) override;
 
     /**
-     * @brief 下载数据集（如果尚未下载）- 显式指定CIFAR类型
-     * @param save_path 数据集保存路径
-     * @param dataset_type 数据集类型（DatasetType::cifar_10 或 DatasetType::cifar_100）
+     * @brief 下载数据集（如果尚未下载�? 显式指定CIFAR类型
+     * @param save_path 数据集保存路�?
+     * @param dataset_type 数据集类型（DatasetType::cifar_10 �?DatasetType::cifar_100�?
      * @throws TRException 如果下载失败或dataset_type无效
-     * @note 推荐使用此方法以明确指定要下载的数据集类型
+     * @note 推荐使用此方法以明确指定要下载的数据集类�?
      */
     void download(const std::string& save_path, DatasetType dataset_type);
+
+    /**
+     * @brief Verify downloaded CIFAR DTS files using CRC-32 checksums
+     * @param save_path Dataset directory (where DTS files were downloaded)
+     * @param verbose Whether to print verification messages (default=false)
+     * @return true=verification passed, false=verification failed
+     * @throws TRException If file reading fails or cannot detect dataset type
+     * @note Verifies all DTS files by calling verify_dts_crc()
+     */
+    bool verify(const std::string& save_path, bool verbose = false) override;
+
+    /**
+     * @brief Verify downloaded CIFAR DTS files using CRC-32 checksums (explicit type)
+     * @param save_path Dataset directory (where DTS files were downloaded)
+     * @param dataset_type Dataset type (CIFAR-10 or CIFAR-100)
+     * @return true=verification passed, false=verification failed
+     * @throws TRException If file reading fails or dataset_type is invalid
+     */
+    bool verify(const std::string& save_path, DatasetType dataset_type, bool verbose = false);
 
 private:
     CifarLoaderDts() = default;
@@ -128,19 +148,19 @@ private:
         size_t num_samples = 0;
         size_t image_bytes = 3072;  // 32×32×3
 
-        // FULLY模式数据（一次性加载，保留在内存中）
+        // FULLY模式数据（一次性加载，保留在内存中�?
         uint8_t* labels_region = nullptr;   // 指向标签区域
         uint8_t* images_region = nullptr;   // 指向图像区域
-        size_t data_size = 0;               // 总数据大小（labels + images）
+        size_t data_size = 0;               // 总数据大小（labels + images�?
 
-        // Epoch状态
+        // Epoch状�?
         std::vector<uint32_t> epoch_sample_order;  // Level 2 shuffle后的顺序
         std::atomic<size_t> consumed_count{0};     // 已消费样本数
         int current_epoch_id = -1;
     };
 
     struct WorkerState {
-        size_t local_idx = 0;     // 该worker已消费的样本数
+        size_t local_idx = 0;     // 该worker已消费的样本�?
         uint64_t global_seq = 0;  // 全局序列号（统计用）
     };
 
@@ -149,7 +169,7 @@ private:
     // ========================================================================
 
     int detected_num_classes_ = 0;  // configure()时自动检测：10 or 100
-    bool configured_ = false;        // 是否已配置（防止重复配置）
+    bool configured_ = false;        // 是否已配置（防止重复配置�?
 
     Dataset* current_set_ = nullptr;
     Dataset train_set_;

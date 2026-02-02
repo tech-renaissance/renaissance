@@ -16,6 +16,8 @@
 #include <iostream>
 #include <cstdint>
 #include <filesystem>
+#include <map>
+#include <iomanip>
 
 #include "renaissance/data/cifar_loader_raw.h"
 #include "renaissance/base/logger.h"
@@ -23,6 +25,9 @@
 #include "renaissance/base/philox.h"
 #include "renaissance/base/rng.h"
 #include "renaissance/base/downloader.h"
+#include <zlib.h>
+#include <archive.h>
+#include <archive_entry.h>
 
 #include <fstream>
 #include <cstring>
@@ -280,6 +285,58 @@ void CifarLoaderRaw::end_epoch() {
     }
 
     LOG_INFO << "Epoch ended";
+}
+
+void CifarLoaderRaw::reset_after_warmup() {
+    /**
+     * 重置DataLoader状态（用于warmup和test_dataloader之后）
+     *
+     * 目的：将DataLoader重置到"刚刚加载完文件头"的状态
+     *
+     * 操作：
+     * 1. 释放FULLY模式分配的内存（train_set_.labels_region/images_region 和 val_set_...）
+     * 2. 重置worker状态
+     * 3. 保留文件头信息
+     */
+
+    LOG_INFO << "Resetting CIFAR RAW DataLoader state after warmup/test";
+
+    // 释放训练集FULLY模式内存
+    if (train_set_.labels_region != nullptr) {
+#ifdef _WIN32
+        VirtualFree(train_set_.labels_region, 0, MEM_RELEASE);
+#else
+        free(train_set_.labels_region);
+#endif
+        train_set_.labels_region = nullptr;
+        train_set_.images_region = nullptr;
+        train_set_.data_size = 0;
+        LOG_INFO << "Train set FULLY mode memory released";
+    }
+
+    // 释放验证集FULLY模式内存
+    if (val_set_.labels_region != nullptr) {
+#ifdef _WIN32
+        VirtualFree(val_set_.labels_region, 0, MEM_RELEASE);
+#else
+        free(val_set_.labels_region);
+#endif
+        val_set_.labels_region = nullptr;
+        val_set_.images_region = nullptr;
+        val_set_.data_size = 0;
+        LOG_INFO << "Validation set FULLY mode memory released";
+    }
+
+    // 重置worker状态
+    for (auto& ws : worker_states_) {
+        ws.local_idx = 0;
+        ws.global_seq = 0;
+    }
+
+    // 重置current_set_
+    current_set_ = nullptr;
+
+    LOG_INFO << "CIFAR RAW DataLoader state reset completed";
 }
 
 // =============================================================================
@@ -627,47 +684,53 @@ void CifarLoaderRaw::download(const std::string& save_path, DatasetType dataset_
     if (dataset_type == DatasetType::cifar_10) {
         std::string full_path = save_path + "/" + target_cifar10;
         if (std::filesystem::exists(full_path)) {
-            std::cout << "File already exists at " << full_path << "\n";
-            std::cout << "CIFAR-10 dataset has been downloaded to " << save_path << "\n";
-        } else {
-            std::string full_url = primary_url_cifar10 + target_cifar10;
-            std::cout << "Downloading " << target_cifar10 << " from " << full_url << "\n";
-
-            Downloader downloader;
-            std::string full_spare_url = spare_url_cifar10 + target_cifar10;
-            downloader.set_url(full_url, full_spare_url);
-
-            bool success = downloader.download_to(save_path, target_cifar10, false);
-            if (!success) {
-                TR_VALUE_ERROR("Failed to download " << target_cifar10
-                              << "\n  Please download manually from:"
-                              << "\n    " << primary_url_cifar10
-                              << "\n    " << spare_url_cifar10);
-            }
-            std::cout << "CIFAR-10 dataset has been downloaded to " << save_path << "\n";
+            // File already exists, skip silently
+            return;
         }
+
+        std::string full_url = primary_url_cifar10 + target_cifar10;
+        std::cout << "Downloading " << target_cifar10 << " from " << full_url << "\n";
+
+        Downloader downloader;
+        std::string full_spare_url = spare_url_cifar10 + target_cifar10;
+        downloader.set_url(full_url, full_spare_url);
+
+        bool success = downloader.download_to(save_path, target_cifar10, false);
+        if (!success) {
+            TR_VALUE_ERROR("Failed to download " << target_cifar10
+                          << "\n  Please download manually from:"
+                          << "\n    " << primary_url_cifar10
+                          << "\n    " << spare_url_cifar10);
+        }
+        std::cout << "CIFAR-10 dataset has been downloaded to " << save_path << "\n";
+
+        // 自动验证已下载的文件
+        verify(save_path, DatasetType::cifar_10, true);
     } else if (dataset_type == DatasetType::cifar_100) {
         std::string full_path = save_path + "/" + target_cifar100;
         if (std::filesystem::exists(full_path)) {
-            std::cout << "File already exists at " << full_path << "\n";
-            std::cout << "CIFAR-100 dataset has been downloaded to " << save_path << "\n";
-        } else {
-            std::string full_url = primary_url_cifar100 + target_cifar100;
-            std::cout << "Downloading " << target_cifar100 << " from " << full_url << "\n";
-
-            Downloader downloader;
-            std::string full_spare_url = spare_url_cifar100 + target_cifar100;
-            downloader.set_url(full_url, full_spare_url);
-
-            bool success = downloader.download_to(save_path, target_cifar100, false);
-            if (!success) {
-                TR_VALUE_ERROR("Failed to download " << target_cifar100
-                              << "\n  Please download manually from:"
-                              << "\n    " << primary_url_cifar100
-                              << "\n    " << spare_url_cifar100);
-            }
-            std::cout << "CIFAR-100 dataset has been downloaded to " << save_path << "\n";
+            // File already exists, skip silently
+            return;
         }
+
+        std::string full_url = primary_url_cifar100 + target_cifar100;
+        std::cout << "Downloading " << target_cifar100 << " from " << full_url << "\n";
+
+        Downloader downloader;
+        std::string full_spare_url = spare_url_cifar100 + target_cifar100;
+        downloader.set_url(full_url, full_spare_url);
+
+        bool success = downloader.download_to(save_path, target_cifar100, false);
+        if (!success) {
+            TR_VALUE_ERROR("Failed to download " << target_cifar100
+                          << "\n  Please download manually from:"
+                          << "\n    " << primary_url_cifar100
+                          << "\n    " << spare_url_cifar100);
+        }
+        std::cout << "CIFAR-100 dataset has been downloaded to " << save_path << "\n";
+
+        // 自动验证已下载的文件
+        verify(save_path, DatasetType::cifar_100, true);
     } else {
         TR_VALUE_ERROR("Invalid dataset_type: " << static_cast<int>(dataset_type)
                       << "\n  Expected: DatasetType::cifar_10 or DatasetType::cifar_100");
@@ -688,6 +751,242 @@ void CifarLoaderRaw::download(const std::string& save_path) {
                       << "'\n  Expected: 'cifar-10' or 'cifar-100'"
                       << "\n  Full path: " << save_path
                       << "\n  Alternatively, use download(save_path, dataset_type) to explicitly specify dataset type");
+    }
+}
+
+bool CifarLoaderRaw::verify(const std::string& save_path, DatasetType dataset_type, bool verbose) {
+    // CRC-32 constants from python/scripts/make_dataset.py
+    std::map<std::string, uint32_t> crc32_constants;
+    std::string dataset_name;
+
+    if (dataset_type == DatasetType::cifar_10) {
+        crc32_constants = {{"cifar-10-binary.tar.gz", 0xf709d4ba}};
+        dataset_name = "CIFAR-10";
+    } else if (dataset_type == DatasetType::cifar_100) {
+        crc32_constants = {{"cifar-100-binary.tar.gz", 0xb2274685}};
+        dataset_name = "CIFAR-100";
+    } else {
+        TR_VALUE_ERROR("Invalid dataset_type. Must be cifar_10 or cifar_100");
+        return false;
+    }
+
+    bool all_passed = true;
+
+    // Scan directory for .tar.gz files
+    if (!std::filesystem::exists(save_path)) {
+        LOG_WARN << "Directory does not exist: " << save_path;
+        return false;
+    }
+
+    for (const auto& entry : std::filesystem::directory_iterator(save_path)) {
+        if (!entry.is_regular_file()) continue;
+
+        std::string filename = entry.path().filename().string();
+        if (filename.size() < 7 || filename.substr(filename.size() - 7) != ".tar.gz") {
+            continue;  // Skip non-.tar.gz files
+        }
+
+        std::string file_path = entry.path().string();
+
+        // Check if we have a CRC-32 constant for this file
+        auto it = crc32_constants.find(filename);
+        if (it == crc32_constants.end()) {
+            if (verbose) {
+                LOG_WARN << "[SKIP] " << filename << " - No CRC-32 constant available";
+            }
+            continue;
+        }
+
+        uint32_t expected_crc = it->second;
+
+        // Open file and calculate CRC-32
+        std::ifstream file(file_path, std::ios::binary);
+        if (!file) {
+            LOG_WARN << "[FAIL] " << filename << " - Failed to open file";
+            all_passed = false;
+            continue;
+        }
+
+        // Calculate CRC-32 using zlib
+        uint32_t crc = crc32(0, Z_NULL, 0);
+        char buffer[8192];
+        while (file.read(buffer, sizeof(buffer))) {
+            crc = crc32(crc, reinterpret_cast<const Bytef*>(buffer), file.gcount());
+        }
+        // Handle remaining bytes
+        if (file.gcount() > 0) {
+            crc = crc32(crc, reinterpret_cast<const Bytef*>(buffer), file.gcount());
+        }
+
+        // Compare with expected CRC-32
+        if (crc == expected_crc) {
+            if (verbose) {
+                std::cout << "[PASS] " << filename << " - CRC-32: "
+                          << std::hex << std::setw(8) << std::setfill('0') << crc << std::dec << "\n";
+            }
+        } else {
+            LOG_WARN << "[FAIL] " << filename << " - CRC-32 mismatch";
+            LOG_WARN << "        Expected: " << std::hex << std::setw(8) << std::setfill('0')
+                       << expected_crc << std::dec;
+            LOG_WARN << "        Got:      " << std::hex << std::setw(8) << std::setfill('0')
+                       << crc << std::dec;
+            all_passed = false;
+        }
+    }
+
+    if (all_passed) {
+        if (verbose) {
+            std::cout << dataset_name << " dataset file verification PASSED" << std::endl;
+        }
+    } else {
+        LOG_WARN << dataset_name << " dataset file verification FAILED";
+    }
+
+    return all_passed;
+}
+
+bool CifarLoaderRaw::verify(const std::string& save_path, bool verbose) {
+    // 调用基类默认实现(未实现)
+    (void)save_path;
+    (void)verbose;
+    TR_NOT_IMPLEMENTED("verify() is not implemented for CifarLoaderRaw"
+                       << "\n  Use verify(save_path, dataset_type) to specify dataset type");
+    return false;
+}
+
+void CifarLoaderRaw::extract(const std::string& save_path, DatasetType dataset_type) {
+    LOG_INFO << "Extracting CIFAR dataset files...";
+
+    // Determine tar.gz filename based on dataset type
+    std::string tar_gz_filename;
+    std::string expected_subdir;
+    std::string dataset_name;
+    std::vector<std::string> expected_bin_files;  // Expected .bin files in subdir
+
+    if (dataset_type == DatasetType::cifar_10) {
+        tar_gz_filename = "cifar-10-binary.tar.gz";
+        expected_subdir = "cifar-10-batches-bin";
+        dataset_name = "CIFAR-10";
+        // CIFAR-10: 5 data batches + 1 test batch = 6 files
+        expected_bin_files = {"data_batch_1.bin", "data_batch_2.bin", "data_batch_3.bin",
+                              "data_batch_4.bin", "data_batch_5.bin", "test_batch.bin"};
+    } else if (dataset_type == DatasetType::cifar_100) {
+        tar_gz_filename = "cifar-100-binary.tar.gz";
+        expected_subdir = "cifar-100-binary";
+        dataset_name = "CIFAR-100";
+        // CIFAR-100: train.bin + test.bin = 2 files
+        expected_bin_files = {"train.bin", "test.bin"};
+    } else {
+        TR_VALUE_ERROR("Invalid dataset_type");
+        return;
+    }
+
+    std::string subdir_path = save_path + "/" + expected_subdir;
+
+    // Case 1: Subdirectory doesn't exist - extract
+    if (!std::filesystem::exists(subdir_path)) {
+        goto do_extraction;
+    }
+
+    // Case 2: Subdirectory exists - check if all .bin files exist
+    {
+        bool all_files_exist = true;
+        std::vector<std::string> missing_files;
+
+        for (const auto& bin_file : expected_bin_files) {
+            std::string full_path = subdir_path + "/" + bin_file;
+            if (!std::filesystem::exists(full_path)) {
+                all_files_exist = false;
+                missing_files.push_back(bin_file);
+            }
+        }
+
+        if (all_files_exist) {
+            // All files exist - skip extraction
+            return;
+        }
+
+        // Some files missing - delete subdir and re-extract
+        LOG_WARN << "Incomplete extraction detected (missing " << missing_files.size()
+                  << " files). Deleting existing directory and re-extracting...";
+        std::filesystem::remove_all(subdir_path);
+    }
+
+do_extraction:
+    // Extract tar.gz file
+    std::string tar_gz_path = save_path + "/" + tar_gz_filename;
+    if (!std::filesystem::exists(tar_gz_path)) {
+        TR_FILE_NOT_FOUND("tar.gz file not found: " << tar_gz_path);
+    }
+
+    LOG_INFO << "Extracting: " << tar_gz_filename;
+
+    // Open tar.gz file
+    struct archive* a = archive_read_new();
+    archive_read_support_filter_gzip(a);
+    archive_read_support_format_tar(a);
+
+    struct archive* ext = archive_write_disk_new();
+    archive_write_disk_set_options(ext, ARCHIVE_EXTRACT_TIME | ARCHIVE_EXTRACT_PERM);
+    archive_write_disk_set_standard_lookup(ext);
+
+    if (archive_read_open_filename(a, tar_gz_path.c_str(), 10240) != ARCHIVE_OK) {
+        archive_read_free(a);
+        archive_write_free(ext);
+        TR_VALUE_ERROR("Failed to open tar.gz file: " << tar_gz_path
+                      << "\n  Error: " << archive_error_string(a));
+    }
+
+    // Extract all files
+    struct archive_entry* entry;
+    while (archive_read_next_header(a, &entry) == ARCHIVE_OK) {
+        const char* current_path = archive_entry_pathname(entry);
+
+        // Keep the subdirectory structure (cifar-10-batches-bin/)
+        // tar.gz contains files like: "cifar-10-batches-bin/data_batch_1.bin"
+        // We want to extract to: "save_path/cifar-10-batches-bin/data_batch_1.bin"
+        std::string output_path = save_path + "/" + current_path;
+
+        archive_entry_set_pathname(entry, output_path.c_str());
+
+        if (archive_write_header(ext, entry) != ARCHIVE_OK) {
+            LOG_WARN << "Failed to write header: " << archive_error_string(ext);
+        }
+
+        const void* buff;
+        size_t size;
+        int64_t offset;
+
+        while (archive_read_data_block(a, &buff, &size, &offset) == ARCHIVE_OK) {
+            if (archive_write_data_block(ext, buff, size, offset) != ARCHIVE_OK) {
+                LOG_WARN << "Failed to write data: " << archive_error_string(ext);
+            }
+        }
+
+        LOG_DEBUG << "Extracted: " << output_path;
+    }
+
+    archive_read_close(a);
+    archive_read_free(a);
+    archive_write_close(ext);
+    archive_write_free(ext);
+
+    std::cout << "Successfully extracted " << dataset_name << " dataset to " << save_path << std::endl;
+}
+
+void CifarLoaderRaw::extract(const std::string& save_path) {
+    // 从路径中自动检测CIFAR类型（向后兼容）
+    std::string dirname = std::filesystem::path(save_path).filename().string();
+
+    if (dirname == "cifar-10") {
+        extract(save_path, DatasetType::cifar_10);
+    } else if (dirname == "cifar-100") {
+        extract(save_path, DatasetType::cifar_100);
+    } else {
+        TR_VALUE_ERROR("Invalid directory name: '" << dirname
+                      << "'\n  Expected: 'cifar-10' or 'cifar-100'"
+                      << "\n  Full path: " << save_path
+                      << "\n  Alternatively, use extract(save_path, dataset_type) to explicitly specify dataset type");
     }
 }
 

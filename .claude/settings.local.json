@@ -6,7 +6,9 @@
       "Bash(/dev/null)",
       "Bash(./build/windows-msvc-release/bin/tests/data/test_dataloader_performance.exe:*)",
       "Bash(powershell.exe:*)",
-      "Bash(./build/windows-msvc-release/bin/tests/data/test_reproducibility_epoch.exe:*)"
+      "Bash(./build/windows-msvc-release/bin/tests/data/test_reproducibility_epoch.exe:*)",
+      "Bash(.buildwindows-msvc-releasebintestsdatatest_download.exe)",
+      "Bash(./build/windows-msvc-release/bin/tests/integration/test_dataloader_performance.exe:*)"
     ],
     "deny": [],
     "ask": []

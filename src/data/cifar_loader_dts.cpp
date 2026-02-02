@@ -1,13 +1,13 @@
 /**
  * @file cifar_loader_dts.cpp
- * @brief CIFAR-10/100数据加载器（DTS格式）实现
+ * @brief CIFAR-10/100数据加载器（DTS格式）实�?
  * @version 1.0.0
  * @date 2026-01-23
- * @author 技术觉醒团队
+ * @author 技术觉醒团�?
  */
 
 #ifdef _WIN32
-    // 必须在任何include之前定义,避免Windows宏冲突
+    // 必须在任何include之前定义,避免Windows宏冲�?
     #ifndef NOMINMAX
         #define NOMINMAX
     #endif
@@ -54,10 +54,10 @@ CifarLoaderDts& CifarLoaderDts::getInstance() {
 CifarLoaderDts::~CifarLoaderDts() {
     LOG_INFO << "CifarLoaderDts destroying...";
 
-    // 释放训练集内存
+    // 释放训练集内�?
     free_dataset(train_set_);
 
-    // 释放验证集内存
+    // 释放验证集内�?
     free_dataset(val_set_);
 
     LOG_INFO << "CifarLoaderDts destroyed";
@@ -108,7 +108,7 @@ void CifarLoaderDts::free_dataset(Dataset& ds) {
         free(ds.labels_region);
 #endif
         ds.labels_region = nullptr;
-        ds.images_region = nullptr;  // 同一块内存，只需释放一次
+        ds.images_region = nullptr;  // 同一块内存，只需释放一�?
         LOG_DEBUG << "Dataset freed";
     }
 }
@@ -152,7 +152,7 @@ void CifarLoaderDts::configure(int num_load_workers, int num_preproc_workers,
                         << ". Cannot reconfigure.");
     }
 
-    // 自动检测数据集类型（使用训练集路径）
+    // 自动检测数据集类型（使用训练集路径�?
     if (!train_path.empty()) {
         detected_num_classes_ = detect_dataset_type(train_path);
     } else if (!val_path.empty()) {
@@ -166,14 +166,14 @@ void CifarLoaderDts::configure(int num_load_workers, int num_preproc_workers,
 
 
 
-    // 初始化Worker状态
+    // 初始化Worker状�?
     worker_states_.resize(num_preproc_workers_);
     for (int i = 0; i < num_preproc_workers_; ++i) {
         worker_states_[i].local_idx = 0;
         worker_states_[i].global_seq = 0;
     }
 
-    // 配置数据集
+    // 配置数据�?
     train_set_.is_train = true;
     train_set_.file_path = train_path;
     train_set_.mode = LoadMode::FULLY;  // 强制FULLY
@@ -227,7 +227,7 @@ void CifarLoaderDts::begin_epoch(int epoch_id, bool is_train) {
     LOG_INFO << "Beginning epoch " << epoch_id
              << " (" << (is_train ? "train" : "val") << ")";
 
-    // 1. 设置当前数据集
+    // 1. 设置当前数据�?
     current_set_ = is_train ? &train_set_ : &val_set_;
 
     // 2. 检查是否已加载
@@ -236,12 +236,12 @@ void CifarLoaderDts::begin_epoch(int epoch_id, bool is_train) {
         load_dataset_fully(*current_set_);
     }
 
-    // 3. Level 2 shuffle（样本级）
+    // 3. Level 2 shuffle（样本级�?
     bool should_shuffle = is_train ? shuffle_train_ : shuffle_val_;
     if (should_shuffle && (!skip_first_ || epoch_id > 0)) {
         perform_shuffle(*current_set_, epoch_id);
     } else {
-        // 不shuffle，使用原始顺序
+        // 不shuffle，使用原始顺�?
         current_set_->epoch_sample_order.resize(current_set_->num_samples);
         for (size_t i = 0; i < current_set_->num_samples; ++i) {
             current_set_->epoch_sample_order[i] = static_cast<uint32_t>(i);
@@ -258,7 +258,7 @@ void CifarLoaderDts::begin_epoch(int epoch_id, bool is_train) {
 void CifarLoaderDts::end_epoch() {
     LOG_INFO << "Ending epoch " << current_epoch_id_.load();
 
-    // 重置worker状态
+    // 重置worker状�?
     for (auto& ws : worker_states_) {
         ws.local_idx = 0;
         ws.global_seq = 0;
@@ -279,7 +279,7 @@ bool CifarLoaderDts::get_next_sample(
 
     Dataset& ds = *current_set_;
 
-    // 1. 获取该worker的状态
+    // 1. 获取该worker的状�?
     WorkerState& ws = worker_states_[preproc_worker_id];
 
     // 2. 计算全局样本序号（静态公式，与ImageNet一致）
@@ -287,7 +287,7 @@ bool CifarLoaderDts::get_next_sample(
     size_t sample_idx = static_cast<size_t>(preproc_worker_id) +
                         static_cast<size_t>(ws.global_seq) * num_preproc_workers_;
 
-    // 3. 检查是否超出范围
+    // 3. 检查是否超出范�?
     if (sample_idx >= ds.num_samples) {
         return false;  // Epoch结束
     }
@@ -300,7 +300,7 @@ bool CifarLoaderDts::get_next_sample(
     data_ptr = ds.images_region + real_idx * ds.image_bytes;
     data_size = ds.image_bytes;
 
-    // 6. 更新worker状态（用于统计）
+    // 6. 更新worker状态（用于统计�?
     ws.global_seq++;
     ws.local_idx++;
 
@@ -359,7 +359,7 @@ void CifarLoaderDts::load_dataset_fully(Dataset& ds) {
 
     ds.num_samples = header.num_samples;
 
-    // 3. 计算内存需求
+    // 3. 计算内存需�?
     size_t labels_size = ds.num_samples * 1;  // 1 byte per label
     size_t images_size = ds.num_samples * ds.image_bytes;
     ds.data_size = labels_size + images_size;
@@ -371,7 +371,7 @@ void CifarLoaderDts::load_dataset_fully(Dataset& ds) {
     // 4. 分配内存
     uint8_t* full_data = allocate_aligned_memory(ds.data_size);
 
-    // 5. 读取整个文件的数据部分（跳过Header）
+    // 5. 读取整个文件的数据部分（跳过Header�?
     constexpr size_t HEADER_SIZE = 256;  // CIFAR_MNIST_HEADER_SIZE
 
 #ifdef _WIN32
@@ -462,7 +462,7 @@ bool CifarLoaderDts::verify_dts_crc(const std::string& file_path) const {
     uint32_t stored_crc = header.crc_code;
     LOG_INFO << "Stored CRC-32: 0x" << std::hex << stored_crc << std::dec;
 
-    // 计算CRC-32（跳过Header前256字节）
+    // 计算CRC-32（跳过Header�?56字节�?
     uint32_t computed_crc = 0;
     constexpr size_t HEADER_SIZE = 256;
     constexpr size_t BUF_SIZE = 64 * 1024;  // 64KB chunks
@@ -501,7 +501,7 @@ bool CifarLoaderDts::verify_dts_crc(const std::string& file_path) const {
 
     LOG_INFO << "Computed CRC-32: 0x" << std::hex << computed_crc << std::dec;
 
-    // 比对CRC并返回结果
+    // 比对CRC并返回结�?
     if (computed_crc != stored_crc) {
         LOG_ERROR << "CRC-32 mismatch for " << file_path
                   << "\n  Stored: 0x" << std::hex << stored_crc
@@ -514,12 +514,12 @@ bool CifarLoaderDts::verify_dts_crc(const std::string& file_path) const {
 }
 
 // =============================================================================
-// 数据集类型自动检测（CIFAR专用）
+// 数据集类型自动检测（CIFAR专用�?
 // =============================================================================
 
 int CifarLoaderDts::detect_dataset_type(const std::string& dts_path) {
     // 通过读取DTS header自动检测数据集类型
-    // 返回：10 (CIFAR-10) 或 100 (CIFAR-100)
+    // 返回�?0 (CIFAR-10) �?100 (CIFAR-100)
 
     SmallDtsHeader header;
     FileHandle file(dts_path);
@@ -563,7 +563,7 @@ int CifarLoaderDts::detect_dataset_type(const std::string& dts_path) {
 }
 
 // =============================================================================
-// 数据集下载
+// 数据集下�?
 // =============================================================================
 
 void CifarLoaderDts::download(const std::string& save_path, DatasetType dataset_type) {
@@ -579,22 +579,20 @@ void CifarLoaderDts::download(const std::string& save_path, DatasetType dataset_
         "cifar100_test.dts"
     };
 
-    // 定义下载URL（无备用URL）
+    // 定义下载URL（无备用URL�?
     const std::string primary_url_cifar10 = "https://tech-renaissance.cn/download/cifar-10/";
     const std::string primary_url_cifar100 = "https://tech-renaissance.cn/download/cifar-100/";
     const std::string spare_url = "";  // 无备用URL
 
-    // 创建目录（如果不存在）
+    // 创建目录（如果不存在�?
     std::filesystem::create_directories(save_path);
 
-    // 根据dataset_type选择下载哪个数据集
+    // 根据dataset_type选择下载哪个数据�?
     if (dataset_type == DatasetType::cifar_10) {
         std::vector<std::string> missing_files;
         for (const auto& target : targets_cifar10) {
             std::string full_path = save_path + "/" + target;
-            if (std::filesystem::exists(full_path)) {
-                std::cout << "File already exists at " << full_path << "\n";
-            } else {
+            if (!std::filesystem::exists(full_path)) {
                 missing_files.push_back(target);
             }
         }
@@ -618,15 +616,19 @@ void CifarLoaderDts::download(const std::string& save_path, DatasetType dataset_
             }
         }
 
-        std::cout << "CIFAR-10 dataset (DTS format) has been downloaded to " << save_path << "\n";
+        // Only print message if files were actually downloaded
+        if (!missing_files.empty()) {
+            std::cout << "CIFAR-10 dataset (DTS format) has been downloaded to " << save_path << "\n";
+
+            // 自动验证已下载的文件
+            verify(save_path, DatasetType::cifar_10, true);
+        }
 
     } else if (dataset_type == DatasetType::cifar_100) {
         std::vector<std::string> missing_files;
         for (const auto& target : targets_cifar100) {
             std::string full_path = save_path + "/" + target;
-            if (std::filesystem::exists(full_path)) {
-                std::cout << "File already exists at " << full_path << "\n";
-            } else {
+            if (!std::filesystem::exists(full_path)) {
                 missing_files.push_back(target);
             }
         }
@@ -650,7 +652,13 @@ void CifarLoaderDts::download(const std::string& save_path, DatasetType dataset_
             }
         }
 
-        std::cout << "CIFAR-100 dataset (DTS format) has been downloaded to " << save_path << "\n";
+        // Only print message if files were actually downloaded
+        if (!missing_files.empty()) {
+            std::cout << "CIFAR-100 dataset (DTS format) has been downloaded to " << save_path << "\n";
+
+            // 自动验证已下载的文件
+            verify(save_path, DatasetType::cifar_100, true);
+        }
 
     } else {
         TR_VALUE_ERROR("Invalid dataset_type: " << static_cast<int>(dataset_type)
@@ -673,6 +681,128 @@ void CifarLoaderDts::download(const std::string& save_path) {
                       << "\n  Full path: " << save_path
                       << "\n  Alternatively, use download(save_path, dataset_type) to explicitly specify dataset type");
     }
+}
+
+bool CifarLoaderDts::verify(const std::string& save_path, DatasetType dataset_type, bool verbose) {
+    if (dataset_type == DatasetType::cifar_10) {
+        // No need to print dataset name, will be in final message
+    } else if (dataset_type == DatasetType::cifar_100) {
+        // No need to print dataset name, will be in final message
+    } else {
+        TR_VALUE_ERROR("Invalid dataset_type. Must be cifar_10 or cifar_100");
+        return false;
+    }
+
+    bool all_passed = true;
+
+    // Scan directory for .dts files
+    if (!std::filesystem::exists(save_path)) {
+        LOG_WARN << "Directory does not exist: " << save_path;
+        return false;
+    }
+
+    for (const auto& entry : std::filesystem::directory_iterator(save_path)) {
+        if (!entry.is_regular_file()) continue;
+
+        std::string filename = entry.path().filename().string();
+        if (filename.size() < 4 || filename.substr(filename.size() - 4) != ".dts") {
+            continue;  // Skip non-.dts files
+        }
+
+        std::string file_path = entry.path().string();
+
+        // Call verify_dts_crc for each file
+        bool passed = verify_dts_crc(file_path);
+        if (passed) {
+            if (verbose) {
+                std::cout << "[PASS] " << filename << " - CRC-32 verification passed\n";
+            }
+        } else {
+            LOG_WARN << "[FAIL] " << filename << " - CRC-32 verification failed";
+            all_passed = false;
+        }
+    }
+
+    if (all_passed) {
+        if (verbose) {
+            if (dataset_type == DatasetType::cifar_10) {
+                std::cout << "CIFAR-10 dataset (DTS format) files verification PASSED" << std::endl;
+            } else {
+                std::cout << "CIFAR-100 dataset (DTS format) files verification PASSED" << std::endl;
+            }
+        }
+    } else {
+        if (dataset_type == DatasetType::cifar_10) {
+            LOG_WARN << "CIFAR-10 dataset (DTS format) files verification FAILED";
+        } else {
+            LOG_WARN << "CIFAR-100 dataset (DTS format) files verification FAILED";
+        }
+    }
+
+    return all_passed;
+}
+
+bool CifarLoaderDts::verify(const std::string& save_path, bool verbose) {
+    // 从路径中自动检测CIFAR类型（向后兼容）
+    std::string dirname = std::filesystem::path(save_path).filename().string();
+
+    if (dirname == "cifar-10") {
+        return verify(save_path, DatasetType::cifar_10, verbose);
+    } else if (dirname == "cifar-100") {
+        return verify(save_path, DatasetType::cifar_100, verbose);
+    } else {
+        TR_VALUE_ERROR("Invalid directory name: '" << dirname
+                      << "'\n  Expected: 'cifar-10' or 'cifar-100'"
+                      << "\n  Full path: " << save_path
+                      << "\n  Alternatively, use verify(save_path, dataset_type) to explicitly specify dataset type");
+        return false;
+    }
+}
+
+void CifarLoaderDts::reset_after_warmup() {
+    /**
+     * 重置DataLoader状态（用于warmup和test_dataloader之后）
+     *
+     * CIFAR DTS强制FULLY模式，需要释放内存
+     *
+     * 重要：必须释放labels_region（原始分配指针），而不是images_region（内部偏移指针）
+     */
+    LOG_INFO << "Resetting CIFAR DTS DataLoader state after warmup/test";
+
+    // 释放训练集内存
+    if (train_set_.labels_region != nullptr) {
+#ifdef _WIN32
+        VirtualFree(train_set_.labels_region, 0, MEM_RELEASE);
+#else
+        free(train_set_.labels_region);
+#endif
+        train_set_.labels_region = nullptr;
+        train_set_.images_region = nullptr;
+        LOG_INFO << "CIFAR train set memory released";
+    }
+
+    // 释放验证集内存
+    if (val_set_.labels_region != nullptr) {
+#ifdef _WIN32
+        VirtualFree(val_set_.labels_region, 0, MEM_RELEASE);
+#else
+        free(val_set_.labels_region);
+#endif
+        val_set_.labels_region = nullptr;
+        val_set_.images_region = nullptr;
+        LOG_INFO << "CIFAR validation set memory released";
+    }
+
+    // 重置worker状态
+    for (auto& ws : worker_states_) {
+        ws.local_idx = 0;
+        ws.global_seq = 0;
+    }
+
+    // 重置current_set_
+    current_set_ = nullptr;
+
+    LOG_INFO << "CIFAR DTS DataLoader state reset completed";
 }
 
 } // namespace tr

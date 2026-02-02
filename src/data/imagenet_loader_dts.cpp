@@ -15,6 +15,7 @@
 #include <iostream>
 #include <fstream>
 #include <cstring>
+#include <filesystem>
 #include <thread>
 #include <algorithm>
 #include <chrono>
@@ -793,6 +794,69 @@ void ImageNetLoaderDts::end_epoch() {
     current_set_ = nullptr;
 
     LOG_INFO << "Epoch ended successfully";
+}
+
+void ImageNetLoaderDts::reset_after_warmup() {
+    /**
+     * 重置DataLoader状态（用于warmup和test_dataloader之后）
+     *
+     * 目的：将DataLoader重置到"刚刚加载完文件头"的状态
+     *
+     * 操作：
+     * 1. 释放FULLY模式分配的内存（train_set_.full_arena 和 val_set_.full_arena）
+     * 2. 清空buffer_metas
+     * 3. 重置FULLY模式的buffer序号和累积样本计数
+     * 4. 重置worker状态
+     * 5. 保留文件头信息和summary.bin读取的数据
+     */
+
+    LOG_INFO << "Resetting DataLoader state after warmup/test";
+
+    // 释放训练集FULLY模式内存
+    if (train_set_.full_arena != nullptr) {
+#ifdef _WIN32
+        VirtualFree(train_set_.full_arena, 0, MEM_RELEASE);
+#else
+        free(train_set_.full_arena);
+#endif
+        train_set_.full_arena = nullptr;
+        train_set_.buffer_metas.clear();
+
+        // 关键修复：重置FULLY模式的状态变量
+        train_set_.current_ready_buffer_seq = 0;
+        train_set_.cumulative_samples = 0;
+
+        LOG_INFO << "Train set FULLY mode memory released";
+    }
+
+    // 释放验证集FULLY模式内存
+    if (val_set_.full_arena != nullptr) {
+#ifdef _WIN32
+        VirtualFree(val_set_.full_arena, 0, MEM_RELEASE);
+#else
+        free(val_set_.full_arena);
+#endif
+        val_set_.full_arena = nullptr;
+        val_set_.buffer_metas.clear();
+
+        // 关键修复：重置FULLY模式的状态变量
+        val_set_.current_ready_buffer_seq = 0;
+        val_set_.cumulative_samples = 0;
+
+        LOG_INFO << "Validation set FULLY mode memory released";
+    }
+
+    // 重置worker状态
+    for (int i = 0; i < num_preproc_workers_; ++i) {
+        worker_states_[i].consuming_buffer = nullptr;
+        worker_states_[i].local_idx = 0;
+        worker_states_[i].global_seq = 0;
+    }
+
+    // 重置current_set_
+    current_set_ = nullptr;
+
+    LOG_INFO << "DataLoader state reset completed";
 }
 
 // =============================================================================
@@ -1965,12 +2029,79 @@ bool ImageNetLoaderDts::verify_dts_crc(const std::string& file_path) const {
 }
 
 // =============================================================================
+// 数据集验证
+// =============================================================================
+
+bool ImageNetLoaderDts::verify(const std::string& save_path, bool verbose) {
+    bool all_passed = true;
+
+    // Scan directory for .dts files
+    if (!std::filesystem::exists(save_path)) {
+        LOG_WARN << "Directory does not exist: " << save_path;
+        return false;
+    }
+
+    for (const auto& entry : std::filesystem::directory_iterator(save_path)) {
+        if (!entry.is_regular_file()) continue;
+
+        std::string filename = entry.path().filename().string();
+        if (filename.size() < 4 || filename.substr(filename.size() - 4) != ".dts") {
+            continue;  // Skip non-.dts files
+        }
+
+        std::string file_path = entry.path().string();
+
+        // Call verify_dts_crc for each file
+        bool passed = verify_dts_crc(file_path);
+        if (passed) {
+            if (verbose) {
+                std::cout << "[PASS] " << filename << " - CRC-32 verification passed\n";
+            }
+        } else {
+            LOG_WARN << "[FAIL] " << filename << " - CRC-32 verification failed";
+            all_passed = false;
+        }
+    }
+
+    if (all_passed) {
+        if (verbose) {
+            std::cout << "ImageNet dataset (DTS format) files verification PASSED" << std::endl;
+        }
+    } else {
+        LOG_WARN << "ImageNet dataset (DTS format) files verification FAILED";
+    }
+
+    return all_passed;
+}
+
+// =============================================================================
 // 数据集下载
 // =============================================================================
 
 void ImageNetLoaderDts::download(const std::string& save_path) {
-    (void)save_path;  // Unused parameter
+    // 检查是否存在任何imagenet_*.dts文件
+    bool has_dts_files = false;
+    if (std::filesystem::exists(save_path)) {
+        for (const auto& entry : std::filesystem::directory_iterator(save_path)) {
+            if (!entry.is_regular_file()) continue;
 
+            std::string filename = entry.path().filename().string();
+            if (filename.size() >= 9 && filename.substr(0, 9) == "imagenet_") {
+                size_t dot_pos = filename.find_last_of('.');
+                if (dot_pos != std::string::npos && filename.substr(dot_pos) == ".dts") {
+                    has_dts_files = true;
+                    break;
+                }
+            }
+        }
+    }
+
+    if (has_dts_files) {
+        // 已存在.dts文件,静默跳过
+        return;
+    }
+
+    // 没有找到.dts文件,打印提示信息
     std::cout << "ImageNet dataset in DTS format is not available for automatic download." << std::endl;
     std::cout << "Please download the DTS files from the official source:" << std::endl;
     std::cout << "  https://tech-renaissance.cn/download/imagenet/" << std::endl;

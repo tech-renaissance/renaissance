@@ -101,6 +101,10 @@ public:
         // SampleLoader 不使用 epoch 机制
     }
 
+    void reset_after_warmup() override {
+        // SampleLoader 不使用 warmup 机制
+    }
+
     void set_train_mode(LoadMode mode) override {
         // SampleLoader 始终为验证模式
         (void)mode;

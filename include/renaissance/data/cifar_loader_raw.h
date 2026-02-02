@@ -58,6 +58,7 @@ public:
 
     void begin_epoch(int epoch_id, bool is_train) override;
     void end_epoch() override;
+    void reset_after_warmup() override;
     bool get_next_sample(int preproc_worker_id,
                          int32_t& label,
                          const uint8_t*& data_ptr,
@@ -120,6 +121,41 @@ public:
      * @note 推荐使用此方法以明确指定要下载的数据集类型
      */
     void download(const std::string& save_path, DatasetType dataset_type);
+
+    /**
+     * @brief Extract CIFAR tar.gz files
+     * @param save_path Dataset directory (where tar.gz files were downloaded)
+     * @param dataset_type Dataset type (CIFAR-10 or CIFAR-100)
+     * @throws TRException If extraction fails
+     * @note Will extract tar.gz and preserve subdirectory structure
+     */
+    void extract(const std::string& save_path, DatasetType dataset_type);
+
+    /**
+     * @brief Extract CIFAR tar.gz files (auto-detect from directory name)
+     * @param save_path Dataset directory
+     * @throws TRException If extraction fails or cannot detect dataset type
+     */
+    void extract(const std::string& save_path) override;
+
+    /**
+     * @brief Verify downloaded CIFAR tar.gz files using CRC-32 checksums
+     * @param save_path Dataset directory (where tar.gz files were downloaded)
+     * @return true=verification passed, false=verification failed
+     * @throws TRException If file reading fails or cannot detect dataset type
+     * @note Verifies tar.gz files against known CRC-32 constants
+     */
+    bool verify(const std::string& save_path, bool verbose = false) override;
+
+    /**
+     * @brief Verify downloaded CIFAR tar.gz files using CRC-32 checksums (explicit type)
+     * @param save_path Dataset directory (where tar.gz files were downloaded)
+     * @param dataset_type Dataset type (CIFAR-10 or CIFAR-100)
+     * @param verbose Whether to print detailed verification output (default: false)
+     * @return true=verification passed, false=verification failed
+     * @throws TRException If file reading fails or dataset_type is invalid
+     */
+    bool verify(const std::string& save_path, DatasetType dataset_type, bool verbose = false);
 
 private:
     CifarLoaderRaw() = default;

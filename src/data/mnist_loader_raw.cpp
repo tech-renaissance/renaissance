@@ -15,6 +15,8 @@
 
 #include <iostream>
 #include <filesystem>
+#include <map>
+#include <iomanip>
 
 #include "renaissance/data/mnist_loader_raw.h"
 #include "renaissance/base/logger.h"
@@ -22,6 +24,9 @@
 #include "renaissance/base/philox.h"
 #include "renaissance/base/rng.h"
 #include "renaissance/base/downloader.h"
+#include <zlib.h>
+#include <archive.h>
+#include <archive_entry.h>
 
 #include <fstream>
 #include <cstring>
@@ -244,6 +249,58 @@ void MnistLoaderRaw::end_epoch() {
     }
 
     LOG_INFO << "Epoch ended";
+}
+
+void MnistLoaderRaw::reset_after_warmup() {
+    /**
+     * 重置DataLoader状态（用于warmup和test_dataloader之后）
+     *
+     * 目的：将DataLoader重置到"刚刚加载完文件头"的状态
+     *
+     * 操作：
+     * 1. 释放FULLY模式分配的内存（train_set_.labels_region/images_region 和 val_set_...）
+     * 2. 重置worker状态
+     * 3. 保留文件头信息
+     */
+
+    LOG_INFO << "Resetting MNIST RAW DataLoader state after warmup/test";
+
+    // 释放训练集FULLY模式内存
+    if (train_set_.labels_region != nullptr) {
+#ifdef _WIN32
+        VirtualFree(train_set_.labels_region, 0, MEM_RELEASE);
+#else
+        free(train_set_.labels_region);
+#endif
+        train_set_.labels_region = nullptr;
+        train_set_.images_region = nullptr;
+        train_set_.data_size = 0;
+        LOG_INFO << "Train set FULLY mode memory released";
+    }
+
+    // 释放验证集FULLY模式内存
+    if (val_set_.labels_region != nullptr) {
+#ifdef _WIN32
+        VirtualFree(val_set_.labels_region, 0, MEM_RELEASE);
+#else
+        free(val_set_.labels_region);
+#endif
+        val_set_.labels_region = nullptr;
+        val_set_.images_region = nullptr;
+        val_set_.data_size = 0;
+        LOG_INFO << "Validation set FULLY mode memory released";
+    }
+
+    // 重置worker状态
+    for (auto& ws : worker_states_) {
+        ws.local_idx = 0;
+        ws.global_seq = 0;
+    }
+
+    // 重置current_set_
+    current_set_ = nullptr;
+
+    LOG_INFO << "MNIST RAW DataLoader state reset completed";
 }
 
 // =============================================================================
@@ -526,16 +583,13 @@ void MnistLoaderRaw::download(const std::string& save_path) {
     std::vector<std::string> missing_files;
     for (const auto& target : targets) {
         std::string full_path = save_path + "/" + target;
-        if (std::filesystem::exists(full_path)) {
-            std::cout << "File already exists at " << full_path << "\n";
-        } else {
+        if (!std::filesystem::exists(full_path)) {
             missing_files.push_back(target);
         }
     }
 
-    // 如果所有文件都存在，直接返回
+    // 如果所有文件都存在，直接返回(静默跳过)
     if (missing_files.empty()) {
-        std::cout << "MNIST dataset has been downloaded to " << save_path << "\n";
         return;
     }
 
@@ -560,6 +614,196 @@ void MnistLoaderRaw::download(const std::string& save_path) {
     }
 
     std::cout << "MNIST dataset has been downloaded to " << save_path << "\n";
+
+    // 自动验证已下载的文件
+    verify(save_path, true);
+}
+
+// =============================================================================
+// 数据集验证
+// =============================================================================
+
+bool MnistLoaderRaw::verify(const std::string& save_path, bool verbose) {
+    // CRC-32 constants from python/scripts/make_dataset.py
+    const std::map<std::string, uint32_t> crc32_constants = {
+        {"train-images-idx3-ubyte.gz", 0xeb392171},
+        {"train-labels-idx1-ubyte.gz", 0x28ee680a},
+        {"t10k-images-idx3-ubyte.gz", 0xdf9322ee},
+        {"t10k-labels-idx1-ubyte.gz", 0x5c1cf43b}
+    };
+
+    bool all_passed = true;
+
+    // Scan directory for .gz files
+    if (!std::filesystem::exists(save_path)) {
+        LOG_WARN << "Directory does not exist: " << save_path;
+        return false;
+    }
+
+    for (const auto& entry : std::filesystem::directory_iterator(save_path)) {
+        if (!entry.is_regular_file()) continue;
+
+        std::string filename = entry.path().filename().string();
+        if (filename.size() < 3 || filename.substr(filename.size() - 3) != ".gz") {
+            continue;  // Skip non-.gz files
+        }
+
+        std::string file_path = entry.path().string();
+
+        // Check if we have a CRC-32 constant for this file
+        auto it = crc32_constants.find(filename);
+        if (it == crc32_constants.end()) {
+            if (verbose) {
+                LOG_WARN << "[SKIP] " << filename << " - No CRC-32 constant available";
+            }
+            continue;
+        }
+
+        uint32_t expected_crc = it->second;
+
+        // Open file and calculate CRC-32
+        std::ifstream file(file_path, std::ios::binary);
+        if (!file) {
+            LOG_WARN << "[FAIL] " << filename << " - Failed to open file";
+            all_passed = false;
+            continue;
+        }
+
+        // Calculate CRC-32 using zlib
+        uint32_t crc = crc32(0, Z_NULL, 0);
+        char buffer[8192];
+        while (file.read(buffer, sizeof(buffer))) {
+            crc = crc32(crc, reinterpret_cast<const Bytef*>(buffer), file.gcount());
+        }
+        // Handle remaining bytes
+        if (file.gcount() > 0) {
+            crc = crc32(crc, reinterpret_cast<const Bytef*>(buffer), file.gcount());
+        }
+
+        // Compare with expected CRC-32
+        if (crc == expected_crc) {
+            if (verbose) {
+                std::cout << "[PASS] " << filename << " - CRC-32: "
+                          << std::hex << std::setw(8) << std::setfill('0') << crc << std::dec << "\n";
+            }
+        } else {
+            LOG_WARN << "[FAIL] " << filename << " - CRC-32 mismatch";
+            LOG_WARN << "        Expected: " << std::hex << std::setw(8) << std::setfill('0')
+                       << expected_crc << std::dec;
+            LOG_WARN << "        Got:      " << std::hex << std::setw(8) << std::setfill('0')
+                       << crc << std::dec;
+            all_passed = false;
+        }
+    }
+
+    if (all_passed) {
+        if (verbose) {
+            std::cout << "MNIST dataset files verification PASSED" << std::endl;
+        }
+    } else {
+        LOG_WARN << "MNIST dataset files verification FAILED";
+    }
+
+    return all_passed;
+}
+
+void MnistLoaderRaw::extract(const std::string& save_path) {
+    LOG_INFO << "Extracting MNIST dataset files...";
+
+    // Define expected output files (only check RAW files, not DTS files)
+    const std::vector<std::string> expected_files = {
+        "train-images-idx3-ubyte",
+        "train-labels-idx1-ubyte",
+        "t10k-images-idx3-ubyte",
+        "t10k-labels-idx1-ubyte"
+    };
+
+    // Check which expected files exist
+    std::vector<std::string> existing_files;
+    std::vector<std::string> missing_files;
+
+    for (const auto& filename : expected_files) {
+        std::string full_path = save_path + "/" + filename;
+        if (std::filesystem::exists(full_path)) {
+            existing_files.push_back(full_path);
+        } else {
+            missing_files.push_back(filename);
+        }
+    }
+
+    // Case 1: All files exist - skip extraction
+    if (missing_files.empty()) {
+        return;
+    }
+
+    // Case 2: Some files exist but not all - delete existing files and re-extract
+    if (!existing_files.empty()) {
+        LOG_WARN << "Incomplete extraction detected. Deleting existing extracted files and re-extracting...";
+        for (const auto& filepath : existing_files) {
+            std::filesystem::remove(filepath);
+            LOG_DEBUG << "Deleted: " << filepath;
+        }
+    }
+
+    // Case 3: No files exist or partial files deleted - extract all .gz files
+    // Extract .gz files
+    for (const auto& entry : std::filesystem::directory_iterator(save_path)) {
+        if (!entry.is_regular_file()) continue;
+
+        std::string filename = entry.path().filename().string();
+        if (filename.size() < 3 || filename.substr(filename.size() - 3) != ".gz") {
+            continue;
+        }
+
+        std::string gz_path = entry.path().string();
+        std::string output_path = gz_path.substr(0, gz_path.size() - 3);  // Remove .gz
+
+        LOG_INFO << "Extracting: " << filename;
+
+        // Open gzip file
+        struct archive* a = archive_read_new();
+        archive_read_support_filter_gzip(a);
+        archive_read_support_format_raw(a);
+
+        struct archive* ext = archive_write_disk_new();
+        archive_write_disk_set_options(ext, ARCHIVE_EXTRACT_TIME);
+        archive_write_disk_set_standard_lookup(ext);
+
+        if (archive_read_open_filename(a, gz_path.c_str(), 10240) != ARCHIVE_OK) {
+            archive_read_free(a);
+            archive_write_free(ext);
+            TR_VALUE_ERROR("Failed to open gzip file: " << gz_path
+                          << "\n  Error: " << archive_error_string(a));
+        }
+
+        // Extract
+        struct archive_entry* aentry;
+        while (archive_read_next_header(a, &aentry) == ARCHIVE_OK) {
+            archive_entry_set_pathname(aentry, output_path.c_str());
+            if (archive_write_header(ext, aentry) != ARCHIVE_OK) {
+                TR_VALUE_ERROR("Failed to write header: " << archive_error_string(ext));
+            }
+
+            const void* buff;
+            size_t size;
+            int64_t offset;
+
+            while (archive_read_data_block(a, &buff, &size, &offset) == ARCHIVE_OK) {
+                if (archive_write_data_block(ext, buff, size, offset) != ARCHIVE_OK) {
+                    TR_VALUE_ERROR("Failed to write data: " << archive_error_string(ext));
+                }
+            }
+        }
+
+        archive_read_close(a);
+        archive_read_free(a);
+        archive_write_close(ext);
+        archive_write_free(ext);
+
+        LOG_DEBUG << "Extracted: " << output_path;
+    }
+
+    std::cout << "Successfully extracted MNIST dataset to " << save_path << std::endl;
 }
 
 } // namespace tr

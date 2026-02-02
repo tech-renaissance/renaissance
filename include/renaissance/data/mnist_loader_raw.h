@@ -59,6 +59,7 @@ public:
 
     void begin_epoch(int epoch_id, bool is_train) override;
     void end_epoch() override;
+    void reset_after_warmup() override;
     bool get_next_sample(int preproc_worker_id,
                          int32_t& label,
                          const uint8_t*& data_ptr,
@@ -110,6 +111,23 @@ public:
      * @note MNIST官方下载地址：http://yann.lecun.com/exdb/mnist/
      */
     void download(const std::string& save_path) override;
+
+    /**
+     * @brief Extract MNIST .gz files
+     * @param save_path Dataset directory (where .gz files were downloaded)
+     * @throws TRException If extraction fails
+     * @note Will extract 4 .gz files to corresponding .ubyte files
+     */
+    void extract(const std::string& save_path) override;
+
+    /**
+     * @brief Verify downloaded MNIST .gz files using CRC-32 checksums
+     * @param save_path Dataset directory (where .gz files were downloaded)
+     * @return true=verification passed, false=verification failed
+     * @throws TRException If file reading fails
+     * @note Verifies all 4 .gz files against known CRC-32 constants
+     */
+    bool verify(const std::string& save_path, bool verbose = false) override;
 
 private:
     MnistLoaderRaw() = default;

@@ -184,6 +184,11 @@ if(TR_USE_LIBCURL)
     message(STATUS "Global macro TR_USE_LIBCURL defined: 1")
 endif()
 
+if(TR_USE_LIBARCHIVE)
+    add_compile_definitions(TR_USE_LIBARCHIVE=1)
+    message(STATUS "Global macro TR_USE_LIBARCHIVE defined: 1")
+endif()
+
 if(TR_USE_MIMALLOC)
     add_compile_definitions(TR_USE_MIMALLOC=1)
     message(STATUS "Global macro TR_USE_MIMALLOC defined: 1")

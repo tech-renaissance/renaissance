@@ -16,7 +16,7 @@ SCENE_DEPS = {
     "pc_cuda": {
         "name": "PC-CUDA",
         "description": "Windows + NVIDIA GPU + MSVC",
-        "required": ["cmake", "ninja", "msvc", "cuda", "cudnn", "onednn", "xnnpack", "zlib", "libcurl", "libjpeg-turbo", "mimalloc", "stb", "simd", "python", "numpy"],
+        "required": ["cmake", "ninja", "msvc", "cuda", "cudnn", "onednn", "xnnpack", "zlib", "libcurl", "libarchive", "libjpeg-turbo", "mimalloc", "stb", "simd", "python", "numpy"],
         "optional": [],
         "cmake_opts": [
             "-DTR_SCENE_PC_CUDA=ON",
@@ -28,6 +28,7 @@ SCENE_DEPS = {
             "-DTR_USE_LIBJPEG=ON",
             "-DTR_USE_ZLIB=ON",
             "-DTR_USE_LIBCURL=ON",
+            "-DTR_USE_LIBARCHIVE=ON",
             "-DTR_USE_MIMALLOC=ON",
             "-DTR_USE_SIMD=ON"
         ]
@@ -35,7 +36,7 @@ SCENE_DEPS = {
     "gpu_cloud": {
         "name": "GPU_CLOUD",
         "description": "Linux + Multi-NVIDIA GPU + GCC",
-        "required": ["cmake", "ninja", "gcc", "cuda", "cudnn", "nccl", "onednn", "xnnpack", "zlib", "libcurl", "libjpeg-turbo", "mimalloc", "stb", "simd", "python", "numpy"],
+        "required": ["cmake", "ninja", "gcc", "cuda", "cudnn", "nccl", "onednn", "xnnpack", "zlib", "libcurl", "libarchive", "libjpeg-turbo", "mimalloc", "stb", "simd", "python", "numpy"],
         "optional": [],
         "cmake_opts": [
             "-DTR_SCENE_GPU_CLOUD=ON",
@@ -49,6 +50,7 @@ SCENE_DEPS = {
             "-DTR_USE_LIBJPEG=ON",
             "-DTR_USE_ZLIB=ON",
             "-DTR_USE_LIBCURL=ON",
+            "-DTR_USE_LIBARCHIVE=ON",
             "-DTR_USE_MIMALLOC=ON",
             "-DTR_USE_SIMD=ON"
         ]
@@ -56,7 +58,7 @@ SCENE_DEPS = {
     "pc_musa": {
         "name": "PC-MUSA",
         "description": "Linux + Moore Threads GPU + GCC",
-        "required": ["cmake", "ninja", "gcc", "musa", "mudnn", "onednn", "xnnpack", "zlib", "libcurl", "libjpeg-turbo", "mimalloc", "stb", "simd", "python", "numpy"],
+        "required": ["cmake", "ninja", "gcc", "musa", "mudnn", "onednn", "xnnpack", "zlib", "libcurl", "libarchive", "libjpeg-turbo", "mimalloc", "stb", "simd", "python", "numpy"],
         "optional": [],
         "cmake_opts": [
             "-DTR_SCENE_PC_MUSA=ON",
@@ -68,6 +70,7 @@ SCENE_DEPS = {
             "-DTR_USE_LIBJPEG=ON",
             "-DTR_USE_ZLIB=ON",
             "-DTR_USE_LIBCURL=ON",
+            "-DTR_USE_LIBARCHIVE=ON",
             "-DTR_USE_MIMALLOC=ON",
             "-DTR_USE_SIMD=ON"
         ]
@@ -75,7 +78,7 @@ SCENE_DEPS = {
     "cpu_cloud": {
         "name": "CPU_CLOUD",
         "description": "Windows/Linux x86 CPU Cloud Server + GCC/MSVC",
-        "required": ["cmake", "ninja", "onednn", "xnnpack", "zlib", "libcurl", "libjpeg-turbo", "mimalloc", "stb", "simd", "python", "numpy"],
+        "required": ["cmake", "ninja", "onednn", "xnnpack", "zlib", "libcurl", "libarchive", "libjpeg-turbo", "mimalloc", "stb", "simd", "python", "numpy"],
         "optional": ["gcc", "msvc"],  # 编译器为可选，根据平台选择
         "cmake_opts": [
             "-DTR_SCENE_CPU_CLOUD=ON",
@@ -87,6 +90,7 @@ SCENE_DEPS = {
             "-DTR_USE_LIBJPEG=ON",
             "-DTR_USE_ZLIB=ON",
             "-DTR_USE_LIBCURL=ON",
+            "-DTR_USE_LIBARCHIVE=ON",
             "-DTR_USE_MIMALLOC=ON",
             "-DTR_USE_SIMD=ON"
         ]
@@ -94,7 +98,7 @@ SCENE_DEPS = {
     "edge_arm": {
         "name": "EDGE_ARM",
         "description": "ARM Embedded Linux + GCC",
-        "required": ["cmake", "ninja", "gcc", "xnnpack", "zlib", "libcurl", "libjpeg-turbo", "mimalloc", "stb", "simd", "python", "numpy"],
+        "required": ["cmake", "ninja", "gcc", "xnnpack", "zlib", "libcurl", "libarchive", "libjpeg-turbo", "mimalloc", "stb", "simd", "python", "numpy"],
         "optional": [],
         "cmake_opts": [
             "-DTR_SCENE_EDGE_ARM=ON",
@@ -105,6 +109,7 @@ SCENE_DEPS = {
             "-DTR_USE_LIBJPEG=ON",
             "-DTR_USE_ZLIB=ON",
             "-DTR_USE_LIBCURL=ON",
+            "-DTR_USE_LIBARCHIVE=ON",
             "-DTR_USE_MIMALLOC=ON",
             "-DTR_USE_SIMD=ON",
             "-DTR_IS_EDGE_DEVICE=ON"
@@ -113,7 +118,7 @@ SCENE_DEPS = {
     "edge_riscv": {
         "name": "EDGE_RISCV",
         "description": "RISC-V Embedded Linux + GCC",
-        "required": ["cmake", "ninja", "gcc", "xnnpack", "zlib", "libcurl", "libjpeg-turbo", "mimalloc", "stb", "python", "numpy"],
+        "required": ["cmake", "ninja", "gcc", "xnnpack", "zlib", "libcurl", "libarchive", "libjpeg-turbo", "mimalloc", "stb", "python", "numpy"],
         "optional": [],
         "cmake_opts": [
             "-DTR_SCENE_EDGE_RISCV=ON",
@@ -124,6 +129,7 @@ SCENE_DEPS = {
             "-DTR_USE_LIBJPEG=ON",
             "-DTR_USE_ZLIB=ON",
             "-DTR_USE_LIBCURL=ON",
+            "-DTR_USE_LIBARCHIVE=ON",
             "-DTR_USE_MIMALLOC=ON",
             "-DTR_USE_SIMD=OFF",
             "-DTR_IS_EDGE_DEVICE=ON"
@@ -331,6 +337,19 @@ DEP_CONFIG = {
         "install_hint": "vcpkg install curl (Windows) | sudo apt install libcurl4-openssl-dev (Linux)"
     },
 
+    "libarchive": {
+        "name": "libarchive",
+        "exe": [],  # 通过头文件检测
+        "header": "archive.h",
+        "lib_files": ["archive.lib", "libarchive.a", "libarchive.so"],
+        "env": ["ARCHIVE_ROOT"],
+        "paths_linux": ["/usr", "/usr/local"],
+        "vcpkg_packages": ["libarchive"],
+        "version_cmd": ["bsdtar", "--version"],
+        "version_pattern": r"bsdtar (\d+\.\d+\.\d+)",
+        "install_hint": "vcpkg install libarchive (Windows) | sudo apt install libarchive-dev (Linux)"
+    },
+
     "xnnpack": {
         "name": "XNNPACK",
         "exe": [],  # 通过头文件检测
@@ -446,6 +465,10 @@ INSTALL_SUGGESTIONS = {
     "libcurl": {
         "windows": "Run: vcpkg install curl",
         "linux": "Run: sudo apt install libcurl4-openssl-dev"
+    },
+    "libarchive": {
+        "windows": "Run: vcpkg install libarchive",
+        "linux": "Run: sudo apt install libarchive-dev"
     },
     "musa": {
         "both": "Download from https://www.mthreads.com/download"

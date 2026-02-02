@@ -303,6 +303,7 @@ public:
      * @brief 结束Epoch
      */
     void end_epoch() override;
+    void reset_after_warmup() override;
 
     // =========================================================================
     // 样本获取接口（静态领取）
@@ -340,6 +341,20 @@ public:
      * @note RAW Loader直接读取JPEG文件，不使用DTS格式，因此此方法始终返回false
      */
     bool verify_dts_crc(const std::string& file_path) const override;
+
+    // =========================================================================
+    // 数据集验证
+    // =========================================================================
+
+    /**
+     * @brief 验证下载的ImageNet RAW文件（占位符）
+     * @param save_path 数据集目录(未使用)
+     * @param verbose 是否打印提示信息(默认false)
+     * @return true(始终返回true,需要手动验证)
+     * @note ImageNet RAW数据集过大,不提供自动验证功能
+     * @note 此方法仅为占位符,实际验证需要用户手动完成
+     */
+    bool verify(const std::string& save_path, bool verbose = false) override;
 
     // =========================================================================
     // 数据集下载

@@ -1281,6 +1281,69 @@ void ImageNetLoaderRaw::end_epoch() {
     LOG_INFO << "Epoch ended successfully";
 }
 
+void ImageNetLoaderRaw::reset_after_warmup() {
+    /**
+     * 重置DataLoader状态（用于warmup和test_dataloader之后）
+     *
+     * 目的：将DataLoader重置到"刚刚加载完文件头"的状态
+     *
+     * 操作：
+     * 1. 释放FULLY模式分配的内存（train_set_.full_arena 和 val_set_.full_arena）
+     * 2. 清空buffer_metas
+     * 3. 重置FULLY模式的buffer序号和累积样本计数
+     * 4. 重置worker状态
+     * 5. 保留文件头信息和summary.bin读取的数据
+     */
+
+    LOG_INFO << "Resetting ImageNet RAW DataLoader state after warmup/test";
+
+    // 释放训练集FULLY模式内存
+    if (train_set_.full_arena != nullptr) {
+#ifdef _WIN32
+        VirtualFree(train_set_.full_arena, 0, MEM_RELEASE);
+#else
+        free(train_set_.full_arena);
+#endif
+        train_set_.full_arena = nullptr;
+        train_set_.buffer_metas.clear();
+
+        // 关键修复：重置FULLY模式的状态变量
+        train_set_.current_ready_buffer_seq = 0;
+        train_set_.cumulative_samples = 0;
+
+        LOG_INFO << "Train set FULLY mode memory released";
+    }
+
+    // 释放验证集FULLY模式内存
+    if (val_set_.full_arena != nullptr) {
+#ifdef _WIN32
+        VirtualFree(val_set_.full_arena, 0, MEM_RELEASE);
+#else
+        free(val_set_.full_arena);
+#endif
+        val_set_.full_arena = nullptr;
+        val_set_.buffer_metas.clear();
+
+        // 关键修复：重置FULLY模式的状态变量
+        val_set_.current_ready_buffer_seq = 0;
+        val_set_.cumulative_samples = 0;
+
+        LOG_INFO << "Validation set FULLY mode memory released";
+    }
+
+    // 重置worker状态
+    for (int i = 0; i < num_preproc_workers_; ++i) {
+        worker_states_[i].consuming_buffer = nullptr;
+        worker_states_[i].local_idx = 0;
+        worker_states_[i].global_seq = 0;
+    }
+
+    // 重置current_set_
+    current_set_ = nullptr;
+
+    LOG_INFO << "RAW DataLoader state reset completed";
+}
+
 // =============================================================================
 // 阶段3：PARTIAL模式核心实现
 // =============================================================================
@@ -2235,12 +2298,33 @@ void ImageNetLoaderRaw::shuffle_full_dataset(RawDataset& ds, int epoch_id) {
 }
 
 // =============================================================================
+// 数据集验证
+// =============================================================================
+
+bool ImageNetLoaderRaw::verify(const std::string& save_path, bool verbose) {
+    (void)save_path;  // Unused parameter
+
+    if (verbose) {
+        std::cout << "ImageNet RAW dataset verification skipped (manual verification required)" << std::endl;
+    }
+    return true;
+}
+
+// =============================================================================
 // 数据集下载
 // =============================================================================
 
 void ImageNetLoaderRaw::download(const std::string& save_path) {
-    (void)save_path;  // Unused parameter
+    // 检查train和val文件夹是否都存在
+    std::string train_path = save_path + "/train";
+    std::string val_path = save_path + "/val";
 
+    if (std::filesystem::exists(train_path) && std::filesystem::exists(val_path)) {
+        // 两个文件夹都存在,静默跳过
+        return;
+    }
+
+    // 至少有一个文件夹不存在,打印提示信息
     std::cout << "ImageNet dataset is not available for automatic download." << std::endl;
     std::cout << "Please download the dataset from the official source:" << std::endl;
     std::cout << "  https://image-net.org/" << std::endl;

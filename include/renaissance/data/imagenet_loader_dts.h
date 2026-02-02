@@ -311,6 +311,12 @@ public:
      */
     void end_epoch() override;
 
+    /**
+     * @brief 重置DataLoader状态（用于warmup和test_dataloader之后）
+     * @details 将DataLoader重置到"刚刚加载完文件头"的状态
+     */
+    void reset_after_warmup() override;
+
     // =========================================================================
     // 样本获取接口（静态领取）
     // =========================================================================
@@ -362,6 +368,20 @@ public:
      * @override 实现基类DataLoader的纯虚函数
      */
     bool verify_dts_crc(const std::string& file_path) const override;
+
+    // =========================================================================
+    // 数据集验证
+    // =========================================================================
+
+    /**
+     * @brief 验证下载的ImageNet DTS文件的CRC-32校验码
+     * @param save_path 数据集目录(存放.dts文件的目录)
+     * @param verbose 是否打印详细验证信息(默认false)
+     * @return true=验证通过, false=验证失败
+     * @throws TRException 如果文件读取失败
+     * @note 验证目录下所有.dts文件,调用verify_dts_crc()进行CRC-32校验
+     */
+    bool verify(const std::string& save_path, bool verbose = false) override;
 
     // =========================================================================
     // 数据集下载

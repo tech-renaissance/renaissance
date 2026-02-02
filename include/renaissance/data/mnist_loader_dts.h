@@ -53,6 +53,7 @@ public:
 
     void begin_epoch(int epoch_id, bool is_train) override;
     void end_epoch() override;
+    void reset_after_warmup() override;
     bool get_next_sample(int preproc_worker_id,
                          int32_t& label,
                          const uint8_t*& data_ptr,
@@ -81,6 +82,20 @@ public:
      * @override 实现基类DataLoader的纯虚函数
      */
     bool verify_dts_crc(const std::string& file_path) const override;
+
+    // =========================================================================
+    // 数据集验证
+    // =========================================================================
+
+    /**
+     * @brief 验证下载的MNIST DTS文件的CRC-32校验码
+     * @param save_path 数据集目录(存放.dts文件的目录)
+     * @param verbose 是否打印详细验证信息(默认false)
+     * @return true=验证通过, false=验证失败
+     * @throws TRException 如果文件读取失败
+     * @note 验证目录下所有.dts文件,调用verify_dts_crc()进行CRC-32校验
+     */
+    bool verify(const std::string& save_path, bool verbose = false) override;
 
     // =========================================================================
     // 数据集下载

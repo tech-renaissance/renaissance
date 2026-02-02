@@ -55,6 +55,33 @@ if(TR_USE_LIBCURL)
     endif()
 endif()
 
+# 添加libarchive支持
+if(TR_USE_LIBARCHIVE)
+    if(DEFINED TR_LIBARCHIVE_INCLUDE_DIR)
+        target_include_directories(renaissance INTERFACE ${TR_LIBARCHIVE_INCLUDE_DIR})
+        message(STATUS "Renaissance library: Using libarchive headers from ${TR_LIBARCHIVE_INCLUDE_DIR}")
+    endif()
+    if(DEFINED TR_LIBARCHIVE_LIBRARY_DIR)
+        if(WIN32)
+            # Windows下直接链接libarchive静态库
+            if(EXISTS "${TR_LIBARCHIVE_LIBRARY_DIR}/archive.lib")
+                target_link_libraries(renaissance INTERFACE "${TR_LIBARCHIVE_LIBRARY_DIR}/archive.lib")
+                message(STATUS "Renaissance library: Linking libarchive import library")
+            elseif(EXISTS "${TR_LIBARCHIVE_LIBRARY_DIR}/libarchive.a")
+                target_link_libraries(renaissance INTERFACE "${TR_LIBARCHIVE_LIBRARY_DIR}/libarchive.a")
+                message(STATUS "Renaissance library: Linking libarchive static library")
+            else()
+                message(FATAL_ERROR "Renaissance library: libarchive library not found in ${TR_LIBARCHIVE_LIBRARY_DIR}")
+            endif()
+        else()
+            # Linux/Unix下链接libarchive
+            target_link_directories(renaissance INTERFACE ${TR_LIBARCHIVE_LIBRARY_DIR})
+            target_link_libraries(renaissance INTERFACE archive)
+            message(STATUS "Renaissance library: libarchive linked")
+        endif()
+    endif()
+endif()
+
 # 添加mimalloc支持
 if(TR_USE_MIMALLOC)
     if(DEFINED TR_MIMALLOC_INCLUDE_DIR)

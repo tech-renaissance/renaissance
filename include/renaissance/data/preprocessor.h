@@ -75,6 +75,85 @@ public:
      */
     static Preprocessor& getInstance();
 
+private:
+    /**
+     * @brief 构造函数（私有，单例模式）
+     */
+    Preprocessor();
+
+    /**
+     * @brief 析构函数
+     */
+    ~Preprocessor();
+
+    // 禁止拷贝和移动
+    Preprocessor(const Preprocessor&) = delete;
+    Preprocessor& operator=(const Preprocessor&) = delete;
+    Preprocessor(Preprocessor&&) = delete;
+    Preprocessor& operator=(Preprocessor&&) = delete;
+
+public:
+    // =========================================================================
+    // 新配置方法（状态机）
+    // =========================================================================
+
+    // 步骤1：选择数据集（普通模式）
+    void config_dataset(const std::string& dataset_name,
+                        bool dts_format = false,
+                        int compression_level = 0);
+
+    void config_dataset(DatasetType dataset_type,
+                        bool dts_format = false,
+                        int compression_level = 0);
+
+    // 步骤1': 配置Deployment模式
+    void config_deployment_mode(int batch_size,
+                                int max_resolution,
+                                int num_color_channels);
+
+    // 步骤2：配置DataLoader
+    void config_dataloader(const std::string& dataset_path,
+                           int num_load_workers,
+                           int num_preproc_workers,
+                           bool partial_mode = true,
+                           bool shuffle_train = true,
+                           bool download = true);
+
+    // 步骤3：配置Preprocessor
+    void config_preprocessor(int world_size,
+                             int batch_size,
+                             int max_resolution,
+                             int num_color_channels,
+                             int sdmp_factor = 1,
+                             bool using_cpvs = false);
+
+    // 步骤4：设置数据变换
+    void set_train_transforms();  // TODO: 后续实现
+    void set_val_transforms();    // TODO: 后续实现
+
+    // Deployment模式专用
+    void set_deployment_transforms();  // TODO: 后续实现
+
+    // =========================================================================
+    // 高级封装方法
+    // =========================================================================
+
+    // 训练一个epoch（= begin_epoch + run + end_epoch）
+    void train();
+
+    // 验证一个epoch（不增加iteration_id）
+    void val();
+
+    // 性能测试（训练集+验证集，总是先测试train再测试val）
+    void test_dataloader();
+
+    // 预热缓存（不打印的test_dataloader）
+    void warmup();
+
+    // =========================================================================
+    // 原有方法（保留，用于高级用户）
+    // =========================================================================
+
     /**
      * @brief 配置预处理器
      */
@@ -225,6 +304,89 @@ public:
     };
 
 private:
+    // =========================================================================
+    // 新成员变量（统一配置）
+    // =========================================================================
+
+    // DataLoader指针（一次性绑定，永不改变）
+    // 使用指针而非引用，因为单例构造时还未选择数据集
+    DataLoader* current_dataloader_;
+
+    // DataLoader配置（保存线程数）
+    int num_load_workers_;       // IO线程数
+    int num_preproc_workers_;    // 预处理线程数
+
+    // Preprocessor配置
+    int world_size_;
+    int batch_size_;
+    int max_resolution_;
+    int num_color_channels_;
+    int sdmp_factor_;
+    bool using_cpvs_;
+
+    // 计算结果
+    size_t sample_size_bytes_;    // 单个样本大小 = res * res * channels
+    size_t buffer_size_bytes_;    // 单个缓冲区大小 = batch * sample_size
+
+    // 模式标志
+    bool is_deployment_mode_;
+
+    // iteration管理（替代epoch_id，避免混淆）
+    int train_iteration_id_;      // 每次train()递增
+    int val_iteration_id_;        // 每次val()递增
+
+    // 状态机标志
+    enum class ConfigState {
+        Unconfigured,
+        DatasetSelected,
+        DataLoaderConfigured,
+        PreprocessorConfigured,
+        TransformsSet,
+        Initialized
+    };
+    ConfigState config_state_;
+
+    // 数据集类型和压缩级别
+    DatasetType dataset_type_;
+    int imagenet_compression_level_;
+
+    // Transforms设置标志（用于状态机）
+    bool train_transforms_set_;
+    bool val_transforms_set_;
+
+    // =========================================================================
+    // 辅助方法
+    // =========================================================================
+
+    // 快速运行（不执行预处理，用于test_dataloader和warmup）
+    void run_fast_without_processing();
+
+    // 检查状态机顺序
+    void check_state(ConfigState expected_state, const std::string& method_name);
+
+    // 获取状态名称（用于错误消息）
+    static std::string state_name(ConfigState state);
+
+    // 更新配置状态（根据transforms设置情况）
+    void update_config_state();
+
+    // 构建数据集路径
+    void build_dataset_paths(const std::string& dataset_path,
+                             std::string& train_path,
+                             std::string& val_path);
+
+    // 判断是否需要JPEG解码
+    bool should_jpeg_decode() const;
+
+    // 判断是否需要RandomResizedCrop
+    bool should_apply_crop() const;
+
+    // 判断是否使用DTS格式
+    bool is_dts_format() const;
+
+    // 判断是否是ImageNet数据集
+    bool is_imagenet() const;
+
     /**
      * @brief Worker解码缓冲区（V4.1 - 增加RandomResizedCrop支持）
      */
@@ -343,13 +505,13 @@ private:
                                    int height,
                                    size_t pitch);
 
-    // ✅ Step 1.2：线程持久化相关成员
+    // Step 1.2：线程持久化相关成员
     std::vector<std::thread> worker_pool_;  // 持久线程池（替代worker_threads_）
     std::atomic<bool> stop_flag_{false};         // 停止信号
     std::atomic<int> current_buffer_seq_{0};      // 当前buffer序号
     std::atomic<int> workers_finished_{0};        // 完成计数的原子变量
 
-    // ✅ 线程持久化辅助方法
+    // 线程持久化辅助方法
     void start_worker_pool(DataLoader& loader);
     void stop_worker_pool();
     void notify_workers_new_buffer();
@@ -365,6 +527,12 @@ private:
     size_t buffer_count_{0};                    ///< 处理的buffer数量
     std::vector<size_t> worker_sample_counts_;  // 非原子，只在run()结束时读取
     std::mutex stats_mutex_;  // 保护worker_sample_counts_的写入
+
+    // 日志抑制标志（用于warmup等场景）
+    bool suppress_info_logs_;
+
+    // 快速模式标志（用于test_dataloader和warmup）
+    bool fast_mode_;
 };
 
 } // namespace tr

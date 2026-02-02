@@ -10,6 +10,7 @@
 #pragma once
 
 #include "renaissance/base/global_config.h"
+#include "renaissance/base/tr_exception.h"
 #include <string>
 #include <cstdint>
 #include <stdexcept>
@@ -70,6 +71,18 @@ public:
      * @brief 结束当前epoch
      */
     virtual void end_epoch() = 0;
+
+    /**
+     * @brief 重置DataLoader状态（用于warmup和test_dataloader之后）
+     * @details 将DataLoader重置到"刚刚加载完文件头"的状态
+     *          - 释放FULLY模式分配的内存
+     *          - 重置所有加载标记和状态
+     *          - 保留文件头信息和summary.bin读取的数据
+     * @note 默认实现为空，子类可以重写
+     */
+    virtual void reset_after_warmup() {
+        // 默认实现：什么都不做
+    }
 
     // =========================================================================
     // 核心数据接口（给Preprocessor调用）
@@ -181,6 +194,50 @@ public:
      * @todo 各个开源数据集Loader需要实现此方法（MNIST/CIFAR/ImageNet）
      */
     virtual void download(const std::string& save_path) = 0;
+
+    /**
+     * @brief Extract downloaded archive files
+     * @param save_path Dataset directory (where archives were downloaded)
+     * @throws NotImplementedError If not implemented by subclass
+     * @throws TRException If extraction fails
+     *
+     * This method should:
+     * 1. Check if extracted files/folders exist and are complete
+     * 2. If complete: skip extraction
+     * 3. If partial: delete partial files and re-extract
+     * 4. If missing: extract archives
+     *
+     * @note This is a public method, users can call it anytime after download
+     * @note Default implementation: throws NotImplementedError (subclasses may implement)
+     *
+     * @todo Each open-source dataset loader needs to implement this (MNIST/CIFAR)
+     */
+    virtual void extract(const std::string& save_path) {
+        (void)save_path;  // Unused parameter
+        TR_NOT_IMPLEMENTED("extract() is not implemented for this DataLoader");
+    }
+
+    /**
+     * @brief Verify downloaded files using CRC-32 checksums
+     * @param save_path Dataset directory (where files were downloaded)
+     * @return true=verification passed, false=verification failed
+     * @throws NotImplementedError If not implemented by subclass
+     * @throws TRException If file reading fails
+     *
+     * This method should:
+     * 1. For DTS loaders: call existing verify_dts_crc() method
+     * 2. For RAW loaders: verify downloaded files using CRC-32 constants
+     * 3. For ImageNet RAW: do nothing (not applicable)
+     *
+     * @note This is a public method, users can call it anytime after download
+     * @note Default implementation: throws NotImplementedError (subclasses may implement)
+     */
+    virtual bool verify(const std::string& save_path, bool verbose = false) {
+        (void)save_path;  // Unused parameter
+        (void)verbose;    // Unused parameter
+        TR_NOT_IMPLEMENTED("verify() is not implemented for this DataLoader");
+        return false;  // Unreachable
+    }
 
 protected:
     int num_load_workers_ = 8;      ///< N: DataLoader线程数

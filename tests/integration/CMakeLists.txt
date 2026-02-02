@@ -120,4 +120,23 @@ endif()
 # # 注意：不添加为CTest，因为它需要外部数据集
 # message(STATUS "ImageNet data loader test configured: test_imagenet_loader")
 
+# ============================================================================
+# Preprocessor V4.0 Performance Test
+# ============================================================================
+
+add_executable(test_dataloader_performance
+    test_dataloader_performance.cpp
+)
+
+target_link_libraries(test_dataloader_performance
+    renaissance
+)
+
+set_target_properties(test_dataloader_performance PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/integration
+)
+
+# 注意：不添加为CTest，因为它需要外部数据集
+message(STATUS "Preprocessor V4.0 performance test configured: test_dataloader_performance")
+
 message(STATUS "=== Integration Tests Configuration Complete ===")

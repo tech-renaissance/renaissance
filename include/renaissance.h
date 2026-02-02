@@ -65,6 +65,7 @@
 #include "renaissance/data/mnist_loader_raw.h"
 #include "renaissance/data/cifar_loader_dts.h"
 #include "renaissance/data/cifar_loader_raw.h"
+#include "renaissance/data/unified_data_loader.h"
 #include "renaissance/data/preprocessor.h"
 #include "renaissance/data/sample_loader.h"
 // V3.9.0 公共组件
