@@ -17,6 +17,7 @@
 #include "renaissance/base/logger.h"
 #include "renaissance/base/tr_exception.h"
 #include <turbojpeg.h>
+#include <zlib.h>  // for crc32()
 #include <cstdint>
 #include <sstream>
 #include <iomanip>
@@ -247,8 +248,31 @@ void Preprocessor::worker_func(int worker_id, DataLoader& loader) {
     // get_next_sample()内部已经实现了这个逻辑
     // =========================================================================
 
+    size_t sample_count = 0;  // 样本计数器
+
+    LOG_DEBUG << "[WORKER START] Worker=" << worker_id
+             << ", calc_crc=" << config_.calc_crc
+             << ", enable_logging=" << config_.enable_logging;
+
     while (loader.get_next_sample(worker_id, label, data_ptr, data_size)) {
         int first_byte = -1;  // 默认值-1表示不解码
+        uint32_t crc_value = 0;  // CRC32校验值（如果启用）
+
+        // 计算CRC32（如果启用）
+        if (config_.calc_crc) {
+            crc_value = crc32(0L, Z_NULL, 0);  // 初始化CRC
+            crc_value = crc32(crc_value, data_ptr, static_cast<uInt>(data_size));
+
+            // 【调试】打印前10个样本的CRC
+            if (sample_count < 10) {
+                LOG_DEBUG << "[PREPROC CRC] Worker=" << worker_id
+                         << ", Sample #" << (sample_count + 1)
+                         << ", DataPtr=" << static_cast<const void*>(data_ptr)
+                         << ", Size=" << data_size
+                         << ", Label=" << label
+                         << ", CRC32=0x" << std::hex << std::uppercase << crc_value << std::dec;
+            }
+        }
 
         // JPEG解码（如果启用）
         if (config_.jpeg_decode) {
@@ -286,11 +310,17 @@ void Preprocessor::worker_func(int worker_id, DataLoader& loader) {
             );
         }
 
-        // 写入CSV日志：worker_id,size,label,first_byte
+        // 写入CSV日志：worker_id,size,label,first_byte[,crc32]
         if (config_.enable_logging) {
-            log_file << worker_id << "," << data_size << "," << label << "," << first_byte << "\n";
+            log_file << worker_id << "," << data_size << "," << label << "," << first_byte;
+            if (config_.calc_crc) {
+                // CRC32打印为8位16进制大写（例如：A1B2C3D4）
+                log_file << "," << std::uppercase << std::hex << std::setfill('0') << std::setw(8) << crc_value << std::dec;
+            }
+            log_file << "\n";
         }
 
+        sample_count++;  // 增加样本计数
         local_count++;
         total_samples_.fetch_add(1, std::memory_order_relaxed);
     }
@@ -652,7 +682,9 @@ void Preprocessor::worker_func_persistent(int worker_id, DataLoader& loader) {
 
     // 打开CSV日志文件（如果启用）
     std::ofstream log_file;
+    std::ofstream crc_file;
     if (config_.enable_logging) {
+        // 打开worker_x.csv (记录worker_id, size, label, first_byte)
         std::ostringstream oss;
         oss << config_.log_dir << "/worker_" << worker_id << ".csv";
         std::string log_path = oss.str();
@@ -661,9 +693,22 @@ void Preprocessor::worker_func_persistent(int worker_id, DataLoader& loader) {
         if (!log_file.is_open()) {
             TR_FILE_NOT_FOUND("Failed to open log file: " << log_path);
         }
+
+        // 如果启用CRC计算，打开crc_x.csv (记录crc32)
+        if (config_.calc_crc) {
+            std::ostringstream crc_oss;
+            crc_oss << config_.log_dir << "/crc_" << worker_id << ".csv";
+            std::string crc_path = crc_oss.str();
+
+            crc_file.open(crc_path, std::ios::out | std::ios::trunc);
+            if (!crc_file.is_open()) {
+                TR_FILE_NOT_FOUND("Failed to open CRC file: " << crc_path);
+            }
+        }
     }
 
     size_t local_count = 0;
+    size_t sample_count = 0;  // 总样本计数器（用于打印前10个样本的CRC）
 
     // =========================================================================
     // ✅ 持久线程主循环：跨多个buffer处理样本
@@ -700,6 +745,23 @@ void Preprocessor::worker_func_persistent(int worker_id, DataLoader& loader) {
 
             // 正常模式：执行完整预处理
             int first_byte = -1;
+            uint32_t crc_value = 0;  // CRC32校验值（如果启用）
+
+            // 计算CRC32（如果启用）
+            if (config_.calc_crc) {
+                crc_value = crc32(0L, Z_NULL, 0);  // 初始化CRC
+                crc_value = crc32(crc_value, data_ptr, static_cast<uInt>(data_size));
+
+                // 【调试】打印前10个样本和第962-973个样本的CRC（覆盖第二个buffer的前10个）
+                if (sample_count < 10 || (sample_count >= 961 && sample_count < 973)) {
+                    LOG_DEBUG << "[PREPROC CRC] Worker=" << worker_id
+                             << ", Sample #" << (sample_count + 1)
+                             << ", DataPtr=" << static_cast<const void*>(data_ptr)
+                             << ", Size=" << data_size
+                             << ", Label=" << label
+                             << ", CRC32=0x" << std::hex << std::uppercase << crc_value << std::dec;
+                }
+            }
 
             // JPEG解码（如果启用）
             if (config_.jpeg_decode) {
@@ -742,11 +804,18 @@ void Preprocessor::worker_func_persistent(int worker_id, DataLoader& loader) {
                 );
             }
 
-            // 写入CSV日志：worker_id,size,label,first_byte
+            // 写入CSV日志（分离格式）
             if (config_.enable_logging) {
+                // worker_x.csv: worker_id,size,label,first_byte (无表头)
                 log_file << worker_id << "," << data_size << "," << label << "," << first_byte << "\n";
+
+                // crc_x.csv: crc32 (无表头)
+                if (config_.calc_crc) {
+                    crc_file << std::uppercase << std::hex << std::setfill('0') << std::setw(8) << crc_value << "\n";
+                }
             }
 
+            sample_count++;  // 增加总样本计数
             local_count++;
             total_samples_.fetch_add(1, std::memory_order_relaxed);
         }
@@ -770,6 +839,9 @@ void Preprocessor::worker_func_persistent(int worker_id, DataLoader& loader) {
 
     if (log_file.is_open()) {
         log_file.close();
+    }
+    if (crc_file.is_open()) {
+        crc_file.close();
     }
 
     LOG_INFO << "Persistent Worker " << worker_id << " exiting: processed "
@@ -1434,12 +1506,8 @@ void Preprocessor::test_dataloader() {
                   (dynamic_cast<MnistLoaderDts*>(current_dataloader_) != nullptr) ||
                   (dynamic_cast<CifarLoaderDts*>(current_dataloader_) != nullptr);
 
-    int compression_level = 0;
-    if (auto* imagenet_dts = dynamic_cast<ImageNetLoaderDts*>(current_dataloader_)) {
-        // ImageNet DTS有压缩级别
-        // 这里简化处理，默认为0（可通过其他方式获取实际值）
-        compression_level = 0;
-    }
+    // 直接使用Preprocessor保存的compression_level（在config_dataset时设置）
+    int compression_level = imagenet_compression_level_;
 
     std::string format = is_dts ? "dts" : "raw";
 

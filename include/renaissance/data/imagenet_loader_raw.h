@@ -126,9 +126,12 @@ struct RawFileInfo {
 };
 
 // PART槽位元数据（对应DTS的SlotMeta）
+// 【RAW Loader语义】每个IO线程一个slot（slot_idx = thread_id）
+// 【DTS Loader语义】每个BLOCK一个slot（slot_idx = block_seq）
+// 注意：offsets是相对于该slot基地址的偏移，不是全局偏移
 struct PartSlotMeta {
     uint32_t num_samples = 0;            // 该slot包含的样本数
-    std::vector<uint32_t> offsets;       // 样本在slot内的偏移
+    std::vector<uint32_t> offsets;       // 样本在slot内的偏移（相对于slot基地址）
     std::vector<uint32_t> sizes;         // 样本大小
     std::vector<int32_t> labels;         // 样本标签
 
@@ -145,7 +148,8 @@ struct RawBuffer {
     BufferState state = BufferState::EMPTY;  // 复用基类枚举
 
     // ===================== 3. Slot元数据 ===================
-    std::vector<PartSlotMeta> slot_metas;  // N个slot
+    std::vector<PartSlotMeta> slot_metas;  // N个线程slot（slot_idx = thread_id）
+                                           // 与DTS Loader不同：DTS是N×PF个BLOCK slot
 
     // ===================== 4. 样本级打乱索引表 ================
     std::vector<uint32_t> shuffled_locations;  // (slot_idx << 16) | sample_idx
@@ -176,6 +180,9 @@ struct RawDataset {
     std::string summary_path;           // summary.bin路径
     size_t num_samples = 0;
     uint64_t total_size_bytes = 0;
+
+    // ===================== Summary加载状态 =====================
+    bool summary_loaded = false;        // 标记summary.bin是否已加载（避免重复读取）
 
     // ===================== 类别映射 =====================
     std::map<uint32_t, std::string> label_to_folder;  // 0-999 -> folder_name
@@ -429,6 +436,7 @@ private:
     // =========================================================================
 
     void load_full_dataset(RawDataset& ds);
+    void build_full_shuffled_locations(RawDataset& ds);  // 预先构建full_shuffled_locations（不加载实际数据）
     void shuffle_full_dataset(RawDataset& ds, int epoch_id);
     void perform_incremental_shuffle(RawDataset::BufferMeta& buffer_meta, uint32_t buffer_seq);  // 【新增】增量shuffle
 

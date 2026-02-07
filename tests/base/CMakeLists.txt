@@ -68,6 +68,9 @@ if(TR_USE_MUSA)
     add_executable(test_musa_arena test_musa_arena.cpp)
 endif()
 
+# CRC32对比测试
+add_executable(test_crc32_comparison test_crc32_comparison.cpp)
+
 # 设置输出目录
 set_target_properties(test_logger PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/base
@@ -115,6 +118,10 @@ if(TR_USE_MUSA)
     )
 endif()
 
+set_target_properties(test_crc32_comparison PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/base
+)
+
 # Windows下为控制台程序设置子系统
 if(WIN32)
     set_target_properties(test_logger PROPERTIES
@@ -153,6 +160,9 @@ if(WIN32)
             WIN32_EXECUTABLE FALSE
         )
     endif()
+    set_target_properties(test_crc32_comparison PROPERTIES
+        WIN32_EXECUTABLE FALSE
+    )
 endif()
 
 # 编译选项
@@ -227,6 +237,7 @@ endif()
 if(TR_USE_MUSA)
     target_link_libraries(test_musa_arena PRIVATE renaissance)
 endif()
+target_link_libraries(test_crc32_comparison PRIVATE renaissance)
 
 message(STATUS "TR_WORKSPACE propagated to base tests: ${TR_WORKSPACE}")
 

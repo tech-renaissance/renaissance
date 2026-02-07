@@ -55,6 +55,7 @@ public:
         uint64_t delay_us = 100;           ///< 延迟时间（微秒）
         bool jpeg_decode = true;            ///< 是否执行JPEG解码（第二步功能，默认开启）
         bool apply_crop = true;             ///< 是否执行RandomResizedCrop（需要jpeg_decode=true，默认开启）
+        bool calc_crc = false;              ///< 是否计算CRC32校验码（用于验证数据完整性，默认关闭）
 
         Config() = default;
     };

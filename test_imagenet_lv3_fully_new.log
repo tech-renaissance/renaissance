@@ -1,0 +1,31 @@
+
+========================================================================
+Multi-Epoch Test: imagenet dts fully
+========================================================================
+
+Configuration:
+  Dataset: ImageNet
+  Format: DTS LV3
+  Mode: FULLY
+  Load workers: 8
+  Preprocess workers: 16
+  Train samples: 1281167
+  Val samples: 50000
+
+Test Flow:
+  1. Validation Set (Epoch -1) - Pre-training validation
+  2. Training Set (Epoch 0)
+  3. Validation Set (Epoch 0)
+  4. Training Set (Epoch 1)
+  5. Validation Set (Epoch 1)
+
+Running epochs...
+
+Epoch -1 (Pre-training validation):
+  Validation Epoch -1: 50000 samples (PASSED), 2.763 s
+
+Epoch 0:
+Error: [MemoryError] FULLY mode requires 44 GB memory, but available memory is insufficient
+  Dataset: Training (44.5625 GB)
+  Required: 44 GB
+  Recommended: Use PARTIAL mode or smaller dataset (at imagenet_loader_dts.cpp :: allocate_buffers())

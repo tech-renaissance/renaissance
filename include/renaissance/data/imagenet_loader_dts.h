@@ -419,7 +419,7 @@ private:
     // =========================================================================
 
     void io_worker_func_batched(int thread_id, Buffer& buffer,
-                                uint32_t start_group_idx, Dataset& ds);
+                                uint32_t start_group_idx, Dataset& ds, int start_slot_idx);
     void read_block_native(FileHandle& file, uint32_t block_id, uint8_t* dst);
     void parse_block_meta(uint32_t slot_idx, const uint8_t* data,
                           Dataset& ds, SlotMeta& slot_meta);
@@ -446,6 +446,7 @@ private:
     // =========================================================================
 
     void load_full_dataset(Dataset& ds);  // 保留用于后续epoch的全局shuffle
+    void build_full_shuffled_locations(Dataset& ds);  // 预先构建full_shuffled_locations（不加载实际数据）
     void shuffle_full_dataset(Dataset& ds, int epoch_id);
     void perform_incremental_shuffle(Dataset::BufferMeta& buffer_meta, uint32_t buffer_seq);
 

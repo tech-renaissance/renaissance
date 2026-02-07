@@ -663,7 +663,13 @@ void ImageNetLoaderDts::begin_epoch(int epoch_id, bool is_train) {
                 buffer_meta.slot_metas.clear();
             }
 
-            // 4. 同步加载第一个buffer（使用PARTIAL相同的机制）
+            // 4. 预先构建full_shuffled_locations（用于后续epoch的全局shuffle）
+            // 注意：此时数据还未加载，只是根据full_slot_metas构建样本位置映射
+            LOG_INFO << "FULLY mode: building full_shuffled_locations for future epochs";
+            build_full_shuffled_locations(*current_set_);
+            LOG_INFO << "FULLY mode: full_shuffled_locations built with " << current_set_->full_total_samples << " samples";
+
+            // 5. 同步加载第一个buffer（边加载边处理，避免GPU等待）
             current_set_->current_ready_buffer_seq = 0;
             load_one_buffer_batch_fully(*current_set_, 0);
             LOG_INFO << "FULLY mode: first buffer loaded, ready for consumption";
@@ -735,7 +741,7 @@ void ImageNetLoaderDts::begin_epoch(int epoch_id, bool is_train) {
         // 更新下一个buffer的起始索引
         const int N = num_load_workers_;
         const int PF = prefetch_factor_;
-        uint32_t groups_per_buffer = PF * N;
+        uint32_t groups_per_buffer = PF;  // 1个buffer = PF个GROUP
         current_set_->next_start_group_idx = groups_per_buffer;
 
         // 检查是否还有更多samples（检查实际加载的samples数量）
@@ -1072,59 +1078,43 @@ bool ImageNetLoaderDts::get_next_sample(int preproc_worker_id, int32_t& label,
 // =============================================================================
 
 void ImageNetLoaderDts::io_worker_func_batched(int thread_id, Buffer& buffer,
-                                                uint32_t start_group_idx, Dataset& ds) {
+                                                uint32_t start_group_idx, Dataset& ds,
+                                                int start_slot_idx) {
     /**
      * IO线程批量工作函数（新架构V4.0）
      *
-     * 静态分配策略（姜总工的核心设计）：
-     * - 每个线程负责PF个连续的slot
-     * - Thread k负责：Slot [k×PF, k×PF+1, ..., k×PF+PF-1]
-     * - 对应的group索引：start_group_idx, start_group_idx+1, ..., start_group_idx+PF-1
-     * - Block索引：group_idx × N + thread_id
+     * 【修复】仿照FULLY模式，确保slot顺序=block_seq顺序（0,1,2,3,...）
      *
-     * 内存布局（N=8, PF=4）：
-     *   Thread 0: Slot 0,1,2,3   (连续64MB)
-     *   Thread 1: Slot 4,5,6,7   (连续64MB)
-     *   Thread 7: Slot 28,29,30,31 (连续64MB)
-     *
-     * 优点：
-     * - 每个线程的内存连续（缓存友好）
-     * - 零竞争：每个线程只操作自己的slot
-     * - Join同步：无需原子操作
+     * 关键：使用start_slot_idx参数，让slot_idx连续递增（不是按stride=N）
+     * 这样无论shuffle与否，slot顺序=block_seq顺序
      */
 
     const int N = num_load_workers_;
     const int PF = prefetch_factor_;
 
-    LOG_DEBUG << "IO worker " << thread_id << " started (start_group_idx=" << start_group_idx << ")";
+    // 计算起始block序号（从group_idx转换）
+    int start_block = static_cast<int>(start_group_idx) * N;
+    int end_block = std::min(start_block + N * PF, static_cast<int>(ds.num_blocks));
+
+    LOG_DEBUG << "IO worker " << thread_id << " started (start_group_idx=" << start_group_idx
+              << ", start_block=" << start_block << ", end_block=" << end_block
+              << ", start_slot_idx=" << start_slot_idx << ")";
 
     // 打开文件（每个线程独立打开，避免锁竞争）
     FileHandle file(ds.file_path);
 
-    // 遍历PF个groups（每个线程负责PF个连续slot）
-    for (int local_idx = 0; local_idx < PF; ++local_idx) {
-        // 计算group索引
-        uint32_t group_idx = start_group_idx + local_idx;
+    // 使用传入的start_slot_idx
+    int slot_idx = start_slot_idx;
 
+    // 遍历本线程负责的所有blocks（stride=N）
+    for (int block_seq = start_block + thread_id; block_seq < end_block; block_seq += N) {
         // 检查是否超出范围
-        if (group_idx >= ds.epoch_block_order.size()) {
-            break;  // 没有更多groups了
-        }
-
-        // 计算逻辑block序号
-        uint32_t block_seq = group_idx * N + thread_id;
-
-        // 检查block_seq是否超出范围
-        if (block_seq >= ds.num_blocks) {
-            break;  // 超出数据集范围
+        if (block_seq >= static_cast<int>(ds.num_blocks)) {
+            break;
         }
 
         // 获取真实block ID（经过Level 2 shuffle）
         uint32_t block_id = ds.epoch_block_order[block_seq];
-
-        // 【关键】计算slot索引（姜总工的连续布局设计）
-        // Thread k的PF个slot是连续的：k×PF, k×PF+1, ..., k×PF+PF-1
-        uint32_t slot_idx = thread_id * PF + local_idx;
 
         TR_CHECK(slot_idx < buffer.slot_metas.size(), ValueError,
                  "slot_idx " << slot_idx << " >= slot_metas.size() " << buffer.slot_metas.size());
@@ -1140,6 +1130,9 @@ void ImageNetLoaderDts::io_worker_func_batched(int thread_id, Buffer& buffer,
 
         LOG_DEBUG << "Worker " << thread_id << " loaded block " << block_id
                   << " (seq=" << block_seq << ") to slot " << slot_idx;
+
+        // 下一个slot（连续递增，不是stride=N）
+        slot_idx++;
     }
 
     LOG_DEBUG << "IO worker " << thread_id << " finished";
@@ -1316,12 +1309,16 @@ void ImageNetLoaderDts::collect_sample_locations(Buffer& buffer) {
      * 编码方式: (slot_idx << 16) | sample_idx
      * - 高16位: slot_idx (在buffer.slot_metas中的索引)
      * - 低16位: sample_idx (在slot内的样本索引)
+     *
+     * 注意：调用此函数前，buffer.slot_metas应该已经按照block_id顺序排列。
+     *       对于PARTIAL模式，在load_one_buffer_batch中会先重排slot_metas。
+     *       对于FULLY模式，slot_metas本身就是按block_seq顺序的。
      */
 
     buffer.shuffled_locations.clear();
     buffer.total_samples = 0;
 
-    // 遍历所有slot
+    // 遍历所有slot，按顺序收集样本位置
     for (size_t slot_idx = 0; slot_idx < buffer.slot_metas.size(); ++slot_idx) {
         const SlotMeta& smeta = buffer.slot_metas[slot_idx];
 
@@ -1497,9 +1494,29 @@ void ImageNetLoaderDts::load_one_buffer_batch(Buffer* buffer, Dataset& ds, uint3
     std::vector<std::thread> io_threads;
     io_threads.reserve(N);
 
+    // 【新增】计算每个线程在buffer内的起始slot_idx（仿照FULLY模式）
+    std::vector<int> thread_start_slot_idx(N);
+    thread_start_slot_idx[0] = 0;
+    for (int thread_id = 1; thread_id < N; ++thread_id) {
+        // 计算thread_id之前所有线程处理的blocks数量
+        int blocks_before = 0;
+        int start_block = static_cast<int>(start_group_idx) * N;
+        int end_block = std::min(start_block + N * PF, static_cast<int>(ds.num_blocks));
+
+        for (int prev_thread = 0; prev_thread < thread_id; ++prev_thread) {
+            // 计算prev_thread处理了多少个blocks（stride=N）
+            int count = 0;
+            for (int block_seq = start_block + prev_thread; block_seq < end_block; block_seq += N) {
+                ++count;
+            }
+            blocks_before += count;
+        }
+        thread_start_slot_idx[thread_id] = blocks_before;
+    }
+
     for (int thread_id = 0; thread_id < N; ++thread_id) {
-        io_threads.emplace_back([this, thread_id, buffer, &ds, start_group_idx]() {
-            this->io_worker_func_batched(thread_id, *buffer, start_group_idx, ds);
+        io_threads.emplace_back([this, thread_id, buffer, &ds, start_group_idx, &thread_start_slot_idx]() {
+            this->io_worker_func_batched(thread_id, *buffer, start_group_idx, ds, thread_start_slot_idx[thread_id]);
         });
     }
 
@@ -1609,28 +1626,53 @@ void ImageNetLoaderDts::load_one_buffer_batch_fully(Dataset& ds, uint32_t buffer
     temp_buffer.slot_metas = buffer_meta.slot_metas;
     temp_buffer.shuffled_locations.clear();
 
+    // 【修复】为每个线程计算其在buffer内的起始slot索引（处理不完整buffer）
+    std::vector<int> thread_start_slot_idx(N);
+    thread_start_slot_idx[0] = 0;
+    for (int thread_id = 1; thread_id < N; ++thread_id) {
+        // 计算thread_id之前所有线程处理的blocks数量
+        int blocks_before = 0;
+        for (int prev_thread = 0; prev_thread < thread_id; ++prev_thread) {
+            // 计算prev_thread处理了多少个blocks（stride=N）
+            int count = 0;
+            for (int block_seq = start_block + prev_thread; block_seq < end_block; block_seq += N) {
+                ++count;
+            }
+            blocks_before += count;
+        }
+        thread_start_slot_idx[thread_id] = blocks_before;
+    }
+
     // 1. 创建N个IO线程
     std::vector<std::thread> io_threads;
     io_threads.reserve(N);
 
     for (int thread_id = 0; thread_id < N; ++thread_id) {
-        io_threads.emplace_back([this, thread_id, start_block, end_block, &temp_buffer, &ds, buffer_seq, N]() {
+        io_threads.emplace_back([this, thread_id, start_block, end_block, &temp_buffer, &ds, &thread_start_slot_idx, N]() {
             FileHandle file(ds.file_path);
+
+            // 【修复】使用预先计算的起始索引，保证连续索引
+            int slot_idx_in_buffer = thread_start_slot_idx[thread_id];
 
             // 当前线程负责的blocks（stride为N）
             for (int block_seq = start_block + thread_id; block_seq < end_block; block_seq += N) {
                 // 获取真实block ID（经过Level 2 shuffle）
                 uint32_t block_id = ds.epoch_block_order[block_seq];
 
-                // 计算目标地址（在buffer内的相对位置）
-                int local_block_seq = block_seq - start_block;
-                uint8_t* dst = temp_buffer.data + static_cast<size_t>(local_block_seq) * block_size_;
+                // 【修复】使用连续的slot索引，避免越界
+                uint32_t slot_idx = slot_idx_in_buffer++;
+
+                TR_CHECK(slot_idx < temp_buffer.slot_metas.size(), ValueError,
+                         "slot_idx " << slot_idx << " >= slot_metas.size() " << temp_buffer.slot_metas.size());
+
+                // 计算目标地址（静态偏移）
+                uint8_t* dst = temp_buffer.data + static_cast<size_t>(slot_idx) * block_size_;
 
                 // 执行I/O
                 read_block_native(file, block_id, dst);
 
                 // 解析元数据
-                parse_block_meta(local_block_seq, dst, ds, temp_buffer.slot_metas[local_block_seq]);
+                parse_block_meta(slot_idx, dst, ds, temp_buffer.slot_metas[slot_idx]);
             }
         });
     }
@@ -1644,9 +1686,19 @@ void ImageNetLoaderDts::load_one_buffer_batch_fully(Dataset& ds, uint32_t buffer
     buffer_meta.slot_metas = temp_buffer.slot_metas;
 
     // 4. 同时填充ds.full_slot_metas（用于后续epoch的全局shuffle复用）
-    for (int i = 0; i < blocks_in_this_buffer; ++i) {
-        int global_block_idx = start_block + i;
-        ds.full_slot_metas[global_block_idx] = buffer_meta.slot_metas[i];
+    // 【修复】直接按顺序填充，不需要复杂的(thread_id, local_idx)映射
+    for (int slot_idx = 0; slot_idx < blocks_in_this_buffer; ++slot_idx) {
+        // 计算对应的block_seq（按stride=N的顺序）
+        int thread_id = slot_idx % N;
+        int local_idx = slot_idx / N;
+        int block_seq = start_block + thread_id + local_idx * N;
+
+        // 检查是否在范围内
+        if (block_seq >= end_block) {
+            break;  // 安全检查
+        }
+
+        ds.full_slot_metas[block_seq] = buffer_meta.slot_metas[slot_idx];
     }
 
     // 5. 收集样本位置
@@ -1763,7 +1815,7 @@ void ImageNetLoaderDts::load_next_buffer() {
     // 3. 计算下一个group索引
     const int N = num_load_workers_;
     const int PF = prefetch_factor_;
-    uint32_t groups_per_buffer = PF * N;
+    uint32_t groups_per_buffer = PF;  // 1个buffer = PF个GROUP
     uint32_t start_group_idx = current_set_->next_start_group_idx;
 
     // 4. 检查是否已加载所有samples（更准确的判断）
@@ -1920,6 +1972,56 @@ void ImageNetLoaderDts::load_full_dataset(Dataset& ds) {
     }
 
     LOG_INFO << "Full dataset loaded: " << ds.full_total_samples << " samples";
+}
+
+void ImageNetLoaderDts::build_full_shuffled_locations(Dataset& ds) {
+    /**
+     * FULLY模式：预先构建full_shuffled_locations（不加载实际数据）
+     *
+     * 目的：
+     * - 为后续epoch的全局shuffle准备样本位置映射
+     * - 避免在第一个epoch加载时阻塞GPU
+     * - 实现边加载边处理的流式设计
+     *
+     * 流程：
+     * 1. 遍历所有blocks，估算每个block的样本数
+     * 2. 为每个样本生成位置编码(slot_idx << 16 | sample_idx)
+     * 3. 填充full_shuffled_locations数组
+     *
+     * 注意：此时full_slot_metas还未填充，我们使用默认值估算样本数
+     *       实际样本数会在后续load_one_buffer_batch_fully中更新
+     */
+
+    LOG_INFO << "Building full_shuffled_locations for " << ds.num_blocks << " blocks";
+
+    // 1. 清空并预分配空间
+    ds.full_shuffled_locations.clear();
+    ds.full_total_samples = 0;
+
+    // 2. 估算每个block的样本数（使用平均值或从DTS header获取）
+    // 这里我们简化处理：先按blocks数量分配，后续在load_one_buffer_batch_fully中更新
+    // 更精确的做法是在configure阶段读取summary信息
+
+    // 临时方案：使用默认值（每个block假设有固定样本数）
+    // 实际样本数会在第一次加载buffer时从slot_metas中获取
+    uint32_t estimated_samples_per_block = 1000;  // 估算值
+    uint32_t total_estimated_samples = ds.num_blocks * estimated_samples_per_block;
+
+    ds.full_shuffled_locations.reserve(total_estimated_samples);
+
+    // 3. 为每个样本生成位置编码（临时编码，后续会被正确覆盖）
+    for (uint32_t block_idx = 0; block_idx < ds.num_blocks; ++block_idx) {
+        for (uint32_t sample_idx = 0; sample_idx < estimated_samples_per_block; ++sample_idx) {
+            // 位置编码：高16位 = slot_idx, 低16位 = sample_idx
+            uint32_t location = (block_idx << 16) | sample_idx;
+            ds.full_shuffled_locations.push_back(location);
+        }
+    }
+
+    ds.full_total_samples = total_estimated_samples;
+
+    LOG_INFO << "Full shuffled locations built: " << ds.full_total_samples << " samples (estimated)";
+    LOG_DEBUG << "Note: Actual sample counts will be updated when buffers are loaded";
 }
 
 void ImageNetLoaderDts::perform_incremental_shuffle(Dataset::BufferMeta& buffer_meta, uint32_t buffer_seq) {

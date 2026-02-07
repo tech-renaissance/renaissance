@@ -8,7 +8,10 @@
       "Bash(powershell.exe:*)",
       "Bash(./build/windows-msvc-release/bin/tests/data/test_reproducibility_epoch.exe:*)",
       "Bash(.buildwindows-msvc-releasebintestsdatatest_download.exe)",
-      "Bash(./build/windows-msvc-release/bin/tests/integration/test_dataloader_performance.exe:*)"
+      "Bash(./build/windows-msvc-release/bin/tests/integration/test_dataloader_performance.exe:*)",
+      "Bash(./build/windows-msvc-release/bin/tests/integration/test_epochs.exe:*)",
+      "Bash(tee:*)",
+      "Bash(.buildwindows-msvc-releasebintestsintegrationtest_crc_logging.exe --dataset imagenet --format dts --lv 0 --preproc 8 --samples 0)"
     ],
     "deny": [],
     "ask": []

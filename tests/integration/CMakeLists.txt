@@ -139,4 +139,61 @@ set_target_properties(test_dataloader_performance PROPERTIES
 # 注意：不添加为CTest，因为它需要外部数据集
 message(STATUS "Preprocessor V4.0 performance test configured: test_dataloader_performance")
 
+# ============================================================================
+# Multi-Epoch Test (Train-Val Switching)
+# ============================================================================
+
+add_executable(test_epochs
+    test_epochs.cpp
+)
+
+target_link_libraries(test_epochs
+    renaissance
+)
+
+set_target_properties(test_epochs PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/integration
+)
+
+# 注意：不添加为CTest，因为它需要外部数据集
+message(STATUS "Multi-epoch test configured: test_epochs")
+
+# ============================================================================
+# CRC32 Logging Test
+# ============================================================================
+
+add_executable(test_crc_logging
+    test_crc_logging.cpp
+)
+
+target_link_libraries(test_crc_logging
+    renaissance
+)
+
+set_target_properties(test_crc_logging PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/integration
+)
+
+# 注意：不添加为CTest，因为它需要外部数据集
+message(STATUS "CRC32 logging test configured: test_crc_logging")
+
+# =============================================================================
+# Test: test_epoch_crc
+# Purpose: 测试任意epoch和phase的CRC32值
+# =============================================================================
+add_executable(test_epoch_crc
+    test_epoch_crc.cpp
+)
+
+target_link_libraries(test_epoch_crc
+    renaissance
+)
+
+set_target_properties(test_epoch_crc PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
+)
+
+# 注意：不添加为CTest，因为它需要外部数据集
+message(STATUS "Epoch CRC test configured: test_epoch_crc")
+
 message(STATUS "=== Integration Tests Configuration Complete ===")
