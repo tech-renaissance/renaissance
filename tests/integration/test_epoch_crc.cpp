@@ -55,6 +55,7 @@ void print_usage(const char* program_name) {
               << "  --path <PATH>        Dataset root path (default: " << DEFAULT_DATASET_PATH << ")\n\n"
               << "Optional Options:\n"
               << "  --mode <MODE>        Mode: partial, fully (case-insensitive, default: partial)\n"
+              << "  --shuffle            Enable data shuffling (default: disabled)\n"
               << "  --lv <0-3>           DTS compression level for ImageNet (default: 0)\n"
               << "  --workers <N>        Number of load workers (default: 16)\n"
               << "  --preproc <N>        Number of preprocess workers (default: 16)\n"
@@ -119,6 +120,7 @@ void test_epoch_crc(const std::string& dataset_name,
                    const std::string& phase_str,
                    int target_epoch,
                    const std::string& dataset_path,
+                   bool enable_shuffle,
                    int compression_level,
                    int num_load_workers,
                    int num_preproc_workers) {
@@ -151,7 +153,7 @@ void test_epoch_crc(const std::string& dataset_name,
 
     // 步骤2: 配置DataLoader
     prep.config_dataloader(dataset_path, num_load_workers, num_preproc_workers,
-                          partial_mode, false, false);  // 关闭shuffle，顺序加载
+                          partial_mode, enable_shuffle, false);  // 使用enable_shuffle参数
 
     // 步骤3: 配置Preprocessor（必须先调用config_preprocessor）
     prep.config_preprocessor(1, 32, 224, 3, 1, false);
@@ -208,6 +210,7 @@ void test_epoch_crc(const std::string& dataset_name,
     }
     std::cout << "\n";
     std::cout << "  Mode: " << (partial_mode ? "PARTIAL" : "FULLY") << "\n";
+    std::cout << "  Shuffle: " << (enable_shuffle ? "ENABLED" : "DISABLED") << "\n";
     std::cout << "  Load workers: " << num_load_workers << "\n";
     std::cout << "  Preprocess workers: " << num_preproc_workers << "\n";
     std::cout << "  Target: Epoch " << target_epoch << " " << (target_is_train ? "TRAIN" : "VAL") << "\n\n";
@@ -321,6 +324,7 @@ int main(int argc, char* argv[]) {
     std::string phase_arg = "";
     std::string dataset_path = DEFAULT_DATASET_PATH;
     int target_epoch = -1;
+    bool enable_shuffle = false;
     int compression_level = 0;
     int num_load_workers = 16;
     int num_preproc_workers = 16;
@@ -346,6 +350,8 @@ int main(int argc, char* argv[]) {
                 std::cerr << "Error: --epoch must be >= 0\n";
                 return 1;
             }
+        } else if (arg == "--shuffle") {
+            enable_shuffle = true;
         } else if (arg == "--lv" && i + 1 < argc) {
             compression_level = std::stoi(argv[++i]);
             if (compression_level < 0 || compression_level > 3) {
@@ -393,7 +399,7 @@ int main(int argc, char* argv[]) {
     // 运行测试
     try {
         test_epoch_crc(dataset_arg, format_arg, mode_arg, phase_arg, target_epoch,
-                      dataset_path, compression_level, num_load_workers, num_preproc_workers);
+                      dataset_path, enable_shuffle, compression_level, num_load_workers, num_preproc_workers);
     } catch (const std::exception& e) {
         std::cerr << "Error: " << e.what() << "\n";
         return 1;

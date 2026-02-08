@@ -14,6 +14,7 @@
 
 #include "renaissance/data/data_loader.h"          // LoadMode, verify_dts_crc
 #include "renaissance/data/imagenet_loader_dts.h"   // BufferState (共享枚举)
+#include "renaissance/data/sample_info.h"           // SampleInfo结构体（FULLY模式使用）
 #include "renaissance/base/philox.h"               // Philox RNG
 #include <cstdint>
 #include <vector>
@@ -56,6 +57,7 @@ struct RawWorkerState {
     RawBuffer* consuming_buffer = nullptr;  ///< 当前正在消费的Buffer
     size_t local_idx = 0;                   ///< 在当前Buffer内的索引
     size_t global_seq = 0;                  ///< 全局样本序号（跨Buffer连续）
+    size_t fully_local_idx = 0;             ///< FULLY模式：第二个epoch开始的本地读取索引
 };
 
 // =============================================================================
@@ -228,6 +230,23 @@ struct RawDataset {
     std::thread async_load_thread;            // 后台异步加载线程
     size_t current_ready_buffer_seq = 0;      // 当前ready的buffer序号
     bool is_first_epoch = true;               // 是否是第一个epoch
+
+    // ===================== FULLY模式：第二个epoch及以后专用 =====================
+    // 全局数组（拼接后的所有样本信息）
+    std::vector<SampleInfo> global_sample_info_fully_train;    // 全局训练集
+    std::vector<SampleInfo> global_sample_info_fully_val;      // 全局验证集
+
+    // 线程级别数组（M个线程，每个线程独享自己的数组）
+    std::vector<std::vector<SampleInfo>> thread_sample_info_fully_train;  // M个线程的训练集
+    std::vector<std::vector<SampleInfo>> thread_sample_info_fully_val;    // M个线程的验证集
+
+    // 记录每个线程贡献的元素数量（用于第二轮epoch开始时的分段）
+    std::vector<size_t> num_elements_per_thread_train;  // M个元素
+    std::vector<size_t> num_elements_per_thread_val;    // M个元素
+
+    // 状态标记（是否已完成第一轮收集）
+    bool fully_train_collected = false;   // 训练集第一轮epoch是否完成
+    bool fully_val_collected = false;     // 验证集第一轮epoch是否完成
 };
 
 // =============================================================================
@@ -439,6 +458,11 @@ private:
     void build_full_shuffled_locations(RawDataset& ds);  // 预先构建full_shuffled_locations（不加载实际数据）
     void shuffle_full_dataset(RawDataset& ds, int epoch_id);
     void perform_incremental_shuffle(RawDataset::BufferMeta& buffer_meta, uint32_t buffer_seq);  // 【新增】增量shuffle
+
+    // 【FULLY方案】第二个epoch及以后专用方法
+    void merge_thread_samples_to_global(RawDataset& ds, bool is_train);
+    void distribute_global_to_threads(RawDataset& ds, bool is_train);
+    void shuffle_sample_info_array(std::vector<SampleInfo>& array, uint64_t seed);
 
     // =========================================================================
     // 成员变量（与DTS Loader保持一致的命名）

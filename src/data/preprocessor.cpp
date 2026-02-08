@@ -145,6 +145,14 @@ void Preprocessor::run(DataLoader& loader) {
     // 重置buffer计数
     buffer_count_ = 0;
 
+    // 【方案A 关键修复1】重置所有同步状态
+    workers_finished_.store(0, std::memory_order_seq_cst);
+    current_buffer_seq_.store(0, std::memory_order_seq_cst);
+    stop_flag_.store(false, std::memory_order_seq_cst);
+
+    // 【方案A 关键修复2】添加内存屏障，确保所有线程看到一致的状态
+    std::atomic_thread_fence(std::memory_order_seq_cst);
+
     // =========================================================================
     // Step 1.2：持久线程池模式（替代原来的创建-销毁模式）
     // =========================================================================
@@ -601,26 +609,9 @@ void Preprocessor::start_worker_pool(DataLoader& loader) {
 
     for (int i = 0; i < config_.num_workers; ++i) {
         worker_pool_.emplace_back([this, i, &loader]() {
-            // Worker线程主循环（持久化）
-            while (!stop_flag_.load(std::memory_order_acquire)) {
-                // 等待新buffer信号
-                int last_seen = current_buffer_seq_.load(std::memory_order_acquire) - 1;
-                while (current_buffer_seq_.load(std::memory_order_acquire) == last_seen &&
-                       !stop_flag_.load(std::memory_order_acquire)) {
-                    std::this_thread::sleep_for(std::chrono::microseconds(10));
-                }
-
-                // 检查停止信号
-                if (stop_flag_.load(std::memory_order_acquire)) {
-                    break;
-                }
-
-                // 处理buffer（调用原来的worker_func逻辑）
-                worker_func_persistent(i, loader);
-
-                // 标记完成
-                workers_finished_.fetch_add(1, std::memory_order_acq_rel);
-            }
+            // Worker线程：直接调用worker_func_persistent()
+            // worker_func_persistent()内部会持续处理多个buffer直到整个epoch结束
+            worker_func_persistent(i, loader);
 
             LOG_INFO << "Persistent Worker " << i << " exiting";
         });
@@ -659,9 +650,14 @@ void Preprocessor::stop_worker_pool() {
 // ---------------------------------------------------------------------------
 
 void Preprocessor::notify_workers_new_buffer() {
-    // 原子递增buffer序号，唤醒所有worker
-    current_buffer_seq_.fetch_add(1, std::memory_order_acq_rel);
+    // 【方案A 关键修复】必须先重置计数器，防止抢跑的Worker的计数被覆盖
     workers_finished_.store(0, std::memory_order_release);
+
+    // 确保计数器重置对所有线程可见后，再更新序号唤醒Worker
+    std::atomic_thread_fence(std::memory_order_seq_cst);
+
+    // 最后再唤醒Worker
+    current_buffer_seq_.fetch_add(1, std::memory_order_acq_rel);
 }
 
 // ---------------------------------------------------------------------------
@@ -711,26 +707,21 @@ void Preprocessor::worker_func_persistent(int worker_id, DataLoader& loader) {
     size_t sample_count = 0;  // 总样本计数器（用于打印前10个样本的CRC）
 
     // =========================================================================
-    // ✅ 持久线程主循环：跨多个buffer处理样本
+    // 【关键修复】恢复外层循环，让worker持续处理多个buffer直到整个epoch结束
     // =========================================================================
-
     while (!stop_flag_.load(std::memory_order_acquire)) {
-        // 等待新buffer信号
+        // 等待新buffer的信号
         int last_seen = current_buffer_seq_.load(std::memory_order_acquire);
         while (current_buffer_seq_.load(std::memory_order_acquire) == last_seen &&
                !stop_flag_.load(std::memory_order_acquire)) {
             std::this_thread::sleep_for(std::chrono::microseconds(10));
         }
 
-        // 检查停止信号
         if (stop_flag_.load(std::memory_order_acquire)) {
             break;
         }
 
-        // =========================================================================
         // 处理当前buffer的所有样本
-        // =========================================================================
-
         int32_t label;
         const uint8_t* data_ptr;
         size_t data_size;
@@ -821,17 +812,14 @@ void Preprocessor::worker_func_persistent(int worker_id, DataLoader& loader) {
         }
 
         // =========================================================================
-        // 当前buffer处理完毕，通知主线程
+        // 当前buffer处理完毕，报告完成状态
         // =========================================================================
-
         workers_finished_.fetch_add(1, std::memory_order_acq_rel);
     }
 
     // =========================================================================
-    // 持久线程退出
-    // =========================================================================
-
     // 保存此worker的样本数（累加到整个epoch的总数，使用互斥锁保护）
+    // =========================================================================
     {
         std::lock_guard<std::mutex> lock(stats_mutex_);
         worker_sample_counts_[worker_id] += local_count;
@@ -843,9 +831,6 @@ void Preprocessor::worker_func_persistent(int worker_id, DataLoader& loader) {
     if (crc_file.is_open()) {
         crc_file.close();
     }
-
-    LOG_INFO << "Persistent Worker " << worker_id << " exiting: processed "
-             << local_count << " samples total";
 }
 
 // =============================================================================
