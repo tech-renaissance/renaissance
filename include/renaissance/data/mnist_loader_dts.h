@@ -11,6 +11,7 @@
 
 #include "renaissance/data/data_loader.h"
 #include "renaissance/data/file_handle.h"
+#include "renaissance/data/sample_info.h"
 #include <string>
 #include <vector>
 #include <atomic>
@@ -138,14 +139,8 @@ private:
         size_t data_size = 0;               // 总数据大小（labels + images）
 
         // Epoch状态
-        std::vector<uint32_t> epoch_sample_order;  // Level 2 shuffle后的顺序
         std::atomic<size_t> consumed_count{0};     // 已消费样本数
         int current_epoch_id = -1;
-    };
-
-    struct WorkerState {
-        size_t local_idx = 0;     // 该worker已消费的样本数
-        uint64_t global_seq = 0;  // 全局序列号（统计用）
     };
 
     // ========================================================================
@@ -156,7 +151,20 @@ private:
     Dataset train_set_;
     Dataset val_set_;
 
-    std::vector<WorkerState> worker_states_;  // M个Preprocessor worker
+    // SampleInfo容器（FULLY模式专用）
+    std::vector<SampleInfo> global_sample_info_fully_train_;  // 全局训练集样本信息
+    std::vector<SampleInfo> global_sample_info_fully_val_;    // 全局验证集样本信息
+    std::vector<std::vector<SampleInfo>> thread_sample_info_fully_train_;  // M个worker的训练集
+    std::vector<std::vector<SampleInfo>> thread_sample_info_fully_val_;    // M个worker的验证集
+
+    // 标志位
+    bool sample_info_registered_train_ = false;  // 训练集SampleInfo是否已登记
+    bool sample_info_registered_val_ = false;    // 验证集SampleInfo是否已登记
+
+    // Worker状态（简化版）
+    std::vector<size_t> worker_local_idxs_train_;  // M个worker的训练集读取位置
+    std::vector<size_t> worker_local_idxs_val_;    // M个worker的验证集读取位置
+
     std::atomic<int> current_epoch_id_{0};    // 当前epoch ID
 
     // 配置参数
@@ -172,7 +180,10 @@ private:
     // ========================================================================
 
     void load_dataset_fully(Dataset& ds);
-    void perform_shuffle(Dataset& ds, int epoch_id);
+    void register_sample_info(Dataset& ds, bool is_train);
+    void perform_global_shuffle(std::vector<SampleInfo>& global_info, int epoch_id);
+    void distribute_to_threads(const std::vector<SampleInfo>& global_info,
+                              std::vector<std::vector<SampleInfo>>& thread_info);
     uint8_t* allocate_aligned_memory(size_t size);
     void free_dataset(Dataset& ds);
 };

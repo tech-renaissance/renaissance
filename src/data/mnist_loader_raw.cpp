@@ -150,12 +150,9 @@ void MnistLoaderRaw::configure(int num_load_workers, int num_preproc_workers,
     skip_first_ = skip_first;
     verify_crc_ = verify_crc;
 
-    // 初始化Worker状态
-    worker_states_.resize(num_preproc_workers_);
-    for (int i = 0; i < num_preproc_workers_; ++i) {
-        worker_states_[i].local_idx = 0;
-        worker_states_[i].global_seq = 0;
-    }
+    // 初始化Worker状态（简化版）
+    worker_local_idxs_train_.resize(num_preproc_workers_, 0);
+    worker_local_idxs_val_.resize(num_preproc_workers_, 0);
 
     // 配置数据集
     train_set_.is_train = true;

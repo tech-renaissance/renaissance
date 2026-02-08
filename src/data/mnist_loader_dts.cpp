@@ -146,14 +146,11 @@ void MnistLoaderDts::configure(int num_load_workers, int num_preproc_workers,
     skip_first_ = skip_first;
     verify_crc_ = verify_crc;
 
-    // 初始化Worker状�?
-    worker_states_.resize(num_preproc_workers_);
-    for (int i = 0; i < num_preproc_workers_; ++i) {
-        worker_states_[i].local_idx = 0;
-        worker_states_[i].global_seq = 0;
-    }
+    // 初始化Worker状态（简化版）
+    worker_local_idxs_train_.resize(num_preproc_workers_, 0);
+    worker_local_idxs_val_.resize(num_preproc_workers_, 0);
 
-    // 配置数据�?
+    // 配置数据集
     train_set_.is_train = true;
     train_set_.file_path = train_path;
     train_set_.mode = LoadMode::FULLY;  // 强制FULLY
@@ -207,42 +204,49 @@ void MnistLoaderDts::begin_epoch(int epoch_id, bool is_train) {
     LOG_INFO << "Beginning epoch " << epoch_id
              << " (" << (is_train ? "train" : "val") << ")";
 
-    // 1. 设置当前数据�?
+    // 1. 设置当前数据集
     current_set_ = is_train ? &train_set_ : &val_set_;
 
-    // 2. 检查是否已加载
+    // 2. 懒加载：检查是否已加载
     if (current_set_->labels_region == nullptr) {
-        LOG_INFO << "Dataset not loaded, loading now...";
+        LOG_INFO << "Dataset not loaded, loading now";
         load_dataset_fully(*current_set_);
     }
 
-    // 3. Level 2 shuffle（样本级�?
+    // 3. 登记SampleInfo（只执行一次）
+    register_sample_info(*current_set_, is_train);
+
+    // 4. 判断是否需要shuffle
     bool should_shuffle = is_train ? shuffle_train_ : shuffle_val_;
-    if (should_shuffle && (!skip_first_ || epoch_id > 0)) {
-        perform_shuffle(*current_set_, epoch_id);
-    } else {
-        // 不shuffle，使用原始顺�?
-        current_set_->epoch_sample_order.resize(current_set_->num_samples);
-        for (size_t i = 0; i < current_set_->num_samples; ++i) {
-            current_set_->epoch_sample_order[i] = static_cast<uint32_t>(i);
-        }
-        current_set_->consumed_count.store(0, std::memory_order_relaxed);
+
+    if (should_shuffle) {
+        // 5. 全局洗牌（每个epoch都执行）
+        auto& global_info = is_train ? global_sample_info_fully_train_
+                                      : global_sample_info_fully_val_;
+        perform_global_shuffle(global_info, epoch_id);
     }
+
+    // 6. 分配到各worker（每个epoch都重新分配）
+    auto& global_info = is_train ? global_sample_info_fully_train_
+                                  : global_sample_info_fully_val_;
+    auto& thread_info = is_train ? thread_sample_info_fully_train_
+                                  : thread_sample_info_fully_val_;
+    distribute_to_threads(global_info, thread_info);
+
+    // 7. 重置worker状态
+    auto& worker_local_idxs = is_train ? worker_local_idxs_train_ : worker_local_idxs_val_;
+    std::fill(worker_local_idxs.begin(), worker_local_idxs.end(), 0);
 
     current_set_->current_epoch_id = epoch_id;
     current_epoch_id_.store(epoch_id, std::memory_order_relaxed);
 
-    LOG_INFO << "Epoch " << epoch_id << " began";
+    LOG_INFO << "Epoch " << epoch_id << " began (SampleInfo mode)";
 }
 
 void MnistLoaderDts::end_epoch() {
     LOG_INFO << "Ending epoch " << current_epoch_id_.load();
 
-    // 重置worker状�?
-    for (auto& ws : worker_states_) {
-        ws.local_idx = 0;
-        ws.global_seq = 0;
-    }
+    // 不需要重置worker_states_,因为worker_local_idxs在begin_epoch()中已重置
 
     LOG_INFO << "Epoch ended";
 }
@@ -257,32 +261,30 @@ bool MnistLoaderDts::get_next_sample(
     const uint8_t*& data_ptr,
     size_t& data_size) {
 
-    Dataset& ds = *current_set_;
+    // 1. 选择train或val的thread_sample_info
+    auto& thread_samples = current_set_->is_train ? thread_sample_info_fully_train_[preproc_worker_id]
+                                                  : thread_sample_info_fully_val_[preproc_worker_id];
 
-    // 1. 获取该worker的状�?
-    WorkerState& ws = worker_states_[preproc_worker_id];
+    // 2. 选择train或val的worker_local_idxs
+    auto& worker_local_idxs = current_set_->is_train ? worker_local_idxs_train_
+                                                     : worker_local_idxs_val_;
 
-    // 2. 计算全局样本序号（静态公式，与ImageNet一致）
-    //    Worker i 读取样本: [i, i+M, i+2M, i+3M, ...]
-    size_t sample_idx = static_cast<size_t>(preproc_worker_id) +
-                        static_cast<size_t>(ws.global_seq) * num_preproc_workers_;
+    // 3. 获取该worker的当前读取位置
+    size_t& local_idx = worker_local_idxs[preproc_worker_id];
 
-    // 3. 检查是否超出范�?
-    if (sample_idx >= ds.num_samples) {
+    // 4. 检查是否超出范围
+    if (local_idx >= thread_samples.size()) {
         return false;  // Epoch结束
     }
 
-    // 4. 根据shuffle后的顺序获取真实索引
-    uint32_t real_idx = ds.epoch_sample_order[sample_idx];
+    // 5. 直接读取SampleInfo
+    const SampleInfo& info = thread_samples[local_idx];
+    label = info.label;
+    data_ptr = info.data_ptr;
+    data_size = info.data_size;
 
-    // 5. 计算指针
-    label = static_cast<int32_t>(ds.labels_region[real_idx]);
-    data_ptr = ds.images_region + real_idx * ds.image_bytes;
-    data_size = ds.image_bytes;
-
-    // 6. 更新worker状态（用于统计�?
-    ws.global_seq++;
-    ws.local_idx++;
+    // 6. 更新状态
+    local_idx++;
 
     return true;
 }
@@ -384,29 +386,95 @@ void MnistLoaderDts::load_dataset_fully(Dataset& ds) {
 }
 
 // =============================================================================
-// Shuffle实现
+// SampleInfo机制实现
 // =============================================================================
 
-void MnistLoaderDts::perform_shuffle(Dataset& ds, int epoch_id) {
-    ds.epoch_sample_order.resize(ds.num_samples);
+void MnistLoaderDts::register_sample_info(Dataset& ds, bool is_train) {
+    auto& global_info = is_train ? global_sample_info_fully_train_ : global_sample_info_fully_val_;
+    auto& registered = is_train ? sample_info_registered_train_ : sample_info_registered_val_;
+
+    // 如果已经登记,直接返回
+    if (registered) {
+        return;
+    }
+
+    LOG_INFO << "Registering SampleInfo for " << (is_train ? "train" : "val") << " set";
+
+    // 分配空间
+    global_info.resize(ds.num_samples);
+
+    // 遍历所有样本,构建SampleInfo
     for (size_t i = 0; i < ds.num_samples; ++i) {
-        ds.epoch_sample_order[i] = static_cast<uint32_t>(i);
+        global_info[i].label = static_cast<int32_t>(ds.labels_region[i]);
+        global_info[i].data_ptr = ds.images_region + i * ds.image_bytes;
+        global_info[i].data_size = ds.image_bytes;
     }
 
-    // Philox PRNG（使用全局Generator的seed，与ImageNet DTS Loader一致）
-    uint64_t base_seed = tr::get_default_generator().seed();
-    uint64_t seed = base_seed ^ (static_cast<uint64_t>(epoch_id) << 32);
-    for (size_t i = ds.num_samples - 1; i > 0; --i) {
-        uint32_t r[4];
-        tr::detail::philox_generate_4x32(seed, i, r);
-        size_t j = r[0] % (i + 1);
-        std::swap(ds.epoch_sample_order[i], ds.epoch_sample_order[j]);
+    // 标记已登记
+    registered = true;
+
+    LOG_INFO << "SampleInfo registration completed: " << ds.num_samples << " samples";
+}
+
+void MnistLoaderDts::perform_global_shuffle(std::vector<SampleInfo>& global_info, int epoch_id) {
+    const uint64_t seed = static_cast<uint64_t>(epoch_id);
+
+    LOG_INFO << "Performing global shuffle with seed: " << seed;
+
+    // 使用Philox PRNG进行可复现的洗牌
+    tr::PhiloxGenerator rng(seed);
+
+    for (size_t i = global_info.size() - 1; i > 0; --i) {
+        const uint64_t random_value = rng.next();
+        const size_t j = random_value % (i + 1);
+        std::swap(global_info[i], global_info[j]);
     }
 
-    ds.consumed_count.store(0, std::memory_order_relaxed);
-    ds.current_epoch_id = epoch_id;
+    LOG_INFO << "Global shuffle completed";
+}
 
-    LOG_DEBUG << "Shuffle completed for epoch " << epoch_id;
+void MnistLoaderDts::distribute_to_threads(
+    const std::vector<SampleInfo>& global_info,
+    std::vector<std::vector<SampleInfo>>& thread_info) {
+
+    const size_t M = num_preproc_workers_;
+    const size_t N = global_info.size();
+
+    LOG_INFO << "Distributing " << N << " samples to " << M << " workers";
+
+    // 计算均匀分配
+    const size_t base_count = N / M;
+    const size_t extra_count = N % M;
+
+    // 调整thread_info大小
+    thread_info.resize(M);
+
+    // 分配样本
+    size_t global_offset = 0;
+    for (size_t i = 0; i < M; ++i) {
+        // 前extra_count个worker分配base_count+1个样本
+        // 后M-extra_count个worker分配base_count个样本
+        const size_t count = base_count + (i < extra_count ? 1 : 0);
+
+        thread_info[i].assign(
+            global_info.begin() + global_offset,
+            global_info.begin() + global_offset + count
+        );
+
+        global_offset += count;
+
+        LOG_DEBUG << "Worker " << i << " assigned " << count << " samples";
+    }
+
+    // 验证总和
+    size_t total = 0;
+    for (const auto& vec : thread_info) {
+        total += vec.size();
+    }
+    TR_CHECK(total == N, ValueError,
+             "Total samples after distribution mismatch: expected " << N << ", got " << total);
+
+    LOG_INFO << "Distribution completed: total=" << total << ", expected=" << N;
 }
 
 // =============================================================================
