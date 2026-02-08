@@ -17,8 +17,6 @@ set(DATA_SOURCES
     cifar_loader_raw.cpp
     # V3.10.0 SampleLoader
     sample_loader.cpp
-    # V3.10.0 UnifiedDataLoader
-    unified_data_loader.cpp
     # V3.9.0 公共组件
     file_handle.cpp
 )

@@ -181,10 +181,12 @@ void test_epoch_crc(const std::string& dataset_name,
     if (dataset_normalized == "mnist") {
         loader = dts_format ? (DataLoader*)&MnistLoaderDts::getInstance()
                             : (DataLoader*)&MnistLoaderRaw::getInstance();
-    } else if (dataset_normalized == "cifar10" || dataset_normalized == "cifar10") {
+    } else if (dataset_normalized == "cifar10") {
+        // CIFAR-10和CIFAR-100使用相同的Loader类，Loader内部通过detected_num_classes_区分
         loader = dts_format ? (DataLoader*)&CifarLoaderDts::getInstance()
                             : (DataLoader*)&CifarLoaderRaw::getInstance();
-    } else if (dataset_normalized == "cifar100" || dataset_normalized == "cifar100") {
+    } else if (dataset_normalized == "cifar100") {
+        // CIFAR-100和CIFAR-10使用相同的Loader类，Loader内部通过detected_num_classes_区分
         loader = dts_format ? (DataLoader*)&CifarLoaderDts::getInstance()
                             : (DataLoader*)&CifarLoaderRaw::getInstance();
     } else if (dataset_normalized == "imagenet") {

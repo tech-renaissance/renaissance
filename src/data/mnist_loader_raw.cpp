@@ -1,13 +1,4 @@
-/**
- * @file mnist_loader_raw.cpp
- * @brief MNIST数据加载器（RAW格式）实现
- * @version 1.0.0
- * @date 2026-02-01
- * @author 技术觉醒团队
- */
-
 #ifdef _WIN32
-    // 必须在任何include之前定义,避免Windows宏冲突
     #ifndef NOMINMAX
         #define NOMINMAX
     #endif
@@ -128,7 +119,6 @@ void MnistLoaderRaw::configure(int num_load_workers, int num_preproc_workers,
                                 bool shuffle_train, bool shuffle_val,
                                 bool skip_first, bool verify_crc) {
     LOG_INFO << "Configuring MnistLoaderRaw";
-    LOG_INFO << "  IO workers (N): " << num_load_workers << " (Note: unused, always single-threaded)";
     LOG_INFO << "  Preprocessor workers (M): " << num_preproc_workers;
     LOG_INFO << "  Train path: " << train_path;
     LOG_INFO << "  Val path: " << val_path;
@@ -136,14 +126,13 @@ void MnistLoaderRaw::configure(int num_load_workers, int num_preproc_workers,
     LOG_INFO << "  Shuffle val: " << (shuffle_val ? "true" : "false");
     LOG_INFO << "  Verify files: " << (verify_crc ? "true" : "false");
 
-    // 参数验证
-    TR_CHECK(num_load_workers >= 1 && num_load_workers <= 16, ValueError,
-             "num_load_workers must be in [1, 16], got " << num_load_workers);
-    TR_CHECK(num_preproc_workers >= 1 && num_preproc_workers <= 64, ValueError,
-             "num_preproc_workers must be in [1, 64], got " << num_preproc_workers);
+    // 参数验证（num_load_workers参数未使用，静默忽略）
+    (void)num_load_workers;  // 标记为未使用，避免编译器警告
+    TR_CHECK(num_preproc_workers >= 1, ValueError,
+             "num_preproc_workers must be >= 1, got " << num_preproc_workers);
 
-    // 保存配置
-    num_load_workers_ = num_load_workers;
+    // 保存配置（强制单线程加载）
+    num_load_workers_ = 1;  // MNIST数据集较小，静默强制单线程加载
     num_preproc_workers_ = num_preproc_workers;
     shuffle_train_ = shuffle_train;
     shuffle_val_ = shuffle_val;
@@ -178,20 +167,12 @@ void MnistLoaderRaw::configure(int num_load_workers, int num_preproc_workers,
 }
 
 void MnistLoaderRaw::set_train_mode(LoadMode mode) {
-    LOG_INFO << "Setting train mode: "
-             << (mode == LoadMode::FULLY ? "FULLY" : "PARTIAL");
-    if (mode != LoadMode::FULLY) {
-        LOG_WARN << "MNIST Loader only supports FULLY mode, ignoring PARTIAL request";
-    }
+    (void)mode;  // 参数未使用，MNIST静默强制FULLY模式
     train_set_.mode = LoadMode::FULLY;
 }
 
 void MnistLoaderRaw::set_val_mode(LoadMode mode) {
-    LOG_INFO << "Setting val mode: "
-             << (mode == LoadMode::FULLY ? "FULLY" : "PARTIAL");
-    if (mode != LoadMode::FULLY) {
-        LOG_WARN << "MNIST Loader only supports FULLY mode, ignoring PARTIAL request";
-    }
+    (void)mode;  // 参数未使用，MNIST静默强制FULLY模式
     val_set_.mode = LoadMode::FULLY;
 }
 
@@ -211,39 +192,46 @@ void MnistLoaderRaw::begin_epoch(int epoch_id, bool is_train) {
     // 1. 设置当前数据集
     current_set_ = is_train ? &train_set_ : &val_set_;
 
-    // 2. 检查是否已加载
+    // 2. 懒加载：检查是否已加载
     if (current_set_->labels_region == nullptr) {
-        LOG_INFO << "Dataset not loaded, loading now...";
+        LOG_INFO << "Dataset not loaded, loading now";
         load_dataset_fully(*current_set_);
     }
 
-    // 3. Level 2 shuffle（样本级）
+    // 3. 登记SampleInfo（只执行一次）
+    register_sample_info(*current_set_, is_train);
+
+    // 4. 判断是否需要shuffle
     bool should_shuffle = is_train ? shuffle_train_ : shuffle_val_;
-    if (should_shuffle && (!skip_first_ || epoch_id > 0)) {
-        perform_shuffle(*current_set_, epoch_id);
-    } else {
-        // 不shuffle，使用原始顺序
-        current_set_->epoch_sample_order.resize(current_set_->num_samples);
-        for (size_t i = 0; i < current_set_->num_samples; ++i) {
-            current_set_->epoch_sample_order[i] = static_cast<uint32_t>(i);
-        }
-        current_set_->consumed_count.store(0, std::memory_order_relaxed);
+
+    if (should_shuffle) {
+        // 5. 全局洗牌（每个epoch都执行）
+        auto& global_info = is_train ? global_sample_info_fully_train_
+                                      : global_sample_info_fully_val_;
+        perform_global_shuffle(global_info, epoch_id);
     }
+
+    // 6. 分配到各worker（每个epoch都重新分配）
+    auto& global_info = is_train ? global_sample_info_fully_train_
+                                  : global_sample_info_fully_val_;
+    auto& thread_info = is_train ? thread_sample_info_fully_train_
+                                  : thread_sample_info_fully_val_;
+    distribute_to_threads(global_info, thread_info);
+
+    // 7. 重置worker状态
+    auto& worker_local_idxs = is_train ? worker_local_idxs_train_ : worker_local_idxs_val_;
+    std::fill(worker_local_idxs.begin(), worker_local_idxs.end(), 0);
 
     current_set_->current_epoch_id = epoch_id;
     current_epoch_id_.store(epoch_id, std::memory_order_relaxed);
 
-    LOG_INFO << "Epoch " << epoch_id << " began";
+    LOG_INFO << "Epoch " << epoch_id << " began (SampleInfo mode)";
 }
 
 void MnistLoaderRaw::end_epoch() {
     LOG_INFO << "Ending epoch " << current_epoch_id_.load();
 
-    // 重置worker状态
-    for (auto& ws : worker_states_) {
-        ws.local_idx = 0;
-        ws.global_seq = 0;
-    }
+    // 不需要重置worker_states_,因为worker_local_idxs在begin_epoch()中已重置
 
     LOG_INFO << "Epoch ended";
 }
@@ -288,11 +276,9 @@ void MnistLoaderRaw::reset_after_warmup() {
         LOG_INFO << "Validation set FULLY mode memory released";
     }
 
-    // 重置worker状态
-    for (auto& ws : worker_states_) {
-        ws.local_idx = 0;
-        ws.global_seq = 0;
-    }
+    // 重置worker状态（简化版）
+    std::fill(worker_local_idxs_train_.begin(), worker_local_idxs_train_.end(), 0);
+    std::fill(worker_local_idxs_val_.begin(), worker_local_idxs_val_.end(), 0);
 
     // 重置current_set_
     current_set_ = nullptr;
@@ -310,32 +296,30 @@ bool MnistLoaderRaw::get_next_sample(
     const uint8_t*& data_ptr,
     size_t& data_size) {
 
-    Dataset& ds = *current_set_;
+    // 1. 选择train或val的thread_sample_info
+    auto& thread_samples = current_set_->is_train ? thread_sample_info_fully_train_[preproc_worker_id]
+                                                  : thread_sample_info_fully_val_[preproc_worker_id];
 
-    // 1. 获取该worker的状态
-    WorkerState& ws = worker_states_[preproc_worker_id];
+    // 2. 选择train或val的worker_local_idxs
+    auto& worker_local_idxs = current_set_->is_train ? worker_local_idxs_train_
+                                                     : worker_local_idxs_val_;
 
-    // 2. 计算全局样本序号（静态公式，与ImageNet一致）
-    //    Worker i 读取样本: [i, i+M, i+2M, i+3M, ...]
-    size_t sample_idx = static_cast<size_t>(preproc_worker_id) +
-                        static_cast<size_t>(ws.global_seq) * num_preproc_workers_;
+    // 3. 获取该worker的当前读取位置
+    size_t& local_idx = worker_local_idxs[preproc_worker_id];
 
-    // 3. 检查是否超出范围
-    if (sample_idx >= ds.num_samples) {
+    // 4. 检查是否超出范围
+    if (local_idx >= thread_samples.size()) {
         return false;  // Epoch结束
     }
 
-    // 4. 根据shuffle后的顺序获取真实索引
-    uint32_t real_idx = ds.epoch_sample_order[sample_idx];
+    // 5. 直接读取SampleInfo
+    const SampleInfo& info = thread_samples[local_idx];
+    label = info.label;
+    data_ptr = info.data_ptr;
+    data_size = info.data_size;
 
-    // 5. 计算指针
-    label = static_cast<int32_t>(ds.labels_region[real_idx]);
-    data_ptr = ds.images_region + real_idx * ds.image_bytes;
-    data_size = ds.image_bytes;
-
-    // 6. 更新worker状态（用于统计）
-    ws.global_seq++;
-    ws.local_idx++;
+    // 6. 更新状态
+    local_idx++;
 
     return true;
 }
@@ -472,29 +456,94 @@ void MnistLoaderRaw::load_dataset_fully(Dataset& ds) {
 }
 
 // =============================================================================
-// Shuffle实现
+// SampleInfo机制实现
 // =============================================================================
 
-void MnistLoaderRaw::perform_shuffle(Dataset& ds, int epoch_id) {
-    ds.epoch_sample_order.resize(ds.num_samples);
-    for (size_t i = 0; i < ds.num_samples; ++i) {
-        ds.epoch_sample_order[i] = static_cast<uint32_t>(i);
+void MnistLoaderRaw::register_sample_info(Dataset& ds, bool is_train) {
+    auto& global_info = is_train ? global_sample_info_fully_train_ : global_sample_info_fully_val_;
+    auto& registered = is_train ? sample_info_registered_train_ : sample_info_registered_val_;
+
+    // 如果已经登记,直接返回
+    if (registered) {
+        return;
     }
 
-    // Philox PRNG（使用全局Generator的seed，与ImageNet DTS Loader一致）
-    uint64_t base_seed = tr::get_default_generator().seed();
-    uint64_t seed = base_seed ^ (static_cast<uint64_t>(epoch_id) << 32);
-    for (size_t i = ds.num_samples - 1; i > 0; --i) {
+    LOG_INFO << "Registering SampleInfo for " << (is_train ? "train" : "val") << " set";
+
+    // 分配空间
+    global_info.resize(ds.num_samples);
+
+    // 遍历所有样本,构建SampleInfo
+    for (size_t i = 0; i < ds.num_samples; ++i) {
+        global_info[i].label = static_cast<int32_t>(ds.labels_region[i]);
+        global_info[i].data_ptr = ds.images_region + i * ds.image_bytes;
+        global_info[i].data_size = ds.image_bytes;
+    }
+
+    // 标记已登记
+    registered = true;
+
+    LOG_INFO << "SampleInfo registration completed: " << ds.num_samples << " samples";
+}
+
+void MnistLoaderRaw::perform_global_shuffle(std::vector<SampleInfo>& global_info, int epoch_id) {
+    const uint64_t seed = static_cast<uint64_t>(epoch_id);
+
+    LOG_INFO << "Performing global shuffle with seed: " << seed;
+
+    // 使用Philox PRNG进行可复现的洗牌（Fisher-Yates算法）
+    for (size_t i = global_info.size() - 1; i > 0; --i) {
         uint32_t r[4];
         tr::detail::philox_generate_4x32(seed, i, r);
-        size_t j = r[0] % (i + 1);
-        std::swap(ds.epoch_sample_order[i], ds.epoch_sample_order[j]);
+        const size_t j = r[0] % (i + 1);
+        std::swap(global_info[i], global_info[j]);
     }
 
-    ds.consumed_count.store(0, std::memory_order_relaxed);
-    ds.current_epoch_id = epoch_id;
+    LOG_INFO << "Global shuffle completed";
+}
 
-    LOG_DEBUG << "Shuffle completed for epoch " << epoch_id;
+void MnistLoaderRaw::distribute_to_threads(
+    const std::vector<SampleInfo>& global_info,
+    std::vector<std::vector<SampleInfo>>& thread_info) {
+
+    const size_t M = num_preproc_workers_;
+    const size_t N = global_info.size();
+
+    LOG_INFO << "Distributing " << N << " samples to " << M << " workers";
+
+    // 计算均匀分配
+    const size_t base_count = N / M;
+    const size_t extra_count = N % M;
+
+    // 调整thread_info大小
+    thread_info.resize(M);
+
+    // 分配样本
+    size_t global_offset = 0;
+    for (size_t i = 0; i < M; ++i) {
+        // 前extra_count个worker分配base_count+1个样本
+        // 后M-extra_count个worker分配base_count个样本
+        const size_t count = base_count + (i < extra_count ? 1 : 0);
+
+        thread_info[i].assign(
+            global_info.begin() + global_offset,
+            global_info.begin() + global_offset + count
+        );
+
+        global_offset += count;
+
+        LOG_DEBUG << "Worker " << i << " assigned " << count << " samples";
+    }
+
+    // 验证总和
+    size_t total = 0;
+    for (const auto& vec : thread_info) {
+        total += vec.size();
+    }
+    TR_CHECK(total == N, ValueError,
+             "Total samples after distribution mismatch: expected " << N << ", got " << total);
+
+    LOG_INFO << "Distribution completed: total=" << total << ", expected=" << N;
 }
 
 // =============================================================================

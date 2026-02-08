@@ -11,6 +11,7 @@
 
 #include "renaissance/data/data_loader.h"
 #include "renaissance/data/file_handle.h"
+#include "renaissance/data/sample_info.h"
 #include <string>
 #include <vector>
 #include <atomic>
@@ -73,6 +74,13 @@ public:
     bool is_loaded() const override;
     void set_train_mode(LoadMode mode) override;
     void set_val_mode(LoadMode mode) override;
+
+    /**
+     * @brief 设置检测到的数据集类别数（由Preprocessor统一调用）
+     * @param num_classes 类别数（10或100）
+     * @note 这个方法应该由Preprocessor::config_dataset()调用，而不是通过文件路径检测
+     */
+    void set_detected_num_classes(int num_classes) { detected_num_classes_ = num_classes; }
 
     // ========================================================================
     // CRC-32验证
@@ -148,20 +156,14 @@ private:
         size_t num_samples = 0;
         size_t image_bytes = 3072;  // 32×32×3
 
-        // FULLY模式数据（一次性加载，保留在内存中�?
+        // FULLY模式数据（一次性加载，保留在内存中）
         uint8_t* labels_region = nullptr;   // 指向标签区域
         uint8_t* images_region = nullptr;   // 指向图像区域
-        size_t data_size = 0;               // 总数据大小（labels + images�?
+        size_t data_size = 0;               // 总数据大小（labels + images）
 
-        // Epoch状�?
-        std::vector<uint32_t> epoch_sample_order;  // Level 2 shuffle后的顺序
+        // Epoch状态
         std::atomic<size_t> consumed_count{0};     // 已消费样本数
         int current_epoch_id = -1;
-    };
-
-    struct WorkerState {
-        size_t local_idx = 0;     // 该worker已消费的样本�?
-        uint64_t global_seq = 0;  // 全局序列号（统计用）
     };
 
     // ========================================================================
@@ -169,13 +171,26 @@ private:
     // ========================================================================
 
     int detected_num_classes_ = 0;  // configure()时自动检测：10 or 100
-    bool configured_ = false;        // 是否已配置（防止重复配置�?
+    bool configured_ = false;        // 是否已配置（防止重复配置）
 
     Dataset* current_set_ = nullptr;
     Dataset train_set_;
     Dataset val_set_;
 
-    std::vector<WorkerState> worker_states_;  // M个Preprocessor worker
+    // SampleInfo容器（FULLY模式专用）
+    std::vector<SampleInfo> global_sample_info_fully_train_;  // 全局训练集样本信息
+    std::vector<SampleInfo> global_sample_info_fully_val_;    // 全局验证集样本信息
+    std::vector<std::vector<SampleInfo>> thread_sample_info_fully_train_;  // M个worker的训练集
+    std::vector<std::vector<SampleInfo>> thread_sample_info_fully_val_;    // M个worker的验证集
+
+    // 标志位
+    bool sample_info_registered_train_ = false;  // 训练集SampleInfo是否已登记
+    bool sample_info_registered_val_ = false;    // 验证集SampleInfo是否已登记
+
+    // Worker状态（简化版）
+    std::vector<size_t> worker_local_idxs_train_;  // M个worker的训练集读取位置
+    std::vector<size_t> worker_local_idxs_val_;    // M个worker的验证集读取位置
+
     std::atomic<int> current_epoch_id_{0};    // 当前epoch ID
 
     // 配置参数
@@ -191,7 +206,10 @@ private:
     // ========================================================================
 
     void load_dataset_fully(Dataset& ds);
-    void perform_shuffle(Dataset& ds, int epoch_id);
+    void register_sample_info(Dataset& ds, bool is_train);
+    void perform_global_shuffle(std::vector<SampleInfo>& global_info, int epoch_id);
+    void distribute_to_threads(const std::vector<SampleInfo>& global_info,
+                              std::vector<std::vector<SampleInfo>>& thread_info);
     uint8_t* allocate_aligned_memory(size_t size);
     void free_dataset(Dataset& ds);
     int detect_dataset_type(const std::string& dts_path);  // 自动检测数据集类型

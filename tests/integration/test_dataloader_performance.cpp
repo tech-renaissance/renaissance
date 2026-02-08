@@ -51,7 +51,6 @@ void print_usage(const char* program_name) {
               << "  --lv <0-3>           DTS compression level for ImageNet (default: 0)\n"
               << "  --workers <N>        Number of load workers (default: 8)\n"
               << "  --preproc <N>        Number of preprocess workers (default: 16)\n"
-              << "  --warmup             Run warmup before testing (default: false)\n"
               << "  --help               Show this help message\n\n"
               << "Examples:\n"
               << "  " << program_name << " --dataset imagenet --format dts --path T:/dataset/imagenet --lv 0\n"
@@ -76,8 +75,7 @@ void test_config(const std::string& dataset_name,
                  const std::string& dataset_path,
                  int compression_level,
                  int num_load_workers,
-                 int num_preproc_workers,
-                 bool run_warmup) {
+                 int num_preproc_workers) {
     // 获取Preprocessor单例
     auto& prep = Preprocessor::getInstance();
 
@@ -113,12 +111,6 @@ void test_config(const std::string& dataset_name,
     prep.set_train_transforms();
     prep.set_val_transforms();
 
-    // Warmup（如果需要）
-    if (run_warmup) {
-        std::cout << "    Warming up...\n";
-        prep.warmup();
-    }
-
     // 步骤5: 测试性能（train和val都会测试，结果由test_dataloader()自己打印）
     prep.test_dataloader();
 }
@@ -136,7 +128,6 @@ int main(int argc, char* argv[]) {
     int compression_level = 0;
     int num_load_workers = 8;
     int num_preproc_workers = 16;
-    bool run_warmup = false;
 
     // 解析命令行参数
     for (int i = 1; i < argc; ++i) {
@@ -163,8 +154,6 @@ int main(int argc, char* argv[]) {
             num_load_workers = std::stoi(argv[++i]);
         } else if (arg == "--preproc" && i + 1 < argc) {
             num_preproc_workers = std::stoi(argv[++i]);
-        } else if (arg == "--warmup") {
-            run_warmup = true;
         } else {
             std::cerr << "Error: Unknown argument: " << arg << "\n";
             print_usage(argv[0]);
@@ -238,7 +227,6 @@ int main(int argc, char* argv[]) {
 
     std::cout << "  Load workers: " << num_load_workers << "\n";
     std::cout << "  Preprocess workers: " << num_preproc_workers << "\n";
-    std::cout << "  Warmup: " << (run_warmup ? "enabled" : "disabled") << "\n";
     std::cout << "\n";
 
     // 遍历所有配置
@@ -252,8 +240,7 @@ int main(int argc, char* argv[]) {
                 try {
                     test_config(dataset, format, mode, dataset_path,
                               compression_level,
-                              num_load_workers, num_preproc_workers,
-                              run_warmup);
+                              num_load_workers, num_preproc_workers);
                 } catch (const std::exception& e) {
                     std::cerr << "    Error: " << e.what() << "\n";
                 }

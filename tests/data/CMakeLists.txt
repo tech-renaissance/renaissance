@@ -36,8 +36,6 @@ set(DATA_TEST_SOURCES
     test_sample_loader.cpp
     # V3.11.0 下载功能测试
     test_download.cpp
-    # V3.11.0 UnifiedDataLoader综合测试
-    test_unifieddataloader.cpp
 )
 
 # 创建data测试可执行文件

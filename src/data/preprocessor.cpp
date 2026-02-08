@@ -1043,8 +1043,16 @@ void Preprocessor::config_dataset(const std::string& dataset_name,
         case DatasetType::cifar_100:
             if (dts_format) {
                 current_dataloader_ = &CifarLoaderDts::getInstance();
+                // 统一设置detected_num_classes_，而不是让Loader通过文件路径检测
+                CifarLoaderDts::getInstance().set_detected_num_classes(
+                    dataset_type_ == DatasetType::cifar_10 ? 10 : 100
+                );
             } else {
                 current_dataloader_ = &CifarLoaderRaw::getInstance();
+                // 统一设置detected_num_classes_，而不是让Loader通过文件路径检测
+                CifarLoaderRaw::getInstance().set_detected_num_classes(
+                    dataset_type_ == DatasetType::cifar_10 ? 10 : 100
+                );
             }
             break;
 
@@ -1101,8 +1109,16 @@ void Preprocessor::config_dataset(DatasetType dataset_type,
         case DatasetType::cifar_100:
             if (dts_format) {
                 current_dataloader_ = &CifarLoaderDts::getInstance();
+                // 统一设置detected_num_classes_，而不是让Loader通过文件路径检测
+                CifarLoaderDts::getInstance().set_detected_num_classes(
+                    dataset_type_ == DatasetType::cifar_10 ? 10 : 100
+                );
             } else {
                 current_dataloader_ = &CifarLoaderRaw::getInstance();
+                // 统一设置detected_num_classes_，而不是让Loader通过文件路径检测
+                CifarLoaderRaw::getInstance().set_detected_num_classes(
+                    dataset_type_ == DatasetType::cifar_10 ? 10 : 100
+                );
             }
             break;
 
@@ -1574,36 +1590,6 @@ void Preprocessor::test_dataloader() {
     // 目的：将DataLoader重置到"刚刚加载完文件头"的状态
     //       这样下次调用时才会重新加载数据
     current_dataloader_->reset_after_warmup();
-}
-
-void Preprocessor::warmup() {
-    /**
-     * 预热文件系统缓存
-     *
-     * 实现方式：预加载一次数据使缓存变热
-     *
-     * 效果说明：
-     * - 对所有 RAW 格式 loader 有明显效果
-     * - 对 MNIST/CIFAR 的 DTS 格式 loader 有明显效果
-     * - 对 ImageNetLoaderDts 效果不明显
-     */
-    // 复用test_dataloader，但不打印
-    // 注意：test_dataloader()内部已经调用了reset_after_warmup()，所以这里不需要重复调用
-    // 保存当前的日志级别
-    bool old_suppress = suppress_info_logs_;
-    suppress_info_logs_ = true;
-
-    // 执行warmup（不会打印LOG_INFO）
-    test_dataloader();
-
-    // 恢复日志级别
-    suppress_info_logs_ = old_suppress;
-
-    // 重置iteration_id
-    train_iteration_id_ = 0;
-    val_iteration_id_ = 0;
-
-    LOG_INFO << "Warmup completed";
 }
 
 // =============================================================================

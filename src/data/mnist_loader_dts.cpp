@@ -1,13 +1,4 @@
-/**
- * @file mnist_loader_dts.cpp
- * @brief MNIST数据加载器（DTS格式）实�?
- * @version 1.0.0
- * @date 2026-01-23
- * @author 技术觉醒团�?
- */
-
 #ifdef _WIN32
-    // 必须在任何include之前定义,避免Windows宏冲�?
     #ifndef NOMINMAX
         #define NOMINMAX
     #endif
@@ -124,7 +115,6 @@ void MnistLoaderDts::configure(int num_load_workers, int num_preproc_workers,
                                 bool shuffle_train, bool shuffle_val,
                                 bool skip_first, bool verify_crc) {
     LOG_INFO << "Configuring MnistLoaderDts";
-    LOG_INFO << "  IO workers (N): " << num_load_workers << " (Note: unused, always single-threaded)";
     LOG_INFO << "  Preprocessor workers (M): " << num_preproc_workers;
     LOG_INFO << "  Train path: " << train_path;
     LOG_INFO << "  Val path: " << val_path;
@@ -132,14 +122,13 @@ void MnistLoaderDts::configure(int num_load_workers, int num_preproc_workers,
     LOG_INFO << "  Shuffle val: " << (shuffle_val ? "true" : "false");
     LOG_INFO << "  Verify CRC: " << (verify_crc ? "true" : "false");
 
-    // 参数验证
-    TR_CHECK(num_load_workers >= 1 && num_load_workers <= 16, ValueError,
-             "num_load_workers must be in [1, 16], got " << num_load_workers);
-    TR_CHECK(num_preproc_workers >= 1 && num_preproc_workers <= 64, ValueError,
-             "num_preproc_workers must be in [1, 64], got " << num_preproc_workers);
+    // 参数验证（num_load_workers参数未使用，静默忽略）
+    (void)num_load_workers;  // 标记为未使用，避免编译器警告
+    TR_CHECK(num_preproc_workers >= 1, ValueError,
+             "num_preproc_workers must be >= 1, got " << num_preproc_workers);
 
-    // 保存配置
-    num_load_workers_ = num_load_workers;
+    // 保存配置（强制单线程加载）
+    num_load_workers_ = 1;  // MNIST数据集较小，静默强制单线程加载
     num_preproc_workers_ = num_preproc_workers;
     shuffle_train_ = shuffle_train;
     shuffle_val_ = shuffle_val;
@@ -174,20 +163,12 @@ void MnistLoaderDts::configure(int num_load_workers, int num_preproc_workers,
 }
 
 void MnistLoaderDts::set_train_mode(LoadMode mode) {
-    LOG_INFO << "Setting train mode: "
-             << (mode == LoadMode::FULLY ? "FULLY" : "PARTIAL");
-    if (mode != LoadMode::FULLY) {
-        LOG_WARN << "MNIST Loader only supports FULLY mode, ignoring PARTIAL request";
-    }
+    (void)mode;  // 参数未使用，MNIST静默强制FULLY模式
     train_set_.mode = LoadMode::FULLY;
 }
 
 void MnistLoaderDts::set_val_mode(LoadMode mode) {
-    LOG_INFO << "Setting val mode: "
-             << (mode == LoadMode::FULLY ? "FULLY" : "PARTIAL");
-    if (mode != LoadMode::FULLY) {
-        LOG_WARN << "MNIST Loader only supports FULLY mode, ignoring PARTIAL request";
-    }
+    (void)mode;  // 参数未使用，MNIST静默强制FULLY模式
     val_set_.mode = LoadMode::FULLY;
 }
 
@@ -421,12 +402,11 @@ void MnistLoaderDts::perform_global_shuffle(std::vector<SampleInfo>& global_info
 
     LOG_INFO << "Performing global shuffle with seed: " << seed;
 
-    // 使用Philox PRNG进行可复现的洗牌
-    tr::PhiloxGenerator rng(seed);
-
+    // 使用Philox PRNG进行可复现的洗牌（Fisher-Yates算法）
     for (size_t i = global_info.size() - 1; i > 0; --i) {
-        const uint64_t random_value = rng.next();
-        const size_t j = random_value % (i + 1);
+        uint32_t r[4];
+        tr::detail::philox_generate_4x32(seed, i, r);
+        const size_t j = r[0] % (i + 1);
         std::swap(global_info[i], global_info[j]);
     }
 
@@ -697,11 +677,9 @@ void MnistLoaderDts::reset_after_warmup() {
         LOG_INFO << "MNIST validation set memory released";
     }
 
-    // 重置worker状态
-    for (auto& ws : worker_states_) {
-        ws.local_idx = 0;
-        ws.global_seq = 0;
-    }
+    // 重置worker状态（简化版）
+    std::fill(worker_local_idxs_train_.begin(), worker_local_idxs_train_.end(), 0);
+    std::fill(worker_local_idxs_val_.begin(), worker_local_idxs_val_.end(), 0);
 
     // 重置current_set_
     current_set_ = nullptr;
