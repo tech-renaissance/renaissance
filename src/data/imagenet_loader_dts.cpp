@@ -50,7 +50,7 @@ void Buffer::reset() {
 // 单例模式实现
 // =============================================================================
 
-ImageNetLoaderDts& ImageNetLoaderDts::getInstance() {
+ImageNetLoaderDts& ImageNetLoaderDts::instance() {
     static ImageNetLoaderDts instance;
     return instance;
 }

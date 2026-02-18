@@ -47,7 +47,7 @@ public:
     /**
      * @brief 获取单例
      */
-    static SampleLoader& getInstance();
+    static SampleLoader& instance();
 
     /**
      * @brief 配置 SampleLoader（自定义配置方法）

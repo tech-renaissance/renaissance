@@ -244,7 +244,7 @@ int main(int argc, char** argv) {
 
     try {
         // 获取单例
-        ImageNetLoaderDts& loader = ImageNetLoaderDts::getInstance();
+        ImageNetLoaderDts& loader = ImageNetLoaderDts::instance();
 
         // 配置DataLoader（只配置需要测试的数据集）
         std::cout << "\n[1/5] Configuring loader..." << std::endl;
@@ -274,7 +274,7 @@ int main(int argc, char** argv) {
 
         // 配置Preprocessor
         std::cout << "\n[2/5] Configuring preprocessor..." << std::endl;
-        Preprocessor& preproc = Preprocessor::getInstance();
+        Preprocessor& preproc = Preprocessor::instance();
         Preprocessor::Config preproc_config;
         preproc_config.num_workers = num_preprocess;
         preproc_config.jpeg_decode = false;

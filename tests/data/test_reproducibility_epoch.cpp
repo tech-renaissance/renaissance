@@ -339,7 +339,7 @@ int main(int argc, char** argv) {
     // =========================================================================
 
     try {
-        auto& loader = ImageNetLoaderDts::getInstance();
+        auto& loader = ImageNetLoaderDts::instance();
 
         // 配置加载模式：只对测试数据集使用FULLY，另一个用PARTIAL节省内存
         if (is_train) {

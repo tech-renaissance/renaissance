@@ -11,6 +11,13 @@
 #pragma once
 
 #include "renaissance/data/data_loader.h"
+#include "renaissance/data/preprocess_worker.h"
+#include "renaissance/data/preprocess_worker_parameter.h"
+
+#if defined(TR_SCENE_GPU_CLOUD)
+#include "renaissance/data/hardware_topology.h"
+#endif
+
 #include <turbojpeg.h>  // tjhandle类型
 #include <Simd/SimdLib.h>  // Simd库（用于RandomResizedCrop）
 #include <string>
@@ -20,6 +27,7 @@
 #include <fstream>
 #include <mutex>
 #include <cmath>
+#include <memory>
 
 namespace tr {
 
@@ -74,7 +82,7 @@ public:
     /**
      * @brief 获取单例
      */
-    static Preprocessor& getInstance();
+    static Preprocessor& instance();
 
 private:
     /**
@@ -126,14 +134,52 @@ public:
                              int max_resolution,
                              int num_color_channels,
                              int sdmp_factor = 1,
-                             bool using_cpvs = false);
+                             bool using_cpvs = false,
+                             bool pw_test_mode = false);  // PW测试模式（配置阶段设置）
 
     // 步骤4：设置数据变换
-    void set_train_transforms();  // TODO: 后续实现
-    void set_val_transforms();    // TODO: 后续实现
+    template<typename... Ops>
+    void set_train_transforms(Ops&&... ops);
+
+    template<typename... Ops>
+    void set_val_transforms(Ops&&... ops);
 
     // Deployment模式专用
     void set_deployment_transforms();  // TODO: 后续实现
+
+    // =========================================================================
+    // 设备配置方法（DeviceConfigured状态）
+    // =========================================================================
+
+    /**
+     * @brief 配置计算设备（三个重载方法）
+     * @param engine_device "CPU"/"GPU"/"CUDA"/"MUSA"
+     * @param auto_cpu_binding 是否自动CPU绑核（仅TR_SCENE_GPU_CLOUD生效）
+     *
+     * @note CUDA/MUSA会自动转换为GPU
+     * @note 必须在config_preprocessor()之后调用
+     */
+    void config_device(const std::string& engine_device, bool auto_cpu_binding = true);
+
+    /**
+     * @brief 配置计算设备（显式指定GPU列表）
+     * @param engine_device "CPU"或"GPU"
+     * @param gpu_ids GPU ID列表
+     * @param auto_cpu_binding 是否自动CPU绑核
+     */
+    void config_device(const std::string& engine_device,
+                       const std::vector<int>& gpu_ids,
+                       bool auto_cpu_binding = true);
+
+    /**
+     * @brief 配置计算设备（显式指定GPU列表字符串）
+     * @param engine_device "CPU"或"GPU"
+     * @param gpu_id_str GPU ID字符串，如"0,1,2,7"
+     * @param auto_cpu_binding 是否自动CPU绑核
+     */
+    void config_device(const std::string& engine_device,
+                       const std::string& gpu_id_str,
+                       bool auto_cpu_binding = true);
 
     // =========================================================================
     // 高级封装方法
@@ -147,6 +193,24 @@ public:
 
     // 性能测试（训练集+验证集，总是先测试train再测试val）
     void test_dataloader();
+
+    // =========================================================================
+    // V4.1: PW测试模式支持
+    // =========================================================================
+
+    /**
+     * @brief 启用或禁用PW测试模式
+     * @param enable true=启用测试模式, false=正常模式
+     *
+     * 测试模式特点：
+     * - PW不需要EngineBuffer
+     * - 只执行第一个PO操作
+     * - 输出固定到A区
+     * - DoNothing可以作为第一个操作（仅测试模式）
+     */
+    void set_pw_test_mode(bool enable) {
+        pw_test_mode_ = enable;
+    }
 
     // =========================================================================
     // 原有方法（保留，用于高级用户）
@@ -339,6 +403,7 @@ private:
         DatasetSelected,
         DataLoaderConfigured,
         PreprocessorConfigured,
+        DeviceConfigured,        ///< 设备配置完成
         TransformsSet,
         Initialized
     };
@@ -351,6 +416,44 @@ private:
     // Transforms设置标志（用于状态机）
     bool train_transforms_set_;
     bool val_transforms_set_;
+
+    // =========================================================================
+    // PW管理相关成员（V4.1 - PreprocessWorker集成）
+    // =========================================================================
+
+    // PW实例（每个worker一个PW，延迟创建）
+    std::vector<std::unique_ptr<PreprocessWorker>> pw_instances_;
+
+    // PO模板（用于克隆到PW）
+    std::vector<std::unique_ptr<PreprocessOperation>> train_ops_template_;
+    std::vector<std::unique_ptr<PreprocessOperation>> val_ops_template_;
+
+    // PW运行时参数（当前phase使用）
+    PreprocessWorkerParameter pw_param_;
+
+    // Workshop大小计算
+    size_t workshop_region_d_size_ = 0;
+    size_t workshop_region_ab_size_ = 0;
+    size_t workshop_region_t_size_ = 0;
+    size_t workshop_region_s_size_ = 0;
+    size_t workshop_region_c_size_ = 0;
+    size_t workshop_num_region_s_ = 0;
+
+    // 测试模式标志
+    bool pw_test_mode_ = false;
+
+    // =========================================================================
+    // 设备配置相关成员（DeviceConfigured状态）
+    // =========================================================================
+
+    bool device_configured_ = false;                    ///< 是否已完成设备配置
+    std::string engine_device_;                         ///< "CPU" 或 "GPU"
+    std::vector<int> selected_gpu_ids_;                 ///< 用户选定的GPU ID列表
+    bool auto_cpu_binding_ = true;                      ///< 是否自动CPU绑核
+
+#if defined(TR_SCENE_GPU_CLOUD)
+    std::unique_ptr<HardwareTopology> hardware_topology_; ///< 硬件拓扑（仅绑核时使用）
+#endif
 
     // =========================================================================
     // 辅助方法
@@ -515,6 +618,58 @@ private:
     void notify_workers_new_buffer();
     void wait_workers_complete_buffer();
     void worker_func_persistent(int worker_id, DataLoader& loader);
+
+    // =========================================================================
+    // PW管理辅助方法（V4.1）
+    // =========================================================================
+
+    /**
+     * @brief 创建PW实例（延迟创建，每个worker一个）
+     * @param is_train true=训练集, false=验证集
+     */
+    void create_pw_instances(bool is_train);
+
+    /**
+     * @brief 更新PW参数（每个phase开始时调用）
+     * @param is_train true=训练集, false=验证集
+     */
+    void update_pw_parameters(bool is_train);
+
+    /**
+     * @brief 计算Workshop各区大小（按照PW2.md规范）
+     */
+    void calculate_workshop_sizes();
+
+    /**
+     * @brief 销毁PW实例
+     */
+    void destroy_pw_instances();
+
+    // =========================================================================
+    // 设备配置辅助方法
+    // =========================================================================
+
+#if defined(TR_USE_CUDA)
+    /**
+     * @brief 验证GPU ID列表的合法性
+     * @param gpu_ids GPU ID列表
+     * @throws TRException::ValueError 如果验证失败
+     */
+    void validate_gpu_ids(const std::vector<int>& gpu_ids);
+#endif
+
+#if defined(TR_SCENE_GPU_CLOUD)
+    /**
+     * @brief 计算CPU绑核策略
+     * @note 打印绑核策略并存储到成员变量
+     */
+    void calculate_cpu_binding_strategy();
+#endif
+
+    /**
+     * @brief 注册设备配置到GlobalRegistry
+     */
+    void register_device_config();
 
     Config config_;
     std::vector<std::thread> worker_threads_;  // 保留用于兼容（不再使用）

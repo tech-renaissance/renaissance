@@ -223,7 +223,7 @@ int main(int argc, char** argv) {
 
     try {
         // 获取单例
-        ImageNetLoaderRaw& loader = ImageNetLoaderRaw::getInstance();
+        ImageNetLoaderRaw& loader = ImageNetLoaderRaw::instance();
 
         // 配置DataLoader
         std::cout << "\n[1/5] Configuring RAW loader..." << std::endl;
@@ -249,7 +249,7 @@ int main(int argc, char** argv) {
 
         // 配置Preprocessor
         std::cout << "\n[2/5] Configuring preprocessor..." << std::endl;
-        Preprocessor& preproc = Preprocessor::getInstance();
+        Preprocessor& preproc = Preprocessor::instance();
         Preprocessor::Config preproc_config;
         preproc_config.num_workers = num_preprocess;
         preproc_config.jpeg_decode = false;

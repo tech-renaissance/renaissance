@@ -38,7 +38,7 @@ namespace tr {
  */
 class MnistLoaderDts : public DataLoader {
 public:
-    static MnistLoaderDts& getInstance();
+    static MnistLoaderDts& instance();
 
     // ========================================================================
     // DataLoader基类接口

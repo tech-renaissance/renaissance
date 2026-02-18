@@ -150,6 +150,15 @@ else()
     message(WARNING "TR_JPEG paths not defined - Preprocessor JPEG decode will not be available")
 endif()
 
+# 添加STB支持（用于JPEG备用解码）
+if(DEFINED TR_STB_INCLUDE_DIR)
+    target_include_directories(renaissance INTERFACE ${TR_STB_INCLUDE_DIR})
+    target_compile_definitions(renaissance INTERFACE TR_USE_STB=1)
+    message(STATUS "Renaissance library: STB headers available (for JPEG fallback decode)")
+else()
+    message(WARNING "TR_STB_INCLUDE_DIR not defined - STB JPEG fallback will not be available")
+endif()
+
 # 添加CUDA支持（base模块的cuda_arena需要）
 if(TR_USE_CUDA)
     if(DEFINED TR_CUDA_PATH)

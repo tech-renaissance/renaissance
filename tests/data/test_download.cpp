@@ -98,10 +98,10 @@ bool test_mnist_raw_download() {
     std::string test_dir = TEST_DOWNLOAD_DIR + "/mnist";
 
     // 调用下载：应该下载所有.gz文件（训练集+验证集）
-    MnistLoaderRaw::getInstance().download(test_dir);
+    MnistLoaderRaw::instance().download(test_dir);
 
     // 调用解压：解压.gz文件为.ubyte文件
-    MnistLoaderRaw::getInstance().extract(test_dir);
+    MnistLoaderRaw::instance().extract(test_dir);
 
     LOG_INFO << "[PASS] MNIST RAW download, verify and extract test passed";
     return true;
@@ -118,7 +118,7 @@ bool test_mnist_dts_download() {
     std::string test_dir = TEST_DOWNLOAD_DIR + "/mnist";
 
     // 调用下载：应该下载所有DTS文件（训练集+验证集）
-    MnistLoaderDts::getInstance().download(test_dir);
+    MnistLoaderDts::instance().download(test_dir);
 
     LOG_INFO << "[PASS] MNIST DTS download test passed";
     return true;
@@ -135,10 +135,10 @@ bool test_cifar10_raw_download() {
     std::string test_dir = TEST_DOWNLOAD_DIR + "/cifar-10";
 
     // 调用下载：应该下载CIFAR-10 tar.gz文件
-    CifarLoaderRaw::getInstance().download(test_dir, DatasetType::cifar_10);
+    CifarLoaderRaw::instance().download(test_dir, DatasetType::cifar_10);
 
     // 调用解压：解压tar.gz到cifar-10-batches-bin/目录
-    CifarLoaderRaw::getInstance().extract(test_dir, DatasetType::cifar_10);
+    CifarLoaderRaw::instance().extract(test_dir, DatasetType::cifar_10);
 
     LOG_INFO << "[PASS] CIFAR-10 RAW download, verify and extract test passed";
     return true;
@@ -155,10 +155,10 @@ bool test_cifar100_raw_download() {
     std::string test_dir = TEST_DOWNLOAD_DIR + "/cifar-100";
 
     // 调用下载：应该下载CIFAR-100 tar.gz文件
-    CifarLoaderRaw::getInstance().download(test_dir, DatasetType::cifar_100);
+    CifarLoaderRaw::instance().download(test_dir, DatasetType::cifar_100);
 
     // 调用解压：解压tar.gz到cifar-100-binary/目录
-    CifarLoaderRaw::getInstance().extract(test_dir, DatasetType::cifar_100);
+    CifarLoaderRaw::instance().extract(test_dir, DatasetType::cifar_100);
 
     LOG_INFO << "[PASS] CIFAR-100 RAW download, verify and extract test passed";
     return true;
@@ -175,7 +175,7 @@ bool test_cifar10_dts_download() {
     std::string test_dir = TEST_DOWNLOAD_DIR + "/cifar-10";
 
     // 调用下载：应该下载所有CIFAR-10 DTS文件
-    CifarLoaderDts::getInstance().download(test_dir, DatasetType::cifar_10);
+    CifarLoaderDts::instance().download(test_dir, DatasetType::cifar_10);
 
     LOG_INFO << "[PASS] CIFAR-10 DTS download test passed";
     return true;
@@ -192,7 +192,7 @@ bool test_cifar100_dts_download() {
     std::string test_dir = TEST_DOWNLOAD_DIR + "/cifar-100";
 
     // 调用下载：应该下载所有CIFAR-100 DTS文件
-    CifarLoaderDts::getInstance().download(test_dir, DatasetType::cifar_100);
+    CifarLoaderDts::instance().download(test_dir, DatasetType::cifar_100);
 
     LOG_INFO << "[PASS] CIFAR-100 DTS download test passed";
     return true;
@@ -209,7 +209,7 @@ bool test_imagenet_raw_download() {
     std::string test_dir = TEST_DOWNLOAD_DIR + "/imagenet";
 
     LOG_INFO << "Calling download (should print warning message):";
-    ImageNetLoaderRaw::getInstance().download(test_dir);
+    ImageNetLoaderRaw::instance().download(test_dir);
 
     LOG_INFO << "[PASS] ImageNet RAW download test passed (warning message expected)";
     return true;
@@ -226,7 +226,7 @@ bool test_imagenet_dts_download() {
     std::string test_dir = TEST_DOWNLOAD_DIR + "/imagenet";
 
     LOG_INFO << "Calling download (should print warning message):";
-    ImageNetLoaderDts::getInstance().download(test_dir);
+    ImageNetLoaderDts::instance().download(test_dir);
 
     LOG_INFO << "[PASS] ImageNet DTS download test passed (warning message expected)";
     return true;
@@ -244,7 +244,7 @@ bool test_sample_loader_download() {
 
     LOG_INFO << "Calling download (should throw NotImplementedError):";
     try {
-        SampleLoader::getInstance().download(test_dir);
+        SampleLoader::instance().download(test_dir);
         LOG_ERROR << "Expected NotImplementedError to be thrown!";
         return false;
     } catch (const NotImplementedError& e) {

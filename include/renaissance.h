@@ -35,6 +35,8 @@
 #include "renaissance/base/tr_exception.h"
 #include "renaissance/base/dtype.h"
 #include "renaissance/base/device_type.h"
+#include "renaissance/base/global_config.h"
+#include "renaissance/base/global_registry.h"
 #include "renaissance/base/memory_arena.h"
 #include "renaissance/base/memory_plan.h"
 #include "renaissance/base/cpu_arena.h"
@@ -69,6 +71,11 @@
 #include "renaissance/data/sample_loader.h"
 // V3.9.0 公共组件
 #include "renaissance/data/file_handle.h"
+// V4.1 Transform操作
+#include "renaissance/data/preprocess_operation.h"
+#include "renaissance/data/resize.h"
+#include "renaissance/data/center_crop.h"
+#include "renaissance/data/do_nothing.h"
 
 // Device
 #include "renaissance/device/device.h"

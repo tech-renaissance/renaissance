@@ -16,7 +16,7 @@ int main() {
 
     try {
         // 获取单例
-        ImageNetLoaderDts& loader = ImageNetLoaderDts::getInstance();
+        ImageNetLoaderDts& loader = ImageNetLoaderDts::instance();
 
         std::cout << "ImageNetLoaderDts singleton obtained successfully" << std::endl;
 

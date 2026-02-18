@@ -175,7 +175,7 @@ int main(int argc, char** argv) {
 
         std::cout << "[1/4] Configuring RAW loader...\n";
 
-        auto& loader = ImageNetLoaderRaw::getInstance();
+        auto& loader = ImageNetLoaderRaw::instance();
 
         // 设置加载模式（根据命令行参数）
         if (is_train) {
@@ -204,7 +204,7 @@ int main(int argc, char** argv) {
         // =========================================================================
 
         std::cout << "[2/4] Configuring preprocessor with logging...\n";
-        Preprocessor& preproc = Preprocessor::getInstance();
+        Preprocessor& preproc = Preprocessor::instance();
         Preprocessor::Config preproc_config;
         preproc_config.num_workers = num_preprocess;
         preproc_config.jpeg_decode = false;

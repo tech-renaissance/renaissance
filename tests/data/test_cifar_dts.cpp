@@ -138,7 +138,7 @@ int main(int argc, char** argv) {
               << "========================================\n\n";
 
     try {
-        auto& loader = CifarLoaderDts::getInstance();
+        auto& loader = CifarLoaderDts::instance();
 
         // 配置loader (IO workers固定为1)
         if (is_train) {

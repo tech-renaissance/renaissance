@@ -19,6 +19,15 @@ set(DATA_SOURCES
     sample_loader.cpp
     # V3.9.0 公共组件
     file_handle.cpp
+    # P0阶段：PreprocessOperation及子类
+    preprocess_operation.cpp
+    resize.cpp
+    center_crop.cpp
+    do_nothing.cpp
+    # V4.1 PreprocessWorker
+    preprocess_worker.cpp
+    # GPU_CLOUD场景：NUMA优化
+    hardware_topology.cpp
 )
 
 # 创建数据库静态库
@@ -42,6 +51,20 @@ target_compile_definitions(data PRIVATE
 
 # 链接base模块（data依赖base的tr_exception等）
 target_link_libraries(data PUBLIC base)
+
+# 添加CUDA头文件路径（hardware_topology.cpp和cpu_advisor.cpp需要）
+if(TR_USE_CUDA)
+    if(DEFINED TR_CUDA_PATH)
+        target_include_directories(data PRIVATE ${TR_CUDA_PATH}/include)
+        message(STATUS "Data library: Using CUDA headers from ${TR_CUDA_PATH}/include")
+    else()
+        # 尝试使用CUDA_INCLUDE_DIRS
+        if(DEFINED CUDA_INCLUDE_DIRS)
+            target_include_directories(data PRIVATE ${CUDA_INCLUDE_DIRS})
+            message(STATUS "Data library: Using CUDA headers from ${CUDA_INCLUDE_DIRS}")
+        endif()
+    endif()
+endif()
 
 # 链接zlib（DTS数据加载器的CRC校验需要）
 find_package(ZLIB)

@@ -5,6 +5,7 @@ set(BASE_SOURCES
     tr_exception.cpp
     device_type.cpp
     dtype.cpp
+    global_registry.cpp
     memory_arena.cpp
     memory_plan.cpp
     cpu_arena.cpp

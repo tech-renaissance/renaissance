@@ -38,7 +38,7 @@ namespace tr {
 // 单例模式实现
 // =============================================================================
 
-MnistLoaderDts& MnistLoaderDts::getInstance() {
+MnistLoaderDts& MnistLoaderDts::instance() {
     static MnistLoaderDts instance;
     return instance;
 }

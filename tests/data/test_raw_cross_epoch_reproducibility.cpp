@@ -85,7 +85,7 @@ bool run_epoch(ImageNetLoaderRaw& loader, int epoch_id, bool is_train,
     loader.begin_epoch(epoch_id, is_train);
 
     // 配置Preprocessor并启用日志
-    Preprocessor& preproc = Preprocessor::getInstance();
+    Preprocessor& preproc = Preprocessor::instance();
     Preprocessor::Config config;
     config.num_workers = num_preprocess;
     config.jpeg_decode = false;  // 关闭JPEG解码，直接记录原始JPEG数据
@@ -279,7 +279,7 @@ int main(int argc, char** argv) {
         // 配置RAW Loader
         // =========================================================================
 
-        auto& loader = ImageNetLoaderRaw::getInstance();
+        auto& loader = ImageNetLoaderRaw::instance();
 
         // 配置模式：测试数据集用FULLY，另一个用PARTIAL节省内存
         if (is_train) {

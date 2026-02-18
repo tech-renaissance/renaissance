@@ -43,7 +43,7 @@ namespace tr {
  */
 class CifarLoaderRaw : public DataLoader {
 public:
-    static CifarLoaderRaw& getInstance();
+    static CifarLoaderRaw& instance();
 
     // ========================================================================
     // DataLoader基类接口

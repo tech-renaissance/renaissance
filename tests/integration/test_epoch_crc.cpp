@@ -87,7 +87,7 @@ bool run_phase(Preprocessor& prep, int epoch_id, bool is_train,
     config.num_workers = num_preproc_workers;  // 使用实际的preprocess worker数量
     config.enable_logging = enable_crc_logging;  // 关键：控制是否输出CRC
     config.calc_crc = enable_crc_logging;
-    config.jpeg_decode = false;     // 快速模式
+    config.jpeg_decode = true;      // 启用JPEG解码
     config.apply_crop = false;
     config.simulate_delay = false;
 
@@ -128,7 +128,7 @@ void test_epoch_crc(const std::string& dataset_name,
     Logger::instance().set_level(LogLevel::DEBUG);
 
     // 获取Preprocessor单例
-    auto& prep = Preprocessor::getInstance();
+    auto& prep = Preprocessor::instance();
 
     // 解析格式（转换为大写以支持大小写不敏感）
     std::string format_upper = format_str;
@@ -156,7 +156,8 @@ void test_epoch_crc(const std::string& dataset_name,
                           partial_mode, enable_shuffle, false);  // 使用enable_shuffle参数
 
     // 步骤3: 配置Preprocessor（必须先调用config_preprocessor）
-    prep.config_preprocessor(1, 32, 224, 3, 1, false);
+    prep.config_preprocessor(-1, 32, 224, 3, 1, false);
+    prep.config_device("GPU");
 
     // 步骤4: 设置数据变换
     prep.set_train_transforms();
@@ -179,19 +180,19 @@ void test_epoch_crc(const std::string& dataset_name,
 
     // 根据标准化后的名称选择DataLoader
     if (dataset_normalized == "mnist") {
-        loader = dts_format ? (DataLoader*)&MnistLoaderDts::getInstance()
-                            : (DataLoader*)&MnistLoaderRaw::getInstance();
+        loader = dts_format ? (DataLoader*)&MnistLoaderDts::instance()
+                            : (DataLoader*)&MnistLoaderRaw::instance();
     } else if (dataset_normalized == "cifar10") {
         // CIFAR-10和CIFAR-100使用相同的Loader类，Loader内部通过detected_num_classes_区分
-        loader = dts_format ? (DataLoader*)&CifarLoaderDts::getInstance()
-                            : (DataLoader*)&CifarLoaderRaw::getInstance();
+        loader = dts_format ? (DataLoader*)&CifarLoaderDts::instance()
+                            : (DataLoader*)&CifarLoaderRaw::instance();
     } else if (dataset_normalized == "cifar100") {
         // CIFAR-100和CIFAR-10使用相同的Loader类，Loader内部通过detected_num_classes_区分
-        loader = dts_format ? (DataLoader*)&CifarLoaderDts::getInstance()
-                            : (DataLoader*)&CifarLoaderRaw::getInstance();
+        loader = dts_format ? (DataLoader*)&CifarLoaderDts::instance()
+                            : (DataLoader*)&CifarLoaderRaw::instance();
     } else if (dataset_normalized == "imagenet") {
-        loader = dts_format ? (DataLoader*)&ImageNetLoaderDts::getInstance()
-                            : (DataLoader*)&ImageNetLoaderRaw::getInstance();
+        loader = dts_format ? (DataLoader*)&ImageNetLoaderDts::instance()
+                            : (DataLoader*)&ImageNetLoaderRaw::instance();
     }
 
     if (!loader) {

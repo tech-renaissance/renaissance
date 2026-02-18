@@ -32,7 +32,7 @@ int main() {
 
     try {
         // 获取DataLoader单例
-        ImageNetLoaderDts& loader = ImageNetLoaderDts::getInstance();
+        ImageNetLoaderDts& loader = ImageNetLoaderDts::instance();
 
         // 配置（只配置val路径，train路径随便填）
         std::cout << "\nConfiguring DataLoader..." << std::endl;

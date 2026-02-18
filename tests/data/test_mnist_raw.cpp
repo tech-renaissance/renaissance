@@ -129,7 +129,7 @@ int main(int argc, char** argv) {
               << "========================================\n\n";
 
     try {
-        auto& loader = MnistLoaderRaw::getInstance();
+        auto& loader = MnistLoaderRaw::instance();
 
         // 配置loader (IO workers固定为1)
         if (is_train) {

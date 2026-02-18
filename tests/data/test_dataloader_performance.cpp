@@ -184,7 +184,7 @@ int main(int argc, char** argv) {
     // =========================================================================
 
     try {
-        auto& loader = ImageNetLoaderDts::getInstance();
+        auto& loader = ImageNetLoaderDts::instance();
 
         // 设置加载模式（根据命令行参数）
         LoadMode mode = (mode_str == "fully") ? LoadMode::FULLY : LoadMode::PARTIAL;

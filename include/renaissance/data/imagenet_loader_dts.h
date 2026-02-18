@@ -274,7 +274,7 @@ public:
     /**
      * @brief 获取单例实例
      */
-    static ImageNetLoaderDts& getInstance();
+    static ImageNetLoaderDts& instance();
 
     // 禁止拷贝和移动（单例模式）
     ImageNetLoaderDts(const ImageNetLoaderDts&) = delete;

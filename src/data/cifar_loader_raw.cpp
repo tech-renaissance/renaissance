@@ -42,7 +42,7 @@ namespace tr {
 // 单例模式实现
 // =============================================================================
 
-CifarLoaderRaw& CifarLoaderRaw::getInstance() {
+CifarLoaderRaw& CifarLoaderRaw::instance() {
     static CifarLoaderRaw instance;
     return instance;
 }

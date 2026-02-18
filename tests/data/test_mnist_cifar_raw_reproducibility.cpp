@@ -169,7 +169,7 @@ int main(int argc, char** argv) {
 
         // 根据数据集类型选择loader
         if (dataset_type == "mnist") {
-            auto& loader = MnistLoaderRaw::getInstance();
+            auto& loader = MnistLoaderRaw::instance();
 
             loader.configure(
                 1,                  // IO workers (固定1)
@@ -210,7 +210,7 @@ int main(int argc, char** argv) {
             std::cout << "[INFO] Total samples recorded: " << total_samples << "\n";
 
         } else if (dataset_type == "cifar10" || dataset_type == "cifar100") {
-            auto& loader = CifarLoaderRaw::getInstance();
+            auto& loader = CifarLoaderRaw::instance();
 
             loader.configure(
                 1,                  // IO workers (固定1)

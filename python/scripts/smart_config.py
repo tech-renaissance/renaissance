@@ -276,33 +276,40 @@ def extract_cudnn_version_from_path(path: str) -> str:
 
     if platform.system() == "Windows":
         # Windows下：从路径中提取版本号
-        # 模式1: CUDNN/v9.17
+        # 模式1: CUDNN/v9.19
         pattern1 = r"/v(\d+\.\d+)"
         match = re.search(pattern1, path)
         if match:
             return match.group(1)
 
-        # 模式2: CUDNN/v9.17.0
+        # 模式2: CUDNN/v9.19.0
         pattern2 = r"/v(\d+\.\d+\.\d+)"
         match = re.search(pattern2, path)
         if match:
             return match.group(1)
 
-        # 模式3: 检查常见的cuDNN版本目录名
-        common_versions = ["9.17", "9.16", "9.15", "9.14", "9.13", "9.12", "9.11", "9.10"]
+        # 模式3: 检查常见的cuDNN版本目录名 (9.19及以上)
+        common_versions = ["9.29", "9.28", "9.27", "9.26", "9.25", "9.24", "9.23", "9.22", "9.21", "9.20", "9.19"]
         for version in common_versions:
             if version in path:
                 return version
 
     else:
-        # Linux下：从CUDA路径的include/cudnn_version.h读取版本号
-        # 假设cuDNN安装在CUDA目录中，先找到CUDA目录
+        # Linux下：从CUDA路径或系统路径读取cuDNN版本号
+        # 支持多个头文件名：cudnn_version.h, cudnn_version_v9.h 等
+
+        # 可能的cuDNN头文件名（按优先级排序）
+        cudnn_header_files = [
+            "cudnn_version.h",
+            "cudnn_version_v9.h",
+            "cudnn_version_v8.h"
+        ]
+
+        # 方案1: 尝试从CUDA目录读取
         cuda_paths = [
             "/usr/local/cuda",
             "/usr/local/cuda-13.1",
-            "/usr/local/cuda-13.0",
-            "/usr/local/cuda-12.9",
-            "/usr/local/cuda-12.8"
+            "/usr/local/cuda-13.0"
         ]
 
         # 如果当前路径就是CUDA路径，直接使用
@@ -310,36 +317,75 @@ def extract_cudnn_version_from_path(path: str) -> str:
             cuda_paths.insert(0, path)
 
         for cuda_path in cuda_paths:
-            cudnn_version_file = os.path.join(cuda_path, "include", "cudnn_version.h")
-            if os.path.exists(cudnn_version_file):
-                try:
-                    # 使用grep命令读取版本信息
-                    success, output = run_cmd(["cat", cudnn_version_file])
-                    if success:
-                        lines = output.split('\n')
-                        major = minor = patch = None
+            for header_file in cudnn_header_files:
+                cudnn_version_file = os.path.join(cuda_path, "include", header_file)
+                if os.path.exists(cudnn_version_file):
+                    try:
+                        # 使用cat命令读取版本信息
+                        success, output = run_cmd(["cat", cudnn_version_file])
+                        if success:
+                            lines = output.split('\n')
+                            major = minor = patch = None
 
-                        for line in lines:
-                            if '#define CUDNN_MAJOR' in line:
-                                major_match = re.search(r'#define\s+CUDNN_MAJOR\s+(\d+)', line)
-                                if major_match:
-                                    major = major_match.group(1)
-                            elif '#define CUDNN_MINOR' in line:
-                                minor_match = re.search(r'#define\s+CUDNN_MINOR\s+(\d+)', line)
-                                if minor_match:
-                                    minor = minor_match.group(1)
-                            elif '#define CUDNN_PATCHLEVEL' in line:
-                                patch_match = re.search(r'#define\s+CUDNN_PATCHLEVEL\s+(\d+)', line)
-                                if patch_match:
-                                    patch = patch_match.group(1)
+                            for line in lines:
+                                if '#define CUDNN_MAJOR' in line:
+                                    major_match = re.search(r'#define\s+CUDNN_MAJOR\s+(\d+)', line)
+                                    if major_match:
+                                        major = major_match.group(1)
+                                elif '#define CUDNN_MINOR' in line:
+                                    minor_match = re.search(r'#define\s+CUDNN_MINOR\s+(\d+)', line)
+                                    if minor_match:
+                                        minor = minor_match.group(1)
+                                elif '#define CUDNN_PATCHLEVEL' in line:
+                                    patch_match = re.search(r'#define\s+CUDNN_PATCHLEVEL\s+(\d+)', line)
+                                    if patch_match:
+                                        patch = patch_match.group(1)
 
-                        if major and minor:
-                            return f"{major}.{minor}.{patch if patch else '0'}"
+                            if major and minor:
+                                return f"{major}.{minor}.{patch if patch else '0'}"
 
-                except Exception:
-                    pass
+                    except Exception:
+                        pass
 
-        # 备用方案：从头文件解析
+        # 方案2: 从系统路径读取（如 /usr/include/x86_64-linux-gnu）
+        system_include_paths = [
+            "/usr/include/x86_64-linux-gnu",
+            "/usr/include",
+            "/usr/local/include"
+        ]
+
+        for system_path in system_include_paths:
+            for header_file in cudnn_header_files:
+                version_file = os.path.join(system_path, header_file)
+                if os.path.exists(version_file):
+                    try:
+                        # 使用grep命令读取版本信息
+                        success, output = run_cmd(["grep", "-A", "2", "CUDNN_MAJOR", version_file])
+                        if success:
+                            lines = output.split('\n')
+                            major = minor = patch = None
+
+                            for line in lines:
+                                if '#define CUDNN_MAJOR' in line:
+                                    major_match = re.search(r'#define\s+CUDNN_MAJOR\s+(\d+)', line)
+                                    if major_match:
+                                        major = major_match.group(1)
+                                elif '#define CUDNN_MINOR' in line:
+                                    minor_match = re.search(r'#define\s+CUDNN_MINOR\s+(\d+)', line)
+                                    if minor_match:
+                                        minor = minor_match.group(1)
+                                elif '#define CUDNN_PATCHLEVEL' in line:
+                                    patch_match = re.search(r'#define\s+CUDNN_PATCHLEVEL\s+(\d+)', line)
+                                    if patch_match:
+                                        patch = patch_match.group(1)
+
+                            if major and minor:
+                                return f"{major}.{minor}.{patch if patch else '0'}"
+
+                    except Exception:
+                        pass
+
+        # 方案3: 从用户提供的路径的include目录读取
         include_paths = [
             path + "/include",
             path,
@@ -348,25 +394,26 @@ def extract_cudnn_version_from_path(path: str) -> str:
         ]
 
         for include_path in include_paths:
-            version_file = os.path.join(include_path, "cudnn_version.h")
-            if os.path.exists(version_file):
-                try:
-                    with open(version_file, 'r') as f:
-                        content = f.read()
+            for header_file in cudnn_header_files:
+                version_file = os.path.join(include_path, header_file)
+                if os.path.exists(version_file):
+                    try:
+                        with open(version_file, 'r') as f:
+                            content = f.read()
 
-                    # 解析版本号
-                    major_match = re.search(r'#define\s+CUDNN_MAJOR\s+(\d+)', content)
-                    minor_match = re.search(r'#define\s+CUDNN_MINOR\s+(\d+)', content)
-                    patch_match = re.search(r'#define\s+CUDNN_PATCHLEVEL\s+(\d+)', content)
+                        # 解析版本号
+                        major_match = re.search(r'#define\s+CUDNN_MAJOR\s+(\d+)', content)
+                        minor_match = re.search(r'#define\s+CUDNN_MINOR\s+(\d+)', content)
+                        patch_match = re.search(r'#define\s+CUDNN_PATCHLEVEL\s+(\d+)', content)
 
-                    if major_match and minor_match:
-                        major = major_match.group(1)
-                        minor = minor_match.group(1)
-                        patch = patch_match.group(1) if patch_match else "0"
-                        return f"{major}.{minor}.{patch}"
+                        if major_match and minor_match:
+                            major = major_match.group(1)
+                            minor = minor_match.group(1)
+                            patch = patch_match.group(1) if patch_match else "0"
+                            return f"{major}.{minor}.{patch}"
 
-                except Exception:
-                    pass
+                    except Exception:
+                        pass
 
     return "unknown"
 

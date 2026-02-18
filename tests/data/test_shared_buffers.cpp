@@ -21,7 +21,7 @@ int main(int argc, char** argv) {
 
     try {
         // 获取单例
-        ImageNetLoaderDts& loader = ImageNetLoaderDts::getInstance();
+        ImageNetLoaderDts& loader = ImageNetLoaderDts::instance();
 
         // 配置训练集和验证集（都为PARTIAL模式）
         std::string dataset_path = "/root/epfs/dataset/imagenet";

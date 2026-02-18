@@ -61,7 +61,7 @@ void RawBuffer::reset() {
 // 单例模式实现
 // =============================================================================
 
-ImageNetLoaderRaw& ImageNetLoaderRaw::getInstance() {
+ImageNetLoaderRaw& ImageNetLoaderRaw::instance() {
     static ImageNetLoaderRaw instance;
     return instance;
 }

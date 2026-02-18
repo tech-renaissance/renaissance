@@ -274,7 +274,7 @@ public:
     /**
      * @brief 获取单例实例（Meyers Singleton）
      */
-    static ImageNetLoaderRaw& getInstance();
+    static ImageNetLoaderRaw& instance();
 
     // 禁止拷贝和移动（单例模式）
     ImageNetLoaderRaw(const ImageNetLoaderRaw&) = delete;

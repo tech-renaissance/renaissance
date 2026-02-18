@@ -77,7 +77,7 @@ void test_config(const std::string& dataset_name,
                  int num_load_workers,
                  int num_preproc_workers) {
     // 获取Preprocessor单例
-    auto& prep = Preprocessor::getInstance();
+    auto& prep = Preprocessor::instance();
 
     // 解析格式
     bool dts_format = (format_str == "dts");
@@ -105,7 +105,8 @@ void test_config(const std::string& dataset_name,
     int batch_size = 32;
     int max_resolution = 224;
     int num_channels = 3;
-    prep.config_preprocessor(1, batch_size, max_resolution, num_channels, 1, false);
+    prep.config_preprocessor(-1, batch_size, max_resolution, num_channels, 1, false);
+    prep.config_device("GPU");
 
     // 步骤4: 设置数据变换
     prep.set_train_transforms();
@@ -234,7 +235,7 @@ int main(int argc, char* argv[]) {
         for (const auto& format : formats) {
             for (const auto& mode : modes) {
                 // 重置Preprocessor状态
-                Preprocessor::getInstance().reset();
+                Preprocessor::instance().reset();
 
                 std::cout << "Testing " << dataset << " " << format << " " << mode << "...\n";
                 try {

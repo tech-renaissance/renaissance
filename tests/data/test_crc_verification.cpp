@@ -53,22 +53,22 @@ void print_usage(const char* program_name) {
 // =============================================================================
 
 bool verify_crc_imagenet(const std::string& dts_file) {
-    ImageNetLoaderDts& loader = ImageNetLoaderDts::getInstance();
+    ImageNetLoaderDts& loader = ImageNetLoaderDts::instance();
     return loader.verify_dts_crc(dts_file);
 }
 
 bool verify_crc_mnist(const std::string& dts_file) {
-    MnistLoaderDts& loader = MnistLoaderDts::getInstance();
+    MnistLoaderDts& loader = MnistLoaderDts::instance();
     return loader.verify_dts_crc(dts_file);
 }
 
 bool verify_crc_cifar10(const std::string& dts_file) {
-    CifarLoaderDts& loader = CifarLoaderDts::getInstance();
+    CifarLoaderDts& loader = CifarLoaderDts::instance();
     return loader.verify_dts_crc(dts_file);
 }
 
 bool verify_crc_cifar100(const std::string& dts_file) {
-    CifarLoaderDts& loader = CifarLoaderDts::getInstance();
+    CifarLoaderDts& loader = CifarLoaderDts::instance();
     return loader.verify_dts_crc(dts_file);
 }
 

@@ -39,7 +39,7 @@ namespace tr {
  */
 class CifarLoaderDts : public DataLoader {
 public:
-    static CifarLoaderDts& getInstance();
+    static CifarLoaderDts& instance();
 
     // ========================================================================
     // DataLoader基类接口

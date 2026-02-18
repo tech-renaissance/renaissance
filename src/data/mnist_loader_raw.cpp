@@ -42,7 +42,7 @@ namespace tr {
 // 单例模式实现
 // =============================================================================
 
-MnistLoaderRaw& MnistLoaderRaw::getInstance() {
+MnistLoaderRaw& MnistLoaderRaw::instance() {
     static MnistLoaderRaw instance;
     return instance;
 }

@@ -44,7 +44,7 @@ namespace tr {
  */
 class MnistLoaderRaw : public DataLoader {
 public:
-    static MnistLoaderRaw& getInstance();
+    static MnistLoaderRaw& instance();
 
     // ========================================================================
     // DataLoader基类接口

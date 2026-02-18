@@ -107,6 +107,18 @@ else()
 endif()
 
 # ============================================================================
+# 包含pw子目录（PreprocessWorker测试）
+# ============================================================================
+
+# 注意：pw测试当前已开启
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/pw AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/pw)
+    add_subdirectory(pw)
+    message(STATUS "Including pw tests")
+else()
+    message(STATUS "PW tests directory not found")
+endif()
+
+# ============================================================================
 # 包含device子目录（Device类测试）
 # ============================================================================
 
@@ -182,4 +194,29 @@ endif()
 # 输出单元测试信息
 # ============================================================================
 
+# ============================================================================
+
+# ============================================================================
+
+# 包含bind子目录（NUMA绑定实验）
+
+# ============================================================================
+
+# 注意：bind测试当前已开启
+
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/bind AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/bind)
+
+    add_subdirectory(bind)
+
+    message(STATUS "Including bind tests")
+
+else()
+
+    message(STATUS "Bind tests directory not found")
+
+endif()
+
+# ============================================================================
+
+message(STATUS "=== Unit Tests Configuration Complete ===")
 message(STATUS "=== Unit Tests Configuration Complete ===")

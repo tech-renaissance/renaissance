@@ -36,7 +36,7 @@ int main(int argc, char* argv[]) {
 
     try {
         // 获取DataLoader单例
-        ImageNetLoaderDts& loader = ImageNetLoaderDts::getInstance();
+        ImageNetLoaderDts& loader = ImageNetLoaderDts::instance();
 
         // 配置
         std::cout << "\nConfiguring DataLoader..." << std::endl;

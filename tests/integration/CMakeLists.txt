@@ -196,4 +196,42 @@ set_target_properties(test_epoch_crc PROPERTIES
 # 注意：不添加为CTest，因为它需要外部数据集
 message(STATUS "Epoch CRC test configured: test_epoch_crc")
 
+# =============================================================================
+# Test: test_pw_resize
+# Purpose: PW测试程序 - 仅使用Resize操作测量ImageNet预处理时间
+# =============================================================================
+add_executable(test_pw_resize
+    test_pw_resize.cpp
+)
+
+target_link_libraries(test_pw_resize
+    renaissance
+)
+
+set_target_properties(test_pw_resize PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/integration
+)
+
+# 注意：不添加为CTest，因为它需要外部数据集
+message(STATUS "PW resize test configured: test_pw_resize")
+
+# =============================================================================
+# Test: test_pw_center_crop
+# Purpose: PW测试程序 - 测试CenterCrop操作（局部解码+STB fallback）
+# =============================================================================
+add_executable(test_pw_center_crop
+    test_pw_center_crop.cpp
+)
+
+target_link_libraries(test_pw_center_crop
+    renaissance
+)
+
+set_target_properties(test_pw_center_crop PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/integration
+)
+
+# 注意：不添加为CTest，因为它需要外部数据集
+message(STATUS "PW center crop test configured: test_pw_center_crop")
+
 message(STATUS "=== Integration Tests Configuration Complete ===")

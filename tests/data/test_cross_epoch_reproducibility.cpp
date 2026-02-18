@@ -87,7 +87,7 @@ bool run_epoch_imagenet(ImageNetLoaderDts& loader, int epoch_id, bool is_train,
     loader.begin_epoch(epoch_id, is_train);
 
     // 配置Preprocessor并启用日志
-    Preprocessor& preproc = Preprocessor::getInstance();
+    Preprocessor& preproc = Preprocessor::instance();
     Preprocessor::Config config;
     config.num_workers = num_preprocess;
     config.jpeg_decode = false;
@@ -124,7 +124,7 @@ bool run_epoch_mnist(MnistLoaderDts& loader, int epoch_id, bool is_train,
     loader.begin_epoch(epoch_id, is_train);
 
     // 配置Preprocessor并启用日志
-    Preprocessor& preproc = Preprocessor::getInstance();
+    Preprocessor& preproc = Preprocessor::instance();
     Preprocessor::Config config;
     config.num_workers = num_preprocess;
     config.jpeg_decode = false;
@@ -161,7 +161,7 @@ bool run_epoch_cifar(CifarLoaderDts& loader, int epoch_id, bool is_train,
     loader.begin_epoch(epoch_id, is_train);
 
     // 配置Preprocessor并启用日志
-    Preprocessor& preproc = Preprocessor::getInstance();
+    Preprocessor& preproc = Preprocessor::instance();
     Preprocessor::Config config;
     config.num_workers = num_preprocess;
     config.jpeg_decode = false;
@@ -411,7 +411,7 @@ int main(int argc, char** argv) {
             // ImageNet
             // ------------------------------------------------------------------------
 
-            auto& loader = ImageNetLoaderDts::getInstance();
+            auto& loader = ImageNetLoaderDts::instance();
 
             // 配置模式：测试数据集用FULLY，另一个用PARTIAL节省内存
             if (is_train) {
@@ -454,7 +454,7 @@ int main(int argc, char** argv) {
             // MNIST
             // ------------------------------------------------------------------------
 
-            auto& loader = MnistLoaderDts::getInstance();
+            auto& loader = MnistLoaderDts::instance();
 
             // MNIST强制FULLY模式
             loader.set_train_mode(LoadMode::FULLY);
@@ -492,7 +492,7 @@ int main(int argc, char** argv) {
             // CIFAR-10/100
             // ------------------------------------------------------------------------
 
-            auto& loader = CifarLoaderDts::getInstance();
+            auto& loader = CifarLoaderDts::instance();
 
             // CIFAR强制FULLY模式
             loader.set_train_mode(LoadMode::FULLY);

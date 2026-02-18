@@ -237,7 +237,7 @@ int main(int argc, char** argv) {
         std::cout << "[1/4] Configuring loader...\n";
 
         if (dataset_type == "imagenet") {
-            auto& loader = ImageNetLoaderDts::getInstance();
+            auto& loader = ImageNetLoaderDts::instance();
 
             // 设置加载模式（根据命令行参数）
             if (is_train) {
@@ -259,7 +259,7 @@ int main(int argc, char** argv) {
                 false
             );
         } else if (dataset_type == "mnist") {
-            auto& loader = MnistLoaderDts::getInstance();
+            auto& loader = MnistLoaderDts::instance();
 
             // MNIST强制FULLY模式
             loader.set_train_mode(LoadMode::FULLY);
@@ -276,7 +276,7 @@ int main(int argc, char** argv) {
                 false
             );
         } else if (dataset_type == "cifar10" || dataset_type == "cifar100") {
-            auto& loader = CifarLoaderDts::getInstance();
+            auto& loader = CifarLoaderDts::instance();
 
             // CIFAR强制FULLY模式
             loader.set_train_mode(LoadMode::FULLY);
@@ -301,7 +301,7 @@ int main(int argc, char** argv) {
         // =========================================================================
 
         std::cout << "[2/4] Configuring preprocessor with logging...\n";
-        Preprocessor& preproc = Preprocessor::getInstance();
+        Preprocessor& preproc = Preprocessor::instance();
         Preprocessor::Config preproc_config;
         preproc_config.num_workers = num_preprocess;
         preproc_config.jpeg_decode = false;
@@ -320,17 +320,17 @@ int main(int argc, char** argv) {
         std::cout << "Expected samples: " << expected_samples << "\n\n";
 
         if (dataset_type == "imagenet") {
-            auto& loader = ImageNetLoaderDts::getInstance();
+            auto& loader = ImageNetLoaderDts::instance();
             loader.begin_epoch(0, is_train);
             preproc.run(loader);
             loader.end_epoch();
         } else if (dataset_type == "mnist") {
-            auto& loader = MnistLoaderDts::getInstance();
+            auto& loader = MnistLoaderDts::instance();
             loader.begin_epoch(0, is_train);
             preproc.run(loader);
             loader.end_epoch();
         } else if (dataset_type == "cifar10" || dataset_type == "cifar100") {
-            auto& loader = CifarLoaderDts::getInstance();
+            auto& loader = CifarLoaderDts::instance();
             loader.begin_epoch(0, is_train);
             preproc.run(loader);
             loader.end_epoch();

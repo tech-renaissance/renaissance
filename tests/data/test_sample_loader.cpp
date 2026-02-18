@@ -42,7 +42,7 @@ bool test_load_jpeg_file_basic(const std::string& folder_path) {
 
     try {
         // 创建 SampleLoader
-        SampleLoader& loader = SampleLoader::getInstance();
+        SampleLoader& loader = SampleLoader::instance();
         loader.configure_memory_pool(256);  // 256MB 内存池
 
         // 统计 JPEG 文件数量
@@ -64,7 +64,7 @@ bool test_load_jpeg_file_basic(const std::string& folder_path) {
         loader.end();
 
         // 创建 Preprocessor（配置 JPEG 解码）
-        Preprocessor& preproc = Preprocessor::getInstance();
+        Preprocessor& preproc = Preprocessor::instance();
         Preprocessor::Config config;
         config.num_workers = 4;
         config.jpeg_decode = true;  // Preprocessor 负责 JPEG 解码
@@ -116,7 +116,7 @@ bool test_error_handling_file_not_found() {
     std::cout << "=====================================" << std::endl;
 
     try {
-        SampleLoader& loader = SampleLoader::getInstance();
+        SampleLoader& loader = SampleLoader::instance();
         loader.configure_memory_pool(256);
 
         // 尝试加载不存在的文件

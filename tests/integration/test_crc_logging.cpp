@@ -80,7 +80,7 @@ void test_crc_logging(const std::string& dataset_name,
     Logger::instance().set_level(LogLevel::DEBUG);
 
     // 获取Preprocessor单例
-    auto& prep = Preprocessor::getInstance();
+    auto& prep = Preprocessor::instance();
 
     // 解析格式（转换为大写以支持大小写不敏感）
     std::string format_upper = format_str;
@@ -108,7 +108,8 @@ void test_crc_logging(const std::string& dataset_name,
                           partial_mode, false, false);  // 【调试】关闭shuffle，顺序加载
 
     // 步骤3: 配置Preprocessor（必须先调用config_preprocessor）
-    prep.config_preprocessor(1, 32, 224, 3, 1, false);
+    prep.config_preprocessor(-1, 32, 224, 3, 1, false);
+    prep.config_device("GPU");
 
     // 步骤4: 设置自定义配置（启用CRC计算和日志记录）
     Preprocessor::Config config;
@@ -141,17 +142,17 @@ void test_crc_logging(const std::string& dataset_name,
 
     // 根据标准化后的名称选择DataLoader
     if (dataset_normalized == "mnist") {
-        loader = dts_format ? (DataLoader*)&MnistLoaderDts::getInstance()
-                            : (DataLoader*)&MnistLoaderRaw::getInstance();
+        loader = dts_format ? (DataLoader*)&MnistLoaderDts::instance()
+                            : (DataLoader*)&MnistLoaderRaw::instance();
     } else if (dataset_normalized == "cifar10" || dataset_normalized == "cifar10") {
-        loader = dts_format ? (DataLoader*)&CifarLoaderDts::getInstance()
-                            : (DataLoader*)&CifarLoaderRaw::getInstance();
+        loader = dts_format ? (DataLoader*)&CifarLoaderDts::instance()
+                            : (DataLoader*)&CifarLoaderRaw::instance();
     } else if (dataset_normalized == "cifar100" || dataset_normalized == "cifar100") {
-        loader = dts_format ? (DataLoader*)&CifarLoaderDts::getInstance()
-                            : (DataLoader*)&CifarLoaderRaw::getInstance();
+        loader = dts_format ? (DataLoader*)&CifarLoaderDts::instance()
+                            : (DataLoader*)&CifarLoaderRaw::instance();
     } else if (dataset_normalized == "imagenet") {
-        loader = dts_format ? (DataLoader*)&ImageNetLoaderDts::getInstance()
-                            : (DataLoader*)&ImageNetLoaderRaw::getInstance();
+        loader = dts_format ? (DataLoader*)&ImageNetLoaderDts::instance()
+                            : (DataLoader*)&ImageNetLoaderRaw::instance();
     }
 
     if (!loader) {

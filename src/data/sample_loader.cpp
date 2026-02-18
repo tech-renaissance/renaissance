@@ -21,7 +21,7 @@ namespace tr {
 // 单例
 // =============================================================================
 
-SampleLoader& SampleLoader::getInstance() {
+SampleLoader& SampleLoader::instance() {
     static SampleLoader instance;
     return instance;
 }

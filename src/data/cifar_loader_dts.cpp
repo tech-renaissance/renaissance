@@ -38,7 +38,7 @@ namespace tr {
 // 单例模式实现
 // =============================================================================
 
-CifarLoaderDts& CifarLoaderDts::getInstance() {
+CifarLoaderDts& CifarLoaderDts::instance() {
     static CifarLoaderDts instance;
     return instance;
 }
