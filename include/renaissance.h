@@ -75,7 +75,11 @@
 #include "renaissance/data/preprocess_operation.h"
 #include "renaissance/data/resize.h"
 #include "renaissance/data/center_crop.h"
+#include "renaissance/data/random_horizontal_flip.h"
+#include "renaissance/data/random_resized_crop.h"
 #include "renaissance/data/do_nothing.h"
+// V3.14.0 EngineBuffer
+#include "renaissance/data/engine_buffer.h"
 
 // Device
 #include "renaissance/device/device.h"

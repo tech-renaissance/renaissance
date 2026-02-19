@@ -103,12 +103,14 @@ PreprocessWorker::PreprocessWorker(
     const std::vector<std::unique_ptr<PreprocessOperation>>& train_ops,
     const std::vector<std::unique_ptr<PreprocessOperation>>& val_ops)
     : config_(config)
+    , engine_buffer_(config.engine_buffer)  // 保存EngineBuffer指针
     , rng_(0)  // 临时seed，延迟初始化
 {
     LOG_DEBUG << "[PW " << config_.worker_id << " CONSTRUCTOR] "
               << "test_mode=" << (config_.test_mode ? "ON" : "OFF")
               << ", engine=" << config_.engine_id
-              << ", pid=" << config_.pid_in_engine;
+              << ", pid=" << config_.pid_in_engine
+              << ", engine_buffer=" << (engine_buffer_ ? "SET" : "NULL");
 
     // ==================== 1. 分配Workshop ====================
     allocate_workshop();
@@ -138,6 +140,10 @@ PreprocessWorker::PreprocessWorker(
     tj3Set(tj_handle_, TJPARAM_FASTUPSAMPLE, 1);
 
     LOG_DEBUG << "PW " << config_.worker_id << " TurboJPEG 3.x initialized";
+
+    // 打印容量配置
+    LOG_DEBUG << "PW " << config_.worker_id << " capacity: max_s_samples=" << config_.max_s_samples
+              << ", max_c_samples=" << config_.max_c_samples;
 
     LOG_INFO << "PW " << config_.worker_id << " created"
              << ", workshop=" << (workshop_size_ / (1024.0*1024.0)) << " MB";
@@ -271,6 +277,7 @@ void PreprocessWorker::update_parameters(const PreprocessWorkerParameter& param)
 
     // 重置样本计数器（每个phase开始时）
     total_samples_processed_ = 0;
+    decoded_sample_id_ = -1;  // 重置解码样本ID
 
     LOG_DEBUG << "PW " << config_.worker_id << " parameters updated: "
               << (param_.is_train ? "TRAIN" : "VAL");
@@ -498,6 +505,7 @@ bool PreprocessWorker::work(
         if (ops.empty()) {
             // 无操作：跳过
             total_samples_processed_++;
+            TR_VALUE_ERROR("Illegal increment: no operation to execute (ops is empty)");
             return true;
         }
 
@@ -523,11 +531,13 @@ bool PreprocessWorker::work(
                     // STB也失败
                     LOG_ERROR << "PW " << config_.worker_id << " both TurboJPEG and STB failed to read JPEG header";
                     total_samples_processed_++;
+                    TR_VALUE_ERROR("Illegal increment: both TurboJPEG and STB failed to read JPEG header");
                     return true;  // 跳过损坏样本
                 }
                 #else
                 LOG_ERROR << "PW " << config_.worker_id << " failed to read JPEG header and STB not available";
                 total_samples_processed_++;
+                TR_VALUE_ERROR("Illegal increment: failed to read JPEG header and STB not available");
                 return true;  // 跳过损坏样本
                 #endif
             } else {
@@ -554,12 +564,28 @@ bool PreprocessWorker::work(
             if (strategy.need_decode && strategy.use_partial) {
                 // 尝试局部解码R2区域到D区
                 int32_t decoded_w, decoded_h;
-                if (decode_partial(data_ptr, data_size, strategy, decoded_w, decoded_h, initial_stride)) {
+                    if (decode_partial(data_ptr, data_size, strategy, decoded_w, decoded_h, initial_stride)) {
                     // 局部解码成功：D区包含R2解码结果
-                    // PO会根据execute_from_full=false和strategy，自己计算从R2中提取R1的偏移
+                    decoded_sample_id_++;  // 递增解码ID
+
+#ifndef NDEBUG
+                    // 检查S区/C区容量（递增后检查，因为decoded_sample_id_就是写入索引）
+                    if (param_.is_train && config_.max_s_samples > 0) {
+                        if (decoded_sample_id_ >= config_.max_s_samples) {
+                            TR_INDEX_ERROR("Train phase: decoded_sample_id=" << decoded_sample_id_
+                                          << " exceeds S zone capacity=" << config_.max_s_samples);
+                        }
+                    } else if (!param_.is_train && config_.max_c_samples > 0) {
+                        if (decoded_sample_id_ >= config_.max_c_samples) {
+                            TR_INDEX_ERROR("Val phase: decoded_sample_id=" << decoded_sample_id_
+                                          << " exceeds C zone capacity=" << config_.max_c_samples);
+                        }
+                    }
+#endif
+
                     initial_ptr = region_d_;
-                    initial_w = decoded_w;     // R2宽度（strategy.decode_w）
-                    initial_h = decoded_h;     // R2高度（strategy.decode_h）
+                    initial_w = decoded_w;
+                    initial_h = decoded_h;
                     execute_from_full = false;
                 } else {
                     // 局部解码失败，尝试STB完整解码
@@ -569,6 +595,23 @@ bool PreprocessWorker::work(
                     if (decode_jpeg_with_stb(data_ptr, data_size, region_d_,
                                              config_.region_d_size, stb_w, stb_h)) {
                         // STB完整解码成功
+                        decoded_sample_id_++;  // 递增解码ID（局部解码失败+STB成功，只算一次）
+
+#ifndef NDEBUG
+                        // 检查S区/C区容量（递增后检查）
+                        if (param_.is_train && config_.max_s_samples > 0) {
+                            if (decoded_sample_id_ >= config_.max_s_samples) {
+                                TR_INDEX_ERROR("Train phase: decoded_sample_id=" << decoded_sample_id_
+                                              << " exceeds S zone capacity=" << config_.max_s_samples);
+                            }
+                        } else if (!param_.is_train && config_.max_c_samples > 0) {
+                            if (decoded_sample_id_ >= config_.max_c_samples) {
+                                TR_INDEX_ERROR("Val phase: decoded_sample_id=" << decoded_sample_id_
+                                              << " exceeds C zone capacity=" << config_.max_c_samples);
+                            }
+                        }
+#endif
+
                         initial_ptr = region_d_;
                         initial_w = stb_w;
                         initial_h = stb_h;
@@ -578,11 +621,13 @@ bool PreprocessWorker::work(
                         // 两者都失败
                         LOG_ERROR << "PW " << config_.worker_id << " both TurboJPEG and STB failed";
                         total_samples_processed_++;
+                        TR_VALUE_ERROR("Illegal increment: both TurboJPEG partial decode and STB fallback failed");
                         return true;  // 跳过样本
                     }
                     #else
                     LOG_ERROR << "PW " << config_.worker_id << " partial decode failed and STB not available";
                     total_samples_processed_++;
+                    TR_VALUE_ERROR("Illegal increment: partial decode failed and STB not available");
                     return true;
                     #endif
                 }
@@ -597,6 +642,23 @@ bool PreprocessWorker::work(
                     if (decode_jpeg_with_stb(data_ptr, data_size, region_d_,
                                              config_.region_d_size, stb_w, stb_h)) {
                         // STB完整解码成功
+                        decoded_sample_id_++;  // 递增解码ID（完整解码失败+STB成功，只算一次）
+
+#ifndef NDEBUG
+                        // 检查S区/C区容量（递增后检查）
+                        if (param_.is_train && config_.max_s_samples > 0) {
+                            if (decoded_sample_id_ >= config_.max_s_samples) {
+                                TR_INDEX_ERROR("Train phase: decoded_sample_id=" << decoded_sample_id_
+                                              << " exceeds S zone capacity=" << config_.max_s_samples);
+                            }
+                        } else if (!param_.is_train && config_.max_c_samples > 0) {
+                            if (decoded_sample_id_ >= config_.max_c_samples) {
+                                TR_INDEX_ERROR("Val phase: decoded_sample_id=" << decoded_sample_id_
+                                              << " exceeds C zone capacity=" << config_.max_c_samples);
+                            }
+                        }
+#endif
+
                         initial_ptr = region_d_;
                         initial_w = stb_w;
                         initial_h = stb_h;
@@ -606,14 +668,34 @@ bool PreprocessWorker::work(
                         // 两者都失败
                         LOG_ERROR << "PW " << config_.worker_id << " both TurboJPEG and STB failed";
                         total_samples_processed_++;
+                        TR_VALUE_ERROR("Illegal increment: both TurboJPEG full decode and STB fallback failed");
                         return true;  // 跳过样本
                     }
                     #else
                     LOG_ERROR << "PW " << config_.worker_id << " full decode failed and STB not available";
                     total_samples_processed_++;
+                    TR_VALUE_ERROR("Illegal increment: full decode failed and STB not available");
                     return true;
                     #endif
                 } else {
+                    // TurboJPEG完整解码成功
+                    decoded_sample_id_++;  // 递增解码ID
+
+#ifndef NDEBUG
+                    // 检查S区/C区容量（递增后检查）
+                    if (param_.is_train && config_.max_s_samples > 0) {
+                        if (decoded_sample_id_ >= config_.max_s_samples) {
+                            TR_INDEX_ERROR("Train phase: decoded_sample_id=" << decoded_sample_id_
+                                          << " exceeds S zone capacity=" << config_.max_s_samples);
+                        }
+                    } else if (!param_.is_train && config_.max_c_samples > 0) {
+                        if (decoded_sample_id_ >= config_.max_c_samples) {
+                            TR_INDEX_ERROR("Val phase: decoded_sample_id=" << decoded_sample_id_
+                                          << " exceeds C zone capacity=" << config_.max_c_samples);
+                        }
+                    }
+#endif
+
                     initial_ptr = region_d_;
                 }
             } else {

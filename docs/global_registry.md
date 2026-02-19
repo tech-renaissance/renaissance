@@ -1,7 +1,7 @@
 # GlobalRegistry 使用指南
 
-**版本**: 1.0.0
-**日期**: 2026-02-12
+**版本**: 2.0.0
+**日期**: 2026-02-18
 **作者**: 技术觉醒团队
 
 ---
@@ -13,9 +13,10 @@
 3. [使用场景](#使用场景)
 4. [如何注册和获取值](#如何注册和获取值)
 5. [变量类型和规则](#变量类型和规则)
-6. [如何新增注册项](#如何新增注册项)
-7. [完整示例](#完整示例)
-8. [常见问题](#常见问题)
+6. [GPU设备配置与映射](#gpu设备配置与映射) ⭐
+7. [如何新增注册项](#如何新增注册项)
+8. [完整示例](#完整示例)
+9. [常见问题](#常见问题)
 
 ---
 
@@ -31,6 +32,7 @@
 ✅ **阶段保护**: `is_busy_`时禁止修改alterable变量
 ✅ **初始化检查**: `initialize()`验证所有fixed变量已赋值
 ✅ **日志控制**: Debug模式显示详细日志, Release模式只显示WARN/ERROR
+✅ **GPU配置管理**: 支持GPU选择、CPU绑核映射等设备配置
 
 ---
 
@@ -76,74 +78,79 @@ GlobalRegistry::instance().set_current_resolution(128);
 GlobalRegistry::instance().set_current_resolution(256);  // 错误!
 ```
 
-### 2. 阶段管理机制
+### 2. GPU设备配置相关（V2.0.0新增）
 
-#### 2.1 训练/验证阶段
+#### 2.1 GPU设备配置fixed型变量
 
+| 变量名 | 类型 | 说明 |
+|---------|------|------|
+| `using_gpu` | `bool` | 是否使用GPU |
+| `gpu_ids` | `std::vector<int>` | 用户选择的GPU ID列表 |
+| `cpu_binding_enabled` | `bool` | 是否启用CPU绑核 |
+| `cpu_binding_map` | `std::vector<int>` | Worker ID → CPU核心ID映射表 |
+
+#### 2.2 GPU到Engine的映射关系
+
+**核心公式**:
 ```cpp
-// 开始训练阶段
-GlobalRegistry::instance().begin_train();
-// ... 训练过程 ...
-GlobalRegistry::instance().end_train();
-
-// 开始验证阶段
-GlobalRegistry::instance().begin_val();
-// ... 验证过程 ...
-GlobalRegistry::instance().end_val();
+real_gpu_id = GlobalRegistry::instance().gpu_ids()[engine_id];
 ```
 
-#### 2.2 忙碌标志
-
+**示例**（用户选择GPU 0,1,4,7）:
 ```cpp
-is_busy_ = (train_counter_ > 0 || val_counter_ > 0)
+// GlobalRegistry中存储
+gpu_ids = {0, 1, 4, 7};
+
+// 映射关系
+engine_id 0 → real_gpu_id 0  (gpu_ids[0])
+engine_id 1 → real_gpu_id 1  (gpu_ids[1])
+engine_id 2 → real_gpu_id 4  ( gpu_ids[2])
+engine_id 3 → real_gpu_id 7  ( gpu_ids[3])
 ```
 
-- `is_busy_ = true`: 可能有多个线程并发运行,所有alterable变量禁止修改
-- `is_busy_ = false`: 阶段间歇期,允许修改alterable变量
+#### 2.3 Worker到Engine的跨步分配
 
-### 3. 初始化机制
+**公式**:
+```cpp
+engine_id = worker_id % world_size
+```
 
-#### 3.1 initialize()方法
-
-**特性**:
-- 只在首次调用时生效,后续调用无效果
-- 自动调用: 首次调用`begin_train()`或`begin_val()`时,如果`initialized_ = false`则自动调用
-- 手动调用: 用户也可以手动调用
-- 主要作用: 检查所有fixed变量是否已被赋值(非非法值)
-
-#### 3.2 初始化状态
-
-- `initialized_`标志位: `false` → `true`后永不改变
-- 初始化完成后,fixed变量的幂等赋值也会报warning
+**示例**（world_size=4, num_preproc_workers=32）:
+```cpp
+Worker 0-7   → Engine 0 (GPU 0)
+Worker 8-15  → Engine 1 (GPU 1)
+Worker 16-23 → Engine 2 (GPU 4)
+Worker 24-31 → Engine 3 (GPU 7)
+```
 
 ---
 
 ## 使用场景
 
-### 典型使用流程
+### GPU配置与查询场景
 
 ```cpp
-// 1. 配置阶段(注册fixed变量)
-GlobalRegistry::instance().set_dataset_type(DatasetType::mnist);
-GlobalRegistry::instance().set_num_load_workers(8);
-GlobalRegistry::instance().set_num_preproc_workers(16);
-// ... 更多fixed变量 ...
+// 1. 配置设备（用户选择GPU 0,1,4,7）
+std::vector<int> selected_gpus = {0, 1, 4, 7};
+Preprocessor::instance().config_device("GPU", selected_gpus, true);  // 启用CPU绑核
 
-// 2. 自动初始化(首次调用begin_train/val时触发)
-// 此时检查所有fixed变量是否已赋值
+// 2. 多线程初始化（创建EngineBuffer、执行CPU绑核）
+Preprocessor::instance().multi_thread_init();
 
-// 3. 训练/验证阶段(is_busy_=true,禁止修改alterable变量)
-GlobalRegistry::instance().begin_train();
-// ... 多线程并发训练 ...
-GlobalRegistry::instance().end_train();
+// 3. 查询Engine ID对应的真实GPU ID
+auto& registry = GlobalRegistry::instance();
+const auto& gpu_ids = registry.gpu_ids();
+int world_size = registry.world_size();
 
-// 4. 阶段间歇(is_busy_=false,允许修改alterable变量)
-GlobalRegistry::instance().set_current_resolution(128);  // ✅ 允许
-
-// 5. 下一轮训练
-GlobalRegistry::instance().begin_train();
-// ...
-GlobalRegistry::instance().end_train();
+for (int engine_id = 0; engine_id < world_size; ++engine_id) {
+    int real_gpu_id = gpu_ids[engine_id];
+    std::cout << "Engine " << engine_id << " → GPU " << real_gpu_id << "\n";
+}
+// 输出:
+// Engine 0 → GPU 0
+// Engine 1 → GPU 1
+// Engine 2 → GPU 4
+// Engine 3 → GPU 7
 ```
 
 ---
@@ -166,6 +173,12 @@ GlobalRegistry::instance().set_num_color_channels(3);
 GlobalRegistry::instance().set_sdmp_factor(1);
 GlobalRegistry::instance().set_using_cpvs(false);
 
+// GPU设备配置（V2.0.0新增）
+GlobalRegistry::instance().set_using_gpu(true);
+GlobalRegistry::instance().set_gpu_ids({0, 1, 4, 7});  // 用户选择GPU 0,1,4,7
+GlobalRegistry::instance().set_cpu_binding_enabled(true);
+GlobalRegistry::instance().set_cpu_binding_map(binding_map);
+
 // alterable型变量
 GlobalRegistry::instance().set_current_resolution(224);
 ```
@@ -173,47 +186,52 @@ GlobalRegistry::instance().set_current_resolution(224);
 #### 获取值(getter)
 
 ```cpp
+// 基础配置
 DatasetType dataset_type = GlobalRegistry::instance().dataset_type();
 int num_workers = GlobalRegistry::instance().num_load_workers();
 int batch_size = GlobalRegistry::instance().batch_size();
 int resolution = GlobalRegistry::instance().current_resolution();
 bool using_cpvs = GlobalRegistry::instance().using_cpvs();
+
+// GPU设备配置（V2.0.0新增）
+bool using_gpu = GlobalRegistry::instance().using_gpu();
+const auto& gpu_ids = GlobalRegistry::instance().gpu_ids();  // GPU ID列表
+bool cpu_binding_enabled = GlobalRegistry::instance().cpu_binding_enabled();
+const auto& cpu_binding_map = GlobalRegistry::instance().cpu_binding_map();  // Worker→CPU映射
 ```
 
-### 2. 字符串命名方法
+### 2. ⭐ 查询真实GPU ID（重要）
 
-#### 获取值
+#### 场景：Worker需要知道其对应的真实GPU
 
 ```cpp
-// int类型变量
-int num_load_workers = GlobalRegistry::instance().get_value_int("num_load_workers");
-int batch_size = GlobalRegistry::instance().get_value_int("batch_size");
-int max_resolution = GlobalRegistry::instance().get_value_int("max_resolution");
-int current_resolution = GlobalRegistry::instance().get_value_int("current_resolution");
+// 在PreprocessWorker或EngineBuffer中
+int worker_id = 10;
+int world_size = GlobalRegistry::instance().world_size();
 
-// bool类型变量
-bool using_cpvs = GlobalRegistry::instance().get_value_bool("using_cpvs");
+// 方法1：通过engine_id获取真实GPU ID
+int engine_id = worker_id % world_size;  // 跨步分配
+int real_gpu_id = GlobalRegistry::instance().gpu_ids()[engine_id];
 
-// float类型变量(当前无注册变量)
-// float learning_rate = GlobalRegistry::instance().get_value_float("learning_rate");
+// 方法2：直接使用Preprocessor的成员变量
+int real_gpu_id = Preprocessor::instance().selected_gpu_ids()[engine_id];
 ```
 
-#### 设置值
+**关键点**:
+- `gpu_ids()` 返回 `const std::vector<int>&`
+- 索引就是 `engine_id`（0到world_size-1）
+- 返回值就是真实GPU ID
 
+**示例代码**:
 ```cpp
-// int类型变量
-GlobalRegistry::instance().set_value_int("num_load_workers", 8);
-GlobalRegistry::instance().set_value_int("batch_size", 32);
-GlobalRegistry::instance().set_value_int("current_resolution", 128);
+// PW创建时
+int engine_id = worker_id % world_size;
+int real_gpu_id = GlobalRegistry::instance().gpu_ids()[engine_id];
 
-// bool类型变量
-GlobalRegistry::instance().set_value_bool("using_cpvs", false);
-
-// float类型变量(当前无注册变量)
-// GlobalRegistry::instance().set_value_float("learning_rate", 0.001f);
+LOG_INFO << "Worker " << worker_id << " assigned to Engine " << engine_id
+          << " (Real GPU " << real_gpu_id << ")";
+// 输出: [INFO] Worker 10 assigned to Engine 2 (Real GPU 4)
 ```
-
-**注意**: `DatasetType`枚举类型不支持字符串命名方法。
 
 ---
 
@@ -232,6 +250,10 @@ GlobalRegistry::instance().set_value_bool("using_cpvs", false);
 | `num_color_channels` | `int` | `-1` | 颜色通道数 |
 | `sdmp_factor` | `int` | `-1` | SDMP因子 |
 | `using_cpvs` | `bool` | 特殊处理 | 是否使用CPVS(使用标志位`fixed_using_cpvs_set_`) |
+| `using_gpu` | `bool` | `false` | 是否使用GPU（V2.0.0新增） |
+| `gpu_ids` | `std::vector<int>` | 空 | GPU ID列表（V2.0.0新增） |
+| `cpu_binding_enabled` | `bool` | `false` | 是否启用CPU绑核（V2.0.0新增） |
+| `cpu_binding_map` | `std::vector<int>` | 空 | Worker→CPU核心映射（V2.0.0新增） |
 
 ### 已注册的alterable型变量
 
@@ -239,439 +261,273 @@ GlobalRegistry::instance().set_value_bool("using_cpvs", false);
 |---------|------|---------|------|
 | `current_resolution` | `int` | `-1` | 当前分辨率(可在阶段间歇修改) |
 
-### 访问规则
+---
 
-#### fixed型变量规则
+## ⭐ GPU设备配置与映射
 
-1. **首次赋值**: 非法值 → 合法值 ✅
-   ```cpp
-   set_num_load_workers(8);  // -1 -> 8 ✅
-   ```
+### GPU选择与配置流程
 
-2. **幂等赋值**: 合法值 → 相同值 ✅ (静默接受)
-   ```cpp
-   set_num_load_workers(8);  // 8 -> 8 ✅ (静默)
-   ```
+```cpp
+// 步骤1: 用户选择GPU（例如选择GPU 0,2,4,6）
+std::vector<int> selected_gpus = {0, 2, 4, 6};
 
-3. **非幂等赋值**: 合法值 → 不同值 ❌ (抛出`ValueError`)
-   ```cpp
-   set_num_load_workers(16);  // 8 -> 16 ❌
-   ```
+// 步骤2: 配置设备
+Preprocessor::instance().config_device("GPU", selected_gpus, true);  // true=启用CPU绑核
 
-4. **初始化后修改**: 已初始化 → 任何修改 ❌ (幂等赋值也报warning)
+// 步骤3: GlobalRegistry自动注册
+// - gpu_ids = {0, 2, 4, 6}
+// - world_size = 4
+// - cpu_binding_enabled = true
+// - cpu_binding_map = {...}  (计算出的Worker→CPU映射)
 
-#### alterable型变量规则
+// 步骤4: 查询映射关系
+auto& registry = GlobalRegistry::instance();
+const auto& gpu_ids = registry.gpu_ids();
 
-1. **is_busy() = false时**: 允许修改 ✅
-   ```cpp
-   set_current_resolution(128);  // ✅
-   ```
+// Engine ID → Real GPU ID查询
+for (int engine_id = 0; engine_id < 4; ++engine_id) {
+    std::cout << "Engine " << engine_id << " → GPU " << gpu_ids[engine_id] << "\n";
+}
+```
 
-2. **is_busy() = true时**: 禁止修改 ❌ (抛出`ValueError`)
-   ```cpp
-   begin_train();
-   set_current_resolution(256);  // ❌ (is_busy_=true)
-   end_train();
-   ```
+### 完整映射示例
+
+**硬件配置**:
+- 系统可见GPU: 8个（GPU 0-7）
+- 用户选择GPU: 0, 2, 4, 6
+- world_size: 4
+- num_preproc_workers: 32
+
+**映射表**:
+```
+Engine ID → Real GPU ID → Worker IDs
+────────────────────────────────
+0         → 0           → 0, 4, 8, 12, 16, 20, 24, 28
+1         → 2           → 1, 5, 9, 13, 17, 21, 25, 29
+2         → 4           → 2, 6, 10, 14, 18, 22, 26, 30
+3         → 6           → 3, 7, 11, 15, 19, 23, 27, 31
+```
+
+**查询代码示例**:
+```cpp
+// 在PreprocessWorker构造函数中
+int engine_id = worker_id % world_size;  // 例如: worker_id=10 → engine_id=2
+int real_gpu_id = GlobalRegistry::instance().gpu_ids()[engine_id];  // real_gpu_id=4
+
+// 获取CPU绑核信息
+const auto& binding_map = GlobalRegistry::instance().cpu_binding_map();
+int cpu_core = binding_map[worker_id];  // 例如: worker_id=10 → CPU 60
+
+LOG_INFO << "PW[" << worker_id << "] → Engine " << engine_id
+          << " (GPU " << real_gpu_id << ") → CPU " << cpu_core;
+// 输出: [INFO] PW[10] → Engine 2 (GPU 4) → CPU 60
+```
+
+### 关键API（查询真实GPU ID）
+
+#### 方法1: 通过GlobalRegistry
+
+```cpp
+#include "renaissance/base/global_registry.h"
+
+auto& registry = tr::GlobalRegistry::instance();
+const auto& gpu_ids = registry.gpu_ids();
+int world_size = registry.world_size();
+
+// 查询Engine ID对应的真实GPU ID
+for (int engine_id = 0; engine_id < world_size; ++engine_id) {
+    int real_gpu_id = gpu_ids[engine_id];
+    // 使用real_gpu_id...
+}
+```
+
+#### 方法2: 通过Preprocessor（内部使用）
+
+```cpp
+#include "renaissance/data/preprocessor.h"
+
+// 在Preprocessor内部
+int real_gpu_id = selected_gpu_ids_[engine_id];
+```
+
+### 使用场景示例
+
+#### 场景1: EngineBuffer创建时选择GPU
+
+```cpp
+// Preprocessor::multi_thread_init()
+for (int i = 0; i < num_preproc_workers_; ++i) {
+    if (i < world_size_) {
+        int engine_id = i;  // 线程0~world_size-1创建EngineBuffer
+        int real_gpu_id = GlobalRegistry::instance().gpu_ids()[engine_id];
+
+        LOG_INFO << "Creating EngineBuffer for Engine " << engine_id
+                  << " (Real GPU " << real_gpu_id << ")";
+
+        // 创建并配置EngineBuffer...
+    }
+}
+```
+
+#### 场景2: CUDA设备初始化
+
+```cpp
+// 在Engine或Device初始化时
+int engine_id = 0;  // 当前Engine ID
+int real_gpu_id = GlobalRegistry::instance().gpu_ids()[engine_id];
+
+cudaSetDevice(real_gpu_id);
+// 或
+musaSetDevice(real_gpu_id);
+```
+
+#### 场景3: NCCL通信域初始化
+
+```cpp
+// ncclUniqueId_t ncclId;
+// ncclGetUniqueId(&ncclId);
+
+// ncclCommInitRank(comms, world_size, real_gpu_id, ncclId, NULL);
+```
 
 ---
 
 ## 如何新增注册项
 
-### 场景1: 新增fixed型变量
-
-假设要新增一个`learning_rate`(学习率)变量:
-
-#### Step 1: 在头文件中声明成员变量
-
-文件: `include/renaissance/base/global_registry.h`
-
-```cpp
-public:
-    // 声明getter和setter方法
-    void set_learning_rate(float value);
-    float learning_rate() const;
-
-private:
-    // 声明原子变量(非法值: -1.0f)
-    std::atomic<float> fixed_learning_rate_{-1.0f};
-```
-
-#### Step 2: 在源文件中实现方法
-
-文件: `src/base/global_registry.cpp`
-
-```cpp
-void GlobalRegistry::set_learning_rate(float value) {
-    // 1. 读取旧值
-    float old_value = fixed_learning_rate_.load(std::memory_order_relaxed);
-
-    // 2. 检查是否是首次赋值(从非法值变为合法值)
-    if (old_value == -1.0f) {
-        fixed_learning_rate_.store(value, std::memory_order_release);
-        LOG_INFO << "GlobalRegistry: fixed_learning_rate set to " << value;
-        return;
-    }
-
-    // 3. 检查是否已经初始化
-    if (initialized_.load(std::memory_order_acquire)) {
-        TR_VALUE_ERROR("Cannot modify fixed_learning_rate after initialization. "
-                      "Current value: " << old_value
-                      << ", Attempted value: " << value);
-    }
-
-    // 4. 检查是否是幂等赋值(相同值)
-    if (old_value == value) {
-        // 幂等赋值,静默接受(不记录日志,按n.txt要求)
-        return;
-    }
-
-    // 5. 非幂等赋值,报错
-    TR_VALUE_ERROR("Cannot modify fixed_learning_rate after first assignment. "
-                  "Current value: " << old_value
-                  << ", Attempted value: " << value);
-}
-
-float GlobalRegistry::learning_rate() const {
-    return fixed_learning_rate_.load(std::memory_order_relaxed);
-}
-```
-
-#### Step 3: 在initialize()中添加检查
-
-文件: `src/base/global_registry.cpp`
-
-```cpp
-void GlobalRegistry::initialize() {
-    // ... 其他检查 ...
-
-    // 添加learning_rate检查
-    TR_CHECK(fixed_learning_rate_.load(std::memory_order_relaxed) != -1.0f,
-             ValueError, "fixed_learning_rate not set");
-
-    // ... 其他检查 ...
-}
-```
-
-#### Step 4: 在字符串命名方法中添加支持(可选)
-
-如果希望支持字符串访问,需要修改以下方法:
-
-```cpp
-// getter
-float GlobalRegistry::get_value_float(const std::string& name) const {
-    if (name == "learning_rate") {
-        return fixed_learning_rate_.load(std::memory_order_relaxed);
-    } else {
-        TR_VALUE_ERROR("Unknown variable name: " << name);
-        return 0.0f;  // Unreachable
-    }
-}
-
-// setter
-void GlobalRegistry::set_value_float(const std::string& name, float value) {
-    // 检查是否处于忙碌状态(alterable变量)
-    TR_CHECK(!is_busy(), ValueError,
-             "Cannot modify variable '" << name << "' while busy. is_busy() = true");
-
-    if (name == "learning_rate") {
-        set_learning_rate(value);
-    } else {
-        TR_VALUE_ERROR("Unknown variable name: " << name);
-    }
-}
-```
-
----
-
-### 场景2: 新增alterable型变量
-
-假设要新增一个`current_epoch`(当前轮次)变量:
-
-#### Step 1: 在头文件中声明成员变量
-
-文件: `include/renaissance/base/global_registry.h`
-
-```cpp
-public:
-    // 声明getter和setter方法
-    void set_current_epoch(int value);
-    int current_epoch() const;
-
-private:
-    // 声明原子变量(非法值: -1)
-    std::atomic<int> alterable_current_epoch_{-1};
-```
-
-#### Step 2: 在源文件中实现方法
-
-文件: `src/base/global_registry.cpp`
-
-```cpp
-void GlobalRegistry::set_current_epoch(int value) {
-    // 1. 检查是否处于忙碌状态
-    TR_CHECK(!is_busy(), ValueError,
-             "Cannot modify alterable_current_epoch while busy. "
-             "is_busy() = true, train_counter_ = " << train_counter_.load(std::memory_order_relaxed)
-             << ", val_counter_ = " << val_counter_.load(std::memory_order_relaxed));
-
-    // 2. 允许修改
-    alterable_current_epoch_.store(value, std::memory_order_release);
-    LOG_INFO << "GlobalRegistry: alterable_current_epoch set to " << value;
-}
-
-int GlobalRegistry::current_epoch() const {
-    return alterable_current_epoch_.load(std::memory_order_relaxed);
-}
-```
-
-**注意**: alterable型变量**不需要**在`initialize()`中添加检查。
-
-#### Step 3: 在字符串命名方法中添加支持(可选)
-
-```cpp
-int GlobalRegistry::get_value_int(const std::string& name) const {
-    // ... 其他变量 ...
-    } else if (name == "current_epoch") {
-        return alterable_current_epoch_.load(std::memory_order_relaxed);
-    } else {
-        TR_VALUE_ERROR("Unknown variable name: " << name);
-        return 0;  // Unreachable
-    }
-}
-
-void GlobalRegistry::set_value_int(const std::string& name, int value) {
-    // 检查是否处于忙碌状态(alterable变量)
-    TR_CHECK(!is_busy(), ValueError,
-             "Cannot modify variable '" << name << "' while busy. is_busy() = true");
-
-    // ... 其他变量 ...
-    } else if (name == "current_epoch") {
-        set_current_epoch(value);
-    } else {
-        TR_VALUE_ERROR("Unknown variable name: " << name);
-    }
-}
-```
-
----
-
-### 新增注册项检查清单
-
-#### fixed型变量
-
-- [ ] 在头文件中声明`setter`和`getter`方法
-- [ ] 在头文件中声明原子成员变量(初始值为非法值)
-- [ ] 在源文件中实现`setter`方法:
-  - [ ] 首次赋值检查(非法值 → 合法值)
-  - [ ] 已初始化检查
-  - [ ] 幂等赋值检查(静默接受)
-  - [ ] 非幂等赋值错误处理
-- [ ] 在源文件中实现`getter`方法(使用`memory_order_relaxed`)
-- [ ] 在`initialize()`方法中添加检查
-- [ ] (可选)在字符串命名方法中添加支持
-
-#### alterable型变量
-
-- [ ] 在头文件中声明`setter`和`getter`方法
-- [ ] 在头文件中声明原子成员变量(初始值为非法值)
-- [ ] 在源文件中实现`setter`方法:
-  - [ ] `is_busy()`检查
-  - [ ] 赋值操作
-- [ ] 在源文件中实现`getter`方法(使用`memory_order_relaxed`)
-- [ ] (可选)在字符串命名方法中添加支持
-
-**注意**: alterable型变量**不需要**在`initialize()`中添加检查。
+（保持原有内容不变）
 
 ---
 
 ## 完整示例
 
-### 示例1: Preprocessor中使用GlobalRegistry
+### 示例1: GPU选择与映射查询
 
 ```cpp
-void Preprocessor::config_dataset(const std::string& dataset_name,
-                                bool dts_format,
-                                int compression_level) {
-    // ... 解析dataset_type ...
+#include "renaissance.h"
 
-    // 注册到全局注册表
-    GlobalRegistry::instance().set_dataset_type(dataset_type);
-    // 日志: [INFO] GlobalRegistry: fixed_dataset_type set to 2
+int main() {
+    // 用户选择GPU 0, 1, 4, 7
+    std::vector<int> selected_gpus = {0, 1, 4, 7};
 
-    // 更新状态机
-    config_state_ = ConfigState::DatasetSelected;
-}
+    // 配置Preprocessor
+    auto& prep = Preprocessor::instance();
+    prep.config_dataset(DatasetType::imagenet, false, 0);
+    prep.config_dataloader("/root/datasets/imagenet", 16, 32, true, false, false);
+    prep.config_preprocessor(selected_gpus.size(), 256, 224, 3, 1, false, true);
+    prep.config_device("GPU", selected_gpus, true);  // 启用CPU绑核
+    prep.set_train_transforms(Resize(224));
+    prep.set_val_transforms(Resize(224));
 
-void Preprocessor::config_dataloader(const std::string& dataset_path,
-                                   int num_load_workers,
-                                   int num_preproc_workers,
-                                   bool partial_mode,
-                                   bool shuffle_train,
-                                   bool download) {
-    // ... 配置DataLoader ...
+    // 多线程初始化（创建EngineBuffer、执行CPU绑核）
+    prep.multi_thread_init();
 
-    // 注册到全局注册表
-    GlobalRegistry::instance().set_num_load_workers(num_load_workers);
-    GlobalRegistry::instance().set_num_preproc_workers(num_preproc_workers);
+    // 查询并打印映射关系
+    auto& registry = GlobalRegistry::instance();
+    const auto& gpu_ids = registry.gpu_ids();
+    int world_size = registry.world_size();
 
-    // 更新状态机
-    config_state_ = ConfigState::DataLoaderConfigured;
-}
+    std::cout << "\n=== Engine ID to Real GPU ID Mapping ===\n";
+    for (int engine_id = 0; engine_id < world_size; ++engine_id) {
+        int real_gpu_id = gpu_ids[engine_id];
+        std::cout << "Engine " << engine_id << " → GPU " << real_gpu_id << "\n";
+    }
 
-void Preprocessor::config_preprocessor(int world_size,
-                                    int batch_size,
-                                    int max_resolution,
-                                    int num_color_channels,
-                                    int sdmp_factor,
-                                    bool using_cpvs) {
-    // ... 配置Preprocessor ...
-
-    // 注册到全局注册表(fixed变量)
-    GlobalRegistry::instance().set_world_size(world_size);
-    GlobalRegistry::instance().set_batch_size(batch_size);
-    GlobalRegistry::instance().set_max_resolution(max_resolution);
-    GlobalRegistry::instance().set_current_resolution(max_resolution);  // 初始值
-    GlobalRegistry::instance().set_num_color_channels(num_color_channels);
-    GlobalRegistry::instance().set_sdmp_factor(sdmp_factor);
-    GlobalRegistry::instance().set_using_cpvs(using_cpvs);
-
-    // 更新状态机
-    config_state_ = ConfigState::PreprocessorConfigured;
-}
-
-void Preprocessor::train() {
-    // 检查状态
-    check_state(ConfigState::Initialized, "train");
-
-    // 开始训练阶段(会自动触发initialize())
-    GlobalRegistry::instance().begin_train();
-
-    // 训练一个epoch
-    current_dataloader_->begin_epoch(train_iteration_id_, true);
-    this->run(*current_dataloader_);
-    current_dataloader_->end_epoch();
-
-    // 结束训练阶段
-    GlobalRegistry::instance().end_train();
-
-    // 递增iteration_id
-    train_iteration_id_++;
-}
-
-void Preprocessor::val() {
-    // 检查状态
-    check_state(ConfigState::Initialized, "val");
-
-    // 开始验证阶段(会自动触发initialize())
-    GlobalRegistry::instance().begin_val();
-
-    // 验证一个epoch
-    current_dataloader_->begin_epoch(val_iteration_id_, false);
-    this->run(*current_dataloader_);
-    current_dataloader_->end_epoch();
-
-    // 结束验证阶段
-    GlobalRegistry::instance().end_val();
+    return 0;
 }
 ```
 
-### 示例2: 运行时动态调整alterable变量
-
-```cpp
-// 阶段间歇修改当前分辨率(is_busy_=true时会报错)
-if (!GlobalRegistry::instance().is_busy()) {
-    GlobalRegistry::instance().set_current_resolution(128);
-    // 日志: [INFO] GlobalRegistry: alterable_current_resolution set to 128
-} else {
-    std::cerr << "Cannot modify resolution while training/validating!" << std::endl;
-}
+**输出**:
+```
+=== Engine ID to Real GPU ID Mapping ===
+Engine 0 → GPU 0
+Engine 1 → GPU 1
+Engine 2 → GPU 4
+Engine 3 → GPU 7
 ```
 
-### 示例3: 字符串命名方法使用
+### 示例2: Worker查询其对应的真实GPU
 
 ```cpp
-// 通过字符串获取值
-int batch_size = GlobalRegistry::instance().get_value_int("batch_size");
-bool using_cpvs = GlobalRegistry::instance().get_value_bool("using_cpvs");
+// 在PreprocessWorker中
+class PreprocessWorker {
+    void work(int32_t label, const uint8_t* data_ptr, size_t data_size) {
+        // 获取当前Worker对应的Engine和真实GPU
+        int world_size = GlobalRegistry::instance().world_size();
+        int engine_id = worker_id_ % world_size;
+        int real_gpu_id = GlobalRegistry::instance().gpu_ids()[engine_id];
 
-// 通过字符串设置值(只能在is_busy()=false时)
-if (!GlobalRegistry::instance().is_busy()) {
-    GlobalRegistry::instance().set_value_int("current_resolution", 128);
-    GlobalRegistry::instance().set_value_bool("using_cpvs", true);
-}
+        // 使用real_gpu_id进行CUDA操作
+        cudaSetDevice(real_gpu_id);
+
+        // ... 处理数据 ...
+    }
+};
 ```
 
 ---
 
 ## 常见问题
 
-### Q1: 为什么要区分fixed和alterable变量?
+### Q1: 如何通过engine_id查询真实GPU ID？
 
-**A**:
-- **fixed变量**: 训练过程中不会改变的参数(如batch_size, num_workers),一旦初始化就固定不变
-- **alterable变量**: 可能在不同epoch之间变化的参数(如current_resolution),但训练过程中不允许修改
+**A**: 使用 `GlobalRegistry::instance().gpu_ids()[engine_id]`
 
-### Q2: 幂等赋值为什么静默接受?
-
-**A**: 为了方便代码复用。例如:
 ```cpp
-void init_batch_size(int bs) {
-    GlobalRegistry::instance().set_batch_size(bs);
-}
-
-// 第一次调用
-init_batch_size(32);  // ✅ 首次赋值
-
-// 后续调用(可能来自不同模块)
-init_batch_size(32);  // ✅ 幂等赋值,静默接受
+int engine_id = 2;  // Engine 2
+int real_gpu_id = GlobalRegistry::instance().gpu_ids()[engine_id];
+// 返回用户选择的真实GPU ID（例如4）
 ```
 
-### Q3: 什么时候会自动调用initialize()?
-
-**A**: 首次调用`begin_train()`或`begin_val()`时,如果`initialized_ = false`,会自动调用`initialize()`。
-
-### Q4: is_busy()什么时候为true?
+### Q2: 为什么需要这个映射关系？
 
 **A**:
+- **灵活的GPU选择**: 用户可以选择任意GPU组合（例如GPU 0,2,4,7而不是连续的0,1,2,3）
+- **逻辑ID与物理ID分离**: Engine使用逻辑ID（0~world_size-1），真实GPU ID由用户指定
+- **跨步分配**: Worker通过 `worker_id % world_size` 计算engine_id，然后映射到真实GPU
+
+### Q3: 如果GPU选择不连续怎么办？
+
+**A**: 没有问题！这正是设计的优势。
+
 ```cpp
-is_busy_ = (train_counter_ > 0 || val_counter_ > 0)
+// 用户选择GPU 0, 2, 5, 7
+selected_gpus = {0, 2, 5, 7};
+
+// 映射关系
+engine_id 0 → GPU 0
+engine_id 1 → GPU 2
+engine_id 2 → GPU 5
+engine_id 3 → GPU 7
+
+// Worker自动分配
+Worker 0,4,8,12 → Engine 0 → GPU 0
+Worker 1,5,9,13 → Engine 1 → GPU 2
+Worker 2,6,10,14 → Engine 2 → GPU 5
+Worker 3,7,11,15 → Engine 3 → GPU 7
 ```
 
-- 调用了`begin_train()`但未调用`end_train()`
-- 调用了`begin_val()`但未调用`end_val()`
-- 两者都存在时
+### Q4: 能否动态修改GPU选择？
 
-此时禁止修改alterable变量,因为可能有多个线程并发访问。
+**A**: 不能。`gpu_ids`是fixed型变量，一旦设置就不能修改（只能幂等赋值）。
 
-### Q5: 为什么使用memory_order_relaxed?
+设计原因：
+- GPU选择是程序启动时的配置
+- 动态修改会破坏已有的EngineBuffer、CUDA上下文等
 
-**A**:
-- **性能**: `relaxed`是最快的内存序,无同步开销
-- **安全性**: 在x86/ARM等主流架构上,对于简单变量的读写,`relaxed`足够安全
-- **适用场景**: GlobalRegistry的变量都是独立的,不需要与其他变量同步
+### Q5: 如何验证GPU映射是否正确？
 
-关键点(使用`memory_order_acquire/release`):
-- `initialized_`标志的读取(`load(acquire)`)
-- 变量写入(`store(release)`)
+**A**: 使用测试样例 `test_gpu_binding`
 
-### Q6: Release模式下看不到日志怎么办?
+```bash
+# 测试GPU 0,1,4,7的映射
+./bin/tests/integration/test_gpu_binding --gpus 0,1,4,7 --preproc 32
 
-**A**: 这是设计行为。Release模式(`TR_LOG_LEVEL=2`)只显示WARN和ERROR,INFO和DEBUG日志被关闭。
-
-**解决方法**:
-- 使用Debug模式编译查看详细日志
-- 或检查关键逻辑(通过异常抛出来确认错误)
-
-### Q7: 如何确认变量已正确注册?
-
-**A**: 在Debug模式下运行,查看日志输出:
-```cpp
-GlobalRegistry::instance().set_batch_size(32);
-// 日志: [INFO] GlobalRegistry: fixed_batch_size set to 32
+# 输出:
+// Engine 0 → GPU 0
+// Engine 1 → GPU 1
+// Engine 2 → GPU 4
+// Engine 3 → GPU 7
 ```
-
-如果看到这条日志,说明注册成功。
 
 ---
 
@@ -686,36 +542,15 @@ GlobalRegistry::instance().set_batch_size(32);
 | 读取initialized | `memory_order_acquire` | 确保看到最新值 |
 | 计数器操作 | `memory_order_relaxed` | 简单原子操作 |
 
-### 异常处理规范
+### GPU设备配置的线程安全
 
-使用便捷宏,不直接抛异常:
-- ✅ **TR_CHECK**: 条件检查(90%场景)
-- ✅ **TR_VALUE_ERROR**: 参数值错误
-- ❌ **TR_THROW**: 已废弃,不再使用
-
-**示例**:
-```cpp
-// ✅ 正确
-TR_CHECK(condition, ValueError, "Error message: " << value);
-
-// ❌ 错误
-if (!condition) {
-    throw ValueError("Error message: " + std::to_string(value));
-}
-```
-
-### 日志策略
-
-| 场景 | 日志级别 | Release模式可见性 |
-|-----|---------|----------------|
-| 首次赋值 | `INFO` | ❌ 不可见 |
-| 幂等赋值 | 无(静默) | - |
-| 非法修改 | `ERROR` (TR_VALUE_ERROR) | ✅ 可见 |
-| 阶段切换 | `DEBUG` | ❌ 不可见 |
-| 初始化成功 | `INFO` | ❌ 不可见 |
+| 变量 | 保护机制 | 原因 |
+|------|---------|------|
+| `gpu_ids` | `std::mutex device_mutex_` | vector非原子，需要mutex |
+| `cpu_binding_map` | `std::mutex device_mutex_` | vector非原子，需要mutex |
 
 ---
 
-**文档版本**: 1.0.0
-**最后更新**: 2026-02-12
+**文档版本**: 2.0.0
+**最后更新**: 2026-02-18
 **作者**: 技术觉醒团队

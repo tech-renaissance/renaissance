@@ -8,6 +8,7 @@
 
 #include "renaissance/data/resize.h"
 #include "renaissance/data/center_crop.h"
+#include "renaissance/data/random_resized_crop.h"
 #include "renaissance/data/do_nothing.h"
 #include "renaissance/base/logger.h"
 #include "renaissance/base/tr_exception.h"
@@ -50,16 +51,18 @@ static constexpr int DEFAULT_JPEG_QUALITY = 90;
 void print_usage(const char* program_name) {
     std::cout << "Usage: " << program_name << " [OPTIONS]\n\n"
               << "Required Options:\n"
-              << "  --po <NAME>         PO to test (Resize/CenterCrop/DoNothing)\n\n"
+              << "  --po <NAME>         PO to test (Resize/CenterCrop/RandomResizedCrop/DoNothing)\n\n"
               << "Optional Options:\n"
               << "  --input <PATH>      Input image path (default: input.jpg)\n"
               << "  --output <PATH>     Output image path (default: workspace/output.jpg)\n"
               << "  --size <N>          Output size (default: 224)\n"
               << "  --quality <N>       JPEG quality for output (default: 90)\n"
+              << "  --seed <N>          Random seed for RandomResizedCrop (default: 42)\n"
               << "  --help              Show this help message\n\n"
               << "Examples:\n"
               << "  " << program_name << " --po Resize --size 224\n"
               << "  " << program_name << " --po CenterCrop --size 224\n"
+              << "  " << program_name << " --po RandomResizedCrop --size 224 --seed 42\n"
               << "  " << program_name << " --input custom.jpg --output result.jpg --po Resize --size 128\n";
 }
 
@@ -347,11 +350,13 @@ std::unique_ptr<PreprocessOperation> create_po(const std::string& name, int size
         return std::make_unique<Resize>(size);
     } else if (name == "CenterCrop") {
         return std::make_unique<CenterCrop>(size);
+    } else if (name == "RandomResizedCrop") {
+        return std::make_unique<RandomResizedCrop>(size);
     } else if (name == "DoNothing") {
         return std::make_unique<DoNothing>();
     } else {
         std::cerr << "[ERROR] Unknown PO: " << name << "\n";
-        std::cerr << "[INFO] Supported POs: Resize, CenterCrop, DoNothing\n";
+        std::cerr << "[INFO] Supported POs: Resize, CenterCrop, RandomResizedCrop, DoNothing\n";
         return nullptr;
     }
 }
@@ -367,6 +372,7 @@ int main(int argc, char* argv[]) {
     std::string po_name;
     int output_size = DEFAULT_OUTPUT_SIZE;
     int jpeg_quality = DEFAULT_JPEG_QUALITY;
+    uint64_t random_seed = 42;
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
@@ -384,6 +390,8 @@ int main(int argc, char* argv[]) {
             output_size = std::atoi(argv[++i]);
         } else if (arg == "--quality" && i + 1 < argc) {
             jpeg_quality = std::atoi(argv[++i]);
+        } else if (arg == "--seed" && i + 1 < argc) {
+            random_seed = std::stoull(argv[++i]);
         } else {
             std::cerr << "[ERROR] Unknown option: " << arg << "\n";
             print_usage(argv[0]);
@@ -440,6 +448,13 @@ int main(int argc, char* argv[]) {
 
         std::cout << "[INFO] Created PO: " << po->name() << "\n";
 
+        // 初始化RNG（用于RandomResizedCrop等随机操作）
+        Generator rng;
+        rng.set_seed(random_seed);
+        if (po->introduce_randomness()) {
+            std::cout << "[INFO] PO introduces randomness, using seed: " << random_seed << "\n";
+        }
+
         // =====================================================================
         // Step 4: 获取解码策略
         // =====================================================================
@@ -458,7 +473,7 @@ int main(int argc, char* argv[]) {
 
         // 获取解码策略（sdmp_factor=1表示不使用SDMP）
         DecodeStrategy strategy = po->get_decode_strategy(
-            image_width, image_height, 1, nullptr
+            image_width, image_height, 1, &rng
         );
 
         std::cout << "[INFO] Decode strategy: need_decode=" << strategy.need_decode
@@ -497,11 +512,13 @@ int main(int argc, char* argv[]) {
 
             int32_t final_w = 0, final_h = 0;
             po->execute(decoded_image.data(), decoded_w, decoded_h, decoded_stride,
-                      final_buffer.data(), final_w, final_h, final_stride, nullptr,
+                      final_buffer.data(), final_w, final_h, final_stride, &rng,
                       false);  // execute_from_full=false
 
             // 复制结果到decoded_image
             decoded_image = std::move(final_buffer);
+            decoded_w = final_w;  // 更新宽度
+            decoded_h = final_h;  // 更新高度
             decoded_stride = final_stride;
 
         } else {
@@ -538,7 +555,7 @@ int main(int argc, char* argv[]) {
             auto start_po = std::chrono::high_resolution_clock::now();
 
             po->execute(decoded_image.data(), decoded_w, decoded_h, decoded_stride,
-                      output_image.data(), output_w, output_h, output_stride, nullptr);
+                      output_image.data(), output_w, output_h, output_stride, &rng);
 
             auto end_po = std::chrono::high_resolution_clock::now();
             double po_ms = std::chrono::duration<double, std::milli>(

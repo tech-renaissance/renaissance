@@ -234,4 +234,63 @@ set_target_properties(test_pw_center_crop PROPERTIES
 # 注意：不添加为CTest，因为它需要外部数据集
 message(STATUS "PW center crop test configured: test_pw_center_crop")
 
+# =============================================================================
+# Test: test_pw_rrc
+# Purpose: PW测试程序 - 测试RandomResizedCrop操作（随机裁剪+缩放）
+# =============================================================================
+add_executable(test_pw_rrc
+    test_pw_rrc.cpp
+)
+
+target_link_libraries(test_pw_rrc
+    renaissance
+)
+
+set_target_properties(test_pw_rrc PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/integration
+)
+
+# 注意：不添加为CTest，因为它需要外部数据集
+message(STATUS "PW RandomResizedCrop test configured: test_pw_rrc")
+
+# =============================================================================
+# Test: test_engine_buffer_emulator
+# Purpose: EngineBufferEmulator多线程写入测试
+# =============================================================================
+add_executable(test_engine_buffer_emulator
+    test_engine_buffer_emulator.cpp
+)
+
+target_link_libraries(test_engine_buffer_emulator
+    renaissance
+)
+
+set_target_properties(test_engine_buffer_emulator PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/integration
+)
+
+add_test(NAME test_engine_buffer_emulator COMMAND test_engine_buffer_emulator)
+
+message(STATUS "EngineBufferEmulator test configured: test_engine_buffer_emulator")
+
+# =============================================================================
+# Test: test_gpu_binding
+# Purpose: GPU选择、CPU绑核和映射关系测试
+# =============================================================================
+add_executable(test_gpu_binding
+    test_gpu_binding.cpp
+)
+
+target_link_libraries(test_gpu_binding
+    renaissance
+)
+
+set_target_properties(test_gpu_binding PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/integration
+)
+
+add_test(NAME test_gpu_binding COMMAND test_gpu_binding)
+
+message(STATUS "GPU binding test configured: test_gpu_binding")
+
 message(STATUS "=== Integration Tests Configuration Complete ===")

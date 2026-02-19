@@ -185,6 +185,18 @@ public:
     // 高级封装方法
     // =========================================================================
 
+    /**
+     * @brief 多线程初始化（在train/val前调用一次）
+     * @details 执行多线程绑核等需要在多线程环境下完成的初始化操作
+     *
+     * 关键特性：
+     * 1. 展开num_preproc_workers_个线程
+     * 2. 在每个线程中执行绑核等操作
+     * 3. join所有线程（确保NUMA架构下的正确初始化）
+     * 4. 设置multi_thread_inited_标志
+     */
+    void multi_thread_init();
+
     // 训练一个epoch（= begin_epoch + run + end_epoch）
     void train();
 
@@ -439,8 +451,19 @@ private:
     size_t workshop_region_c_size_ = 0;
     size_t workshop_num_region_s_ = 0;
 
+    // SDMP/CPVS缓存容量（样本数）
+    int max_s_samples_ = 0;  // 单个S区最大容纳样本数
+    int max_c_samples_ = 0;  // C区最大容纳样本数
+
     // 测试模式标志
     bool pw_test_mode_ = false;
+
+    // =========================================================================
+    // EngineBuffer管理相关成员（V3.14.0 - 双缓冲区管理）
+    // =========================================================================
+
+    // EngineBuffer实例（每个Engine一个，multi_thread_init时创建）
+    std::vector<std::unique_ptr<EngineBuffer>> engine_buffer_instances_;
 
     // =========================================================================
     // 设备配置相关成员（DeviceConfigured状态）
@@ -450,6 +473,7 @@ private:
     std::string engine_device_;                         ///< "CPU" 或 "GPU"
     std::vector<int> selected_gpu_ids_;                 ///< 用户选定的GPU ID列表
     bool auto_cpu_binding_ = true;                      ///< 是否自动CPU绑核
+    bool multi_thread_inited_ = false;                  ///< 多线程初始化是否完成
 
 #if defined(TR_SCENE_GPU_CLOUD)
     std::unique_ptr<HardwareTopology> hardware_topology_; ///< 硬件拓扑（仅绑核时使用）

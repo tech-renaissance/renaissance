@@ -16,7 +16,9 @@
 #include "renaissance/data/sample_loader.h"
 #include "renaissance/data/resize.h"
 #include "renaissance/data/center_crop.h"
+#include "renaissance/data/random_resized_crop.h"
 #include "renaissance/data/do_nothing.h"
+#include "renaissance/data/engine_buffer.h"
 #include "renaissance/base/logger.h"
 #include "renaissance/base/tr_exception.h"
 #include "renaissance/base/global_registry.h"
@@ -94,7 +96,11 @@ Preprocessor::Preprocessor()
 }
 
 Preprocessor::~Preprocessor() {
-    LOG_DEBUG << "Preprocessor destroyed";
+    LOG_INFO << "Preprocessor destructor started";
+
+    // engine_buffer_instances_会自动析构，触发EngineBuffer析构
+
+    LOG_INFO << "Preprocessor destructor completed";
 }
 
 // =============================================================================
@@ -830,6 +836,20 @@ void Preprocessor::worker_func_persistent(int worker_id, DataLoader& loader) {
             // 测试模式
             pw_config.test_mode = pw_test_mode_;
 
+            // SDMP/CPVS缓存容量（样本数）
+            pw_config.max_s_samples = max_s_samples_;
+            pw_config.max_c_samples = max_c_samples_;
+
+            // EngineBuffer指针（V3.14.0 - 跨步分配：worker_id % world_size）
+            // 对应关系：PW ID % world_size = EngineBuffer ID
+            if (!engine_buffer_instances_.empty() && pw_config.engine_id < static_cast<int>(engine_buffer_instances_.size())) {
+                pw_config.engine_buffer = engine_buffer_instances_[pw_config.engine_id].get();
+                LOG_DEBUG << "[Worker " << worker_id << "] Assigned to EngineBuffer " << pw_config.engine_id;
+            } else {
+                pw_config.engine_buffer = nullptr;
+                LOG_WARN << "[Worker " << worker_id << "] EngineBuffer not available, set to NULL";
+            }
+
             LOG_DEBUG << "[Worker " << worker_id << "] pw_config.test_mode = "
                       << (pw_config.test_mode ? "ON" : "OFF");
 
@@ -1539,6 +1559,9 @@ namespace {
         if (auto* center_crop = dynamic_cast<const CenterCrop*>(op)) {
             return true;
         }
+        if (auto* random_resized_crop = dynamic_cast<const RandomResizedCrop*>(op)) {
+            return true;
+        }
         return false;
     }
 
@@ -1732,9 +1755,11 @@ template void Preprocessor::set_train_transforms<>(void);  // 空参数包
 template void Preprocessor::set_train_transforms<Resize>(Resize&&);
 template void Preprocessor::set_train_transforms<CenterCrop>(CenterCrop&&);
 template void Preprocessor::set_train_transforms<CenterCrop, Resize>(CenterCrop&&, Resize&&);
+template void Preprocessor::set_train_transforms<RandomResizedCrop>(RandomResizedCrop&&);
 template void Preprocessor::set_val_transforms<>(void);  // 空参数包
 template void Preprocessor::set_val_transforms<Resize>(Resize&&);
 template void Preprocessor::set_val_transforms<CenterCrop>(CenterCrop&&);
+template void Preprocessor::set_val_transforms<RandomResizedCrop>(RandomResizedCrop&&);
 
 void Preprocessor::set_deployment_transforms() {
     // TODO: 后续实现
@@ -1790,8 +1815,105 @@ void Preprocessor::config_deployment_mode(int batch_size,
 }
 
 // =============================================================================
-// 高级封装方法：train()和val()
+// 高级封装方法：multi_thread_init(), train()和val()
 // =============================================================================
+
+void Preprocessor::multi_thread_init() {
+    LOG_INFO << "Multi-thread initialization started";
+
+    // 创建临时线程池（用于绑核等初始化操作）
+    std::vector<std::thread> init_threads;
+    init_threads.reserve(num_preproc_workers_);
+
+    // EngineBuffer创建的互斥锁
+    static std::mutex eb_create_mutex;
+
+    // 展开所有worker线程
+    for (int i = 0; i < num_preproc_workers_; ++i) {
+        init_threads.emplace_back([this, i]() {
+
+            // ==================== CPU绑核（GPU_CLOUD + auto_binding）====================
+#if defined(TR_SCENE_GPU_CLOUD)
+            if (auto_cpu_binding_ && !selected_gpu_ids_.empty()) {
+                const auto& binding_map = GlobalRegistry::instance().cpu_binding_map();
+
+                TR_CHECK(i >= 0 && i < static_cast<int>(binding_map.size()),
+                         ValueError, "worker_id out of range: " << i);
+
+                int target_cpu = binding_map[i];
+
+                cpu_set_t cpuset;
+                CPU_ZERO(&cpuset);
+                CPU_SET(target_cpu, &cpuset);
+
+                int ret = pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
+                TR_CHECK(ret == 0, DeviceError,
+                         "pthread_setaffinity_np failed for worker " << i
+                         << " -> CPU " << target_cpu << ": " << strerror(errno));
+
+                LOG_DEBUG << "PW[" << i << "] -> CPU[" << target_cpu << "] (init)";
+            }
+#endif
+
+            // ==================== EngineBuffer创建（仅线程0~world_size-1）====================
+            if (i < world_size_) {
+                std::lock_guard<std::mutex> lock(eb_create_mutex);
+
+                // 确保engine_buffer_instances_有足够空间
+                if (engine_buffer_instances_.size() < static_cast<size_t>(world_size_)) {
+                    engine_buffer_instances_.resize(world_size_);
+                }
+
+                // 如果当前EngineBuffer还没创建，就创建它
+                if (!engine_buffer_instances_[i]) {
+                    LOG_INFO << "[Worker " << i << "] Creating EngineBuffer instance for Engine " << i;
+
+                    // 计算每个Engine的worker数
+                    int num_workers_per_engine = num_preproc_workers_ / world_size_;
+
+                    // 创建EngineBuffer实例
+                    engine_buffer_instances_[i] = std::unique_ptr<EngineBuffer>(
+                        new EngineBuffer()
+                    );
+
+                    // 配置EngineBuffer
+                    engine_buffer_instances_[i]->configure(
+                        batch_size_,                      // local_batch_size
+                        sample_size_bytes_,               // max_train_sample_bytes
+                        sample_size_bytes_,               // max_val_sample_bytes
+                        num_workers_per_engine,           // num_workers_per_engine
+                        i                                 // engine_id（线程ID）
+                    );
+
+                    // 更新phase（默认train模式）
+                    engine_buffer_instances_[i]->update_phase(
+                        true,              // is_train
+                        max_resolution_,   // current_resolution
+                        num_color_channels_ // num_color_channels
+                    );
+
+                    LOG_INFO << "[Worker " << i << "] EngineBuffer " << i << " created and configured successfully";
+                }
+            }
+
+            LOG_DEBUG << "Initialization thread " << i << " completed";
+        });
+    }
+
+    // Join所有线程（必须！确保NUMA架构下的正确初始化）
+    for (auto& t : init_threads) {
+        if (t.joinable()) {
+            t.join();
+        }
+    }
+
+    // 设置初始化完成标志
+    multi_thread_inited_ = true;
+
+    LOG_INFO << "Multi-thread initialization completed (workers=" << num_preproc_workers_ << ")";
+}
+
+// -----------------------------------------------------------------------------
 
 void Preprocessor::train() {
     // 检查状态
@@ -1800,6 +1922,11 @@ void Preprocessor::train() {
     // 检查Deployment模式
     TR_CHECK(!is_deployment_mode_, ValueError,
              "train() is not available in deployment mode");
+
+    // 多线程初始化（如果还未初始化）
+    if (!multi_thread_inited_) {
+        multi_thread_init();
+    }
 
     // 开始训练阶段
     GlobalRegistry::instance().begin_train();
@@ -1831,6 +1958,11 @@ void Preprocessor::train() {
 void Preprocessor::val() {
     // 检查状态
     check_state(ConfigState::Initialized, "val");
+
+    // 多线程初始化（如果还未初始化）
+    if (!multi_thread_inited_) {
+        multi_thread_init();
+    }
 
     // 开始验证阶段
     GlobalRegistry::instance().begin_val();
@@ -2152,59 +2284,56 @@ void Preprocessor::calculate_workshop_sizes() {
         workshop_region_t_size_ = align_4k(workshop_region_t_size_);  // 对齐到4KB页边界
     }
 
-    // ==================== 4. 计算S区大小 ====================
+    // ==================== 4. 计算S区容量和大小 ====================
     // 按照EXP2.md第366-368行的公式
     // S区需要对齐到4KB页边界（NUMA优化）
+
+    // 始终计算max_s_samples_（不管是否启用SDMP）
+    TR_CHECK(current_dataloader_ != nullptr, ValueError,
+             "calculate_workshop_sizes: current_dataloader_ is null");
+    size_t num_train = current_dataloader_->num_train_samples();
+    size_t num_train_per_engine = (num_train + world_size_ - 1) / world_size_;
+    int num_workers_per_engine = num_preproc_workers_ / world_size_;
+    max_s_samples_ = static_cast<int>((num_train_per_engine + num_workers_per_engine - 1) / num_workers_per_engine);
+
+    // 只有启用SDMP时才分配S区内存
     if (sdmp_factor_ > 1) {
-        // num_train_samples_per_engine = (num_train_samples + world_size - 1) / world_size
-        TR_CHECK(current_dataloader_ != nullptr, ValueError,
-                 "calculate_workshop_sizes: current_dataloader_ is null");
-        size_t num_train = current_dataloader_->num_train_samples();
-        size_t num_train_per_engine = (num_train + world_size_ - 1) / world_size_;
-
-        // max_region_s_samples = (num_train_per_engine + num_workers_per_engine - 1) / num_workers_per_engine
-        int num_workers_per_engine = num_preproc_workers_ / world_size_;
-        size_t max_s_samples = (num_train_per_engine + num_workers_per_engine - 1) / num_workers_per_engine;
-
         // S区大小计算：先对单个样本进行64字节对齐，再对整个S区进行4KB页对齐
         // 按照EXP2.md第364-368行的公式
         size_t aligned_train_output = align_64(max_train_output);  // 单个样本64字节对齐
-        workshop_region_s_size_ = max_s_samples * aligned_train_output;
+        workshop_region_s_size_ = max_s_samples_ * aligned_train_output;
         workshop_region_s_size_ = align_4k(workshop_region_s_size_);  // 4KB页对齐
         workshop_num_region_s_ = sdmp_factor_ - 1;  // S区个数 = sdmp_factor - 1
 
         LOG_DEBUG << "S区计算: num_train=" << num_train
                   << ", per_engine=" << num_train_per_engine
-                  << ", max_s_samples=" << max_s_samples
+                  << ", max_s_samples=" << max_s_samples_
                   << ", s_size=" << (workshop_region_s_size_ / (1024.0*1024.0)) << " MB";
     } else {
         workshop_region_s_size_ = 0;
         workshop_num_region_s_ = 0;
     }
 
-    // ==================== 5. 计算C区大小 ====================
+    // ==================== 5. 计算C区容量和大小 ====================
     // 按照EXP2.md第395-396行的公式
     // C区需要对单个样本进行64字节对齐，然后对整个C区进行4KB页对齐
+
+    // 始终计算max_c_samples_（不管是否启用CPVS）
+    size_t num_val = current_dataloader_->num_val_samples();
+    size_t num_val_per_engine = (num_val + world_size_ - 1) / world_size_;
+    max_c_samples_ = static_cast<int>((num_val_per_engine + num_workers_per_engine - 1) / num_workers_per_engine);
+
+    // 只有启用CPVS时才分配C区内存
     if (using_cpvs_) {
-        // num_val_samples_per_engine = (num_val_samples + world_size - 1) / world_size
-        TR_CHECK(current_dataloader_ != nullptr, ValueError,
-                 "calculate_workshop_sizes: current_dataloader_ is null");
-        size_t num_val = current_dataloader_->num_val_samples();
-        size_t num_val_per_engine = (num_val + world_size_ - 1) / world_size_;
-
-        // max_region_c_samples = (num_val_per_engine + num_workers_per_engine - 1) / num_workers_per_engine
-        int num_workers_per_engine = num_preproc_workers_ / world_size_;
-        size_t max_c_samples = (num_val_per_engine + num_workers_per_engine - 1) / num_workers_per_engine;
-
         // C区大小计算：先对单个样本进行64字节对齐，再对整个C区进行4KB页对齐
         // 64字节对齐确保单个样本的访问效率，4KB页对齐确保NUMA性能
         size_t aligned_val_output = align_64(max_val_output);  // 单个样本64字节对齐
-        workshop_region_c_size_ = max_c_samples * aligned_val_output;
+        workshop_region_c_size_ = max_c_samples_ * aligned_val_output;
         workshop_region_c_size_ = align_4k(workshop_region_c_size_);  // 4KB页对齐
 
         LOG_DEBUG << "C区计算: num_val=" << num_val
                   << ", per_engine=" << num_val_per_engine
-                  << ", max_c_samples=" << max_c_samples
+                  << ", max_c_samples=" << max_c_samples_
                   << ", c_size=" << (workshop_region_c_size_ / (1024.0*1024.0)) << " MB";
     } else {
         workshop_region_c_size_ = 0;
@@ -2213,7 +2342,7 @@ void Preprocessor::calculate_workshop_sizes() {
     // ==================== 输出汇总信息 ====================
     LOG_INFO << "Workshop大小计算完成:"
              << "\n  D区: " << (workshop_region_d_size_ / (1024.0*1024.0)) << " MB"
-             << "\n  AB区: " << (workshop_region_ab_size_ / 1024.0) << " KB (对齐后)"
+             << "\n  AB区: " << (workshop_region_ab_size_ / (1024.0*1024.0)) << " MB (对齐后)"
              << "\n  T区: " << (workshop_region_t_size_ / 1024.0) << " KB"
              << "\n  S区: " << (workshop_region_s_size_ / (1024.0*1024.0)) << " MB (x" << workshop_num_region_s_ << ")"
              << "\n  C区: " << (workshop_region_c_size_ / (1024.0*1024.0)) << " MB";
@@ -2269,6 +2398,18 @@ void Preprocessor::create_pw_instances(bool is_train) {
 
         // 测试模式
         pw_config.test_mode = pw_test_mode_;
+
+        // SDMP/CPVS缓存容量（样本数）
+        pw_config.max_s_samples = max_s_samples_;
+        pw_config.max_c_samples = max_c_samples_;
+
+        // EngineBuffer指针（V3.14.0 - 跨步分配：worker_id % world_size）
+        // 对应关系：PW ID % world_size = EngineBuffer ID
+        if (!engine_buffer_instances_.empty() && pw_config.engine_id < static_cast<int>(engine_buffer_instances_.size())) {
+            pw_config.engine_buffer = engine_buffer_instances_[pw_config.engine_id].get();
+        } else {
+            pw_config.engine_buffer = nullptr;
+        }
 
         // 创建PW实例（同时传入train_ops和val_ops）
         // 注意：PreprocessWorker会在内部克隆PO，所以可以传递const引用
