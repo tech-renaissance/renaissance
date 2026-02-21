@@ -100,6 +100,8 @@ CudaDevice::CudaDevice(int device_id)
 }
 
 CudaDevice::~CudaDevice() {
+    LOG_INFO << "CudaDevice[" << device_id_ << "] destructor started";
+
     cudaSetDevice(device_id_);
 
     // 1. 同步所有流（确保工作完成）

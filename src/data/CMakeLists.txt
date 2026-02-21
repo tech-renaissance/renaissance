@@ -23,11 +23,15 @@ set(DATA_SOURCES
     preprocess_operation.cpp
     resize.cpp
     center_crop.cpp
+    random_horizontal_flip.cpp
+    random_resized_crop.cpp
     do_nothing.cpp
     # V4.1 PreprocessWorker
     preprocess_worker.cpp
     # GPU_CLOUD场景：NUMA优化
     hardware_topology.cpp
+    # V3.14.0 EngineBuffer
+    engine_buffer.cpp
 )
 
 # 创建数据库静态库

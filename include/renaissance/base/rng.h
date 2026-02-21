@@ -122,6 +122,21 @@ public:
      */
     uint64_t current_offset() const noexcept;
 
+    // =========================================================================
+    // 辅助方法
+    // =========================================================================
+
+    /**
+     * @brief 生成[low, high]范围的随机整数（包含两端）
+     * @param low 最小值（包含）
+     * @param high 最大值（包含）
+     * @return [low, high]范围内的随机整数
+     *
+     * @note 可复现：相同的seed和offset序列产生相同的结果
+     * @note 用于Fisher-Yates洗牌等需要精确控制的场景
+     */
+    int random_int(int low, int high);
+
 private:
     class Impl;  // Pimpl: 前向声明实现类
     std::unique_ptr<Impl> impl_;  // 指向实现的智能指针

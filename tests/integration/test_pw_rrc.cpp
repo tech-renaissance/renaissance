@@ -1,10 +1,9 @@
 /**
- * @file test_pw_center_crop.cpp
- * @brief 测试PW的CenterCrop功能（测试模式）
+ * @file test_pw_rrc.cpp
+ * @brief 测试PW的RandomResizedCrop功能（测试模式）
  * @version 1.0.0
- * @date 2026-02-18
+ * @date 2026-02-19
  * @author 技术觉醒团队
- * @note CenterCrop默认尝试局部解码，失败时使用STB fallback完整解码
  */
 
 #include "renaissance.h"
@@ -26,27 +25,36 @@ void print_usage(const char* program_name) {
               << "                       (default: /root/datasets/imagenet)\n"
               << "  --loaders <N>        Number of load workers (default: 16)\n"
               << "  --preproc <N>        Number of preprocess workers (default: 16)\n"
-              << "  --resolution <N>     Crop resolution (default: 224)\n"
+              << "  --resolution <N>     Output resolution (default: 224)\n"
               << "  --batch-size <N>     Batch size (default: 256)\n"
+              << "  --scale-min <F>      Min scale for RandomResizedCrop (default: 0.08)\n"
+              << "  --scale-max <F>      Max scale for RandomResizedCrop (default: 1.0)\n"
+              << "  --ratio-min <F>      Min ratio for RandomResizedCrop (default: 0.75)\n"
+              << "  --ratio-max <F>      Max ratio for RandomResizedCrop (default: 1.333)\n"
+              << "  --seed <N>           Random seed (default: 42)\n"
               << "  --cpu-bind           Enable CPU binding (default: disabled)\n"
               << "  --help               Show this help message\n\n"
               << "Note: This test uses PW test mode (no EngineBuffer)\n"
-              << "      CenterCrop attempts partial decode first,\n"
-              << "      falls back to STB full decode on failure\n"
               << "      Tests both train and val sets once, reports total time\n";
 }
 
 int main(int argc, char* argv[]) {
-
     // 默认配置
     std::string format_arg = "raw";
     std::string dataset_path = "/root/datasets/imagenet";
     int num_preproc_workers = 16;
     int num_load_workers = 16;
-    int crop_size = 224;
+    int resolution = 224;
     int batch_size = 256;
     int compression_level = 0;
     bool auto_cpu_binding = false;
+
+    // RandomResizedCrop参数
+    float scale_min = 0.08f;
+    float scale_max = 1.0f;
+    float ratio_min = 0.75f;
+    float ratio_max = 1.3333333f;
+    uint64_t random_seed = 42;
 
     // 解析命令行参数
     for (int i = 1; i < argc; ++i) {
@@ -69,9 +77,19 @@ int main(int argc, char* argv[]) {
         } else if (arg == "--preproc" && i + 1 < argc) {
             num_preproc_workers = std::stoi(argv[++i]);
         } else if (arg == "--resolution" && i + 1 < argc) {
-            crop_size = std::stoi(argv[++i]);
+            resolution = std::stoi(argv[++i]);
         } else if (arg == "--batch-size" && i + 1 < argc) {
             batch_size = std::stoi(argv[++i]);
+        } else if (arg == "--scale-min" && i + 1 < argc) {
+            scale_min = std::stof(argv[++i]);
+        } else if (arg == "--scale-max" && i + 1 < argc) {
+            scale_max = std::stof(argv[++i]);
+        } else if (arg == "--ratio-min" && i + 1 < argc) {
+            ratio_min = std::stof(argv[++i]);
+        } else if (arg == "--ratio-max" && i + 1 < argc) {
+            ratio_max = std::stof(argv[++i]);
+        } else if (arg == "--seed" && i + 1 < argc) {
+            random_seed = std::stoull(argv[++i]);
         } else if (arg == "--cpu-bind") {
             auto_cpu_binding = true;
         } else {
@@ -116,12 +134,12 @@ int main(int argc, char* argv[]) {
 
     // 步骤3：配置Preprocessor
     std::cout << "Configuring Preprocessor...\n";
-    std::cout << "  Resolution: " << crop_size << "\n";
+    std::cout << "  Resolution: " << resolution << "\n";
     std::cout << "  Batch size: " << batch_size << "\n";
     prep.config_preprocessor(
         -1,     // world_size（-1表示由config_device自动设置）
         batch_size,
-        crop_size,  // max_resolution
+        resolution,  // max_resolution
         3,      // num_color_channels
         1,      // sdmp_factor
         false,  // using_cpvs
@@ -129,13 +147,19 @@ int main(int argc, char* argv[]) {
     );
     prep.config_device("GPU", auto_cpu_binding);  // 自动使用所有可见GPU
 
-    // 步骤4：设置数据变换（只添加一个CenterCrop）
-    std::cout << "Setting transforms (CenterCrop only)...\n";
-    std::cout << "  CenterCrop will attempt partial decode first\n";
-    std::cout << "  If partial decode fails, will use STB fallback (full decode)\n";
-    prep.set_train_transforms(CenterCrop(crop_size));
-    prep.set_val_transforms(CenterCrop(crop_size));
+    // 步骤4：设置数据变换（RandomResizedCrop）
+    std::cout << "Setting transforms (RandomResizedCrop)...\n";
+    std::cout << "  Scale range: [" << scale_min << ", " << scale_max << "]\n";
+    std::cout << "  Ratio range: [" << ratio_min << ", " << ratio_max << "]\n";
+    std::cout << "  Random seed: " << random_seed << "\n";
+    prep.set_train_transforms(RandomResizedCrop(resolution, scale_min, scale_max,
+                                                ratio_min, ratio_max));
+    prep.set_val_transforms(RandomResizedCrop(resolution, scale_min, scale_max,
+                                              ratio_min, ratio_max));
     prep.multi_thread_init();
+
+    // 设置全局随机种子（确保可复现）
+    manual_seed(random_seed);
 
     // 步骤5：运行训练集测试
     std::cout << "\n=== Testing Train Set ===\n";

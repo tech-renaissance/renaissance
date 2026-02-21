@@ -16,7 +16,9 @@
 #include "renaissance/data/sample_loader.h"
 #include "renaissance/data/resize.h"
 #include "renaissance/data/center_crop.h"
+#include "renaissance/data/random_resized_crop.h"
 #include "renaissance/data/do_nothing.h"
+#include "renaissance/data/engine_buffer.h"
 #include "renaissance/base/logger.h"
 #include "renaissance/base/tr_exception.h"
 #include "renaissance/base/global_registry.h"
@@ -80,8 +82,11 @@ Preprocessor::Preprocessor()
     , sample_size_bytes_(0)
     , buffer_size_bytes_(0)
     , is_deployment_mode_(false)
-    , train_iteration_id_(0)
-    , val_iteration_id_(0)
+    , train_iteration_id_(0)  // 标志DataLoader读取训练集的次数，不一定等于epoch数或phase数
+    , val_iteration_id_(0)  // 标志DataLoader读取验证集的次数，不一定等于epoch数或phase数
+    , train_phase_id_(0)  // train phase的编号，也是实际已完成的训练阶段的数量
+    , val_phase_id_(0)  // val phase的编号，也是实际已完成的验证阶段的数量
+    , is_lazy_phase_(false)
     , config_state_(ConfigState::Unconfigured)
     , dataset_type_(DatasetType::mnist)  // 默认值，会被config_dataset覆盖
     , imagenet_compression_level_(0)
@@ -94,7 +99,11 @@ Preprocessor::Preprocessor()
 }
 
 Preprocessor::~Preprocessor() {
-    LOG_DEBUG << "Preprocessor destroyed";
+    LOG_INFO << "Preprocessor destructor started";
+
+    // engine_buffer_instances_会自动析构，触发EngineBuffer析构
+
+    LOG_INFO << "Preprocessor destructor completed";
 }
 
 // =============================================================================
@@ -246,131 +255,6 @@ void Preprocessor::run(DataLoader& loader) {
 
 // =============================================================================
 // Worker线程函数（姜总工的静态领取设计）
-// =============================================================================
-
-void Preprocessor::worker_func(int worker_id, DataLoader& loader) {
-    LOG_INFO << "Preprocessor Worker " << worker_id << " started";
-
-    // 打开CSV日志文件（如果启用）
-    // 注意：使用追加模式，因为在PARTIAL模式下，worker会被多次调用（每个buffer一次）
-    std::ofstream log_file;
-    if (config_.enable_logging) {
-        std::ostringstream oss;
-        oss << config_.log_dir << "/worker_" << worker_id << ".csv";
-        std::string log_path = oss.str();
-
-        // 使用追加模式（append），避免覆盖之前buffer的日志
-        log_file.open(log_path, std::ios::out | std::ios::app);
-        if (!log_file.is_open()) {
-            TR_FILE_NOT_FOUND("Failed to open log file: " << log_path);
-        }
-
-        LOG_DEBUG << "Worker " << worker_id << " logging to: " << log_path << " (append mode)";
-    }
-
-    size_t local_count = 0;
-    int32_t label;
-    const uint8_t* data_ptr;
-    size_t data_size;
-
-    // =========================================================================
-    // 静态领取循环（姜总工的核心设计）
-    // =========================================================================
-    // Worker i的第k次调用 → 读取第 (i + k×M) 个样本
-    // get_next_sample()内部已经实现了这个逻辑
-    // =========================================================================
-
-    size_t sample_count = 0;  // 样本计数器
-
-    LOG_DEBUG << "[WORKER START] Worker=" << worker_id
-             << ", calc_crc=" << config_.calc_crc
-             << ", enable_logging=" << config_.enable_logging;
-
-    while (loader.get_next_sample(worker_id, label, data_ptr, data_size)) {
-        int first_byte = -1;  // 默认值-1表示不解码
-        uint32_t crc_value = 0;  // CRC32校验值（如果启用）
-
-        // 计算CRC32（如果启用）
-        if (config_.calc_crc) {
-            crc_value = crc32(0L, Z_NULL, 0);  // 初始化CRC
-            crc_value = crc32(crc_value, data_ptr, static_cast<uInt>(data_size));
-
-            // 【调试】打印前10个样本的CRC
-            if (sample_count < 10) {
-                LOG_DEBUG << "[PREPROC CRC] Worker=" << worker_id
-                         << ", Sample #" << (sample_count + 1)
-                         << ", DataPtr=" << static_cast<const void*>(data_ptr)
-                         << ", Size=" << data_size
-                         << ", Label=" << label
-                         << ", CRC32=0x" << std::hex << std::uppercase << crc_value << std::dec;
-            }
-        }
-
-        // JPEG解码（如果启用）
-        if (config_.jpeg_decode) {
-            // 复用持久handle（避免每次创建/销毁）
-            tjhandle handle = worker_decode_buffers_[worker_id].handle;
-            if (handle) {
-                int width, height, subsamp, colorspace;
-
-                // 获取JPEG头信息
-                if (tjDecompressHeader3(handle, data_ptr, static_cast<unsigned long>(data_size),
-                                      &width, &height, &subsamp, &colorspace) == 0) {
-
-                    // ✅ 64字节对齐的stride（与PW/test_po/fast_crop一致）
-                    int pitch = ((width * 3 + 63) / 64) * 64;
-
-                    // 解码到worker专属的128MB缓冲区
-                    uint8_t* decode_buffer = worker_decode_buffers_[worker_id].memory;
-
-                    // ✅ 使用优化flags（FASTDCT + NOREALLOC，提升30-50%性能）
-                    if (tjDecompress2(handle, data_ptr, static_cast<unsigned long>(data_size),
-                                     decode_buffer, width, pitch, height,  // ← 精确参数
-                                     TJPF_RGB, TJFLAG_FASTDCT | TJFLAG_NOREALLOC) == 0) {
-                        // 记录解码后第一个字节
-                        first_byte = static_cast<int>(decode_buffer[0]);
-                    }
-                }
-                // ✅ 不再销毁handle，保持持久化
-            }
-        }
-
-        // 模拟预处理延迟（可选）
-        if (config_.simulate_delay) {
-            std::this_thread::sleep_for(
-                std::chrono::microseconds(config_.delay_us)
-            );
-        }
-
-        // 写入CSV日志：worker_id,size,label,first_byte[,crc32]
-        if (config_.enable_logging) {
-            log_file << worker_id << "," << data_size << "," << label << "," << first_byte;
-            if (config_.calc_crc) {
-                // CRC32打印为8位16进制大写（例如：A1B2C3D4）
-                log_file << "," << std::uppercase << std::hex << std::setfill('0') << std::setw(8) << crc_value << std::dec;
-            }
-            log_file << "\n";
-        }
-
-        sample_count++;  // 增加样本计数
-        local_count++;
-        total_samples_.fetch_add(1, std::memory_order_relaxed);
-    }
-
-    // 保存此worker的样本数（累加到整个epoch的总数，使用互斥锁保护）
-    {
-        std::lock_guard<std::mutex> lock(stats_mutex_);
-        worker_sample_counts_[worker_id] += local_count;  // 累加，不覆盖
-    }
-
-    if (log_file.is_open()) {
-        log_file.close();
-    }
-
-    LOG_INFO << "Preprocessor Worker " << worker_id << " finished: "
-             << local_count << " samples";
-}
-
 // =============================================================================
 // 解码缓冲区管理
 // =============================================================================
@@ -830,6 +714,20 @@ void Preprocessor::worker_func_persistent(int worker_id, DataLoader& loader) {
             // 测试模式
             pw_config.test_mode = pw_test_mode_;
 
+            // SDMP/CPVS缓存容量（样本数）
+            pw_config.max_s_samples = max_s_samples_;
+            pw_config.max_c_samples = max_c_samples_;
+
+            // EngineBuffer指针（V3.14.0 - 跨步分配：worker_id % world_size）
+            // 对应关系：PW ID % world_size = EngineBuffer ID
+            if (!engine_buffer_instances_.empty() && pw_config.engine_id < static_cast<int>(engine_buffer_instances_.size())) {
+                pw_config.engine_buffer = engine_buffer_instances_[pw_config.engine_id].get();
+                LOG_DEBUG << "[Worker " << worker_id << "] Assigned to EngineBuffer " << pw_config.engine_id;
+            } else {
+                pw_config.engine_buffer = nullptr;
+                LOG_WARN << "[Worker " << worker_id << "] EngineBuffer not available, set to NULL";
+            }
+
             LOG_DEBUG << "[Worker " << worker_id << "] pw_config.test_mode = "
                       << (pw_config.test_mode ? "ON" : "OFF");
 
@@ -838,11 +736,29 @@ void Preprocessor::worker_func_persistent(int worker_id, DataLoader& loader) {
                 new PreprocessWorker(
                     pw_config,
                     train_ops_template_,  // 训练集PO列表
-                    val_ops_template_     // 验证集PO列表
+                    val_ops_template_,     // 验证集PO列表
+                    &pw_param_
                 )
             );
 
             LOG_DEBUG << "[Worker " << worker_id << "] PW instance created successfully";
+        }
+    }
+
+    // ==================== PW更新参数 ====================
+    {
+		if (pw_instances_[worker_id]) {
+			pw_instances_[worker_id]->update_parameters();
+		}
+	}
+
+    // ==================== EngineBuffer更新 ====================
+    // 只有每个Engine的第一个PW（worker_id < world_size_）负责更新对应的EngineBuffer
+    if (worker_id < world_size_) {
+        int engine_id = worker_id % world_size_;  // engine_id = worker_id % world_size_
+        if (engine_buffer_instances_[engine_id]) {
+            engine_buffer_instances_[engine_id]->reset_and_update();
+            LOG_DEBUG << "[Worker " << worker_id << "] EngineBuffer " << engine_id << " reset_and_update called";
         }
     }
 
@@ -879,15 +795,19 @@ void Preprocessor::worker_func_persistent(int worker_id, DataLoader& loader) {
     // =========================================================================
     // 【关键修复】恢复外层循环，让worker持续处理多个buffer直到整个epoch结束
     // =========================================================================
-    while (!stop_flag_.load(std::memory_order_acquire)) {
+    while (true) {
         // 等待新buffer的信号
         int last_seen = current_buffer_seq_.load(std::memory_order_acquire);
         while (current_buffer_seq_.load(std::memory_order_acquire) == last_seen &&
-               !stop_flag_.load(std::memory_order_acquire)) {
+               !stop_flag_.load(std::memory_order_acquire)) {  // 只要没有得到最终退出信号，就等待buffer更新
             std::this_thread::sleep_for(std::chrono::microseconds(10));
         }
 
-        if (stop_flag_.load(std::memory_order_acquire)) {
+        if (stop_flag_.load(std::memory_order_acquire)) {  // 得到最终退出信号
+			if (pw_instances_[worker_id]) {
+				// 让PW向对应的EngineBuffer表明已无更多样本
+				pw_instances_[worker_id]->no_more_samples();
+			}
             break;
         }
 
@@ -896,156 +816,167 @@ void Preprocessor::worker_func_persistent(int worker_id, DataLoader& loader) {
         const uint8_t* data_ptr;
         size_t data_size;
 
-        while (loader.get_next_sample(worker_id, label, data_ptr, data_size)) {
-            // 快速模式：直接计数，不执行任何预处理
-            if (fast_mode_) {
-                local_count++;
-                total_samples_.fetch_add(1, std::memory_order_relaxed);
-                continue;
-            }
+		if (pw_test_mode_) {
+			while (loader.get_next_sample(worker_id, label, data_ptr, data_size)) {
+				if (pw_instances_[worker_id]) {
+					pw_instances_[worker_id]->work_test_mode(label, data_ptr, data_size);
+					local_count++;
+					total_samples_.fetch_add(1, std::memory_order_relaxed);
+					sample_count++;
+				}
+			}
+		}
+		else {
+			while (loader.get_next_sample(worker_id, label, data_ptr, data_size)) {
+				// 快速模式：直接计数，不执行任何预处理
+				if (fast_mode_) {
+					local_count++;
+					total_samples_.fetch_add(1, std::memory_order_relaxed);
+					continue;
+				}
 
-            // ==================== PW模式（V4.1）：调用PW处理样本 ====================
-            if (pw_instances_[worker_id]) {
-                // 调用PW的work方法处理样本
-                pw_instances_[worker_id]->work(label, data_ptr, data_size);
-                local_count++;
-                total_samples_.fetch_add(1, std::memory_order_relaxed);
-                sample_count++;
-                continue;
-            }
+				// ==================== PW模式（V4.1）：调用PW处理样本 ====================
+				if (pw_instances_[worker_id]) {
+					// 调用PW的work方法处理样本
+					pw_instances_[worker_id]->work(label, data_ptr, data_size);
+					local_count++;
+					total_samples_.fetch_add(1, std::memory_order_relaxed);
+					sample_count++;
+					continue;
+				}
 
-            // 如果PW没创建成功，报错
-            LOG_ERROR << "Worker " << worker_id << " PW instance not created, skipping sample";
-            continue;
-            int first_byte = -1;
-            uint32_t crc_value = 0;  // CRC32校验值（如果启用）
+				// 如果PW没创建成功，报错
+				LOG_ERROR << "Worker " << worker_id << " PW instance not created, skipping sample";
+				continue;
+				int first_byte = -1;
+				uint32_t crc_value = 0;  // CRC32校验值（如果启用）
 
-            // 计算CRC32（如果启用）
-            if (config_.calc_crc) {
-                crc_value = crc32(0L, Z_NULL, 0);  // 初始化CRC
-                crc_value = crc32(crc_value, data_ptr, static_cast<uInt>(data_size));
+				// 计算CRC32（如果启用）
+				if (config_.calc_crc) {
+					crc_value = crc32(0L, Z_NULL, 0);  // 初始化CRC
+					crc_value = crc32(crc_value, data_ptr, static_cast<uInt>(data_size));
 
-                // 【调试】打印前10个样本和第962-973个样本的CRC（覆盖第二个buffer的前10个）
-                if (sample_count < 10 || (sample_count >= 961 && sample_count < 973)) {
-                    LOG_DEBUG << "[PREPROC CRC] Worker=" << worker_id
-                             << ", Sample #" << (sample_count + 1)
-                             << ", DataPtr=" << static_cast<const void*>(data_ptr)
-                             << ", Size=" << data_size
-                             << ", Label=" << label
-                             << ", CRC32=0x" << std::hex << std::uppercase << crc_value << std::dec;
-                }
-            }
+					// 【调试】打印前10个样本和第962-973个样本的CRC（覆盖第二个buffer的前10个）
+					if (sample_count < 10 || (sample_count >= 961 && sample_count < 973)) {
+						LOG_DEBUG << "[PREPROC CRC] Worker=" << worker_id
+								 << ", Sample #" << (sample_count + 1)
+								 << ", DataPtr=" << static_cast<const void*>(data_ptr)
+								 << ", Size=" << data_size
+								 << ", Label=" << label
+								 << ", CRC32=0x" << std::hex << std::uppercase << crc_value << std::dec;
+					}
+				}
 
-            // JPEG解码（如果启用）
-            if (config_.jpeg_decode) {
-                tjhandle handle = worker_decode_buffers_[worker_id].handle;
-                if (handle) {
-                    int width, height, subsamp, colorspace;
+				// JPEG解码（如果启用）
+				if (config_.jpeg_decode) {
+					tjhandle handle = worker_decode_buffers_[worker_id].handle;
+					if (handle) {
+						int width, height, subsamp, colorspace;
 
-                    // 获取JPEG头信息
-                    if (tjDecompressHeader3(handle, data_ptr, static_cast<unsigned long>(data_size),
-                                          &width, &height, &subsamp, &colorspace) == 0) {
+						// 获取JPEG头信息
+						if (tjDecompressHeader3(handle, data_ptr, static_cast<unsigned long>(data_size),
+											  &width, &height, &subsamp, &colorspace) == 0) {
 
-                        // ✅ 64字节对齐的stride（与PW/test_po/fast_crop一致）
-                        int pitch = ((width * 3 + 63) / 64) * 64;
+							// ✅ 64字节对齐的stride（与PW/test_po/fast_crop一致）
+							int pitch = ((width * 3 + 63) / 64) * 64;
 
-                        // 解码到worker专属的128MB缓冲区
-                        uint8_t* decode_buffer = worker_decode_buffers_[worker_id].memory;
+							// 解码到worker专属的128MB缓冲区
+							uint8_t* decode_buffer = worker_decode_buffers_[worker_id].memory;
 
-                        // ✅ 使用优化flags（FASTDCT + NOREALLOC，提升30-50%性能）
-                        if (tjDecompress2(handle, data_ptr, static_cast<unsigned long>(data_size),
-                                         decode_buffer, width, pitch, height,
-                                         TJPF_RGB, TJFLAG_FASTDCT | TJFLAG_NOREALLOC) == 0) {
-                            // 记录解码后第一个字节
-                            first_byte = static_cast<int>(decode_buffer[0]);
+							// ✅ 使用优化flags（FASTDCT + NOREALLOC，提升30-50%性能）
+							if (tjDecompress2(handle, data_ptr, static_cast<unsigned long>(data_size),
+											 decode_buffer, width, pitch, height,
+											 TJPF_RGB, TJFLAG_FASTDCT | TJFLAG_NOREALLOC) == 0) {
+								// 记录解码后第一个字节
+								first_byte = static_cast<int>(decode_buffer[0]);
 
-                            // ✅ RandomResizedCrop（如果启用）
-                            if (config_.apply_crop) {
-                                apply_random_resized_crop(worker_id, decode_buffer,
-                                                         width, height, pitch);
-                                // 注意：crop结果在crop_output_buffer中，可用于后续处理
-                            }
-                        } else {
-                            // TurboJPEG解码失败，尝试使用STB备用解码
-                            #if TR_USE_STB
-                            uint8_t* stb_decode_buffer = worker_decode_buffers_[worker_id].memory;
-                            size_t stb_buffer_size = worker_decode_buffers_[worker_id].size;
-                            int stb_width, stb_height;
-                            if (decode_jpeg_with_stb(data_ptr, data_size,
-                                                       stb_decode_buffer, stb_buffer_size,
-                                                       stb_width, stb_height)) {
-                                // STB解码成功
-                                width = stb_width;
-                                height = stb_height;
-                                int pitch = ((width * 3 + 63) / 64) * 64;  // 64字节对齐
-                                first_byte = static_cast<int>(stb_decode_buffer[0]);
+								// ✅ RandomResizedCrop（如果启用）
+								if (config_.apply_crop) {
+									apply_random_resized_crop(worker_id, decode_buffer,
+															 width, height, pitch);
+									// 注意：crop结果在crop_output_buffer中，可用于后续处理
+								}
+							} else {
+								// TurboJPEG解码失败，尝试使用STB备用解码
+								#if TR_USE_STB
+								uint8_t* stb_decode_buffer = worker_decode_buffers_[worker_id].memory;
+								size_t stb_buffer_size = worker_decode_buffers_[worker_id].size;
+								int stb_width, stb_height;
+								if (decode_jpeg_with_stb(data_ptr, data_size,
+														   stb_decode_buffer, stb_buffer_size,
+														   stb_width, stb_height)) {
+									// STB解码成功
+									width = stb_width;
+									height = stb_height;
+									int pitch = ((width * 3 + 63) / 64) * 64;  // 64字节对齐
+									first_byte = static_cast<int>(stb_decode_buffer[0]);
 
-                                // ✅ RandomResizedCrop（如果启用）
-                                if (config_.apply_crop) {
-                                    apply_random_resized_crop(worker_id, stb_decode_buffer,
-                                                             width, height, pitch);
-                                }
-                            } else {
-                                // STB备用解码也失败
-                                LOG_ERROR << "[Worker " << worker_id << "] Failed to decode JPEG: "
-                                         << "both TurboJPEG and STB failed (sample size=" << data_size
-                                         << ", label=" << label << "), skipping sample";
-                            }
-                            #endif
-                        }
-                    }
-                    // TurboJPEG读取头失败，尝试使用STB备用解码
-                    #if TR_USE_STB
-                    else {
-                        uint8_t* stb_decode_buffer = worker_decode_buffers_[worker_id].memory;
-                        size_t stb_buffer_size = worker_decode_buffers_[worker_id].size;
-                        int stb_width, stb_height;
-                        if (decode_jpeg_with_stb(data_ptr, data_size,
-                                                   stb_decode_buffer, stb_buffer_size,
-                                                   stb_width, stb_height)) {
-                            // STB解码成功
-                            int pitch = ((stb_width * 3 + 63) / 64) * 64;  // 64字节对齐
-                            first_byte = static_cast<int>(stb_decode_buffer[0]);
+									// ✅ RandomResizedCrop（如果启用）
+									if (config_.apply_crop) {
+										apply_random_resized_crop(worker_id, stb_decode_buffer,
+																 width, height, pitch);
+									}
+								} else {
+									// STB备用解码也失败
+									LOG_ERROR << "[Worker " << worker_id << "] Failed to decode JPEG: "
+											 << "both TurboJPEG and STB failed (sample size=" << data_size
+											 << ", label=" << label << "), skipping sample";
+								}
+								#endif
+							}
+						}
+						// TurboJPEG读取头失败，尝试使用STB备用解码
+						#if TR_USE_STB
+						else {
+							uint8_t* stb_decode_buffer = worker_decode_buffers_[worker_id].memory;
+							size_t stb_buffer_size = worker_decode_buffers_[worker_id].size;
+							int stb_width, stb_height;
+							if (decode_jpeg_with_stb(data_ptr, data_size,
+													   stb_decode_buffer, stb_buffer_size,
+													   stb_width, stb_height)) {
+								// STB解码成功
+								int pitch = ((stb_width * 3 + 63) / 64) * 64;  // 64字节对齐
+								first_byte = static_cast<int>(stb_decode_buffer[0]);
 
-                            // ✅ RandomResizedCrop（如果启用）
-                            if (config_.apply_crop) {
-                                apply_random_resized_crop(worker_id, stb_decode_buffer,
-                                                         stb_width, stb_height, pitch);
-                            }
-                        } else {
-                            // STB备用解码也失败
-                            LOG_ERROR << "[Worker " << worker_id << "] Failed to decode JPEG header: "
-                                     << "both TurboJPEG and STB failed (sample size=" << data_size
-                                     << ", label=" << label << "), skipping sample";
-                        }
-                    }
-                    #endif
-                }
-            }
+								// ✅ RandomResizedCrop（如果启用）
+								if (config_.apply_crop) {
+									apply_random_resized_crop(worker_id, stb_decode_buffer,
+															 stb_width, stb_height, pitch);
+								}
+							} else {
+								// STB备用解码也失败
+								LOG_ERROR << "[Worker " << worker_id << "] Failed to decode JPEG header: "
+										 << "both TurboJPEG and STB failed (sample size=" << data_size
+										 << ", label=" << label << "), skipping sample";
+							}
+						}
+						#endif
+					}
+				}
 
-            // 模拟预处理延迟（可选）
-            if (config_.simulate_delay) {
-                std::this_thread::sleep_for(
-                    std::chrono::microseconds(config_.delay_us)
-                );
-            }
+				// 模拟预处理延迟（可选）
+				if (config_.simulate_delay) {
+					std::this_thread::sleep_for(
+						std::chrono::microseconds(config_.delay_us)
+					);
+				}
 
-            // 写入CSV日志（分离格式）
-            if (config_.enable_logging) {
-                // worker_x.csv: worker_id,size,label,first_byte (无表头)
-                log_file << worker_id << "," << data_size << "," << label << "," << first_byte << "\n";
+				// 写入CSV日志（分离格式）
+				if (config_.enable_logging) {
+					// worker_x.csv: worker_id,size,label,first_byte (无表头)
+					log_file << worker_id << "," << data_size << "," << label << "," << first_byte << "\n";
 
-                // crc_x.csv: crc32 (无表头)
-                if (config_.calc_crc) {
-                    crc_file << std::uppercase << std::hex << std::setfill('0') << std::setw(8) << crc_value << "\n";
-                }
-            }
+					// crc_x.csv: crc32 (无表头)
+					if (config_.calc_crc) {
+						crc_file << std::uppercase << std::hex << std::setfill('0') << std::setw(8) << crc_value << "\n";
+					}
+				}
 
-            sample_count++;  // 增加总样本计数
-            local_count++;
-            total_samples_.fetch_add(1, std::memory_order_relaxed);
-        }
-
+				sample_count++;  // 增加总样本计数
+				local_count++;
+				total_samples_.fetch_add(1, std::memory_order_relaxed);
+			}
+		}
         // =========================================================================
         // 当前buffer处理完毕，报告完成状态
         // =========================================================================
@@ -1375,8 +1306,17 @@ void Preprocessor::config_dataset(DatasetType dataset_type,
     // 注册到全局注册表
     GlobalRegistry::instance().set_dataset_type(dataset_type_);
 
+    // ==================== 向GlobalRegistry注册训练集和验证集样本总数 ====================
+    // 这应该在config_dataset()之后立刻注册，因为后续的计算可能需要这些值
+    size_t num_train = current_dataloader_->num_train_samples();
+    size_t num_val = current_dataloader_->num_val_samples();
+    GlobalRegistry::instance().set_num_train_samples(num_train);
+    GlobalRegistry::instance().set_num_val_samples(num_val);
+
     LOG_INFO << "Configured dataset type: " << static_cast<int>(dataset_type_)
-             << " (" << (dts_format ? "DTS" : "RAW") << ")";
+             << " (" << (dts_format ? "DTS" : "RAW") << ")"
+             << ", num_train=" << num_train
+             << ", num_val=" << num_val;
 }
 
 // =============================================================================
@@ -1491,7 +1431,8 @@ void Preprocessor::config_preprocessor(int world_size,
     // world_size 将在 config_device 中验证后注册
     GlobalRegistry::instance().set_batch_size(batch_size);
     GlobalRegistry::instance().set_max_resolution(max_resolution);
-    GlobalRegistry::instance().set_current_resolution(max_resolution);  // 初始值
+    GlobalRegistry::instance().set_current_resolution_train(max_resolution);  // 初始值
+    GlobalRegistry::instance().set_current_resolution_val(max_resolution);  // 初始值
     GlobalRegistry::instance().set_num_color_channels(num_color_channels);
     GlobalRegistry::instance().set_sdmp_factor(sdmp_factor);
     GlobalRegistry::instance().set_using_cpvs(using_cpvs);
@@ -1539,16 +1480,18 @@ namespace {
         if (auto* center_crop = dynamic_cast<const CenterCrop*>(op)) {
             return true;
         }
+        if (auto* random_resized_crop = dynamic_cast<const RandomResizedCrop*>(op)) {
+            return true;
+        }
         return false;
     }
 
     /**
      * @brief 判断是否是RandomHorizontalFlip
-     * @note 暂时返回false，因为RandomHorizontalFlip还未实现
+     * @note 使用虚方法is_random_horizontal_flip()，避免dynamic_cast开销
      */
     bool is_random_horizontal_flip(const PreprocessOperation* op) {
-        return false;  // TODO: 实现RandomHorizontalFlip后返回true
-        // return dynamic_cast<const RandomHorizontalFlip*>(op) != nullptr;
+        return op->is_random_horizontal_flip();
     }
 
     /**
@@ -1632,6 +1575,20 @@ void Preprocessor::set_train_transforms(Ops&&... ops) {
     for (auto& op : flip_ops) {
         train_ops_template_.push_back(std::move(op));
     }
+
+    // ==================== 设置所有PO的颜色通道数 ====================
+    for (auto& op : train_ops_template_) {
+        op->set_num_channels(num_color_channels_);
+    }
+
+	train_ops_template_[0]->set_as_first();  // 标记首个PO
+
+    // ==================== 检测是否包含RandomHorizontalFlip（复用排序时的检测结果）====================
+    bool train_with_rhf = !flip_ops.empty();  // 排序时已经检测过
+    if (train_with_rhf) {
+        LOG_INFO << "Train transforms contain RandomHorizontalFlip";
+    }
+    GlobalRegistry::instance().set_train_with_rhf(train_with_rhf);
 
     // ==================== 计算Workshop大小（按照PW2.md规范）====================
     calculate_workshop_sizes();
@@ -1718,6 +1675,20 @@ void Preprocessor::set_val_transforms(Ops&&... ops) {
         val_ops_template_.push_back(std::move(op));
     }
 
+    // ==================== 设置所有PO的颜色通道数 ====================
+    for (auto& op : val_ops_template_) {
+        op->set_num_channels(num_color_channels_);
+    }
+
+	val_ops_template_[0]->set_as_first();  // 标记首个PO
+
+    // ==================== 检测是否包含RandomHorizontalFlip（复用排序时的检测结果）====================
+    bool val_with_rhf = !flip_ops.empty();  // 排序时已经检测过
+    if (val_with_rhf) {
+        LOG_INFO << "Validation transforms contain RandomHorizontalFlip";
+    }
+    GlobalRegistry::instance().set_val_with_rhf(val_with_rhf);
+
     // 标记val transforms已设置
     val_transforms_set_ = true;
 
@@ -1729,12 +1700,18 @@ void Preprocessor::set_val_transforms(Ops&&... ops) {
 
 // 显式实例化模板（支持常用的transform组合）
 template void Preprocessor::set_train_transforms<>(void);  // 空参数包
+template void Preprocessor::set_train_transforms<PreprocessOperation&>(PreprocessOperation&);
+template void Preprocessor::set_train_transforms<PreprocessOperation&, PreprocessOperation&>(PreprocessOperation&, PreprocessOperation&);
 template void Preprocessor::set_train_transforms<Resize>(Resize&&);
 template void Preprocessor::set_train_transforms<CenterCrop>(CenterCrop&&);
 template void Preprocessor::set_train_transforms<CenterCrop, Resize>(CenterCrop&&, Resize&&);
+template void Preprocessor::set_train_transforms<RandomResizedCrop>(RandomResizedCrop&&);
 template void Preprocessor::set_val_transforms<>(void);  // 空参数包
+template void Preprocessor::set_val_transforms<PreprocessOperation&>(PreprocessOperation&);
+template void Preprocessor::set_val_transforms<PreprocessOperation&, PreprocessOperation&>(PreprocessOperation&, PreprocessOperation&);
 template void Preprocessor::set_val_transforms<Resize>(Resize&&);
 template void Preprocessor::set_val_transforms<CenterCrop>(CenterCrop&&);
+template void Preprocessor::set_val_transforms<RandomResizedCrop>(RandomResizedCrop&&);
 
 void Preprocessor::set_deployment_transforms() {
     // TODO: 后续实现
@@ -1753,6 +1730,9 @@ void Preprocessor::config_deployment_mode(int batch_size,
 
     // 启用Deployment模式
     is_deployment_mode_ = true;
+
+    // 注册到GlobalRegistry
+    GlobalRegistry::instance().set_is_deployment_mode(true);
 
     // 绑定SampleLoader（一次性绑定）
     current_dataloader_ = &SampleLoader::instance();
@@ -1790,10 +1770,108 @@ void Preprocessor::config_deployment_mode(int batch_size,
 }
 
 // =============================================================================
-// 高级封装方法：train()和val()
+// 高级封装方法：multi_thread_init(), train()和val()
 // =============================================================================
 
+void Preprocessor::multi_thread_init() {
+    LOG_INFO << "Multi-thread initialization started";
+
+    // 创建临时线程池（用于绑核等初始化操作）
+    std::vector<std::thread> init_threads;
+    init_threads.reserve(num_preproc_workers_);
+
+    // EngineBuffer创建的互斥锁
+    static std::mutex eb_create_mutex;
+
+    // 展开所有worker线程
+    for (int i = 0; i < num_preproc_workers_; ++i) {
+        init_threads.emplace_back([this, i]() {
+
+            // ==================== CPU绑核（GPU_CLOUD + auto_binding）====================
+#if defined(TR_SCENE_GPU_CLOUD)
+            if (auto_cpu_binding_ && !selected_gpu_ids_.empty()) {
+                const auto& binding_map = GlobalRegistry::instance().cpu_binding_map();
+
+                TR_CHECK(i >= 0 && i < static_cast<int>(binding_map.size()),
+                         ValueError, "worker_id out of range: " << i);
+
+                int target_cpu = binding_map[i];
+
+                cpu_set_t cpuset;
+                CPU_ZERO(&cpuset);
+                CPU_SET(target_cpu, &cpuset);
+
+                int ret = pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
+                TR_CHECK(ret == 0, DeviceError,
+                         "pthread_setaffinity_np failed for worker " << i
+                         << " -> CPU " << target_cpu << ": " << strerror(errno));
+
+                LOG_DEBUG << "PW[" << i << "] -> CPU[" << target_cpu << "] (init)";
+            }
+#endif
+
+            // ==================== EngineBuffer创建（仅线程0~world_size-1）====================
+            if (i < world_size_) {
+                std::lock_guard<std::mutex> lock(eb_create_mutex);
+
+                // 确保engine_buffer_instances_有足够空间
+                if (engine_buffer_instances_.size() < static_cast<size_t>(world_size_)) {
+                    engine_buffer_instances_.resize(world_size_);
+                }
+
+                // 如果当前EngineBuffer还没创建，就创建它
+                if (!engine_buffer_instances_[i]) {
+                    LOG_INFO << "[Worker " << i << "] Creating EngineBuffer instance for Engine " << i;
+
+                    // 计算每个Engine的worker数
+                    int num_workers_per_engine = num_preproc_workers_ / world_size_;
+
+                    // 创建EngineBuffer实例
+                    engine_buffer_instances_[i] = std::unique_ptr<EngineBuffer>(
+                        new EngineBuffer()  // 使用默认参数test_mode=false（正常模式）
+                    );
+
+                    // 配置EngineBuffer
+                    engine_buffer_instances_[i]->configure(
+                        batch_size_,                      // local_batch_size
+                        sample_size_bytes_,               // max_train_sample_bytes
+                        sample_size_bytes_,               // max_val_sample_bytes
+                        num_workers_per_engine,           // num_workers_per_engine
+                        i                                 // engine_id（线程ID）
+                    );
+
+                    // 更新phase（默认train模式）
+                    engine_buffer_instances_[i]->update_phase(
+                        true,              // is_train
+                        max_resolution_,   // current_resolution
+                        num_color_channels_ // num_color_channels
+                    );
+
+                    LOG_INFO << "[Worker " << i << "] EngineBuffer " << i << " created and configured successfully";
+                }
+            }
+
+            LOG_DEBUG << "Initialization thread " << i << " completed";
+        });
+    }
+
+    // Join所有线程（必须！确保NUMA架构下的正确初始化）
+    for (auto& t : init_threads) {
+        if (t.joinable()) {
+            t.join();
+        }
+    }
+
+    // 设置初始化完成标志
+    multi_thread_inited_ = true;
+
+    LOG_INFO << "Multi-thread initialization completed (workers=" << num_preproc_workers_ << ")";
+}
+
+// -----------------------------------------------------------------------------
+
 void Preprocessor::train() {
+    GlobalRegistry& gr_instance = GlobalRegistry::instance();
     // 检查状态
     check_state(ConfigState::Initialized, "train");
 
@@ -1801,67 +1879,265 @@ void Preprocessor::train() {
     TR_CHECK(!is_deployment_mode_, ValueError,
              "train() is not available in deployment mode");
 
-    // 开始训练阶段
-    GlobalRegistry::instance().begin_train();
+    // 多线程初始化（如果还未初始化）
+    if (!multi_thread_inited_) {
+        multi_thread_init();
+    }
 
-    // 记录开始时间
-    auto start_time = std::chrono::high_resolution_clock::now();
+    if (train_phase_id_ % sdmp_factor_ == 0) {  // Busy train phase行为
+        is_lazy_phase_ = false;
 
-    // 训练一个epoch
-    current_dataloader_->begin_epoch(train_iteration_id_, true);
-    this->run(*current_dataloader_);  // 原有run方法，包含完整预处理
-    current_dataloader_->end_epoch();
+        // 更新运行时参数
+        pw_param_.is_train = true;
+        pw_param_.is_lazy_phase = false;
+        pw_param_.active_s_region_idx = -1;  // Busy phase不从S区读取
+        pw_param_.phase_id = train_phase_id_;
+        pw_param_.current_train_resolution = gr_instance.current_resolution_train();
+        pw_param_.current_val_resolution = gr_instance.current_resolution_val();
 
-    // 记录结束时间
-    auto end_time = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double> elapsed = end_time - start_time;
+        // 开始训练阶段
+        gr_instance.begin_train();
 
-    // 结束训练阶段
-    GlobalRegistry::instance().end_train();
+        // 训练一个epoch
+        current_dataloader_->begin_epoch(train_iteration_id_, true);  // train_iteration_id_标志DataLoader读取训练集的次数，不一定等于epoch数或phase数
+        this->run(*current_dataloader_);  // 原有run方法，包含完整预处理
+        current_dataloader_->end_epoch();
 
-    // 输出时间统计（仅在测试模式下输出简单信息，详细统计由test程序负责）
-    // 注意：test程序会计算更详细的统计信息（包括吞吐量），所以这里不再输出
+        // 结束训练阶段
+        gr_instance.end_train();
 
-    // 递增iteration_id
-    train_iteration_id_++;
+        // 输出时间统计（仅在测试模式下输出简单信息，详细统计由test程序负责）
+        // 注意：test程序会计算更详细的统计信息（包括吞吐量），所以这里不再输出
 
-    LOG_INFO << "Train iteration " << (train_iteration_id_ - 1) << " completed";
+        // 递增iteration_id
+        train_iteration_id_++;  // train_iteration_id_标志DataLoader读取训练集的次数，不一定等于epoch数或phase数
+    }
+    else {  // Lazy train phase行为
+        is_lazy_phase_ = true;
+        // 注意！这个时候是不需要递增train_iteration_id_的！因为并没有调用DataLoader！
+
+        // 更新运行时参数
+        pw_param_.is_train = true;
+        pw_param_.is_lazy_phase = true;
+        pw_param_.active_s_region_idx = (train_phase_id_ % sdmp_factor_) - 1;
+        pw_param_.phase_id = train_phase_id_;
+        pw_param_.current_train_resolution = gr_instance.current_resolution_train();
+        pw_param_.current_val_resolution = gr_instance.current_resolution_val();
+
+        // ==================== 重置样本计数器 ====================
+        total_samples_.store(0, std::memory_order_relaxed);
+
+        // 开始训练阶段
+        gr_instance.begin_train();
+
+        // ==================== 展开Lazy Train Phase ====================
+        // 参照worker_func_persistent的结构，但不涉及DataLoader
+
+        std::vector<std::thread> lazy_threads;
+        for (int i = 0; i < num_preproc_workers_; ++i) {
+            lazy_threads.emplace_back([this, i]() {
+                // ==================== Step 1: CPU绑核（GPU_CLOUD + auto_binding）====================
+#if defined(TR_SCENE_GPU_CLOUD)
+                if (auto_cpu_binding_ && !selected_gpu_ids_.empty()) {
+                    const auto& binding_map = GlobalRegistry::instance().cpu_binding_map();
+
+                    TR_CHECK(i >= 0 && i < static_cast<int>(binding_map.size()),
+                             ValueError, "worker_id out of range: " << i);
+
+                    int target_cpu = binding_map[i];
+
+                    cpu_set_t cpuset;
+                    CPU_ZERO(&cpuset);
+                    CPU_SET(target_cpu, &cpuset);
+
+                    int ret = pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
+                    TR_CHECK(ret == 0, DeviceError,
+                             "pthread_setaffinity_np failed for worker " << i
+                             << " -> CPU " << target_cpu << ": " << strerror(errno));
+
+                    LOG_DEBUG << "[Lazy Train PW[" << i << "] -> CPU[" << target_cpu << "]";
+                }
+#endif
+
+                // ==================== Step 2: PW更新参数 ====================
+                if (pw_instances_[i]) {
+                    pw_instances_[i]->update_parameters();
+                }
+
+                // ==================== Step 3: EngineBuffer更新 ====================
+                // 只有每个Engine的第一个PW（worker_id < world_size_）负责更新对应的EngineBuffer
+                if (i < world_size_) {
+                    int engine_id = i % world_size_;
+                    if (engine_buffer_instances_[engine_id]) {
+                        engine_buffer_instances_[engine_id]->reset_and_update();
+                        LOG_DEBUG << "[Lazy Train Worker " << i << "] EngineBuffer " << engine_id << " reset_and_update called";
+                    }
+                }
+
+                // ==================== Step 4: 调用PW的work_lazy() ====================
+                if (pw_instances_[i]) {
+                    pw_instances_[i]->work_lazy();
+                }
+
+                LOG_DEBUG << "[Lazy Train Worker " << i << "] completed";
+            });
+        }
+
+        // 等待所有lazy线程完成
+        for (auto& t : lazy_threads) {
+            if (t.joinable()) {
+                t.join();
+            }
+        }
+
+        // ==================== 设置正确的样本数 ====================
+        // Lazy Phase从S区复制数据，没有通过DataLoader累加total_samples_
+        // 所以需要手动设置为训练集样本总数
+        total_samples_.store(current_dataloader_->num_train_samples(), std::memory_order_relaxed);
+
+        // 结束训练阶段
+        gr_instance.end_train();
+        // 注意！这个时候是不需要递增train_iteration_id_的！因为并没有调用DataLoader！
+    }
+
+    train_phase_id_++;  // 只要调用了train()就必定递增
 }
 
 void Preprocessor::val() {
+    GlobalRegistry& gr_instance = GlobalRegistry::instance();
     // 检查状态
     check_state(ConfigState::Initialized, "val");
 
-    // 开始验证阶段
-    GlobalRegistry::instance().begin_val();
-
-    // 记录开始时间
-    auto start_time = std::chrono::high_resolution_clock::now();
-
-    // 验证一个epoch（不递增iteration_id）
-    if (is_deployment_mode_) {
-        // Deployment模式：使用SampleLoader
-        current_dataloader_->begin_epoch(0, false);
-        this->run(*current_dataloader_);
-        current_dataloader_->end_epoch();
-    } else {
-        // 普通模式：使用验证集
-        current_dataloader_->begin_epoch(val_iteration_id_, false);
-        this->run(*current_dataloader_);
-        current_dataloader_->end_epoch();
+    // 多线程初始化（如果还未初始化）
+    if (!multi_thread_inited_) {
+        multi_thread_init();
     }
 
-    // 记录结束时间
-    auto end_time = std::chrono::high_resolution_clock::now();
-    std::chrono::duration<double> elapsed = end_time - start_time;
+    if (val_phase_id_ == 0) {  // Busy val phase行为
+        is_lazy_phase_ = false;
 
-    // 结束验证阶段
-    GlobalRegistry::instance().end_val();
+        // 更新运行时参数
+        pw_param_.is_train = false;
+        pw_param_.is_lazy_phase = false;
+        pw_param_.active_s_region_idx = -1;  // Val phase不从S区读取
+        pw_param_.phase_id = val_phase_id_;
+        pw_param_.current_train_resolution = gr_instance.current_resolution_train();
+        pw_param_.current_val_resolution = gr_instance.current_resolution_val();
 
-    // 输出时间统计（仅在测试模式下输出简单信息，详细统计由test程序负责）
-    // 注意：test程序会计算更详细的统计信息（包括吞吐量），所以这里不再输出
+        // 开始验证阶段
+        gr_instance.begin_val();
 
-    LOG_INFO << "Validation completed";
+        // 验证一个epoch（不递增iteration_id）
+        if (is_deployment_mode_) {
+            // Deployment模式：使用SampleLoader
+            current_dataloader_->begin_epoch(0, false);
+            this->run(*current_dataloader_);
+            current_dataloader_->end_epoch();
+        } else {
+            // 普通模式：使用验证集
+            current_dataloader_->begin_epoch(val_iteration_id_, false);  // val_iteration_id_标志DataLoader读取验证集的次数，不一定等于epoch数或phase数
+            this->run(*current_dataloader_);
+            current_dataloader_->end_epoch();
+        }
+
+        // 结束验证阶段
+        gr_instance.end_val();
+
+        // 输出时间统计（仅在测试模式下输出简单信息，详细统计由test程序负责）
+        // 注意：test程序会计算更详细的统计信息（包括吞吐量），所以这里不再输出
+
+        // 递增iteration_id
+        val_iteration_id_++;  // val_iteration_id_标志DataLoader读取验证集的次数，不一定等于epoch数或phase数
+    }
+    else {  // Lazy val phase行为
+        is_lazy_phase_ = true;
+        // 注意！这个阶段是不需要递增iteration_id_的！因为并没有调用DataLoader！
+
+        // 更新运行时参数
+        pw_param_.is_train = false;
+        pw_param_.is_lazy_phase = true;
+        pw_param_.active_s_region_idx = -1;  // Val phase不从S区读取
+        pw_param_.phase_id = val_phase_id_;
+        pw_param_.current_train_resolution = gr_instance.current_resolution_train();
+        pw_param_.current_val_resolution = gr_instance.current_resolution_val();
+
+        // ==================== 重置样本计数器 ====================
+        total_samples_.store(0, std::memory_order_relaxed);
+
+        // 开始验证阶段
+        gr_instance.begin_val();
+
+        // ==================== 展开Lazy Val Phase ====================
+        // 参照worker_func_persistent的结构，但不涉及DataLoader
+
+        std::vector<std::thread> lazy_threads;
+        for (int i = 0; i < num_preproc_workers_; ++i) {
+            lazy_threads.emplace_back([this, i]() {
+                // ==================== Step 1: CPU绑核（GPU_CLOUD + auto_binding）====================
+#if defined(TR_SCENE_GPU_CLOUD)
+                if (auto_cpu_binding_ && !selected_gpu_ids_.empty()) {
+                    const auto& binding_map = GlobalRegistry::instance().cpu_binding_map();
+
+                    TR_CHECK(i >= 0 && i < static_cast<int>(binding_map.size()),
+                             ValueError, "worker_id out of range: " << i);
+
+                    int target_cpu = binding_map[i];
+
+                    cpu_set_t cpuset;
+                    CPU_ZERO(&cpuset);
+                    CPU_SET(target_cpu, &cpuset);
+
+                    int ret = pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
+                    TR_CHECK(ret == 0, DeviceError,
+                             "pthread_setaffinity_np failed for worker " << i
+                             << " -> CPU " << target_cpu << ": " << strerror(errno));
+
+                    LOG_DEBUG << "[Lazy Val PW[" << i << "] -> CPU[" << target_cpu << "]";
+                }
+#endif
+
+                // ==================== Step 2: PW更新参数 ====================
+                if (pw_instances_[i]) {
+                    pw_instances_[i]->update_parameters();
+                }
+
+                // ==================== Step 3: EngineBuffer更新 ====================
+                // 只有每个Engine的第一个PW（worker_id < world_size_）负责更新对应的EngineBuffer
+                if (i < world_size_) {
+                    int engine_id = i % world_size_;
+                    if (engine_buffer_instances_[engine_id]) {
+                        engine_buffer_instances_[engine_id]->reset_and_update();
+                        LOG_DEBUG << "[Lazy Val Worker " << i << "] EngineBuffer " << engine_id << " reset_and_update called";
+                    }
+                }
+
+                // ==================== Step 4: 调用PW的work_lazy() ====================
+                if (pw_instances_[i]) {
+                    pw_instances_[i]->work_lazy();
+                }
+
+                LOG_DEBUG << "[Lazy Val Worker " << i << "] completed";
+            });
+        }
+
+        // 等待所有lazy线程完成
+        for (auto& t : lazy_threads) {
+            if (t.joinable()) {
+                t.join();
+            }
+        }
+
+        // ==================== 设置正确的样本数 ====================
+        // Lazy Phase从C区复制数据，没有通过DataLoader累加total_samples_
+        // 所以需要手动设置为验证集样本总数
+        total_samples_.store(current_dataloader_->num_val_samples(), std::memory_order_relaxed);
+
+        // 结束验证阶段
+        gr_instance.end_val();
+        // 注意！这个阶段是不需要递增iteration_id_的！因为并没有调用DataLoader！
+    }
+
+    val_phase_id_++;  // 只要调用了val()就必定递增
 }
 
 // =============================================================================
@@ -2144,6 +2420,13 @@ void Preprocessor::calculate_workshop_sizes() {
     size_t ab_size = stride * max_resolution_;
     workshop_region_ab_size_ = align_4k(ab_size);  // 对齐到4KB页边界
 
+    // ==================== 计算S区和C区共用对齐后大小（64字节对齐）====================
+    // 这个值用于S区和C区，train和val共享
+    size_t aligned_max_output = align_64(max_train_output);  // max_train_output == max_val_output
+    GlobalRegistry::instance().set_aligned_max_output_size(aligned_max_output);
+
+    LOG_DEBUG << "Registered aligned_max_output_size to GlobalRegistry: " << aligned_max_output << " bytes";
+
     // ==================== 3. 计算T区大小 ====================
     // T区默认为0，需要根据PO的require_temp()决定
     // 目前我们假设不需要T区（TODO: 检查PO是否require_temp）
@@ -2152,59 +2435,66 @@ void Preprocessor::calculate_workshop_sizes() {
         workshop_region_t_size_ = align_4k(workshop_region_t_size_);  // 对齐到4KB页边界
     }
 
-    // ==================== 4. 计算S区大小 ====================
+    // ==================== 4. 计算S区容量和大小 ====================
     // 按照EXP2.md第366-368行的公式
     // S区需要对齐到4KB页边界（NUMA优化）
+
+    // 始终计算max_s_samples_（不管是否启用SDMP）
+    TR_CHECK(current_dataloader_ != nullptr, ValueError,
+             "calculate_workshop_sizes: current_dataloader_ is null");
+    size_t num_train = current_dataloader_->num_train_samples();
+    size_t num_train_per_engine = (num_train + world_size_ - 1) / world_size_;
+    int num_workers_per_engine = num_preproc_workers_ / world_size_;
+    max_s_samples_ = static_cast<int>((num_train_per_engine + num_workers_per_engine - 1) / num_workers_per_engine);
+
+    // ==================== 向GlobalRegistry注册S区原始索引向量 ====================
+    // 这个向量用于S区洗牌，所有PW共享同一个原始顺序定义
+    std::vector<int> s_original_indices(max_s_samples_);
+    for (int i = 0; i < max_s_samples_; ++i) {
+        s_original_indices[i] = i;  // [0, 1, 2, ..., max_s_samples_-1]
+    }
+    GlobalRegistry::instance().set_fixed_s_original_indices(s_original_indices);
+
+    LOG_DEBUG << "Registered fixed_s_original_indices_ to GlobalRegistry: size=" << max_s_samples_;
+
+    // 只有启用SDMP时才分配S区内存
     if (sdmp_factor_ > 1) {
-        // num_train_samples_per_engine = (num_train_samples + world_size - 1) / world_size
-        TR_CHECK(current_dataloader_ != nullptr, ValueError,
-                 "calculate_workshop_sizes: current_dataloader_ is null");
-        size_t num_train = current_dataloader_->num_train_samples();
-        size_t num_train_per_engine = (num_train + world_size_ - 1) / world_size_;
-
-        // max_region_s_samples = (num_train_per_engine + num_workers_per_engine - 1) / num_workers_per_engine
-        int num_workers_per_engine = num_preproc_workers_ / world_size_;
-        size_t max_s_samples = (num_train_per_engine + num_workers_per_engine - 1) / num_workers_per_engine;
-
-        // S区大小计算：先对单个样本进行64字节对齐，再对整个S区进行4KB页对齐
+        // S区大小计算：使用已注册的aligned_max_output（64字节对齐）
         // 按照EXP2.md第364-368行的公式
-        size_t aligned_train_output = align_64(max_train_output);  // 单个样本64字节对齐
-        workshop_region_s_size_ = max_s_samples * aligned_train_output;
+        workshop_region_s_size_ = max_s_samples_ * aligned_max_output;
         workshop_region_s_size_ = align_4k(workshop_region_s_size_);  // 4KB页对齐
         workshop_num_region_s_ = sdmp_factor_ - 1;  // S区个数 = sdmp_factor - 1
 
         LOG_DEBUG << "S区计算: num_train=" << num_train
                   << ", per_engine=" << num_train_per_engine
-                  << ", max_s_samples=" << max_s_samples
+                  << ", max_s_samples=" << max_s_samples_
+                  << ", aligned_max_output=" << aligned_max_output << " bytes"
                   << ", s_size=" << (workshop_region_s_size_ / (1024.0*1024.0)) << " MB";
     } else {
         workshop_region_s_size_ = 0;
         workshop_num_region_s_ = 0;
     }
 
-    // ==================== 5. 计算C区大小 ====================
+    // ==================== 5. 计算C区容量和大小 ====================
     // 按照EXP2.md第395-396行的公式
     // C区需要对单个样本进行64字节对齐，然后对整个C区进行4KB页对齐
+
+    // 始终计算max_c_samples_（不管是否启用CPVS）
+    size_t num_val = current_dataloader_->num_val_samples();
+    size_t num_val_per_engine = (num_val + world_size_ - 1) / world_size_;
+    max_c_samples_ = static_cast<int>((num_val_per_engine + num_workers_per_engine - 1) / num_workers_per_engine);
+
+    // 只有启用CPVS时才分配C区内存
     if (using_cpvs_) {
-        // num_val_samples_per_engine = (num_val_samples + world_size - 1) / world_size
-        TR_CHECK(current_dataloader_ != nullptr, ValueError,
-                 "calculate_workshop_sizes: current_dataloader_ is null");
-        size_t num_val = current_dataloader_->num_val_samples();
-        size_t num_val_per_engine = (num_val + world_size_ - 1) / world_size_;
-
-        // max_region_c_samples = (num_val_per_engine + num_workers_per_engine - 1) / num_workers_per_engine
-        int num_workers_per_engine = num_preproc_workers_ / world_size_;
-        size_t max_c_samples = (num_val_per_engine + num_workers_per_engine - 1) / num_workers_per_engine;
-
-        // C区大小计算：先对单个样本进行64字节对齐，再对整个C区进行4KB页对齐
+        // C区大小计算：使用已注册的aligned_max_output（64字节对齐）
         // 64字节对齐确保单个样本的访问效率，4KB页对齐确保NUMA性能
-        size_t aligned_val_output = align_64(max_val_output);  // 单个样本64字节对齐
-        workshop_region_c_size_ = max_c_samples * aligned_val_output;
+        workshop_region_c_size_ = max_c_samples_ * aligned_max_output;
         workshop_region_c_size_ = align_4k(workshop_region_c_size_);  // 4KB页对齐
 
         LOG_DEBUG << "C区计算: num_val=" << num_val
                   << ", per_engine=" << num_val_per_engine
-                  << ", max_c_samples=" << max_c_samples
+                  << ", max_c_samples=" << max_c_samples_
+                  << ", aligned_max_output=" << aligned_max_output << " bytes"
                   << ", c_size=" << (workshop_region_c_size_ / (1024.0*1024.0)) << " MB";
     } else {
         workshop_region_c_size_ = 0;
@@ -2213,7 +2503,7 @@ void Preprocessor::calculate_workshop_sizes() {
     // ==================== 输出汇总信息 ====================
     LOG_INFO << "Workshop大小计算完成:"
              << "\n  D区: " << (workshop_region_d_size_ / (1024.0*1024.0)) << " MB"
-             << "\n  AB区: " << (workshop_region_ab_size_ / 1024.0) << " KB (对齐后)"
+             << "\n  AB区: " << (workshop_region_ab_size_ / (1024.0*1024.0)) << " MB (对齐后)"
              << "\n  T区: " << (workshop_region_t_size_ / 1024.0) << " KB"
              << "\n  S区: " << (workshop_region_s_size_ / (1024.0*1024.0)) << " MB (x" << workshop_num_region_s_ << ")"
              << "\n  C区: " << (workshop_region_c_size_ / (1024.0*1024.0)) << " MB";
@@ -2270,6 +2560,18 @@ void Preprocessor::create_pw_instances(bool is_train) {
         // 测试模式
         pw_config.test_mode = pw_test_mode_;
 
+        // SDMP/CPVS缓存容量（样本数）
+        pw_config.max_s_samples = max_s_samples_;
+        pw_config.max_c_samples = max_c_samples_;
+
+        // EngineBuffer指针（V3.14.0 - 跨步分配：worker_id % world_size）
+        // 对应关系：PW ID % world_size = EngineBuffer ID
+        if (!engine_buffer_instances_.empty() && pw_config.engine_id < static_cast<int>(engine_buffer_instances_.size())) {
+            pw_config.engine_buffer = engine_buffer_instances_[pw_config.engine_id].get();
+        } else {
+            pw_config.engine_buffer = nullptr;
+        }
+
         // 创建PW实例（同时传入train_ops和val_ops）
         // 注意：PreprocessWorker会在内部克隆PO，所以可以传递const引用
         // 使用new而不是make_unique，因为make_unique无法处理const unique_ptr向量
@@ -2277,35 +2579,13 @@ void Preprocessor::create_pw_instances(bool is_train) {
             new PreprocessWorker(
                 pw_config,
                 train_ops_template_,  // 训练集PO列表
-                val_ops_template_     // 验证集PO列表
+                val_ops_template_,     // 验证集PO列表
+                &pw_param_
             )
         );
     }
 
     LOG_INFO << "PW instances created successfully";
-}
-
-void Preprocessor::update_pw_parameters(bool is_train) {
-    // 确保PW实例已创建
-    if (pw_instances_.empty()) {
-        TR_THROW(ValueError, "PW instances not created. Call create_pw_instances() first.");
-    }
-
-    // 更新运行时参数
-    pw_param_.is_train = is_train;
-    pw_param_.is_busy_epoch = true;  // 在train/val期间总是true
-    pw_param_.active_s_region_idx = 0;  // 从第0个S区开始
-    pw_param_.is_first_val = !is_train && (val_iteration_id_ == 0);  // 首次验证
-    pw_param_.current_train_resolution = max_resolution_;  // 当前使用固定分辨率
-    pw_param_.current_val_resolution = max_resolution_;
-    pw_param_.epoch_id = is_train ? train_iteration_id_ : val_iteration_id_;
-
-    // 向所有PW广播参数更新
-    for (int i = 0; i < num_preproc_workers_; ++i) {
-        if (pw_instances_[i]) {
-            pw_instances_[i]->update_parameters(pw_param_);
-        }
-    }
 }
 
 void Preprocessor::destroy_pw_instances() {
@@ -2594,9 +2874,11 @@ void Preprocessor::validate_gpu_ids(const std::vector<int>& gpu_ids) {
     TR_CHECK(n_gpus > 0 && n_gpus < 16 && ((n_gpus & (n_gpus - 1)) == 0), ValueError,
              "GPU count must be a power of 2 and < 16, got: " << n_gpus);
 
-    // 验证与world_size一致
-    TR_CHECK(n_gpus == world_size_, ValueError,
-             "GPU count (" << n_gpus << ") != world_size (" << world_size_ << ")");
+    // 验证与world_size一致（如果world_size已设置）
+    if (world_size_ != -1) {
+        TR_CHECK(n_gpus == world_size_, ValueError,
+                 "GPU count (" << n_gpus << ") != world_size (" << world_size_ << ")");
+    }
 }
 
 #endif  // TR_USE_CUDA

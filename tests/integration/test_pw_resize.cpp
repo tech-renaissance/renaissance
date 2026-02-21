@@ -129,6 +129,7 @@ int main(int argc, char* argv[]) {
     std::cout << "Setting transforms (Resize only)...\n";
     prep.set_train_transforms(Resize(resolution));
     prep.set_val_transforms(Resize(resolution));
+    prep.multi_thread_init();
 
     // 步骤5：运行训练集测试
     std::cout << "\n=== Testing Train Set ===\n";

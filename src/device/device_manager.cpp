@@ -71,6 +71,14 @@ void DeviceManager::initialize() {
     initialized_ = true;
 }
 
+DeviceManager::~DeviceManager() {
+    LOG_INFO << "DeviceManager destructor started";
+
+    // devices_数组会自动析构，触发CudaDevice析构
+
+    LOG_INFO << "DeviceManager destructor completed";
+}
+
 // ===== 器件访问实现 =====
 
 Device& DeviceManager::get(const DeviceType& type) {

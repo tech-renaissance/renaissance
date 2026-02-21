@@ -19,9 +19,10 @@ void DoNothing::execute(
     uint8_t* output_ptr,
     int32_t& output_width,
     int32_t& output_height,
-    size_t output_stride,
+    size_t& output_stride,
     Generator* rng,
-    bool execute_from_full  // DoNothing不使用此参数
+    bool execute_from_full,  // DoNothing不使用此参数
+    bool compact
 ) {
     (void)rng;
     (void)execute_from_full;  // DoNothing直接复制，忽略此参数
@@ -29,8 +30,19 @@ void DoNothing::execute(
     output_width = input_width;
     output_height = input_height;
 
+    // ==================== 自动计算output_stride（如果为0）====================
+    if (output_stride == 0) {
+        if (compact) {
+            // 紧凑布局：无padding
+            output_stride = output_width * num_channels_;
+        } else {
+            // Stride布局：64字节对齐
+            output_stride = calculate_stride(output_width, num_channels_);
+        }
+    }
+
     // 逐行复制（处理stride可能不同的情况）
-    size_t row_bytes = input_width * 3;
+    size_t row_bytes = input_width * num_channels_;
 
     for (int y = 0; y < input_height; ++y) {
         std::memcpy(output_ptr + y * output_stride,

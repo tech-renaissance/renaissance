@@ -122,9 +122,25 @@ uint64_t Generator::current_offset() const noexcept {
     return impl_->offset_.load(std::memory_order_relaxed);
 }
 
+int Generator::random_int(int low, int high) {
+    // 预留一个offset用于生成随机数
+    uint64_t offset = next_offset(1);
+    uint64_t seed_val = seed();
+
+    // 生成一个64位随机数
+    uint64_t random_val = detail::philox_uint64(seed_val, offset);
+
+    // 映射到[low, high]范围
+    // 注意：范围包含两端，所以range = high - low + 1
+    uint64_t range = static_cast<uint64_t>(high) - static_cast<uint64_t>(low) + 1;
+    uint64_t val = random_val % range;
+
+    return static_cast<int>(low + static_cast<int64_t>(val));
+}
+
 // =============================================================================
 // 全局函数实现
-// =============================================================================
+// ==============================================================================
 
 Generator& get_default_generator() {
     // Meyers单例，线程安全

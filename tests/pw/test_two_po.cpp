@@ -1,8 +1,8 @@
 /**
- * @file test_po.cpp
- * @brief PreprocessOperation单元测试程序
+ * @file test_two_po.cpp
+ * @brief 测试两个PreprocessOperation的链式处理
  * @version 1.0.0
- * @date 2026-02-17
+ * @date 2026-02-21
  * @author 技术觉醒团队
  */
 
@@ -52,20 +52,18 @@ static constexpr int DEFAULT_JPEG_QUALITY = 90;
 void print_usage(const char* program_name) {
     std::cout << "Usage: " << program_name << " [OPTIONS]\n\n"
               << "Required Options:\n"
-              << "  --po <NAME>         PO to test (Resize/CenterCrop/RandomResizedCrop/RandomHorizontalFlip/DoNothing)\n\n"
+              << "  --po1 <NAME>        First PO (Resize/CenterCrop/RandomResizedCrop/RandomHorizontalFlip/DoNothing)\n"
+              << "  --po2 <NAME>        Second PO (Resize/CenterCrop/RandomResizedCrop/RandomHorizontalFlip/DoNothing)\n\n"
               << "Optional Options:\n"
               << "  --input <PATH>      Input image path (default: input.jpg)\n"
-              << "  --output <PATH>     Output image path (default: workspace/output_<NAME>.jpg)\n"
+              << "  --output <PATH>     Output image path (default: workspace/output_two_po.jpg)\n"
               << "  --size <N>          Output size (default: 224)\n"
               << "  --quality <N>       JPEG quality for output (default: 90)\n"
-              << "  --seed <N>          Random seed for RandomResizedCrop (default: 42)\n"
+              << "  --seed <N>          Random seed (default: 42)\n"
               << "  --help              Show this help message\n\n"
               << "Examples:\n"
-              << "  " << program_name << " --po Resize --size 224\n"
-              << "  " << program_name << " --po CenterCrop --size 224\n"
-              << "  " << program_name << " --po RandomResizedCrop --size 224 --seed 42\n"
-              << "  " << program_name << " --po RandomHorizontalFlip --size 224\n"
-              << "  " << program_name << " --input custom.jpg --output result.jpg --po Resize --size 128\n";
+              << "  " << program_name << " --po1 RandomResizedCrop --po2 RandomHorizontalFlip --size 224\n"
+              << "  " << program_name << " --po1 Resize --po2 CenterCrop --size 128 --seed 123\n";
 }
 
 /**
@@ -372,8 +370,8 @@ std::unique_ptr<PreprocessOperation> create_po(const std::string& name, int size
 int main(int argc, char* argv[]) {
     // 解析参数
     std::string input_path = "input.jpg";
-    std::string output_path;  // 默认根据PO名称生成
-    std::string po_name;
+    std::string output_path = "workspace/output_two_po.jpg";
+    std::string po1_name, po2_name;
     int output_size = DEFAULT_OUTPUT_SIZE;
     int jpeg_quality = DEFAULT_JPEG_QUALITY;
     uint64_t random_seed = 42;
@@ -388,8 +386,10 @@ int main(int argc, char* argv[]) {
             input_path = argv[++i];
         } else if (arg == "--output" && i + 1 < argc) {
             output_path = argv[++i];
-        } else if (arg == "--po" && i + 1 < argc) {
-            po_name = argv[++i];
+        } else if (arg == "--po1" && i + 1 < argc) {
+            po1_name = argv[++i];
+        } else if (arg == "--po2" && i + 1 < argc) {
+            po2_name = argv[++i];
         } else if (arg == "--size" && i + 1 < argc) {
             output_size = std::atoi(argv[++i]);
         } else if (arg == "--quality" && i + 1 < argc) {
@@ -403,26 +403,22 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    if (po_name.empty()) {
-        std::cerr << "[ERROR] --po parameter is required\n";
+    if (po1_name.empty() || po2_name.empty()) {
+        std::cerr << "[ERROR] --po1 and --po2 parameters are required\n";
         print_usage(argv[0]);
         return 1;
-    }
-
-    // 如果没有指定输出路径，使用默认路径
-    if (output_path.empty()) {
-        output_path = "workspace/output_" + po_name + ".jpg";
     }
 
     // 初始化Logger（启用INFO级别）
     Logger::instance().set_level(LogLevel::INFO);
 
-    std::cout << "\n========== PreprocessOperation Unit Test ==========\n";
-    std::cout << "PO: " << po_name << "\n";
+    std::cout << "\n========== Two POs Chain Test ==========\n";
+    std::cout << "PO1: " << po1_name << "\n";
+    std::cout << "PO2: " << po2_name << "\n";
     std::cout << "Output size: " << output_size << "\n";
     std::cout << "Input: " << input_path << "\n";
     std::cout << "Output: " << output_path << "\n";
-    std::cout << "====================================================\n\n";
+    std::cout << "=========================================\n\n";
 
     try {
         // =====================================================================
@@ -447,25 +443,32 @@ int main(int argc, char* argv[]) {
         tj3Set(tj, TJPARAM_FASTUPSAMPLE, 1);
 
         // =====================================================================
-        // Step 3: 创建PO
+        // Step 3: 创建PO1和PO2
         // =====================================================================
-        auto po = create_po(po_name, output_size);
-        if (!po) {
+        auto po1 = create_po(po1_name, output_size);
+        if (!po1) {
             tj3Destroy(tj);
             return 1;
         }
 
-        std::cout << "[INFO] Created PO: " << po->name() << "\n";
+        auto po2 = create_po(po2_name, output_size);
+        if (!po2) {
+            tj3Destroy(tj);
+            return 1;
+        }
 
-        // 初始化RNG（用于RandomResizedCrop等随机操作）
+        std::cout << "[INFO] Created PO1: " << po1->name() << "\n";
+        std::cout << "[INFO] Created PO2: " << po2->name() << "\n";
+
+        // 初始化RNG（用于随机操作）
         Generator rng;
         rng.set_seed(random_seed);
-        if (po->introduce_randomness()) {
-            std::cout << "[INFO] PO introduces randomness, using seed: " << random_seed << "\n";
+        if (po1->introduce_randomness() || po2->introduce_randomness()) {
+            std::cout << "[INFO] POs introduce randomness, using seed: " << random_seed << "\n";
         }
 
         // =====================================================================
-        // Step 4: 获取解码策略
+        // Step 4: 获取PO1的解码策略
         // =====================================================================
         int32_t image_width = 0, image_height = 0;
 
@@ -480,113 +483,124 @@ int main(int argc, char* argv[]) {
         image_width = tj3Get(tj, TJPARAM_JPEGWIDTH);
         image_height = tj3Get(tj, TJPARAM_JPEGHEIGHT);
 
-        // 获取解码策略（sdmp_factor=1表示不使用SDMP）
-        DecodeStrategy strategy = po->get_decode_strategy(
+        // 获取PO1的解码策略（sdmp_factor=1表示不使用SDMP）
+        DecodeStrategy strategy1 = po1->get_decode_strategy(
             image_width, image_height, 1, &rng
         );
 
-        std::cout << "[INFO] Decode strategy: need_decode=" << strategy.need_decode
-                  << ", use_partial=" << strategy.use_partial << "\n";
+        std::cout << "[INFO] PO1 decode strategy: need_decode=" << strategy1.need_decode
+                  << ", use_partial=" << strategy1.use_partial << "\n";
 
         // =====================================================================
-        // Step 5: 解码JPEG
+        // Step 5: 解码JPEG并执行PO1
         // =====================================================================
-        std::vector<uint8_t> decoded_image;
-        int32_t decoded_w = 0, decoded_h = 0;
-        size_t decoded_stride = 0;
+        std::vector<uint8_t> po1_output;
+        int32_t po1_w = 0, po1_h = 0;
+        size_t po1_stride = 0;
 
         auto start_decode = std::chrono::high_resolution_clock::now();
 
-        if (!strategy.need_decode) {
-            // 非ImageNet场景（直接使用输入数据）
-            std::cerr << "[ERROR] test_po only supports JPEG images\n";
-            tj3Destroy(tj);
-            return 1;
-        }
+        if (strategy1.use_partial) {
+            // PO1使用局部解码
+            std::vector<uint8_t> decoded_image;
+            int32_t decoded_w = 0, decoded_h = 0;
+            size_t decoded_stride = 0;
 
-        if (strategy.use_partial) {
-            // 局部解码
             if (!decode_jpeg_partial(tj, jpeg_data.data(), jpeg_data.size(),
-                                   strategy, decoded_image,
-                                   decoded_w, decoded_h, decoded_stride)) {
+                                    strategy1, decoded_image,
+                                    decoded_w, decoded_h, decoded_stride)) {
                 tj3Destroy(tj);
                 return 1;
             }
 
-            // 执行PO：传递R2解码结果（从起始位置开始）
-            // PO内部会根据execute_from_full=false和保存的相对偏移，从R2中提取R1
-            std::vector<uint8_t> final_buffer;
-            size_t final_stride = calculate_stride(output_size, 3);
-            final_buffer.resize(final_stride * output_size);
+            // 执行PO1：传递R2解码结果（从起始位置开始）
+            po1_stride = calculate_stride(output_size, 3);
+            po1_output.resize(po1_stride * output_size);
 
-            int32_t final_w = 0, final_h = 0;
-            po->execute(decoded_image.data(), decoded_w, decoded_h, decoded_stride,
-                      final_buffer.data(), final_w, final_h, final_stride, &rng,
-                      false);  // execute_from_full=false
+            auto start_po1 = std::chrono::high_resolution_clock::now();
 
-            // 复制结果到decoded_image
-            decoded_image = std::move(final_buffer);
-            decoded_w = final_w;  // 更新宽度
-            decoded_h = final_h;  // 更新高度
-            decoded_stride = final_stride;
+            po1->execute(decoded_image.data(), decoded_w, decoded_h, decoded_stride,
+                        po1_output.data(), po1_w, po1_h, po1_stride, &rng,
+                        false);  // execute_from_full=false
+
+            auto end_po1 = std::chrono::high_resolution_clock::now();
+            double po1_ms = std::chrono::duration<double, std::milli>(
+                end_po1 - start_po1).count();
+
+            std::cout << "[INFO] PO1 execution time: " << std::fixed << std::setprecision(2)
+                      << po1_ms << " ms\n";
 
         } else {
-            // 完整解码
+            // PO1使用完整解码
+            std::vector<uint8_t> decoded_image;
+            int32_t decoded_w = 0, decoded_h = 0;
+            size_t decoded_stride = 0;
+
             if (!decode_jpeg_full(tj, jpeg_data.data(), jpeg_data.size(),
                                 decoded_image, decoded_w, decoded_h, decoded_stride)) {
                 tj3Destroy(tj);
                 return 1;
             }
+
+            // 执行PO1
+            po1_stride = calculate_stride(output_size, 3);
+            po1_output.resize(po1_stride * output_size);
+
+            auto start_po1 = std::chrono::high_resolution_clock::now();
+
+            po1->execute(decoded_image.data(), decoded_w, decoded_h, decoded_stride,
+                        po1_output.data(), po1_w, po1_h, po1_stride, &rng,
+                        true);  // execute_from_full=true
+
+            auto end_po1 = std::chrono::high_resolution_clock::now();
+            double po1_ms = std::chrono::duration<double, std::milli>(
+                end_po1 - start_po1).count();
+
+            std::cout << "[INFO] PO1 execution time: " << std::fixed << std::setprecision(2)
+                      << po1_ms << " ms\n";
         }
 
         auto end_decode = std::chrono::high_resolution_clock::now();
         double decode_ms = std::chrono::duration<double, std::milli>(
             end_decode - start_decode).count();
 
-        std::cout << "[INFO] Decode time: " << std::fixed << std::setprecision(2)
+        std::cout << "[INFO] Decode + PO1 time: " << std::fixed << std::setprecision(2)
                   << decode_ms << " ms\n";
+        std::cout << "[INFO] PO1 output: " << po1_w << "x" << po1_h << "\n";
 
         // 释放TurboJPEG句柄
         tj3Destroy(tj);
 
         // =====================================================================
-        // Step 6: 执行PO（如果不是局部解码情况）
+        // Step 6: 执行PO2（不需要再解码）
         // =====================================================================
-        std::vector<uint8_t> output_image;
-        int32_t output_w = 0, output_h = 0;
-        size_t output_stride = 0;
+        std::vector<uint8_t> po2_output;
+        int32_t po2_w = 0, po2_h = 0;
+        size_t po2_stride = 0;
 
-        if (!strategy.use_partial) {
-            // 完整解码后需要执行PO
-            output_stride = calculate_stride(output_size, 3);
-            output_image.resize(output_stride * output_size);
+        // PO2的输出尺寸由PO1决定
+        po2_stride = calculate_stride(po1_w, 3);
+        po2_output.resize(po2_stride * po1_h);
 
-            auto start_po = std::chrono::high_resolution_clock::now();
+        auto start_po2 = std::chrono::high_resolution_clock::now();
 
-            po->execute(decoded_image.data(), decoded_w, decoded_h, decoded_stride,
-                      output_image.data(), output_w, output_h, output_stride, &rng);
+        po2->execute(po1_output.data(), po1_w, po1_h, po1_stride,
+                    po2_output.data(), po2_w, po2_h, po2_stride, &rng,
+                    true);  // execute_from_full=true（从PO1的完整输出处理）
 
-            auto end_po = std::chrono::high_resolution_clock::now();
-            double po_ms = std::chrono::duration<double, std::milli>(
-                end_po - start_po).count();
+        auto end_po2 = std::chrono::high_resolution_clock::now();
+        double po2_ms = std::chrono::duration<double, std::milli>(
+            end_po2 - start_po2).count();
 
-            std::cout << "[INFO] PO execution time: " << std::fixed << std::setprecision(2)
-                      << po_ms << " ms\n";
-        } else {
-            // 局部解码情况已经在上面执行了PO
-            output_image = std::move(decoded_image);
-            output_w = decoded_w;
-            output_h = decoded_h;
-            output_stride = decoded_stride;
-        }
-
-        std::cout << "[INFO] Final output: " << output_w << "x" << output_h << "\n";
+        std::cout << "[INFO] PO2 execution time: " << std::fixed << std::setprecision(2)
+                  << po2_ms << " ms\n";
+        std::cout << "[INFO] PO2 output: " << po2_w << "x" << po2_h << "\n";
 
         // =====================================================================
         // Step 7: 保存结果
         // =====================================================================
-        if (!save_jpeg_file(output_path, output_image.data(),
-                          output_w, output_h, 3, output_stride, jpeg_quality)) {
+        if (!save_jpeg_file(output_path, po2_output.data(),
+                          po2_w, po2_h, 3, po2_stride, jpeg_quality)) {
             return 1;
         }
 

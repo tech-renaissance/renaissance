@@ -19,9 +19,10 @@ void CenterCrop::execute(
     uint8_t* output_ptr,
     int32_t& output_width,
     int32_t& output_height,
-    size_t output_stride,
+    size_t& output_stride,
     Generator* rng,
-    bool execute_from_full
+    bool execute_from_full,
+    bool compact
 ) {
     (void)rng;
 
@@ -29,13 +30,24 @@ void CenterCrop::execute(
     output_width = output_size_;
     output_height = output_size_;
 
+    // ==================== 自动计算output_stride（如果为0）====================
+    if (output_stride == 0) {
+        if (compact) {
+            // 紧凑布局：无padding
+            output_stride = output_size_ * num_channels_;
+        } else {
+            // Stride布局：64字节对齐
+            output_stride = calculate_stride(output_size_, num_channels_);
+        }
+    }
+
     // Step 1: 将整个输出buffer填充为0（黑色）
     size_t output_size_bytes = output_stride * output_size_;
     std::memset(output_ptr, 0, output_size_bytes);
 
     int copy_w, copy_h, src_x, src_y;
 
-    if (execute_from_full) {
+    if (execute_from_full || !rank_first_in_the_po_chain_) {
         // ===================================================================
         // 模式1：从完整解码的图像中crop（STB备用解码）
         // input是完整图像（如2000x2000），直接计算全局居中位置
@@ -64,11 +76,11 @@ void CenterCrop::execute(
     int paste_y = (output_size_ - copy_h) / 2;
 
     // Step 3: 逐行复制输入图像到输出的居中位置
-    const uint8_t* src_base = input_ptr + src_y * input_stride + src_x * 3;
-    size_t row_bytes = copy_w * 3;
+    const uint8_t* src_base = input_ptr + src_y * input_stride + src_x * num_channels_;
+    size_t row_bytes = copy_w * num_channels_;
 
     for (int y = 0; y < copy_h; ++y) {
-        std::memcpy(output_ptr + (paste_y + y) * output_stride + paste_x * 3,
+        std::memcpy(output_ptr + (paste_y + y) * output_stride + paste_x * num_channels_,
                    src_base + y * input_stride,
                    row_bytes);
     }

@@ -170,7 +170,7 @@ public:
 
 private:
     DeviceManager();
-    ~DeviceManager() = default;
+    ~DeviceManager();
 
     // 禁止拷贝
     DeviceManager(const DeviceManager&) = delete;

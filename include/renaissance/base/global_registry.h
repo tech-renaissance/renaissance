@@ -237,6 +237,42 @@ public:
      */
     bool using_cpvs() const;
 
+    /**
+     * @brief 设置是否为Deployment模式
+     * @param value 是否为Deployment模式
+     * @throws TRException::ValueError 如果已初始化后修改或非幂等赋值
+     */
+    void set_is_deployment_mode(bool value);
+
+    /**
+     * @brief 是否为Deployment模式
+     */
+    bool is_deployment_mode() const;
+
+    /**
+     * @brief 设置训练集是否包含RandomHorizontalFlip
+     * @param value 是否包含RHF
+     * @throws TRException::ValueError 如果已初始化后修改或非幂等赋值
+     */
+    void set_train_with_rhf(bool value);
+
+    /**
+     * @brief 训练集是否包含RandomHorizontalFlip
+     */
+    bool train_with_rhf() const;
+
+    /**
+     * @brief 设置验证集是否包含RandomHorizontalFlip
+     * @param value 是否包含RHF
+     * @throws TRException::ValueError 如果已初始化后修改或非幂等赋值
+     */
+    void set_val_with_rhf(bool value);
+
+    /**
+     * @brief 验证集是否包含RandomHorizontalFlip
+     */
+    bool val_with_rhf() const;
+
     // =========================================================================
     // 设备配置相关（DeviceConfigured状态后设置）
     // =========================================================================
@@ -289,22 +325,66 @@ public:
      */
     const std::vector<int>& cpu_binding_map() const;
 
+    /**
+     * @brief 设置S区原始索引向量
+     * @param indices 索引向量（内容应为[0, 1, 2, ..., max_s_samples-1]）
+     * @throws TRException::ValueError 如果已初始化后修改或非幂等赋值
+     * @note 此向量用于S区洗牌，所有PW共享同一个原始顺序定义
+     */
+    void set_fixed_s_original_indices(const std::vector<int>& indices);
+
+    /**
+     * @brief 获取S区原始索引向量
+     * @return 索引向量的常量引用
+     */
+    const std::vector<int>& fixed_s_original_indices() const;
+
+    /**
+     * @brief 设置训练集样本总数
+     * @param count 训练集样本总数
+     * @throws TRException::ValueError 如果已初始化后修改或非幂等赋值
+     */
+    void set_num_train_samples(size_t count);
+
+    /**
+     * @brief 获取训练集样本总数
+     */
+    size_t num_train_samples() const;
+
+    /**
+     * @brief 设置验证集样本总数
+     * @param count 验证集样本总数
+     * @throws TRException::ValueError 如果已初始化后修改或非幂等赋值
+     */
+    void set_num_val_samples(size_t count);
+
+    /**
+     * @brief 获取验证集样本总数
+     */
+    size_t num_val_samples() const;
+
+    /**
+     * @brief 设置S区/C区单个样本对齐后大小（64字节对齐）
+     * @param size 单个样本字节数（max_resolution × max_resolution × num_color_channels，对齐到64字节）
+     * @throws TRException::ValueError 如果已初始化后修改或非幂等赋值
+     * @note 用于PW计算S区和C区写入位置，train和val共享同一个值
+     */
+    void set_aligned_max_output_size(size_t size);
+
+    /**
+     * @brief 获取S区/C区单个样本对齐后大小
+     */
+    size_t aligned_max_output_size() const;
+
     // =========================================================================
     // alterable变量：专属getter/setter方法
     // =========================================================================
 
-    /**
-     * @brief 设置当前分辨率
-     * @details 只能在is_busy() = false时修改
-     * @param value 当前分辨率
-     * @throws TRException::ValueError 如果is_busy() = true
-     */
-    void set_current_resolution(int value);
 
-    /**
-     * @brief 获取当前分辨率
-     */
-    int current_resolution() const;
+    void set_current_resolution_train(int value);
+    int current_resolution_train() const;
+    void set_current_resolution_val(int value);
+    int current_resolution_val() const;
 
     // =========================================================================
     // 字符串命名方法
@@ -390,6 +470,12 @@ private:
     std::atomic<int> fixed_sdmp_factor_{-1};                                   ///< SDMP因子
     std::atomic<bool> fixed_using_cpvs_{false};                                  ///< 是否使用CPVS
     std::atomic<bool> fixed_using_cpvs_set_{false};                             ///< CPVS是否已设置标志
+    std::atomic<bool> fixed_is_deployment_mode_{false};                         ///< 是否为Deployment模式
+    std::atomic<bool> fixed_is_deployment_mode_set_{false};                     ///< Deployment模式是否已设置标志
+    std::atomic<bool> fixed_train_with_rhf_{false};                             ///< 训练集是否包含RandomHorizontalFlip
+    std::atomic<bool> fixed_train_with_rhf_set_{false};                         ///< train_with_rhf是否已设置标志
+    std::atomic<bool> fixed_val_with_rhf_{false};                               ///< 验证集是否包含RandomHorizontalFlip
+    std::atomic<bool> fixed_val_with_rhf_set_{false};                           ///< val_with_rhf是否已设置标志
 
     // =========================================================================
     // 设备配置相关fixed型变量
@@ -404,10 +490,30 @@ private:
     mutable std::mutex device_mutex_;                                            ///< 保护GPU IDs和绑核映射表的mutex
 
     // =========================================================================
+    // S区洗牌索引向量
+    // =========================================================================
+
+    std::vector<int> fixed_s_original_indices_;                                  ///< S区原始索引向量[0,1,2,...,max_s_samples-1]
+
+    // =========================================================================
+    // 数据集样本总数
+    // =========================================================================
+
+    std::atomic<size_t> fixed_num_train_samples_{0};                            ///< 训练集样本总数
+    std::atomic<size_t> fixed_num_val_samples_{0};                              ///< 验证集样本总数
+
+    // =========================================================================
+    // S区和C区单个样本对齐后大小（64字节对齐）
+    // =========================================================================
+
+    std::atomic<size_t> fixed_aligned_max_output_size_{0};                      ///< S区/C区单个样本对齐后大小（max_resolution计算）
+
+    // =========================================================================
     // alterable型变量
     // =========================================================================
 
-    std::atomic<int> alterable_current_resolution_{-1};  ///< 当前分辨率（初始值-1）
+    std::atomic<int> alterable_current_resolution_train_{-1};  ///< 当前分辨率（初始值-1）
+    std::atomic<int> alterable_current_resolution_val_{-1};  ///< 当前分辨率（初始值-1）
 };
 
 } // namespace tr

@@ -38,9 +38,10 @@ public:
         uint8_t* output_ptr,
         int32_t& output_width,
         int32_t& output_height,
-        size_t output_stride,
+        size_t& output_stride,
         Generator* rng = nullptr,
-        bool execute_from_full = false  // Resize不使用此参数（总是完整解码）
+        bool execute_from_full = false,  // Resize不使用此参数（总是完整解码）
+        bool compact = true  // 紧凑布局标志（默认true）
     ) override;
 
     std::unique_ptr<PreprocessOperation> clone() const override {

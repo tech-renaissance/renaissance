@@ -406,6 +406,105 @@ bool GlobalRegistry::using_cpvs() const {
     return fixed_using_cpvs_.load(std::memory_order_relaxed);
 }
 
+void GlobalRegistry::set_is_deployment_mode(bool value) {
+    bool old_value = fixed_is_deployment_mode_.load(std::memory_order_relaxed);
+    bool old_set = fixed_is_deployment_mode_set_.load(std::memory_order_relaxed);
+
+    // 检查是否是首次赋值
+    if (!old_set) {
+        fixed_is_deployment_mode_.store(value, std::memory_order_release);
+        fixed_is_deployment_mode_set_.store(true, std::memory_order_release);
+        LOG_INFO << "GlobalRegistry: fixed_is_deployment_mode set to " << (value ? "true" : "false");
+        return;
+    }
+
+    // 检查是否已经初始化
+    if (initialized_.load(std::memory_order_acquire)) {
+        TR_VALUE_ERROR("Cannot modify fixed_is_deployment_mode after initialization. "
+                      "Current value: " << (old_value ? "true" : "false")
+                      << ", Attempted value: " << (value ? "true" : "false"));
+    }
+
+    // 检查是否是幂等赋值
+    if (old_value == value) {
+        return;
+    }
+
+    TR_VALUE_ERROR("Cannot modify fixed_is_deployment_mode after first assignment. "
+                  "Current value: " << (old_value ? "true" : "false")
+                  << ", Attempted value: " << (value ? "true" : "false"));
+}
+
+bool GlobalRegistry::is_deployment_mode() const {
+    return fixed_is_deployment_mode_.load(std::memory_order_relaxed);
+}
+
+void GlobalRegistry::set_train_with_rhf(bool value) {
+    bool old_value = fixed_train_with_rhf_.load(std::memory_order_relaxed);
+    bool old_set = fixed_train_with_rhf_set_.load(std::memory_order_relaxed);
+
+    // 检查是否是首次赋值
+    if (!old_set) {
+        fixed_train_with_rhf_.store(value, std::memory_order_release);
+        fixed_train_with_rhf_set_.store(true, std::memory_order_release);
+        LOG_INFO << "GlobalRegistry: fixed_train_with_rhf set to " << (value ? "true" : "false");
+        return;
+    }
+
+    // 检查是否已经初始化
+    if (initialized_.load(std::memory_order_acquire)) {
+        TR_VALUE_ERROR("Cannot modify fixed_train_with_rhf after initialization. "
+                      "Current value: " << (old_value ? "true" : "false")
+                      << ", Attempted value: " << (value ? "true" : "false"));
+    }
+
+    // 检查是否是幂等赋值
+    if (old_value == value) {
+        return;
+    }
+
+    TR_VALUE_ERROR("Cannot modify fixed_train_with_rhf after first assignment. "
+                  "Current value: " << (old_value ? "true" : "false")
+                  << ", Attempted value: " << (value ? "true" : "false"));
+}
+
+bool GlobalRegistry::train_with_rhf() const {
+    return fixed_train_with_rhf_.load(std::memory_order_relaxed);
+}
+
+void GlobalRegistry::set_val_with_rhf(bool value) {
+    bool old_value = fixed_val_with_rhf_.load(std::memory_order_relaxed);
+    bool old_set = fixed_val_with_rhf_set_.load(std::memory_order_relaxed);
+
+    // 检查是否是首次赋值
+    if (!old_set) {
+        fixed_val_with_rhf_.store(value, std::memory_order_release);
+        fixed_val_with_rhf_set_.store(true, std::memory_order_release);
+        LOG_INFO << "GlobalRegistry: fixed_val_with_rhf set to " << (value ? "true" : "false");
+        return;
+    }
+
+    // 检查是否已经初始化
+    if (initialized_.load(std::memory_order_acquire)) {
+        TR_VALUE_ERROR("Cannot modify fixed_val_with_rhf after initialization. "
+                      "Current value: " << (old_value ? "true" : "false")
+                      << ", Attempted value: " << (value ? "true" : "false"));
+    }
+
+    // 检查是否是幂等赋值
+    if (old_value == value) {
+        return;
+    }
+
+    TR_VALUE_ERROR("Cannot modify fixed_val_with_rhf after first assignment. "
+                  "Current value: " << (old_value ? "true" : "false")
+                  << ", Attempted value: " << (value ? "true" : "false"));
+}
+
+bool GlobalRegistry::val_with_rhf() const {
+    return fixed_val_with_rhf_.load(std::memory_order_relaxed);
+}
+
 // =============================================================================
 // 设备配置相关方法
 // =============================================================================
@@ -531,23 +630,70 @@ const std::vector<int>& GlobalRegistry::cpu_binding_map() const {
 }
 
 // =============================================================================
-// alterable变量：专属getter/setter方法
+// S区洗牌索引向量
 // =============================================================================
 
-void GlobalRegistry::set_current_resolution(int value) {
+void GlobalRegistry::set_fixed_s_original_indices(const std::vector<int>& indices) {
+    std::lock_guard<std::mutex> lock(device_mutex_);
+
+    if (fixed_s_original_indices_.empty()) {
+        // 首次赋值
+        fixed_s_original_indices_ = indices;
+        LOG_INFO << "GlobalRegistry: fixed_s_original_indices_ set with size=" << indices.size();
+        return;
+    }
+
+    if (initialized_.load(std::memory_order_acquire)) {
+        TR_VALUE_ERROR("Cannot modify fixed_s_original_indices_ after initialization");
+    }
+
+    if (fixed_s_original_indices_ == indices) {
+        // 幂等赋值
+        return;
+    }
+
+    TR_VALUE_ERROR("Cannot modify fixed_s_original_indices_ after first assignment");
+}
+
+const std::vector<int>& GlobalRegistry::fixed_s_original_indices() const {
+    std::lock_guard<std::mutex> lock(device_mutex_);
+    return fixed_s_original_indices_;
+}
+
+// =============================================================================
+// alterable变量：专属getter/setter方法
+// ==============================================================================
+
+void GlobalRegistry::set_current_resolution_train(int value) {
     // 检查是否处于忙碌状态
     TR_CHECK(!is_busy(), ValueError,
-             "Cannot modify alterable_current_resolution while busy. "
+             "Cannot modify alterable_current_resolution_train_ while busy. "
              "is_busy() = true, train_counter_ = " << train_counter_.load(std::memory_order_relaxed)
              << ", val_counter_ = " << val_counter_.load(std::memory_order_relaxed));
 
     // 允许修改
-    alterable_current_resolution_.store(value, std::memory_order_release);
-    LOG_INFO << "GlobalRegistry: alterable_current_resolution set to " << value;
+    alterable_current_resolution_train_.store(value, std::memory_order_release);
+    LOG_INFO << "GlobalRegistry: alterable_current_resolution_train_ set to " << value;
 }
 
-int GlobalRegistry::current_resolution() const {
-    return alterable_current_resolution_.load(std::memory_order_relaxed);
+int GlobalRegistry::current_resolution_train() const {
+    return alterable_current_resolution_train_.load(std::memory_order_relaxed);
+}
+
+void GlobalRegistry::set_current_resolution_val(int value) {
+    // 检查是否处于忙碌状态
+    TR_CHECK(!is_busy(), ValueError,
+             "Cannot modify alterable_current_resolution_val_ while busy. "
+             "is_busy() = true, train_counter_ = " << train_counter_.load(std::memory_order_relaxed)
+             << ", val_counter_ = " << val_counter_.load(std::memory_order_relaxed));
+
+    // 允许修改
+    alterable_current_resolution_val_.store(value, std::memory_order_release);
+    LOG_INFO << "GlobalRegistry: alterable_current_resolution_val_ set to " << value;
+}
+
+int GlobalRegistry::current_resolution_val() const {
+    return alterable_current_resolution_val_.load(std::memory_order_relaxed);
 }
 
 // =============================================================================
@@ -569,8 +715,10 @@ int GlobalRegistry::get_value_int(const std::string& name) const {
         return fixed_num_color_channels_.load(std::memory_order_relaxed);
     } else if (name == "sdmp_factor") {
         return fixed_sdmp_factor_.load(std::memory_order_relaxed);
-    } else if (name == "current_resolution") {
-        return alterable_current_resolution_.load(std::memory_order_relaxed);
+    } else if (name == "current_resolution_train") {
+        return alterable_current_resolution_train_.load(std::memory_order_relaxed);
+    } else if (name == "current_resolution_val") {
+        return alterable_current_resolution_val_.load(std::memory_order_relaxed);
     } else {
         TR_VALUE_ERROR("Unknown variable name: " << name);
         return 0;  // Unreachable
@@ -611,8 +759,10 @@ void GlobalRegistry::set_value_int(const std::string& name, int value) {
         set_num_color_channels(value);
     } else if (name == "sdmp_factor") {
         set_sdmp_factor(value);
-    } else if (name == "current_resolution") {
-        set_current_resolution(value);
+    } else if (name == "current_resolution_train") {
+        set_current_resolution_train(value);
+    } else if (name == "current_resolution_val") {
+        set_current_resolution_val(value);
     } else {
         TR_VALUE_ERROR("Unknown variable name: " << name);
     }
@@ -635,6 +785,104 @@ void GlobalRegistry::set_value_bool(const std::string& name, bool value) {
     } else {
         TR_VALUE_ERROR("Unknown variable name: " << name);
     }
+}
+
+// =============================================================================
+// S区和C区单个样本对齐后大小相关方法
+// =============================================================================
+
+void GlobalRegistry::set_aligned_max_output_size(size_t size) {
+    size_t old_value = fixed_aligned_max_output_size_.load(std::memory_order_relaxed);
+
+    if (old_value == 0) {
+        fixed_aligned_max_output_size_.store(size, std::memory_order_release);
+        LOG_DEBUG << "GlobalRegistry: fixed_aligned_max_output_size set to " << size << " bytes";
+        return;
+    }
+
+    if (initialized_.load(std::memory_order_acquire)) {
+        TR_VALUE_ERROR("Cannot modify fixed_aligned_max_output_size after initialization. "
+                      "Current value: " << old_value
+                      << ", Attempted value: " << size);
+    }
+
+    if (old_value == size) {
+        return;  // 幂等赋值，静默接受
+    }
+
+    TR_VALUE_ERROR("Cannot modify fixed_aligned_max_output_size after first assignment. "
+                  "Current value: " << old_value
+                  << ", Attempted value: " << size);
+}
+
+size_t GlobalRegistry::aligned_max_output_size() const {
+    size_t value = fixed_aligned_max_output_size_.load(std::memory_order_relaxed);
+    TR_CHECK(value > 0, ValueError, "fixed_aligned_max_output_size not set");
+    return value;
+}
+
+// =============================================================================
+// 数据集样本总数相关方法
+// =============================================================================
+
+void GlobalRegistry::set_num_train_samples(size_t count) {
+    size_t old_value = fixed_num_train_samples_.load(std::memory_order_relaxed);
+
+    if (old_value == 0) {
+        fixed_num_train_samples_.store(count, std::memory_order_release);
+        LOG_DEBUG << "GlobalRegistry: fixed_num_train_samples set to " << count;
+        return;
+    }
+
+    if (initialized_.load(std::memory_order_acquire)) {
+        TR_VALUE_ERROR("Cannot modify fixed_num_train_samples after initialization. "
+                      "Current value: " << old_value
+                      << ", Attempted value: " << count);
+    }
+
+    if (old_value == count) {
+        return;  // 幂等赋值，静默接受
+    }
+
+    TR_VALUE_ERROR("Cannot modify fixed_num_train_samples after first assignment. "
+                  "Current value: " << old_value
+                  << ", Attempted value: " << count);
+}
+
+size_t GlobalRegistry::num_train_samples() const {
+    size_t value = fixed_num_train_samples_.load(std::memory_order_relaxed);
+    TR_CHECK(value > 0, ValueError, "fixed_num_train_samples not set");
+    return value;
+}
+
+void GlobalRegistry::set_num_val_samples(size_t count) {
+    size_t old_value = fixed_num_val_samples_.load(std::memory_order_relaxed);
+
+    if (old_value == 0) {
+        fixed_num_val_samples_.store(count, std::memory_order_release);
+        LOG_DEBUG << "GlobalRegistry: fixed_num_val_samples set to " << count;
+        return;
+    }
+
+    if (initialized_.load(std::memory_order_acquire)) {
+        TR_VALUE_ERROR("Cannot modify fixed_num_val_samples after initialization. "
+                      "Current value: " << old_value
+                      << ", Attempted value: " << count);
+    }
+
+    if (old_value == count) {
+        return;  // 幂等赋值，静默接受
+    }
+
+    TR_VALUE_ERROR("Cannot modify fixed_num_val_samples after first assignment. "
+                  "Current value: " << old_value
+                  << ", Attempted value: " << count);
+}
+
+size_t GlobalRegistry::num_val_samples() const {
+    size_t value = fixed_num_val_samples_.load(std::memory_order_relaxed);
+    TR_CHECK(value > 0, ValueError, "fixed_num_val_samples not set");
+    return value;
 }
 
 } // namespace tr
