@@ -25,6 +25,17 @@ set(DATA_SOURCES
     center_crop.cpp
     random_horizontal_flip.cpp
     random_resized_crop.cpp
+    fast_random_resized_crop.cpp
+    color_jitter.cpp
+    random_rotation.cpp
+    random_autocontrast.cpp
+    random_brightness.cpp
+    gaussian_blur.cpp
+    gaussian_noise.cpp
+    random_grayscale.cpp
+    pad.cpp
+    random_crop.cpp
+    random_erasing.cpp
     do_nothing.cpp
     # V4.1 PreprocessWorker
     preprocess_worker.cpp

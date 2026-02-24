@@ -29,38 +29,158 @@ void print_usage(const char* program_name) {
               << "  --batch-size <N>     Batch size (default: 256)\n"
               << "  --cpvs <true/false>  Enable CPVS (default: false)\n"
               << "  --sdmp <N>           SDMP factor (default: 1)\n"
+              << "  --reproducible       Enable reproducible mode (default: disabled)\n"
               << "  --epoch <N>          Number of epochs to run (default: 1)\n"
-              << "  --resolution <N>     Output resolution (default: 224)\n"
-              << "  --po-train1 <PO>     First train PO: Resize, CenterCrop, RandomResizedCrop, DoNothing\n"
-              << "  --po-train2 <PO>     Second train PO (optional, default: vacancy)\n"
-              << "  --po-val1 <PO>       First val PO (default: same as po-train1)\n"
-              << "  --po-val2 <PO>       Second val PO (optional, default: vacancy)\n"
+              << "  --resolution <N>     Output resolution for resize/crop operations (default: 224)\n"
+              << "                      This parameter is passed to resize/crop POs only.\n"
+              << "                      The max_resolution for config_preprocessor is inferred\n"
+              << "                      from the final output size of train and val transforms.\n"
+              << "  --po-train1 <PO>     First train PO (MUST be resize/crop):\n"
+              << "                      Resize, CenterCrop, RandomResizedCrop, FastRandomResizedCrop, RandomCrop\n"
+              << "  --po-train2 <PO>     Second train PO (optional):\n"
+              << "                      - If resize/crop: uses --resolution parameter\n"
+              << "                      - If other: infers output from previous PO\n"
+              << "                      Supported: RandomHorizontalFlip, ColorJitter, RandomRotation,\n"
+              << "                                  RandomAutocontrast, RandomBrightness, GaussianBlur, GaussianNoise,\n"
+              << "                                  RandomGrayscale, Pad, DoNothing\n"
+              << "  --po-val1 <PO>       First val PO (MUST be resize/crop, default: same as po-train1)\n"
+              << "  --po-val2 <PO>       Second val PO (optional, same rules as po-train2)\n"
               << "  --loaders <N>        Number of load workers (default: 16)\n"
               << "  --preproc <N>        Number of preprocess workers (default: 16)\n"
               << "  --device <TYPE>      Device type: CPU, GPU (default: CPU)\n"
               << "  --gpu-ids <IDS>      GPU IDs (e.g., \"0,1,2,3\" or \"0-7\", default: \"0\")\n"
               << "  --seed <N>           Random seed (default: 42)\n"
               << "  --help               Show this help message\n\n"
-              << "PO Parameters (RandomResizedCrop):\n"
+              << "PO Parameters (RandomResizedCrop/FastRandomResizedCrop):\n"
               << "  --scale-min <F>      Min scale (default: 0.08)\n"
               << "  --scale-max <F>      Max scale (default: 1.0)\n"
               << "  --ratio-min <F>      Min ratio (default: 0.75)\n"
               << "  --ratio-max <F>      Max ratio (default: 1.333)\n"
-              << "  --prob <F>           RandomHorizontalFlip probability (default: 0.5)\n\n"
+              << "PO Parameters (RandomHorizontalFlip):\n"
+              << "  --prob <F>           Flip probability (default: 0.5)\n"
+              << "PO Parameters (ColorJitter):\n"
+              << "  --brightness <F>     Brightness jitter (default: 0.0)\n"
+              << "  --contrast <F>       Contrast jitter (default: 0.0)\n"
+              << "  --saturation <F>     Saturation jitter (default: 0.0)\n"
+              << "  --hue <F>            Hue jitter, range [0, 0.5] (default: 0.0)\n"
+              << "PO Parameters (RandomRotation):\n"
+              << "  --degrees <F>        Rotation angle range in degrees (default: 30.0)\n"
+              << "  --fill <N>           Fill value for areas outside the image (default: 0)\n"
+              << "PO Parameters (RandomAutocontrast):\n"
+              << "  --autocontrast-p <F> Probability of applying autocontrast (default: 0.5)\n"
+              << "PO Parameters (RandomBrightness):\n"
+              << "  WARNING: RandomBrightness is NOT recommended for datasets other than MNIST!\n"
+              << "  Shift range is hardcoded to [-7, 7], no configurable parameters.\n"
+              << "PO Parameters (GaussianBlur):\n"
+              << "  --blur-sigma-min <F> Minimum sigma for Gaussian blur (default: 0.1)\n"
+              << "  --blur-sigma-max <F> Maximum sigma for Gaussian blur (default: 2.0)\n"
+              << "PO Parameters (RandomGrayscale):\n"
+              << "  --grayscale-p <F>   Probability of converting to grayscale (default: 0.1)\n"
+              << "PO Parameters (GaussianNoise):\n"
+              << "  --noise-mean <F>    Mean of Gaussian noise (default: 0.0)\n"
+              << "  --noise-sigma <F>   Standard deviation of Gaussian noise (default: 25.5)\n\n"
               << "Examples:\n"
               << "  " << program_name << " --dataset imagenet --path /data/imagenet --po-train1 RandomResizedCrop --po-train2 RandomHorizontalFlip\n"
-              << "  " << program_name << " --dataset mnist --path /data/mnist --format raw --mode fully --po-train1 DoNothing\n"
-              << "  " << program_name << " --dataset cifar10 --path /data/cifar --po-train1 CenterCrop --sdmp 3 --epoch 2\n\n"
+              << "  " << program_name << " --dataset imagenet --path /data/imagenet --po-train1 FastRandomResizedCrop --sdmp 2 --epoch 2\n"
+              << "  " << program_name << " --dataset imagenet --path /data/imagenet --po-train1 RandomResizedCrop --po-train2 GaussianBlur --resolution 256\n"
+              << "  " << program_name << " --dataset mnist --path /data/mnist --format raw --mode fully --po-train1 Resize\n"
+              << "  " << program_name << " --dataset cifar10 --path /data/cifar --po-train1 CenterCrop --sdmp 3 --epoch 2\n"
+              << "  " << program_name << " --dataset imagenet --path /data/imagenet --po-train1 RandomResizedCrop --reproducible\n\n"
               << "Note: This test uses Preprocessor NORMAL mode (with EngineBuffer)\n";
 }
 
 /**
- * @brief 解析PO名称并创建PO对象
+ * @brief 检查PO是否为resize/crop类（需要resolution参数）
  */
-std::unique_ptr<PreprocessOperation> create_po(const std::string& po_name, int resolution,
+bool is_resize_or_crop_po(const std::string& po_name) {
+    std::string po_lower = po_name;
+    std::transform(po_lower.begin(), po_lower.end(), po_lower.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+
+    return po_lower == "resize" ||
+           po_lower == "centercrop" ||
+           po_lower == "randomresizedcrop" ||
+           po_lower == "fastrandomresizedcrop" ||
+           po_lower == "randomcrop";
+}
+
+/**
+ * @brief 解析PO名称并创建PO对象
+ * @param po_name PO名称
+ * @param resolution 分辨率（仅用于resize/crop类PO）
+ * @param scale_min, scale_max, ratio_min, ratio_max RandomResizedCrop参数
+ * @param flip_prob RandomHorizontalFlip概率
+ * @param brightness, contrast, saturation, hue ColorJitter参数
+ * @param degrees, fill RandomRotation参数
+ * @param autocontrast_p RandomAutocontrast概率
+ * @param blur_sigma_min, blur_sigma_max GaussianBlur参数
+ * @param grayscale_p RandomGrayscale概率
+ * @param noise_mean, noise_sigma GaussianNoise参数
+ * @return PO对象，如果类型未知则返回nullptr
+ */
+std::unique_ptr<PreprocessOperation> create_po(const std::string& po_name,
                                                    float scale_min, float scale_max,
                                                    float ratio_min, float ratio_max,
-                                                   float flip_prob) {
+                                                   float flip_prob,
+                                                   float brightness, float contrast,
+                                                   float saturation, float hue,
+                                                   float degrees, int fill,
+                                                   float autocontrast_p,
+                                                   float blur_sigma_min, float blur_sigma_max,
+                                                   float grayscale_p,
+                                                   float noise_mean, float noise_sigma) {
+    std::string po_lower = po_name;
+    std::transform(po_lower.begin(), po_lower.end(), po_lower.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+
+    if (po_lower == "resize") {
+        std::cerr << "Error: PO '" << po_name << "' requires --resolution parameter\n";
+        return nullptr;
+    } else if (po_lower == "centercrop") {
+        std::cerr << "Error: PO '" << po_name << "' requires --resolution parameter\n";
+        return nullptr;
+    } else if (po_lower == "randomresizedcrop") {
+        std::cerr << "Error: PO '" << po_name << "' requires --resolution parameter\n";
+        return nullptr;
+    } else if (po_lower == "fastrandomresizedcrop") {
+        std::cerr << "Error: PO '" << po_name << "' requires --resolution parameter\n";
+        return nullptr;
+    } else if (po_lower == "randomcrop") {
+        std::cerr << "Error: PO '" << po_name << "' requires --resolution parameter\n";
+        return nullptr;
+    } else if (po_lower == "randomhorizontalflip") {
+        return std::make_unique<RandomHorizontalFlip>(flip_prob);
+    } else if (po_lower == "colorjitter") {
+        return std::make_unique<ColorJitter>(brightness, contrast, saturation, hue);
+    } else if (po_lower == "randomrotation") {
+        return std::make_unique<RandomRotation>(degrees, static_cast<uint8_t>(fill));
+    } else if (po_lower == "randomautocontrast") {
+        return std::make_unique<RandomAutocontrast>(autocontrast_p);
+    } else if (po_lower == "randombrightness") {
+        return std::make_unique<RandomBrightness>();
+    } else if (po_lower == "gaussianblur") {
+        return std::make_unique<GaussianBlur>(blur_sigma_min, blur_sigma_max);
+    } else if (po_lower == "randomgrayscale") {
+        return std::make_unique<RandomGrayscale>(grayscale_p);
+    } else if (po_lower == "gaussiannoise") {
+        return std::make_unique<GaussianNoise>(noise_mean, noise_sigma, true);
+    } else if (po_lower == "pad") {
+        return std::make_unique<Pad>(4, std::vector<int>{0}, PaddingMode::CONSTANT);
+    } else if (po_lower == "donothing") {
+        return std::make_unique<DoNothing>();
+    } else {
+        std::cerr << "Error: Unknown PO type: " << po_name << "\n";
+        std::cerr << "Supported: Resize, CenterCrop, RandomResizedCrop, FastRandomResizedCrop, RandomHorizontalFlip, ColorJitter, RandomRotation, RandomAutocontrast, RandomBrightness, GaussianBlur, GaussianNoise, RandomGrayscale, Pad, RandomCrop, DoNothing\n";
+        return nullptr;
+    }
+}
+
+/**
+ * @brief 创建resize/crop类PO（带resolution参数）
+ */
+std::unique_ptr<PreprocessOperation> create_resize_crop_po(const std::string& po_name, int resolution,
+                                                              float scale_min, float scale_max,
+                                                              float ratio_min, float ratio_max) {
     std::string po_lower = po_name;
     std::transform(po_lower.begin(), po_lower.end(), po_lower.begin(),
                    [](unsigned char c) { return std::tolower(c); });
@@ -72,14 +192,60 @@ std::unique_ptr<PreprocessOperation> create_po(const std::string& po_name, int r
     } else if (po_lower == "randomresizedcrop") {
         return std::make_unique<RandomResizedCrop>(resolution, scale_min, scale_max,
                                                    ratio_min, ratio_max);
-    } else if (po_lower == "randomhorizontalflip") {
-        return std::make_unique<RandomHorizontalFlip>(flip_prob);
-    } else if (po_lower == "donothing") {
-        return std::make_unique<DoNothing>();
+    } else if (po_lower == "fastrandomresizedcrop") {
+        return std::make_unique<FastRandomResizedCrop>(resolution, scale_min, scale_max,
+                                                        ratio_min, ratio_max);
+    } else if (po_lower == "randomcrop") {
+        return std::make_unique<RandomCrop>(resolution);
     } else {
-        std::cerr << "Error: Unknown PO type: " << po_name << "\n";
-        std::cerr << "Supported: Resize, CenterCrop, RandomResizedCrop, RandomHorizontalFlip, DoNothing\n";
+        std::cerr << "Error: PO '" << po_name << "' is not a resize/crop operation\n";
+        std::cerr << "Resize/crop operations: Resize, CenterCrop, RandomResizedCrop, FastRandomResizedCrop, RandomCrop\n";
         return nullptr;
+    }
+}
+
+/**
+ * @brief 计算 PO 链的最终输出尺寸
+ * @param po_name1 第一个PO名称（必须是resize/crop）
+ * @param po_name2 第二个PO名称（可选，空字符串表示无）
+ * @param resolution resolution参数（用于resize/crop类PO）
+ * @param padding_ padding参数（用于Pad类PO）
+ * @return 最终输出尺寸
+ */
+int calculate_po_chain_final_output(const std::string& po_name1,
+                                     const std::string& po_name2,
+                                     int resolution,
+                                     int padding_ = 4) {
+    std::string po1_lower = po_name1;
+    std::transform(po1_lower.begin(), po1_lower.end(), po1_lower.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+
+    // 第一个PO必须是resize/crop，输出就是resolution
+    int current_size = resolution;
+
+    // 如果没有第二个PO，返回当前尺寸
+    if (po_name2.empty()) {
+        return current_size;
+    }
+
+    // 处理第二个PO
+    std::string po2_lower = po_name2;
+    std::transform(po2_lower.begin(), po2_lower.end(), po2_lower.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+
+    // 如果第二个PO是resize/crop类，输出是resolution
+    if (po2_lower == "resize" || po2_lower == "centercrop" ||
+        po2_lower == "randomresizedcrop" || po2_lower == "fastrandomresizedcrop" ||
+        po2_lower == "randomcrop") {
+        return resolution;
+    }
+    // 如果是Pad，输出是 input_size + 2*padding
+    else if (po2_lower == "pad") {
+        return current_size + 2 * padding_;
+    }
+    // 其他PO不改变尺寸
+    else {
+        return current_size;
     }
 }
 
@@ -94,6 +260,7 @@ int main(int argc, char* argv[]) {
     int batch_size = 256;
     bool using_cpvs = false;
     int sdmp_factor = 1;
+    bool reproducible = false;  // 可复现模式标志
     int num_epochs = 1;
     int resolution = 224;
     std::string po_train1, po_train2;
@@ -110,6 +277,30 @@ int main(int argc, char* argv[]) {
     float ratio_min = 0.75f;
     float ratio_max = 1.3333333f;
     float flip_prob = 0.5f;
+
+    // ColorJitter参数
+    float brightness = 0.2f;  // 亮度变化范围 [0.8, 1.2]
+    float contrast = 0.2f;    // 对比度变化范围 [0.8, 1.2]
+    float saturation = 0.2f;  // 饱和度变化范围 [0.8, 1.2]
+    float hue = 0.1f;         // 色调变化范围 [-0.1, 0.1]
+
+    // RandomRotation参数
+    float degrees = 30.0f;    // 旋转角度范围 [-30, 30]
+    int fill = 0;             // 填充值（黑色）
+
+    // RandomAutocontrast参数
+    float autocontrast_p = 0.5f;  // 自动对比度概率
+
+    // GaussianBlur参数
+    float blur_sigma_min = 0.1f;   // 高斯模糊最小sigma
+    float blur_sigma_max = 2.0f;   // 高斯模糊最大sigma
+
+    // RandomGrayscale参数
+    float grayscale_p = 0.1f;      // 灰度化概率（PyTorch默认值）
+
+    // GaussianNoise参数
+    float noise_mean = 0.0f;   // 噪声均值
+    float noise_sigma = 25.5f; // 噪声标准差（相当于[0,1]范围的0.1）
 
     // 解析命令行参数
     for (int i = 1; i < argc; ++i) {
@@ -141,6 +332,8 @@ int main(int argc, char* argv[]) {
             using_cpvs = (cpvs_str == "true");
         } else if (arg == "--sdmp" && i + 1 < argc) {
             sdmp_factor = std::stoi(argv[++i]);
+        } else if (arg == "--reproducible") {
+            reproducible = true;
         } else if (arg == "--epoch" && i + 1 < argc) {
             num_epochs = std::stoi(argv[++i]);
         } else if (arg == "--resolution" && i + 1 < argc) {
@@ -179,11 +372,43 @@ int main(int argc, char* argv[]) {
             ratio_max = std::stof(argv[++i]);
         } else if (arg == "--prob" && i + 1 < argc) {
             flip_prob = std::stof(argv[++i]);
+        } else if (arg == "--brightness" && i + 1 < argc) {
+            brightness = std::stof(argv[++i]);
+        } else if (arg == "--contrast" && i + 1 < argc) {
+            contrast = std::stof(argv[++i]);
+        } else if (arg == "--saturation" && i + 1 < argc) {
+            saturation = std::stof(argv[++i]);
+        } else if (arg == "--hue" && i + 1 < argc) {
+            hue = std::stof(argv[++i]);
+        } else if (arg == "--degrees" && i + 1 < argc) {
+            degrees = std::stof(argv[++i]);
+        } else if (arg == "--fill" && i + 1 < argc) {
+            fill = std::stoi(argv[++i]);
+        } else if (arg == "--autocontrast-p" && i + 1 < argc) {
+            autocontrast_p = std::stof(argv[++i]);
+        } else if (arg == "--blur-sigma-min" && i + 1 < argc) {
+            blur_sigma_min = std::stof(argv[++i]);
+        } else if (arg == "--blur-sigma-max" && i + 1 < argc) {
+            blur_sigma_max = std::stof(argv[++i]);
+        } else if (arg == "--grayscale-p" && i + 1 < argc) {
+            grayscale_p = std::stof(argv[++i]);
+        } else if (arg == "--noise-mean" && i + 1 < argc) {
+            noise_mean = std::stof(argv[++i]);
+        } else if (arg == "--noise-sigma" && i + 1 < argc) {
+            noise_sigma = std::stof(argv[++i]);
         } else {
             std::cerr << "Error: Unknown argument: " << arg << "\n";
             print_usage(argv[0]);
             return 1;
         }
+    }
+
+    // 【第一句】设置可复现性保险（必须在所有其他操作之前）
+    GlobalRegistry::instance().ensure_reproducibility(reproducible);
+    if (reproducible) {
+        std::cout << "Reproducible mode: ENABLED\n";
+    } else {
+        std::cout << "Reproducible mode: DISABLED (performance optimized)\n";
     }
 
     // 验证必需参数
@@ -243,8 +468,23 @@ int main(int argc, char* argv[]) {
         std::cerr << "Error: --po-train1 is required\n";
         return 1;
     }
+
+    // 验证PO1必须是resize/crop类（ImageNet的第一个PO必须是resize/crop）
+    if (!is_resize_or_crop_po(po_train1)) {
+        std::cerr << "Error: --po-train1 must be a resize/crop operation (Resize, CenterCrop, RandomResizedCrop, FastRandomResizedCrop, RandomCrop)\n";
+        std::cerr << "Got: " << po_train1 << "\n";
+        return 1;
+    }
+
     if (po_val1.empty()) {
         po_val1 = po_train1;  // 默认同train
+    }
+
+    // 验证val PO1也必须是resize/crop类
+    if (!is_resize_or_crop_po(po_val1)) {
+        std::cerr << "Error: --po-val1 must be a resize/crop operation (Resize, CenterCrop, RandomResizedCrop, FastRandomResizedCrop, RandomCrop)\n";
+        std::cerr << "Got: " << po_val1 << "\n";
+        return 1;
     }
 
     // 配置Preprocessor
@@ -272,9 +512,20 @@ int main(int argc, char* argv[]) {
                           false, // shuffle_train（确保可复现）
                           false); // download
 
-    // 步骤3：配置Preprocessor
+    // 步骤2.5：计算正确的max_resolution（基于PO链最终输出）
+    std::cout << "\n=== Calculating Max Resolution ===\n";
+    int train_final_output = calculate_po_chain_final_output(po_train1, po_train2, resolution);
+    int val_final_output = calculate_po_chain_final_output(po_val1, po_val2, resolution);
+    int calculated_max_resolution = std::max(train_final_output, val_final_output);
+
+    std::cout << "Train PO chain final output: " << train_final_output << "\n";
+    std::cout << "Val PO chain final output: " << val_final_output << "\n";
+    std::cout << "Calculated max_resolution: " << calculated_max_resolution << "\n";
+
+    // 步骤3：配置Preprocessor（使用计算出的max_resolution）
     std::cout << "\n=== Configuring Preprocessor ===\n";
-    std::cout << "Resolution: " << resolution << "\n";
+    std::cout << "Resolution parameter: " << resolution << "\n";
+    std::cout << "Calculated max_resolution: " << calculated_max_resolution << "\n";
     std::cout << "Batch size: " << batch_size << "\n";
     std::cout << "SDMP factor: " << sdmp_factor << "\n";
     std::cout << "CPVS: " << (using_cpvs ? "enabled" : "disabled") << "\n";
@@ -284,7 +535,7 @@ int main(int argc, char* argv[]) {
     prep.config_preprocessor(
         -1,     // world_size（-1表示由config_device自动设置）
         batch_size,
-        resolution,  // max_resolution
+        calculated_max_resolution,  // 使用计算出的max_resolution
         3,      // num_color_channels
         sdmp_factor,
         using_cpvs,
@@ -305,33 +556,57 @@ int main(int argc, char* argv[]) {
     std::cout << "\n=== Setting Transforms ===\n";
 
     // Train transforms
-    std::cout << "Train PO 1: " << po_train1 << "\n";
-    auto train_po1 = create_po(po_train1, resolution, scale_min, scale_max,
-                                ratio_min, ratio_max, flip_prob);
+    std::cout << "Train PO 1: " << po_train1 << " (" << resolution << ")\n";
+    auto train_po1 = create_resize_crop_po(po_train1, resolution, scale_min, scale_max,
+                                           ratio_min, ratio_max);
     if (!train_po1) return 1;
 
     if (!po_train2.empty()) {
-        std::cout << "Train PO 2: " << po_train2 << "\n";
-        auto train_po2 = create_po(po_train2, resolution, scale_min, scale_max,
-                                    ratio_min, ratio_max, flip_prob);
-        if (!train_po2) return 1;
-        prep.set_train_transforms(*train_po1, *train_po2);
+        std::cout << "Train PO 2: " << po_train2;
+        if (is_resize_or_crop_po(po_train2)) {
+            std::cout << " (" << resolution << ")\n";
+            auto train_po2 = create_resize_crop_po(po_train2, resolution, scale_min, scale_max,
+                                                   ratio_min, ratio_max);
+            if (!train_po2) return 1;
+            prep.set_train_transforms(*train_po1, *train_po2);
+        } else {
+            std::cout << " (inference from previous PO)\n";
+            auto train_po2 = create_po(po_train2, scale_min, scale_max,
+                                       ratio_min, ratio_max, flip_prob,
+                                       brightness, contrast, saturation, hue, degrees, fill, autocontrast_p,
+                                       blur_sigma_min, blur_sigma_max, grayscale_p,
+                                       noise_mean, noise_sigma);
+            if (!train_po2) return 1;
+            prep.set_train_transforms(*train_po1, *train_po2);
+        }
     } else {
         prep.set_train_transforms(*train_po1);
     }
 
     // Val transforms
-    std::cout << "Val PO 1: " << po_val1 << "\n";
-    auto val_po1 = create_po(po_val1, resolution, scale_min, scale_max,
-                              ratio_min, ratio_max, flip_prob);
+    std::cout << "Val PO 1: " << po_val1 << " (" << resolution << ")\n";
+    auto val_po1 = create_resize_crop_po(po_val1, resolution, scale_min, scale_max,
+                                         ratio_min, ratio_max);
     if (!val_po1) return 1;
 
     if (!po_val2.empty()) {
-        std::cout << "Val PO 2: " << po_val2 << "\n";
-        auto val_po2 = create_po(po_val2, resolution, scale_min, scale_max,
-                                  ratio_min, ratio_max, flip_prob);
-        if (!val_po2) return 1;
-        prep.set_val_transforms(*val_po1, *val_po2);
+        std::cout << "Val PO 2: " << po_val2;
+        if (is_resize_or_crop_po(po_val2)) {
+            std::cout << " (" << resolution << ")\n";
+            auto val_po2 = create_resize_crop_po(po_val2, resolution, scale_min, scale_max,
+                                                 ratio_min, ratio_max);
+            if (!val_po2) return 1;
+            prep.set_val_transforms(*val_po1, *val_po2);
+        } else {
+            std::cout << " (inference from previous PO)\n";
+            auto val_po2 = create_po(po_val2, scale_min, scale_max,
+                                     ratio_min, ratio_max, flip_prob,
+                                     brightness, contrast, saturation, hue, degrees, fill, autocontrast_p,
+                                     blur_sigma_min, blur_sigma_max, grayscale_p,
+                                     noise_mean, noise_sigma);
+            if (!val_po2) return 1;
+            prep.set_val_transforms(*val_po1, *val_po2);
+        }
     } else {
         prep.set_val_transforms(*val_po1);
     }
@@ -402,12 +677,12 @@ int main(int argc, char* argv[]) {
               << total_val_time << " s (" << total_val_samples << " samples)\n";
     std::cout << "Total time: " << std::fixed << std::setprecision(3)
               << (total_train_time + total_val_time) << " s\n";
-    std::cout << "Avg train throughput: " << std::fixed << std::setprecision(1)
-              << (static_cast<double>(total_train_samples) / total_train_time)
-              << " samples/s\n";
-    std::cout << "Avg val throughput: " << std::fixed << std::setprecision(1)
-              << (static_cast<double>(total_val_samples) / total_val_time)
-              << " samples/s\n";
+    std::cout << "Avg train time: " << std::fixed << std::setprecision(3)
+              << (total_train_time / num_epochs) << " s\n";
+    std::cout << "Avg val time: " << std::fixed << std::setprecision(3)
+              << (total_val_time / num_epochs) << " s\n";
+    std::cout << "Avg epoch time: " << std::fixed << std::setprecision(3)
+              << ((total_train_time + total_val_time) / num_epochs) << " s\n";
     std::cout << "\n=== Test Completed Successfully ===\n\n";
 
     return 0;

@@ -5,12 +5,117 @@
  * @date 2026-02-20
  * @author 技术觉醒团队
  * @note 所属系列: data
+ *
+ * ============================================================================
+ * EngineBuffer 双模式设计说明
+ * ============================================================================
+ *
+ * EngineBuffer 支持两种工作模式，通过 `require_reproducibility_` 标志控制：
+ *
+ * ┌─────────────────────────────────────────────────────────────────────────┐
+ * │ 模式1：可复现模式 (require_reproducibility_ == true)                    │
+ * └─────────────────────────────────────────────────────────────────────────┘
+ *
+ * 设计目标：保证每次运行的完全一致性，适用于调试、验证、科学实验
+ *
+ * 核心思路：
+ *   严格计算每个样本在batch中的固定槽位，所有PW必须完成自己在当前batch的
+ *   固定写入任务后才触发传输。
+ *
+ * 工作流程：
+ *   1. request_write_slot(position, batch_id, label)
+ *      - PW传入精确的position（batch内位置）和batch_id（批次编号）
+ *      - 使用条件变量等待：当前batch_id >= 目标batch_id
+ *      - 确保PW按批次顺序写入，快PW等待慢PW
+ *      - 写入到固定的slot：buffer_labels_[buf_id][position]
+ *
+ *   2. notify_sample_written()
+ *      - 使用samples_in_batch_计数器
+ *      - 当samples_in_batch_ == local_batch_size_时触发传输
+ *      - 传输时机完全确定：batch满立即传输
+ *
+ *   3. no_more_samples()
+ *      - 使用exhausted_count_计数器
+ *      - 当exhausted_count_ == num_workers时触发final transfer
+ *      - 统一的终止时机
+ *
+ * 特性：
+ *   ✓ 每次运行写入顺序完全一致
+ *   ✓ 传输时机完全确定
+ *   ✓ 终止逻辑完全一致
+ *   ✗ 需要严格同步，性能较低
+ *   ✗ 快PW被慢PW阻塞
+ *
+ * ┌─────────────────────────────────────────────────────────────────────────┐
+ * │ 模式2：非可复现模式 (require_reproducibility_ == false)                  │
+ * └─────────────────────────────────────────────────────────────────────────┘
+ *
+ * 设计目标：最大化性能和吞吐量，适用于生产环境、大规模训练
+ *
+ * 核心思路：
+ *   直接顺序递增分配slot，无视PW传入的position和batch_id参数。
+ *   写满一个batch或所有PW报告没有更多样本就触发传输。
+ *
+ * 工作流程：
+ *   1. request_write_slot(position, batch_id, label)  [参数被忽略]
+ *      - 双重边界检查：
+ *        a) request_count_ - written_count_ < batch_size
+ *           防止过多已申请但未写入的slot堆积
+ *        b) request_count_ < (current_batch_id_ + 1) * batch_size
+ *           确保不超出当前batch范围
+ *      - 计算写入位置：slot = request_count_ % batch_size
+ *      - 写入label：buffer_labels_[buf_id][slot]
+ *      - 最后递增request_count_（必须放最后！）
+ *
+ *   2. notify_sample_written()
+ *      - 立即递增written_count_（完全无锁）
+ *      - 当written_count_ % batch_size == 0时触发传输
+ *      - 递增current_batch_id_并唤醒所有等待的PW
+ *
+ *   3. no_more_samples()
+ *      - 使用exhausted_count_计数器（与可复现模式相同）
+ *      - 当exhausted_count_ == num_workers时：
+ *        * 检查pending：written_count_ % batch_size
+ *        * pending > 0则触发final transfer
+ *        * 标记finished_并唤醒所有等待线程
+ *
+ * 新增原子计数器：
+ *   - request_count_：slot申请次数，决定写入位置
+ *   - written_count_：写入完成次数，触发传输
+ *   - exhausted_count_：（已存在）PW完成个数
+ *
+ * 特性：
+ *   ✓ 最小化锁竞争（仅传输触发时加锁）
+ *   ✓ PW无需等待，直接申请下一个可用slot
+ *   ✓ 完全无锁的计数递增（fetch_add）
+ *   ✗ 每次运行写入顺序可能不同
+ *   ✗ 传输时机有微小波动
+ *
+ * ┌─────────────────────────────────────────────────────────────────────────┐
+ * │ 关键区别总结                                                              │
+ * └─────────────────────────────────────────────────────────────────────────┘
+ *
+ | 特性                | 可复现模式                    | 非可复现模式                    |
+ |--------------------|------------------------------|--------------------------------|
+ | 写入位置决定        | PW传入的position参数          | request_count_ % batch_size     |
+ | 批次边界保护        | 基于batch_id参数              | 基于request_count_计算          |
+ | 传输触发条件        | samples_in_batch_ == 满       | written_count_ % batch_size == 0|
+ | 同步机制            | 严格条件变量等待              | 最小化锁，原子操作驱动          |
+ | 性能                | 较低（快PW等慢PW）            | 较高（直接申请slot）            |
+ | 可复现性            | 完全一致                      | 每次运行可能不同                |
+ | 适用场景            | 调试、验证、科学实验          | 生产环境、大规模训练            |
+ *
+ * 切换方式：
+ *   GlobalRegistry::instance().ensure_reproducibility(true);   // 可复现模式
+ *   GlobalRegistry::instance().ensure_reproducibility(false);  // 非可复现模式
  */
 
 #include "renaissance/data/engine_buffer.h"
 #include "renaissance/base/global_registry.h"
 #include <iostream>
 #include <algorithm>
+#include <thread>
+#include <chrono>
 
 namespace tr {
 
@@ -18,11 +123,10 @@ namespace tr {
 // 构造函数
 // ============================================================================
 
-EngineBuffer::EngineBuffer(bool test_mode)
-    : test_mode_(test_mode)
+EngineBuffer::EngineBuffer()
 {
-    LOG_DEBUG << "EngineBuffer constructed: test_mode=" << test_mode
-              << " (" << (test_mode ? "TEST MODE - no sync/transfer" : "NORMAL MODE") << ")";
+    // 从GlobalRegistry下载可复现性保险标志
+    require_reproducibility_ = GlobalRegistry::instance().reproducibility_insurance();
 }
 
 // ============================================================================
@@ -97,27 +201,38 @@ void EngineBuffer::reset() {
     finished_.store(false, std::memory_order_release);
     total_transferred_.store(0, std::memory_order_release);
 
-    worker_exhausted_.assign(num_workers_per_engine_, false);
-}
+    // 重置非可复现模式的计数器
+    request_count_.store(0, std::memory_order_release);
+    written_count_.store(0, std::memory_order_release);
 
-void EngineBuffer::update_phase(bool is_train, int current_resolution, int num_color_channels) {
-    is_train_ = is_train;
-    current_sample_bytes_ = current_resolution * current_resolution * num_color_channels;
-    reset();
+    worker_exhausted_.assign(num_workers_per_engine_, false);
 }
 
 void EngineBuffer::reset_and_update() {
     // =========================================================================
+    // 【Core Dump修复3】步骤0：断言检查（Debug模式下）
+    // 如果正确实现了同步屏障，所有操作应该已经完成
+    // =========================================================================
+#ifndef NDEBUG
+    if (!require_reproducibility_) {
+        size_t request = request_count_.load(std::memory_order_acquire);
+        size_t written = written_count_.load(std::memory_order_acquire);
+        TR_CHECK(request == written, ValueError,
+                 "EngineBuffer reset with pending operations: "
+                 << "request=" << request << ", written=" << written
+                 << " (This indicates synchronization barrier may have a bug)");
+    } else {
+        int samples = samples_in_batch_.load(std::memory_order_acquire);
+        TR_CHECK(samples == 0, ValueError,
+                 "EngineBuffer reset with " << samples << " samples in batch"
+                 << " (This indicates synchronization barrier may have a bug)");
+    }
+#endif
+
+    // =========================================================================
     // 步骤1：复位所有计数器和状态变量
     // =========================================================================
-    current_buffer_.store(0, std::memory_order_release);
-    current_batch_id_.store(0, std::memory_order_release);
-    samples_in_batch_.store(0, std::memory_order_release);
-    exhausted_count_.store(0, std::memory_order_release);
-    finished_.store(false, std::memory_order_release);
-    total_transferred_.store(0, std::memory_order_release);
-
-    worker_exhausted_.assign(num_workers_per_engine_, false);
+    reset();
 
     // =========================================================================
     // 步骤2：memset清空所有内存（labels和data）
@@ -154,124 +269,249 @@ void EngineBuffer::reset_and_update() {
     // 重新计算current_sample_bytes_
     current_sample_bytes_ = current_resolution * current_resolution * num_color_channels;
 
-    // =========================================================================
-    // 日志输出
-    // =========================================================================
-    LOG_DEBUG << "EngineBuffer " << engine_id_ << " reset_and_update completed:"
-              << " is_train=" << is_train_
-              << ", current_resolution=" << current_resolution
-              << ", num_color_channels=" << num_color_channels
-              << ", current_sample_bytes_=" << current_sample_bytes_;
+    std::cout << "[EngineBuffer #" << engine_id_ << "] reset and updated." << std::endl;
 }
 
 uint8_t* EngineBuffer::request_write_slot(int position, int batch_id, int32_t label) {
-    // =========================================================================
-    // 测试模式分支：有求必应，永不卡死
-    // =========================================================================
-    if (test_mode_) {
-        // 原子递增槽位计数器（确保每次调用获得不同的槽位）
-        size_t slot_id = test_mode_slot_id_.fetch_add(1, std::memory_order_relaxed);
+    // 【Core Dump修复2】在函数入口立即捕获current_sample_bytes_到栈变量
+    // 确保整个函数调用使用一致的值，避免reset中途修改导致offset计算错误
+    const size_t snapshot_sample_bytes = current_sample_bytes_;
 
-        // 循环使用槽位（避免越界）
-        int slot_index = slot_id % local_batch_size_;
+    if (require_reproducibility_) {
+        // =========================================
+        // 可复现模式：严格的批次边界保护
+        // =========================================
+        // 批次边界保护：快 Worker 需等待当前 batch 完成
+        // 等待逻辑：只有当当前处理的batch已经被传输后，才需要等待
+        // 如果batch_id <= current_batch_id_，说明可以写入当前或下一个batch
+        {
+            std::unique_lock<std::mutex> lock(mutex_);
+            cv_batch_ready_.wait(lock, [this, batch_id]() {
+                int current = current_batch_id_.load(std::memory_order_acquire);
+                // 允许写入的条件：
+                // 1. current_batch_id_ >= batch_id (说明目标batch已准备好)
+                // 2. finished_ (结束状态)
+                return current >= batch_id || finished_.load(std::memory_order_acquire);
+            });
 
-        // 计算返回地址
-        int buf_id = 0;
-        size_t offset = slot_index * current_sample_bytes_;
-        uint8_t* result_ptr = buffer_data_[buf_id] + offset;
-
-        // Debug日志
-        LOG_DEBUG << "EngineBuffer test_mode: slot_id=" << slot_id
-                  << ", slot_index=" << slot_index
-                  << ", offset=" << offset
-                  << ", result_ptr=" << static_cast<void*>(result_ptr);
-
-        return result_ptr;
-    }
-
-    // =========================================================================
-    // 正常模式分支：原有逻辑
-    // =========================================================================
-    // 批次边界保护：快 Worker 需等待当前 batch 完成
-    {
-        std::unique_lock<std::mutex> lock(mutex_);
-        cv_batch_ready_.wait(lock, [this, batch_id]() {
-            return current_batch_id_.load(std::memory_order_acquire) >= batch_id
-                   || finished_.load(std::memory_order_acquire);
-        });
-
-        if (finished_.load(std::memory_order_acquire)) {
-            return nullptr;
+            if (finished_.load(std::memory_order_acquire)) {
+                return nullptr;
+            }
         }
-    }
 
-    int buf_id = current_buffer_.load(std::memory_order_acquire);
+        int buf_id = current_buffer_.load(std::memory_order_acquire);
 
 #ifndef NDEBUG
-    TR_CHECK(position >= 0 && position < local_batch_size_, ValueError,
-             "Position out of range: " << position);
+        TR_CHECK(position >= 0 && position < local_batch_size_, ValueError,
+                 "Position out of range: " << position);
 #endif
 
-    buffer_labels_[buf_id][position] = label;
+        buffer_labels_[buf_id][position] = label;
 
-    size_t offset = position * current_sample_bytes_;
-    return buffer_data_[buf_id] + offset;
+        // 【Core Dump修复2】使用捕获的快照计算offset
+        size_t offset = position * snapshot_sample_bytes;
+        return buffer_data_[buf_id] + offset;
+
+    } else {
+        // =========================================
+        // 非可复现模式：快速通道，无视传入参数
+        // =========================================
+
+        // 步骤1：原子分配唯一的request ID（关键修复：消除TOCTOU竞态）
+        size_t my_request = request_count_.fetch_add(1, std::memory_order_acq_rel);
+
+        // 步骤2：基于my_request计算slot和batch
+        size_t slot = my_request % local_batch_size_;
+        int my_batch = static_cast<int>(my_request / local_batch_size_);
+
+        // 步骤3：边界检查1 - 流量控制（防止已申请但未写入的slot堆积）
+        {
+            size_t request = request_count_.load(std::memory_order_acquire);
+            size_t written = written_count_.load(std::memory_order_acquire);
+
+            // 如果系统中已申请但未写入的slot数量超过batch_size，等待
+            while (request - written >= static_cast<size_t>(local_batch_size_) &&
+                   !finished_.load(std::memory_order_acquire)) {
+                std::unique_lock<std::mutex> lock(mutex_);
+                const auto TIMEOUT = std::chrono::milliseconds(100);
+                bool success = cv_batch_ready_.wait_for(lock, TIMEOUT, [this]() {
+                    size_t r = request_count_.load(std::memory_order_acquire);
+                    size_t w = written_count_.load(std::memory_order_acquire);
+                    return (r - w) < static_cast<size_t>(local_batch_size_) ||
+                           finished_.load(std::memory_order_acquire);
+                });
+
+                if (!success) {
+                    LOG_WARN << "[EB#" << engine_id_ << "] Long wait for flow control: "
+                             << "request=" << request_count_.load()
+                             << ", written=" << written_count_.load()
+                             << ", batch_size=" << local_batch_size_;
+                }
+
+                // 重新读取最新值
+                request = request_count_.load(std::memory_order_acquire);
+                written = written_count_.load(std::memory_order_acquire);
+            }
+
+            if (finished_.load(std::memory_order_acquire)) {
+                return nullptr;
+            }
+        }
+
+        // 步骤4：边界检查2 - batch边界保护（确保不超出当前batch范围）
+        {
+            int current_batch = current_batch_id_.load(std::memory_order_acquire);
+            if (my_batch > current_batch) {
+                // 需要等待当前batch传输完成
+                std::unique_lock<std::mutex> lock(mutex_);
+                const auto TIMEOUT = std::chrono::milliseconds(100);  // 100ms超时
+                bool success = cv_batch_ready_.wait_for(lock, TIMEOUT, [this, my_batch]() {
+                    int c = current_batch_id_.load(std::memory_order_acquire);
+                    return c >= my_batch || finished_.load(std::memory_order_acquire);
+                });
+
+                if (!success) {
+                    // 超时：打印警告
+                    LOG_WARN << "[EB#" << engine_id_ << "] Long wait for batch transfer: "
+                             << "my_batch=" << my_batch
+                             << ", current_batch=" << current_batch_id_.load();
+                }
+
+                if (finished_.load(std::memory_order_acquire)) {
+                    return nullptr;
+                }
+            }
+        }
+
+        // 步骤5：基于my_request计算buffer ID（避免current_buffer_切换导致的竞态）
+        int buf_id = (my_request / local_batch_size_) % 2;
+
+        // 步骤6：写入label（每个线程有唯一的slot，不会冲突）
+        buffer_labels_[buf_id][slot] = label;
+
+        // 步骤7：计算数据指针
+        // 【Core Dump修复2】使用捕获的快照计算offset
+        size_t offset = slot * snapshot_sample_bytes;
+
+        return buffer_data_[buf_id] + offset;
+    }
 }
 
 bool EngineBuffer::notify_sample_written() {
-    // =========================================================================
-    // 测试模式分支：什么都不做
-    // =========================================================================
-    if (test_mode_) {
-        return false;  // 测试模式下不触发传输
-    }
+    if (require_reproducibility_) {
+        // =========================================
+        // 可复现模式：严格的批次计数和触发逻辑
+        // =========================================
+        int prev_count = samples_in_batch_.fetch_add(1, std::memory_order_acq_rel);
+        int current_count = prev_count + 1;
 
-    // =========================================================================
-    // 正常模式分支：原有逻辑
-    // =========================================================================
-    int prev_count = samples_in_batch_.fetch_add(1, std::memory_order_acq_rel);
-    int current_count = prev_count + 1;
+        // 满批次触发
+        if (current_count == local_batch_size_) {
+            std::lock_guard<std::mutex> lock(mutex_);
 
-    // 满批次触发
-    if (current_count == local_batch_size_) {
-        std::lock_guard<std::mutex> lock(mutex_);
+            // 双重检查防止并发触发
+            int samples = samples_in_batch_.load(std::memory_order_acquire);
+            if (samples >= local_batch_size_) {
+                execute_transfer_locked(samples);
+                return true;
+            }
+        }
 
-        // 双重检查防止并发触发
-        int samples = samples_in_batch_.load(std::memory_order_acquire);
-        if (samples >= local_batch_size_) {
-            execute_transfer_locked(samples);
+        return false;
+
+    } else {
+        // =========================================
+        // 非可复现模式：完全无锁的计数和触发逻辑
+        // =========================================
+
+        // 步骤1：立即递增written_count_
+        size_t written = written_count_.fetch_add(1, std::memory_order_acq_rel);
+        size_t next_written = written + 1;
+
+        // 步骤2：检查是否填满一个batch
+        if (next_written % local_batch_size_ == 0) {
+            // 需要触发传输，这里需要锁（execute_transfer_locked需要锁）
+            std::lock_guard<std::mutex> lock(mutex_);
+
+            // 再次检查，防止并发触发
+            size_t current_written = written_count_.load(std::memory_order_acquire);
+            size_t current_batch = current_written / local_batch_size_;
+            size_t trigger_batch = next_written / local_batch_size_;
+
+            if (current_batch > trigger_batch) {
+                // 已经被其他线程触发了
+                return false;
+            }
+
+            // 触发传输（execute_transfer_locked内部会递增current_batch_id_并唤醒等待线程）
+            execute_transfer_locked(local_batch_size_);
+
             return true;
         }
-    }
 
-    return false;
+        return false;
+    }
 }
 
 void EngineBuffer::no_more_samples(int worker_id) {
-    // =========================================================================
-    // 测试模式分支：什么都不做
-    // =========================================================================
-    if (test_mode_) {
-        return;  // 测试模式下不需要处理终止逻辑
-    }
-
-    // =========================================================================
-    // 正常模式分支：原有逻辑
-    // =========================================================================
     TR_CHECK(worker_id >= 0 && worker_id < num_workers_per_engine_, ValueError,
              "Worker ID out of range: " << worker_id);
 
-    std::lock_guard<std::mutex> lock(mutex_);
+    if (require_reproducibility_) {
+        // =========================================
+        // 可复现模式：严格的Worker耗尽检测
+        // =========================================
+        std::lock_guard<std::mutex> lock(mutex_);
 
-    // 防止重复调用
-    if (worker_exhausted_[worker_id]) return;
+        // 防止重复调用
+        if (worker_exhausted_[worker_id]) return;
 
-    worker_exhausted_[worker_id] = true;
-    int exhausted = exhausted_count_.fetch_add(1, std::memory_order_relaxed) + 1;
+        worker_exhausted_[worker_id] = true;
+        int exhausted = exhausted_count_.fetch_add(1, std::memory_order_relaxed) + 1;
 
-    // 检查是否所有 Worker 都已耗尽
-    if (exhausted == num_workers_per_engine_) {
-        try_final_transfer_locked();
+        // 检查是否所有 Worker 都已耗尽
+        if (exhausted == num_workers_per_engine_) {
+            try_final_transfer_locked();
+        }
+
+    } else {
+        // =========================================
+        // 非可复现模式：使用exhausted_count_进行final transfer
+        // =========================================
+
+        std::lock_guard<std::mutex> lock(mutex_);
+
+        // 防止重复调用
+        if (worker_exhausted_[worker_id]) return;
+
+        worker_exhausted_[worker_id] = true;
+        int exhausted = exhausted_count_.fetch_add(1, std::memory_order_relaxed) + 1;
+
+        // 检查是否所有Worker都已完成
+        if (exhausted == num_workers_per_engine_) {
+            // 等待所有已分配的slot都写入完成
+            size_t request = request_count_.load(std::memory_order_acquire);
+            size_t written = written_count_.load(std::memory_order_acquire);
+
+            // 如果有已分配但未写入的slot，等待它们完成
+            while (request != written) {
+                std::this_thread::sleep_for(std::chrono::microseconds(100));
+                request = request_count_.load(std::memory_order_acquire);
+                written = written_count_.load(std::memory_order_acquire);
+            }
+
+            // 检查当前buffer是否有未传输的样本
+            size_t pending = written % local_batch_size_;
+
+            if (pending > 0) {
+                // 触发最后一次传输
+                execute_transfer_locked(pending);
+            }
+
+            // 标记结束
+            finished_.store(true, std::memory_order_release);
+            cv_batch_ready_.notify_all();  // 唤醒所有等待的线程
+        }
     }
 }
 
@@ -297,14 +537,10 @@ bool EngineBuffer::try_final_transfer_locked() {
 void EngineBuffer::execute_transfer_locked(int samples_count) {
     int buf_id = current_buffer_.load(std::memory_order_acquire);
 
+    // 【Core Dump修复2】捕获快照
+    const size_t snapshot_sample_bytes = current_sample_bytes_;
     size_t transfer_bytes = samples_count * sizeof(int32_t) +
-                           samples_count * current_sample_bytes_;
-
-    // 打印传输触发信息（直接使用 std::cout）
-    std::cout << ">>> Transfer: Batch " << (current_batch_id_.load())
-              << " | Buffer " << buf_id
-              << " | Samples " << samples_count
-              << " | Bytes " << transfer_bytes << std::endl;
+                           samples_count * snapshot_sample_bytes;
 
     total_transferred_.fetch_add(samples_count, std::memory_order_relaxed);
 

@@ -87,6 +87,7 @@ public:
         int world_size;
         int sdmp_factor;
         bool using_cpvs;
+        bool using_progressive_resolution;
         int num_workers_per_engine;
 
         // ==================== 数据集信息 ====================
@@ -104,6 +105,7 @@ public:
 
         // ==================== EngineBuffer（V3.14.0）====================
         EngineBuffer* engine_buffer = nullptr;  ///< EngineBuffer指针（不拥有所有权，仅观察）
+        uint64_t global_initial_seed = 0;
     };
 
     /**

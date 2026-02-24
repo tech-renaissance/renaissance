@@ -152,10 +152,13 @@ int main() {
     registry.set_num_load_workers(1);
     registry.set_num_preproc_workers(NUM_WORKERS);
 
+    // 进入train phase（设置is_training=true和current_resolution_train）
+    registry.begin_train();
+
     // 创建 EngineBuffer
     EngineBuffer buffer;
     buffer.configure(LOCAL_BATCH_SIZE, SAMPLE_BYTES, SAMPLE_BYTES, NUM_WORKERS, 0);
-    buffer.update_phase(true, RESOLUTION, NUM_CHANNELS);
+    buffer.reset_and_update();  // 从GlobalRegistry自动获取配置
 
     // 启动 Worker 线程
     std::cout << "Starting worker threads...\n\n";
@@ -195,8 +198,12 @@ int main() {
     } else {
         std::cout << "[FAIL] Expected " << TOTAL_SAMPLES
                   << ", got " << total_transferred << "\n";
+        registry.end_train();  // 即使失败也要结束train phase
         return 1;
     }
+
+    // 结束train phase（正确清理GlobalRegistry状态）
+    registry.end_train();
 
     std::cout << "========================================\n"
               << "Test completed successfully!\n"

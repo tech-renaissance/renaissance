@@ -52,6 +52,7 @@ public:
      * @param scale_max 最大缩放比例（默认1.0，即100%）
      * @param ratio_min 最小长宽比（默认3.0/4.0，即0.75）
      * @param ratio_max 最大长宽比（默认4.0/3.0，即1.33）
+     * @param output_alignment 输出对齐字节数（默认0=紧凑布局）
      *
      * PyTorch兼容参数：scale=[0.08, 1.0], ratio=[3.0/4.0, 4.0/3.0]
      */
@@ -60,7 +61,8 @@ public:
         float scale_min = 0.08f,
         float scale_max = 1.0f,
         float ratio_min = 3.0f / 4.0f,
-        float ratio_max = 4.0f / 3.0f
+        float ratio_max = 4.0f / 3.0f,
+        size_t output_alignment = 0
     );
 
     /**
@@ -89,8 +91,10 @@ public:
         size_t& output_stride,
         Generator* rng = nullptr,
         bool execute_from_full = false,
-        bool compact = true
+        bool forced_compact_output = true
     ) override;
+
+    bool is_crop() const override { return true; }  // 注意：是Crop，不是Resize
 
     /**
      * @brief 获取解码策略
@@ -116,8 +120,17 @@ public:
      * @return 新的独立副本
      */
     std::unique_ptr<PreprocessOperation> clone() const override {
-        return std::make_unique<RandomResizedCrop>(
+        auto cloned = std::make_unique<RandomResizedCrop>(
             output_size_, scale_min_, scale_max_, ratio_min_, ratio_max_);
+        // 复制基类成员变量
+        cloned->num_channels_ = num_channels_;
+        cloned->output_size_ = output_size_;  // ← 重要：需要复制output_size_
+        cloned->output_alignment_ = output_alignment_;
+        cloned->use_compact_output_as_default_ = use_compact_output_as_default_;
+        cloned->output_stride_ = output_stride_;
+        cloned->compact_output_stride_ = compact_output_stride_;
+        cloned->rank_first_in_the_po_chain_ = rank_first_in_the_po_chain_;
+        return cloned;
     }
 
     /**
@@ -130,18 +143,7 @@ public:
      */
     bool introduce_randomness() const override { return true; }
 
-    /**
-     * @brief 设置输出尺寸
-     */
-    void set_output_size(int size) override { output_size_ = size; }
-
-    /**
-     * @brief 获取输出尺寸
-     */
-    int get_output_size() const override { return output_size_; }
-
 private:
-    int output_size_;      ///< 输出尺寸（如224）
     float scale_min_;      ///< 最小缩放比例
     float scale_max_;      ///< 最大缩放比例
     float ratio_min_;       ///< 最小长宽比

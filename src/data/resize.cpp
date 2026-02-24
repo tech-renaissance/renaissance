@@ -22,7 +22,7 @@ void Resize::execute(
     size_t& output_stride,
     Generator* rng,
     bool execute_from_full,  // Resize不使用此参数（总是完整解码）
-    bool compact  // 紧凑布局标志
+    bool forced_compact_output  // 紧凑布局标志
 ) {
     (void)rng;  // Resize不使用随机数
     (void)execute_from_full;  // Resize总是完整解码，忽略此参数
@@ -32,12 +32,11 @@ void Resize::execute(
 
     // ==================== 自动计算output_stride（如果为0）====================
     if (output_stride == 0) {
-        if (compact) {
+        if (forced_compact_output) {
             // 紧凑布局：无padding
-            output_stride = output_size_ * num_channels_;
+            output_stride = compact_output_stride_;
         } else {
-            // Stride布局：64字节对齐
-            output_stride = calculate_stride(output_size_, num_channels_);
+            output_stride = output_stride_;
         }
     }
 
@@ -61,10 +60,6 @@ void Resize::execute(
             SimdResizeChannelByte,
             SimdResizeMethodBilinear
         );
-
-        TR_CHECK(resizer_cache_ != nullptr, MemoryError,
-                 "SimdResizerInit failed: " << input_width << "x" << input_height
-                 << " -> " << output_size_ << "x" << output_size_);
 
         // 更新缓存key
         cached_src_w_ = input_width;

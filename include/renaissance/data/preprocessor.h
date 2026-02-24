@@ -131,11 +131,13 @@ public:
     // 步骤3：配置Preprocessor
     void config_preprocessor(int world_size,
                              int batch_size,
-                             int max_resolution,
+                             int max_final_resolution,
                              int num_color_channels,
                              int sdmp_factor = 1,
                              bool using_cpvs = false,
-                             bool pw_test_mode = false);  // PW测试模式（配置阶段设置）
+                             bool pw_test_mode = false,
+                             bool using_progressive_resolution = false,
+                             int max_intermediate_resolution = -1);
 
     // 步骤4：设置数据变换
     template<typename... Ops>
@@ -397,6 +399,7 @@ private:
     int num_color_channels_;
     int sdmp_factor_;
     bool using_cpvs_;
+    bool using_progressive_resolution_ = false;
 
     // 计算结果
     size_t sample_size_bytes_;    // 单个样本大小 = res * res * channels
@@ -635,6 +638,7 @@ private:
     std::atomic<bool> stop_flag_{false};         // 停止信号
     std::atomic<int> current_buffer_seq_{0};      // 当前buffer序号
     std::atomic<int> workers_finished_{0};        // 完成计数的原子变量
+    std::atomic<int> engine_reset_barrier_{0};    // EngineBuffer重置同步屏障
 
     // 线程持久化辅助方法
     void start_worker_pool(DataLoader& loader);
@@ -656,7 +660,7 @@ private:
     /**
      * @brief 计算Workshop各区大小（按照PW2.md规范）
      */
-    void calculate_workshop_sizes();
+    void calculate_workshop_sizes(int ref_resolution_for_ab);
 
     /**
      * @brief 销毁PW实例
@@ -704,6 +708,11 @@ private:
 
     // 快速模式标志（用于test_dataloader和warmup）
     bool fast_mode_;
+
+    int default_input_width_ = 0;
+    int max_intermediate_resolution_ = 0;
+    bool workshop_size_calculated_ = false;
+    uint64_t global_initial_seed_ = 0;
 };
 
 } // namespace tr

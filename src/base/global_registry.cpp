@@ -406,6 +406,77 @@ bool GlobalRegistry::using_cpvs() const {
     return fixed_using_cpvs_.load(std::memory_order_relaxed);
 }
 
+void GlobalRegistry::set_reproducibility_insurance(bool value) {
+    bool old_value = fixed_reproducibility_insurance_.load(std::memory_order_relaxed);
+    bool old_set = fixed_reproducibility_insurance_set_.load(std::memory_order_relaxed);
+
+    // 检查是否是首次赋值
+    if (!old_set) {
+        fixed_reproducibility_insurance_.store(value, std::memory_order_release);
+        fixed_reproducibility_insurance_set_.store(true, std::memory_order_release);
+        LOG_INFO << "GlobalRegistry: fixed_reproducibility_insurance set to " << (value ? "true" : "false");
+        return;
+    }
+
+    // 检查是否已经初始化
+    if (initialized_.load(std::memory_order_acquire)) {
+        TR_VALUE_ERROR("Cannot modify fixed_reproducibility_insurance after initialization. "
+                      "Current value: " << (old_value ? "true" : "false")
+                      << ", Attempted value: " << (value ? "true" : "false"));
+    }
+
+    // 检查是否是幂等赋值
+    if (old_value == value) {
+        return;
+    }
+
+    TR_VALUE_ERROR("Cannot modify fixed_reproducibility_insurance after first assignment. "
+                  "Current value: " << (old_value ? "true" : "false")
+                  << ", Attempted value: " << (value ? "true" : "false"));
+}
+
+bool GlobalRegistry::reproducibility_insurance() const {
+    return fixed_reproducibility_insurance_.load(std::memory_order_relaxed);
+}
+
+void GlobalRegistry::ensure_reproducibility(bool value) {
+    // 直接调用set_reproducibility_insurance，完全等价
+    set_reproducibility_insurance(value);
+}
+
+void GlobalRegistry::set_using_progressive_resolution(bool value) {
+    bool old_value = fixed_using_progressive_resolution_.load(std::memory_order_relaxed);
+    bool old_set = fixed_using_progressive_resolution_set_.load(std::memory_order_relaxed);
+
+    // 检查是否是首次赋值
+    if (!old_set) {
+        fixed_using_progressive_resolution_.store(value, std::memory_order_release);
+        fixed_using_progressive_resolution_set_.store(true, std::memory_order_release);
+        LOG_INFO << "GlobalRegistry: fixed_using_progressive_resolution set to " << (value ? "true" : "false");
+        return;
+    }
+
+    // 检查是否已经初始化
+    if (initialized_.load(std::memory_order_acquire)) {
+        TR_VALUE_ERROR("Cannot modify fixed_using_progressive_resolution after initialization. "
+                      "Current value: " << (old_value ? "true" : "false")
+                      << ", Attempted value: " << (value ? "true" : "false"));
+    }
+
+    // 检查是否是幂等赋值
+    if (old_value == value) {
+        return;
+    }
+
+    TR_VALUE_ERROR("Cannot modify fixed_using_progressive_resolution after first assignment. "
+                  "Current value: " << (old_value ? "true" : "false")
+                  << ", Attempted value: " << (value ? "true" : "false"));
+}
+
+bool GlobalRegistry::using_progressive_resolution() const {
+    return fixed_using_progressive_resolution_.load(std::memory_order_relaxed);
+}
+
 void GlobalRegistry::set_is_deployment_mode(bool value) {
     bool old_value = fixed_is_deployment_mode_.load(std::memory_order_relaxed);
     bool old_set = fixed_is_deployment_mode_set_.load(std::memory_order_relaxed);
@@ -696,6 +767,90 @@ int GlobalRegistry::current_resolution_val() const {
     return alterable_current_resolution_val_.load(std::memory_order_relaxed);
 }
 
+void GlobalRegistry::set_train_crop_output(int value) {
+    // 检查是否处于忙碌状态
+    TR_CHECK(!is_busy(), ValueError,
+             "Cannot modify alterable_train_crop_output_ while busy. "
+             "is_busy() = true, train_counter_ = " << train_counter_.load(std::memory_order_relaxed)
+             << ", val_counter_ = " << val_counter_.load(std::memory_order_relaxed));
+
+    // 允许修改
+    alterable_train_crop_output_.store(value, std::memory_order_release);
+    LOG_INFO << "GlobalRegistry: alterable_train_crop_output_ set to " << value;
+}
+
+int GlobalRegistry::train_crop_output() const {
+    return alterable_train_crop_output_.load(std::memory_order_relaxed);
+}
+
+void GlobalRegistry::set_train_resize_output(int value) {
+    // 检查是否处于忙碌状态
+    TR_CHECK(!is_busy(), ValueError,
+             "Cannot modify alterable_train_resize_output_ while busy. "
+             "is_busy() = true, train_counter_ = " << train_counter_.load(std::memory_order_relaxed)
+             << ", val_counter_ = " << val_counter_.load(std::memory_order_relaxed));
+
+    // 允许修改
+    alterable_train_resize_output_.store(value, std::memory_order_release);
+    LOG_INFO << "GlobalRegistry: alterable_train_resize_output_ set to " << value;
+}
+
+int GlobalRegistry::train_resize_output() const {
+    return alterable_train_resize_output_.load(std::memory_order_relaxed);
+}
+
+void GlobalRegistry::set_val_crop_output(int value) {
+    // 检查是否处于忙碌状态
+    TR_CHECK(!is_busy(), ValueError,
+             "Cannot modify alterable_val_crop_output_ while busy. "
+             "is_busy() = true, train_counter_ = " << train_counter_.load(std::memory_order_relaxed)
+             << ", val_counter_ = " << val_counter_.load(std::memory_order_relaxed));
+
+    // 允许修改
+    alterable_val_crop_output_.store(value, std::memory_order_release);
+    LOG_INFO << "GlobalRegistry: alterable_val_crop_output_ set to " << value;
+}
+
+int GlobalRegistry::val_crop_output() const {
+    return alterable_val_crop_output_.load(std::memory_order_relaxed);
+}
+
+void GlobalRegistry::set_val_resize_output(int value) {
+    // 检查是否处于忙碌状态
+    TR_CHECK(!is_busy(), ValueError,
+             "Cannot modify alterable_val_resize_output_ while busy. "
+             "is_busy() = true, train_counter_ = " << train_counter_.load(std::memory_order_relaxed)
+             << ", val_counter_ = " << val_counter_.load(std::memory_order_relaxed));
+
+    // 允许修改
+    alterable_val_resize_output_.store(value, std::memory_order_release);
+    LOG_INFO << "GlobalRegistry: alterable_val_resize_output_ set to " << value;
+}
+
+int GlobalRegistry::val_resize_output() const {
+    return alterable_val_resize_output_.load(std::memory_order_relaxed);
+}
+
+void GlobalRegistry::set_random_erasing_p(float value) {
+    // 检查是否处于忙碌状态
+    TR_CHECK(!is_busy(), ValueError,
+             "Cannot modify fixed_random_erasing_p_ while busy. "
+             "is_busy() = true, train_counter_ = " << train_counter_.load(std::memory_order_relaxed)
+             << ", val_counter_ = " << val_counter_.load(std::memory_order_relaxed));
+
+    // 验证参数范围
+    TR_CHECK(value >= 0.0f && value <= 1.0f, ValueError,
+             "Random Erasing probability must be in range [0.0, 1.0], got: " << value);
+
+    // 允许修改（虽然是fixed类型，但Random Erasing需要一次性设置）
+    fixed_random_erasing_p_.store(value, std::memory_order_release);
+    LOG_INFO << "GlobalRegistry: fixed_random_erasing_p_ set to " << value;
+}
+
+float GlobalRegistry::random_erasing_p() const {
+    return fixed_random_erasing_p_.load(std::memory_order_relaxed);
+}
+
 // =============================================================================
 // 字符串命名方法
 // =============================================================================
@@ -719,6 +874,14 @@ int GlobalRegistry::get_value_int(const std::string& name) const {
         return alterable_current_resolution_train_.load(std::memory_order_relaxed);
     } else if (name == "current_resolution_val") {
         return alterable_current_resolution_val_.load(std::memory_order_relaxed);
+    } else if (name == "train_crop_output") {
+        return alterable_train_crop_output_.load(std::memory_order_relaxed);
+    } else if (name == "train_resize_output") {
+        return alterable_train_resize_output_.load(std::memory_order_relaxed);
+    } else if (name == "val_crop_output") {
+        return alterable_val_crop_output_.load(std::memory_order_relaxed);
+    } else if (name == "val_resize_output") {
+        return alterable_val_resize_output_.load(std::memory_order_relaxed);
     } else {
         TR_VALUE_ERROR("Unknown variable name: " << name);
         return 0;  // Unreachable
@@ -726,14 +889,19 @@ int GlobalRegistry::get_value_int(const std::string& name) const {
 }
 
 float GlobalRegistry::get_value_float(const std::string& name) const {
-    // 当前没有float类型的注册变量
-    TR_VALUE_ERROR("No float-type variable registered: " << name);
-    return 0.0f;  // Unreachable
+    if (name == "random_erasing_p") {
+        return fixed_random_erasing_p_.load(std::memory_order_relaxed);
+    } else {
+        TR_VALUE_ERROR("Unknown variable name: " << name);
+        return 0.0f;  // Unreachable
+    }
 }
 
 bool GlobalRegistry::get_value_bool(const std::string& name) const {
     if (name == "using_cpvs") {
         return fixed_using_cpvs_.load(std::memory_order_relaxed);
+    } else if (name == "using_progressive_resolution") {
+        return fixed_using_progressive_resolution_.load(std::memory_order_relaxed);
     } else {
         TR_VALUE_ERROR("Unknown variable name: " << name);
         return false;  // Unreachable
@@ -763,16 +931,25 @@ void GlobalRegistry::set_value_int(const std::string& name, int value) {
         set_current_resolution_train(value);
     } else if (name == "current_resolution_val") {
         set_current_resolution_val(value);
+    } else if (name == "train_crop_output") {
+        set_train_crop_output(value);
+    } else if (name == "train_resize_output") {
+        set_train_resize_output(value);
+    } else if (name == "val_crop_output") {
+        set_val_crop_output(value);
+    } else if (name == "val_resize_output") {
+        set_val_resize_output(value);
     } else {
         TR_VALUE_ERROR("Unknown variable name: " << name);
     }
 }
 
 void GlobalRegistry::set_value_float(const std::string& name, float value) {
-    // 当前没有float类型的注册变量
-    (void)name;   // Unused parameter
-    (void)value;  // Unused parameter
-    TR_VALUE_ERROR("No float-type variable registered: " << name);
+    if (name == "random_erasing_p") {
+        set_random_erasing_p(value);
+    } else {
+        TR_VALUE_ERROR("Unknown variable name: " << name);
+    }
 }
 
 void GlobalRegistry::set_value_bool(const std::string& name, bool value) {
@@ -782,6 +959,8 @@ void GlobalRegistry::set_value_bool(const std::string& name, bool value) {
 
     if (name == "using_cpvs") {
         set_using_cpvs(value);
+    } else if (name == "using_progressive_resolution") {
+        set_using_progressive_resolution(value);
     } else {
         TR_VALUE_ERROR("Unknown variable name: " << name);
     }

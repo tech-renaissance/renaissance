@@ -254,6 +254,25 @@ set_target_properties(test_pw_rrc PROPERTIES
 message(STATUS "PW RandomResizedCrop test configured: test_pw_rrc")
 
 # =============================================================================
+# Test: test_pw_frrc
+# Purpose: PW测试程序 - 测试FastRandomResizedCrop操作（快速随机裁剪+缩放，SDMP=1）
+# =============================================================================
+add_executable(test_pw_frrc
+    test_pw_frrc.cpp
+)
+
+target_link_libraries(test_pw_frrc
+    renaissance
+)
+
+set_target_properties(test_pw_frrc PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/integration
+)
+
+# 注意：不添加为CTest，因为它需要外部数据集
+message(STATUS "PW FastRandomResizedCrop test configured: test_pw_frrc")
+
+# =============================================================================
 # Test: test_engine_buffer_emulator
 # Purpose: EngineBufferEmulator多线程写入测试
 # =============================================================================

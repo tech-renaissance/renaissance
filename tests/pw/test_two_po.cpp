@@ -9,7 +9,17 @@
 #include "renaissance/data/resize.h"
 #include "renaissance/data/center_crop.h"
 #include "renaissance/data/random_resized_crop.h"
+#include "renaissance/data/fast_random_resized_crop.h"
 #include "renaissance/data/random_horizontal_flip.h"
+#include "renaissance/data/color_jitter.h"
+#include "renaissance/data/random_rotation.h"
+#include "renaissance/data/random_autocontrast.h"
+#include "renaissance/data/random_brightness.h"
+#include "renaissance/data/gaussian_blur.h"
+#include "renaissance/data/gaussian_noise.h"
+#include "renaissance/data/random_grayscale.h"
+#include "renaissance/data/pad.h"
+#include "renaissance/data/random_crop.h"
 #include "renaissance/data/do_nothing.h"
 #include "renaissance/base/logger.h"
 #include "renaissance/base/tr_exception.h"
@@ -27,6 +37,7 @@
 #include <chrono>
 #include <cstring>
 #include <cmath>
+#include <algorithm>
 
 #ifdef _WIN32
     #include <windows.h>
@@ -52,8 +63,8 @@ static constexpr int DEFAULT_JPEG_QUALITY = 90;
 void print_usage(const char* program_name) {
     std::cout << "Usage: " << program_name << " [OPTIONS]\n\n"
               << "Required Options:\n"
-              << "  --po1 <NAME>        First PO (Resize/CenterCrop/RandomResizedCrop/RandomHorizontalFlip/DoNothing)\n"
-              << "  --po2 <NAME>        Second PO (Resize/CenterCrop/RandomResizedCrop/RandomHorizontalFlip/DoNothing)\n\n"
+              << "  --po1 <NAME>        First PO (Resize/CenterCrop/RandomResizedCrop/FastRandomResizedCrop/RandomHorizontalFlip/ColorJitter/RandomRotation/RandomAutocontrast/RandomBrightness/GaussianBlur/GaussianNoise/RandomGrayscale/Pad/RandomCrop/DoNothing)\n"
+              << "  --po2 <NAME>        Second PO (Resize/CenterCrop/RandomResizedCrop/FastRandomResizedCrop/RandomHorizontalFlip/ColorJitter/RandomRotation/RandomAutocontrast/RandomBrightness/GaussianBlur/GaussianNoise/RandomGrayscale/Pad/RandomCrop/DoNothing)\n\n"
               << "Optional Options:\n"
               << "  --input <PATH>      Input image path (default: input.jpg)\n"
               << "  --output <PATH>     Output image path (default: workspace/output_two_po.jpg)\n"
@@ -63,7 +74,9 @@ void print_usage(const char* program_name) {
               << "  --help              Show this help message\n\n"
               << "Examples:\n"
               << "  " << program_name << " --po1 RandomResizedCrop --po2 RandomHorizontalFlip --size 224\n"
-              << "  " << program_name << " --po1 Resize --po2 CenterCrop --size 128 --seed 123\n";
+              << "  " << program_name << " --po1 Resize --po2 CenterCrop --size 128 --seed 123\n"
+              << "  " << program_name << " --po1 CenterCrop --po2 ColorJitter --size 224\n"
+              << "  " << program_name << " --po1 RandomCrop --po2 Pad --size 224\n";
 }
 
 /**
@@ -352,13 +365,42 @@ std::unique_ptr<PreprocessOperation> create_po(const std::string& name, int size
         return std::make_unique<CenterCrop>(size);
     } else if (name == "RandomResizedCrop") {
         return std::make_unique<RandomResizedCrop>(size);
+    } else if (name == "FastRandomResizedCrop") {
+        return std::make_unique<FastRandomResizedCrop>(size);
     } else if (name == "RandomHorizontalFlip") {
         return std::make_unique<RandomHorizontalFlip>();
+    } else if (name == "ColorJitter") {
+        // 默认参数：亮度=0.2，对比度=0.3，饱和度=0.4，色调=0.1
+        return std::make_unique<ColorJitter>(0.2f, 0.3f, 0.4f, 0.1f);
+    } else if (name == "RandomRotation") {
+        // 默认参数：degrees=30度，fill=0（黑色填充）
+        return std::make_unique<RandomRotation>(30.0f, 0);
+    } else if (name == "RandomAutocontrast") {
+        // 默认参数：p=0.5（50%概率）
+        return std::make_unique<RandomAutocontrast>(0.5f);
+    } else if (name == "RandomBrightness") {
+        // 无参数：移位范围硬编码为[-7, 7]
+        return std::make_unique<RandomBrightness>();
+    } else if (name == "GaussianBlur") {
+        // 默认参数：sigma范围[0.1, 2.0]
+        return std::make_unique<GaussianBlur>(0.1f, 2.0f);
+    } else if (name == "GaussianNoise") {
+        // 默认参数：mean=0, sigma=25.5（相当于[0,1]范围的0.1）
+        return std::make_unique<GaussianNoise>(0.0f, 25.5f, true);
+    } else if (name == "RandomGrayscale") {
+        // 测试参数：p=0.5（50%概率，方便测试）
+        return std::make_unique<RandomGrayscale>(0.5f);
+    } else if (name == "Pad") {
+        // 默认参数：padding=4，填充模式=CONSTANT（黑色）
+        return std::make_unique<Pad>(4, std::vector<int>{0}, PaddingMode::CONSTANT);
+    } else if (name == "RandomCrop") {
+        // 默认参数：size=224，无padding
+        return std::make_unique<RandomCrop>(size);
     } else if (name == "DoNothing") {
         return std::make_unique<DoNothing>();
     } else {
         std::cerr << "[ERROR] Unknown PO: " << name << "\n";
-        std::cerr << "[INFO] Supported POs: Resize, CenterCrop, RandomResizedCrop, RandomHorizontalFlip, DoNothing\n";
+        std::cerr << "[INFO] Supported POs: Resize, CenterCrop, RandomResizedCrop, FastRandomResizedCrop, RandomHorizontalFlip, ColorJitter, RandomRotation, RandomAutocontrast, RandomBrightness, GaussianBlur, GaussianNoise, RandomGrayscale, Pad, RandomCrop, DoNothing\n";
         return nullptr;
     }
 }
@@ -430,7 +472,7 @@ int main(int argc, char* argv[]) {
         }
 
         // =====================================================================
-        // Step 2: 初始化TurboJPEG
+        // Step 2: 初始化TurboJPEG并获取图像尺寸
         // =====================================================================
         tjhandle tj = tj3Init(TJINIT_DECOMPRESS);
         if (!tj) {
@@ -459,6 +501,35 @@ int main(int argc, char* argv[]) {
 
         std::cout << "[INFO] Created PO1: " << po1->name() << "\n";
         std::cout << "[INFO] Created PO2: " << po2->name() << "\n";
+
+        // 检查PO1必须是Resize/Crop类型
+        if (!po1->is_resize() && !po1->is_crop()) {
+            std::cerr << "[ERROR] PO1 must be Resize or Crop type, got: " << po1->name() << "\n";
+            tj3Destroy(tj);
+            return 1;
+        }
+
+        // 设置颜色通道数
+        po1->set_num_channels(3);
+        po2->set_num_channels(3);
+
+        // 设定输出尺寸（模拟Preprocessor的逻辑）
+        // PO1必须是Resize/Crop，输出尺寸确定
+        int current_output_size = output_size;
+        po1->set_output_size(current_output_size);
+        po1->calculate_stride();
+
+        // PO2基于PO1的输出尺寸
+        if (po2->is_resize() || po2->is_crop()) {
+            current_output_size = output_size;
+        } else {
+            current_output_size = po2->inference_output_size(current_output_size);
+        }
+        po2->set_output_size(current_output_size);
+        po2->calculate_stride();
+
+        std::cout << "[INFO] PO1 output size: " << po1->get_output_size() << "\n";
+        std::cout << "[INFO] PO2 output size: " << po2->get_output_size() << "\n";
 
         // 初始化RNG（用于随机操作）
         Generator rng;
@@ -578,9 +649,10 @@ int main(int argc, char* argv[]) {
         int32_t po2_w = 0, po2_h = 0;
         size_t po2_stride = 0;
 
-        // PO2的输出尺寸由PO1决定
-        po2_stride = calculate_stride(po1_w, 3);
-        po2_output.resize(po2_stride * po1_h);
+        // PO2的输出尺寸由PO2自己决定（通过set_output_size已设置）
+        int po2_size = po2->get_output_size();
+        po2_stride = calculate_stride(po2_size, 3);
+        po2_output.resize(po2_stride * po2_size);
 
         auto start_po2 = std::chrono::high_resolution_clock::now();
 

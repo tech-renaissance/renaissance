@@ -3,7 +3,10 @@
     "allow": [
       "Bash(cmake:*)",
       "Bash(ninja test_pw_ultimate:*)",
-      "Bash(/root/epfs/R/renaissance/build/bin/tests/integration/test_pw_ultimate:*)"
+      "Bash(/root/epfs/R/renaissance/build/bin/tests/integration/test_pw_ultimate:*)",
+      "Bash(powershell.exe:*)",
+      "Bash(build/windows-msvc-release/bin/tests/pw/test_po.exe:*)",
+      "Read(//r/**)"
     ]
   }
 }

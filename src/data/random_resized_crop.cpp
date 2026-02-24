@@ -25,9 +25,10 @@ RandomResizedCrop::RandomResizedCrop(
     float scale_min,
     float scale_max,
     float ratio_min,
-    float ratio_max
+    float ratio_max,
+    size_t output_alignment
 )
-    : output_size_(output_size)
+    : PreprocessOperation(output_alignment)
     , scale_min_(scale_min)
     , scale_max_(scale_max)
     , ratio_min_(ratio_min)
@@ -41,6 +42,8 @@ RandomResizedCrop::RandomResizedCrop(
     , mcu_w_(0)
     , mcu_h_(0)
 {
+    output_size_ = output_size;
+
     // 验证参数合理性
     TR_CHECK(scale_min_ > 0.0f && scale_min_ <= scale_max_, ValueError,
              "scale_min must be in (0, scale_max], got: " << scale_min_ << ", " << scale_max_);
@@ -234,7 +237,7 @@ void RandomResizedCrop::execute(
     size_t& output_stride,
     Generator* rng,
     bool execute_from_full,
-    bool compact
+    bool forced_compact_output
 ) {
     // 步骤1：生成或重用随机crop参数
     if (execute_from_full || !rank_first_in_the_po_chain_) {
@@ -249,12 +252,11 @@ void RandomResizedCrop::execute(
 
     // ==================== 自动计算output_stride（如果为0）====================
     if (output_stride == 0) {
-        if (compact) {
+        if (forced_compact_output) {
             // 紧凑布局：无padding
-            output_stride = output_size_ * num_channels_;
+            output_stride = compact_output_stride_;
         } else {
-            // Stride布局：64字节对齐
-            output_stride = calculate_stride(output_size_, num_channels_);
+            output_stride = output_stride_;
         }
     }
 
@@ -302,10 +304,6 @@ void RandomResizedCrop::execute_from_full_decode(
         SimdResizeMethodBilinear
     );
 
-    TR_CHECK(resizer != nullptr, MemoryError,
-             "SimdResizerInit failed: " << crop_w_ << "x" << crop_h_
-             << " -> " << output_size_ << "x" << output_size_);
-
     // 执行Resize
     SimdResizerRun(resizer,
                       src_row, input_stride,
@@ -339,10 +337,6 @@ void RandomResizedCrop::execute_from_partial_decode(
         SimdResizeChannelByte,
         SimdResizeMethodBilinear
     );
-
-    TR_CHECK(resizer != nullptr, MemoryError,
-             "SimdResizerInit failed: " << crop_w_ << "x" << crop_h_
-             << " -> " << output_size_ << "x" << output_size_);
 
     // 执行Resize
     SimdResizerRun(resizer,

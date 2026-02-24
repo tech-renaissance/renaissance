@@ -71,6 +71,9 @@ endif()
 # CRC32对比测试
 add_executable(test_crc32_comparison test_crc32_comparison.cpp)
 
+# RNG性能测试
+add_executable(test_rng test_rng.cpp)
+
 # 设置输出目录
 set_target_properties(test_logger PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/base
@@ -122,6 +125,10 @@ set_target_properties(test_crc32_comparison PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/base
 )
 
+set_target_properties(test_rng PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/base
+)
+
 # Windows下为控制台程序设置子系统
 if(WIN32)
     set_target_properties(test_logger PROPERTIES
@@ -163,6 +170,9 @@ if(WIN32)
     set_target_properties(test_crc32_comparison PROPERTIES
         WIN32_EXECUTABLE FALSE
     )
+    set_target_properties(test_rng PROPERTIES
+        WIN32_EXECUTABLE FALSE
+    )
 endif()
 
 # 编译选项
@@ -174,6 +184,7 @@ if(MSVC)
     target_compile_options(test_arena PRIVATE /W4 /utf-8)
     target_compile_options(test_cpu_arena PRIVATE /W4 /utf-8)
     target_compile_options(test_memory_plan PRIVATE /W4 /utf-8)
+    target_compile_options(test_rng PRIVATE /W4 /utf-8)
     if(TR_USE_LIBCURL)
         target_compile_options(test_downloader PRIVATE /W4 /utf-8)
     endif()
@@ -190,6 +201,7 @@ else()
     target_compile_options(test_arena PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(test_cpu_arena PRIVATE -Wall -Wextra -Wpedantic)
     target_compile_options(test_memory_plan PRIVATE -Wall -Wextra -Wpedantic)
+    target_compile_options(test_rng PRIVATE -Wall -Wextra -Wpedantic)
     if(TR_USE_LIBCURL)
         target_compile_options(test_downloader PRIVATE -Wall -Wextra -Wpedantic)
     endif()
@@ -210,6 +222,7 @@ target_compile_definitions(test_memory_alignment PRIVATE TR_LOG_LEVEL=0)
 target_compile_definitions(test_arena PRIVATE TR_LOG_LEVEL=0)
 target_compile_definitions(test_cpu_arena PRIVATE TR_LOG_LEVEL=0)
 target_compile_definitions(test_memory_plan PRIVATE TR_LOG_LEVEL=0)
+target_compile_definitions(test_rng PRIVATE TR_LOG_LEVEL=0)
 if(TR_USE_LIBCURL)
     target_compile_definitions(test_downloader PRIVATE TR_LOG_LEVEL=0)
 endif()
@@ -238,6 +251,7 @@ if(TR_USE_MUSA)
     target_link_libraries(test_musa_arena PRIVATE renaissance)
 endif()
 target_link_libraries(test_crc32_comparison PRIVATE renaissance)
+target_link_libraries(test_rng PRIVATE renaissance)
 
 message(STATUS "TR_WORKSPACE propagated to base tests: ${TR_WORKSPACE}")
 

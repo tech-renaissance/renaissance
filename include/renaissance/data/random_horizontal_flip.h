@@ -44,8 +44,10 @@ public:
     /**
      * @brief 构造函数
      * @param prob 翻转概率（默认0.5，即50%概率翻转）
+     * @param output_alignment 输出对齐字节数（默认0=紧凑布局）
      */
-    explicit RandomHorizontalFlip(float prob = 0.5f) : prob_(prob) {}
+    explicit RandomHorizontalFlip(float prob = 0.5f, size_t output_alignment = 0)
+        : PreprocessOperation(output_alignment), prob_(prob) {}
 
     /**
      * @brief 预判是否需要翻转（供PW优化路径使用）
@@ -93,7 +95,7 @@ public:
         size_t& output_stride,
         Generator* rng = nullptr,
         bool execute_from_full = false,
-        bool compact = true
+        bool forced_compact_output = true
     ) override;
 
     /**
@@ -101,7 +103,16 @@ public:
      * @return 新的独立副本
      */
     std::unique_ptr<PreprocessOperation> clone() const override {
-        return std::make_unique<RandomHorizontalFlip>(prob_);
+        auto cloned = std::make_unique<RandomHorizontalFlip>(prob_);
+        // 复制基类成员变量
+        cloned->num_channels_ = num_channels_;
+        cloned->output_size_ = output_size_;  // ← 重要：需要复制output_size_
+        cloned->output_alignment_ = output_alignment_;
+        cloned->use_compact_output_as_default_ = use_compact_output_as_default_;
+        cloned->output_stride_ = output_stride_;
+        cloned->compact_output_stride_ = compact_output_stride_;
+        cloned->rank_first_in_the_po_chain_ = rank_first_in_the_po_chain_;
+        return cloned;
     }
 
     /**
@@ -113,6 +124,15 @@ public:
      * @brief 是否引入随机性
      */
     bool introduce_randomness() const override { return true; }
+
+    /**
+     * @brief 推断输出尺寸
+     * @param input_size 输入尺寸
+     * @return input_size（翻转不改变尺寸）
+     */
+    int inference_output_size(int input_size) override {
+        return input_size;
+    }
 
     /**
      * @brief 是否为RandomHorizontalFlip操作

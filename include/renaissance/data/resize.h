@@ -28,7 +28,10 @@ namespace tr {
  */
 class Resize : public PreprocessOperation {
 public:
-    explicit Resize(int output_size = 224) : output_size_(output_size) {}
+    explicit Resize(int output_size = 224, size_t output_alignment = 0)
+        : PreprocessOperation(output_alignment) {
+        output_size_ = output_size;
+    }
 
     void execute(
         const uint8_t* input_ptr,
@@ -41,19 +44,25 @@ public:
         size_t& output_stride,
         Generator* rng = nullptr,
         bool execute_from_full = false,  // Resize不使用此参数（总是完整解码）
-        bool compact = true  // 紧凑布局标志（默认true）
+        bool forced_compact_output = true  // 紧凑布局标志（默认true）
     ) override;
 
     std::unique_ptr<PreprocessOperation> clone() const override {
-        return std::make_unique<Resize>(output_size_);
+        auto cloned = std::make_unique<Resize>(output_size_);
+        // 复制基类成员变量
+        cloned->num_channels_ = num_channels_;
+        cloned->output_size_ = output_size_;  // ← 重要：需要复制output_size_
+        cloned->output_alignment_ = output_alignment_;
+        cloned->use_compact_output_as_default_ = use_compact_output_as_default_;
+        cloned->output_stride_ = output_stride_;
+        cloned->compact_output_stride_ = compact_output_stride_;
+        cloned->rank_first_in_the_po_chain_ = rank_first_in_the_po_chain_;
+        return cloned;
     }
 
     std::string name() const override { return "Resize"; }
     bool introduce_randomness() const override { return false; }
     bool is_resize() const override { return true; }
-
-    void set_output_size(int size) override;
-    int get_output_size() const override { return output_size_; }
 
     DecodeStrategy get_decode_strategy(
         int32_t image_width,
@@ -62,10 +71,11 @@ public:
         Generator* rng
     ) const override;
 
+    void set_output_size(int size) override;
+
     ~Resize();
 
 private:
-    int output_size_;
 
     // Simd上下文缓存
     mutable void* resizer_cache_ = nullptr;

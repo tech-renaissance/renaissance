@@ -17,7 +17,11 @@
 #include "renaissance/data/resize.h"
 #include "renaissance/data/center_crop.h"
 #include "renaissance/data/random_resized_crop.h"
+#include "renaissance/data/fast_random_resized_crop.h"
 #include "renaissance/data/do_nothing.h"
+#include "renaissance/data/gaussian_blur.h"
+#include "renaissance/data/random_grayscale.h"
+#include "renaissance/data/random_erasing.h"
 #include "renaissance/data/engine_buffer.h"
 #include "renaissance/base/logger.h"
 #include "renaissance/base/tr_exception.h"
@@ -79,6 +83,7 @@ Preprocessor::Preprocessor()
     , num_color_channels_(3)
     , sdmp_factor_(1)
     , using_cpvs_(false)
+    , using_progressive_resolution_(false)
     , sample_size_bytes_(0)
     , buffer_size_bytes_(0)
     , is_deployment_mode_(false)
@@ -94,6 +99,9 @@ Preprocessor::Preprocessor()
     , val_transforms_set_(false)
     , suppress_info_logs_(false)
     , fast_mode_(false)
+    , max_intermediate_resolution_(0)
+    , workshop_size_calculated_(false)
+    , global_initial_seed_(0)
 {
     LOG_DEBUG << "Preprocessor constructed";
 }
@@ -182,6 +190,9 @@ void Preprocessor::run(DataLoader& loader) {
     workers_finished_.store(0, std::memory_order_seq_cst);
     current_buffer_seq_.store(0, std::memory_order_seq_cst);
     stop_flag_.store(false, std::memory_order_seq_cst);
+
+    // 【Core Dump修复】重置EngineBuffer同步屏障
+    engine_reset_barrier_.store(0, std::memory_order_seq_cst);
 
     // 【方案A 关键修复2】添加内存屏障，确保所有线程看到一致的状态
     std::atomic_thread_fence(std::memory_order_seq_cst);
@@ -573,9 +584,21 @@ void Preprocessor::notify_workers_new_buffer() {
 void Preprocessor::wait_workers_complete_buffer() {
     // 等待所有worker完成当前buffer
     int expected = config_.num_workers;
+    auto start = std::chrono::steady_clock::now();
+    const auto TIMEOUT = std::chrono::seconds(10);  // 10秒超时
 
     while (workers_finished_.load(std::memory_order_acquire) < expected) {
-        std::this_thread::sleep_for(std::chrono::microseconds(10));
+        auto elapsed = std::chrono::steady_clock::now() - start;
+        if (elapsed > TIMEOUT) {
+            int current = workers_finished_.load(std::memory_order_acquire);
+            LOG_ERROR << "TIMEOUT waiting for workers to complete buffer! "
+                      << "workers_finished_=" << current << "/" << expected
+                      << " (waited " << std::chrono::duration_cast<std::chrono::seconds>(elapsed).count() << "s)";
+
+            TR_THROW(TimeoutError, "Workers timeout, possible deadlock detected");
+        }
+
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));  // 改为1ms，减少CPU占用
     }
 }
 
@@ -691,6 +714,8 @@ void Preprocessor::worker_func_persistent(int worker_id, DataLoader& loader) {
             pw_config.pid_in_engine = worker_id / world_size_;
             pw_config.num_workers_per_engine = num_workers_per_engine;
 
+            pw_config.global_initial_seed = global_initial_seed_;
+
             // Workshop大小（从全局配置获取）
             pw_config.region_d_size = workshop_region_d_size_;
             pw_config.region_ab_size = workshop_region_ab_size_;
@@ -704,12 +729,13 @@ void Preprocessor::worker_func_persistent(int worker_id, DataLoader& loader) {
             pw_config.world_size = world_size_;
             pw_config.sdmp_factor = sdmp_factor_;
             pw_config.using_cpvs = using_cpvs_;
+            pw_config.using_progressive_resolution = using_progressive_resolution_;
 
             // 数据集信息
             pw_config.dataset_type = dataset_type_;
             pw_config.num_color_channels = num_color_channels_;
-            pw_config.raw_image_width = 0;   // ImageNet不需要
-            pw_config.raw_image_height = 0;  // ImageNet不需要
+            pw_config.raw_image_width = default_input_width_;   // ImageNet不需要
+            pw_config.raw_image_height = default_input_width_;  // ImageNet不需要
 
             // 测试模式
             pw_config.test_mode = pw_test_mode_;
@@ -758,9 +784,19 @@ void Preprocessor::worker_func_persistent(int worker_id, DataLoader& loader) {
         int engine_id = worker_id % world_size_;  // engine_id = worker_id % world_size_
         if (engine_buffer_instances_[engine_id]) {
             engine_buffer_instances_[engine_id]->reset_and_update();
-            LOG_DEBUG << "[Worker " << worker_id << "] EngineBuffer " << engine_id << " reset_and_update called";
         }
+        // 【Core Dump修复1】Leader完成重置后签到
+        engine_reset_barrier_.fetch_add(1, std::memory_order_acq_rel);
     }
+
+    // ==================== 【Core Dump修复1】同步屏障 ====================
+    // 所有Worker（Leader和Follower）必须等待所有EngineBuffer重置完成
+    while (engine_reset_barrier_.load(std::memory_order_acquire) < world_size_) {
+        std::this_thread::sleep_for(std::chrono::microseconds(10));
+    }
+
+    // 【Core Dump修复1】内存屏障：确保所有线程看到重置后的最新内存状态
+    std::atomic_thread_fence(std::memory_order_acq_rel);
 
     // 打开CSV日志文件（如果启用）
     std::ofstream log_file;
@@ -1203,6 +1239,7 @@ void Preprocessor::config_dataset(const std::string& dataset_name,
             } else {
                 current_dataloader_ = &MnistLoaderRaw::instance();
             }
+            default_input_width_ = 28;
             break;
 
         case DatasetType::cifar_10:
@@ -1220,6 +1257,7 @@ void Preprocessor::config_dataset(const std::string& dataset_name,
                     dataset_type_ == DatasetType::cifar_10 ? 10 : 100
                 );
             }
+            default_input_width_ = 32;
             break;
 
         case DatasetType::imagenet:
@@ -1272,6 +1310,7 @@ void Preprocessor::config_dataset(DatasetType dataset_type,
             } else {
                 current_dataloader_ = &MnistLoaderRaw::instance();
             }
+            default_input_width_ = 28;
             break;
 
         case DatasetType::cifar_10:
@@ -1289,6 +1328,7 @@ void Preprocessor::config_dataset(DatasetType dataset_type,
                     dataset_type_ == DatasetType::cifar_10 ? 10 : 100
                 );
             }
+            default_input_width_ = 32;
             break;
 
         case DatasetType::imagenet:
@@ -1408,21 +1448,35 @@ void Preprocessor::config_dataloader(const std::string& dataset_path,
 
 void Preprocessor::config_preprocessor(int world_size,
                                        int batch_size,
-                                       int max_resolution,
+                                       int max_final_resolution,
                                        int num_color_channels,
                                        int sdmp_factor,
                                        bool using_cpvs,
-                                       bool pw_test_mode) {
+                                       bool pw_test_mode,
+                                       bool using_progressive_resolution,
+                                       int max_intermediate_resolution) {
     // 检查状态
     check_state(ConfigState::DataLoaderConfigured, "config_preprocessor");
 
+    // ==================== 内存使用警告 ====================
+    // 经验公式：sdmp_factor应该小于计算机内存除以187GB
+    // 如果大于这个值，即使仍能运转，也会因为数据加载器的缓存被驱逐而导致性能大幅下降
+    //
+    // 示例计算：
+    // - 512 GB内存: 512/187 ≈ 2.74，合理的最大取值是2
+    // - 960 GB内存: 960/187 ≈ 5.13，合理的最大取值是5
+    //
+    global_initial_seed_ = get_default_generator().seed();
     // 保存配置
     world_size_ = world_size;
     batch_size_ = batch_size;
-    max_resolution_ = max_resolution;
+    max_resolution_ = max_final_resolution;
+    bool user_specified_max_intermediate = (max_intermediate_resolution > 0);
+    max_intermediate_resolution_ = (max_intermediate_resolution > 0 ? max_intermediate_resolution : max_final_resolution);
     num_color_channels_ = num_color_channels;
     sdmp_factor_ = sdmp_factor;
     using_cpvs_ = using_cpvs;
+    using_progressive_resolution_ = using_progressive_resolution;
 
     // 设置PW测试模式（在配置阶段）
     pw_test_mode_ = pw_test_mode;
@@ -1430,15 +1484,28 @@ void Preprocessor::config_preprocessor(int world_size,
     // 注册到全局注册表（fixed变量，但不包括world_size）
     // world_size 将在 config_device 中验证后注册
     GlobalRegistry::instance().set_batch_size(batch_size);
-    GlobalRegistry::instance().set_max_resolution(max_resolution);
-    GlobalRegistry::instance().set_current_resolution_train(max_resolution);  // 初始值
-    GlobalRegistry::instance().set_current_resolution_val(max_resolution);  // 初始值
+    GlobalRegistry::instance().set_max_resolution(max_final_resolution);
+    GlobalRegistry::instance().set_train_crop_output(max_final_resolution);
+    GlobalRegistry::instance().set_train_resize_output(max_final_resolution);
+    GlobalRegistry::instance().set_val_crop_output(max_final_resolution);
+    GlobalRegistry::instance().set_val_resize_output(max_final_resolution);
+    GlobalRegistry::instance().set_current_resolution_train(max_final_resolution);  // 初始值
+    GlobalRegistry::instance().set_current_resolution_val(max_final_resolution);  // 初始值
     GlobalRegistry::instance().set_num_color_channels(num_color_channels);
     GlobalRegistry::instance().set_sdmp_factor(sdmp_factor);
     GlobalRegistry::instance().set_using_cpvs(using_cpvs);
+    GlobalRegistry::instance().set_using_progressive_resolution(using_progressive_resolution);
 
-    // 计算单个样本大小
-    sample_size_bytes_ = max_resolution * max_resolution * num_color_channels;
+    // 计算单个样本大小（使用 size_t 避免溢出）
+    size_t max_res = static_cast<size_t>(max_final_resolution);
+    size_t num_ch = static_cast<size_t>(num_color_channels);
+    sample_size_bytes_ = max_res * max_res * num_ch;
+
+    LOG_INFO << "config_preprocessor: max_final_resolution=" << max_final_resolution
+             << ", max_intermediate_resolution=" << max_intermediate_resolution_
+             << (user_specified_max_intermediate ? " (user-specified)" : " (auto-calculated)")
+             << ", num_color_channels=" << num_color_channels
+             << ", sample_size_bytes_=" << sample_size_bytes_;
 
     // 计算单个缓冲区大小
     buffer_size_bytes_ = batch_size * sample_size_bytes_;
@@ -1458,7 +1525,7 @@ void Preprocessor::config_preprocessor(int world_size,
     LOG_INFO << "Preprocessor configured: "
              << "world_size=" << world_size
              << ", batch_size=" << batch_size
-             << ", max_resolution=" << max_resolution
+             << ", max_final_resolution=" << max_final_resolution
              << ", num_preproc_workers=" << num_preproc_workers_
              << ", pw_test_mode=" << (pw_test_mode ? "ON" : "OFF");
 }
@@ -1474,16 +1541,7 @@ namespace {
      * @return true=需要解码, false=不需要解码
      */
     bool is_crop_or_resize_op(const PreprocessOperation* op) {
-        if (auto* resize = dynamic_cast<const Resize*>(op)) {
-            return true;
-        }
-        if (auto* center_crop = dynamic_cast<const CenterCrop*>(op)) {
-            return true;
-        }
-        if (auto* random_resized_crop = dynamic_cast<const RandomResizedCrop*>(op)) {
-            return true;
-        }
-        return false;
+        return op->is_crop() || op->is_resize();
     }
 
     /**
@@ -1523,10 +1581,48 @@ void Preprocessor::set_train_transforms(Ops&&... ops) {
 
     // 将所有ops存入vector以便处理
     std::vector<std::unique_ptr<PreprocessOperation>> temp_ops;
-    temp_ops.reserve(sizeof...(Ops));
 
-    // 使用fold expression展开参数包
-    (temp_ops.push_back(std::unique_ptr<PreprocessOperation>(ops.clone())), ...);
+    if constexpr (sizeof...(Ops) == 0) {
+        // 空参数包：检查数据集类型
+        if (is_imagenet()) {
+            // ImageNet不允许空操作
+            TR_THROW(ValueError,
+                     "set_train_transforms() requires at least one transform operation for ImageNet dataset.\n"
+                     "  Empty transforms are not allowed for ImageNet.\n"
+                     "  ImageNet requires at least one preprocessing operation (e.g., Resize, CenterCrop, RandomResizedCrop).\n"
+                     "Solution:\n"
+                     "  Provide at least one preprocessing operation.");
+        } else {
+            // 非ImageNet数据集：使用DoNothing作为占位操作
+            temp_ops.push_back(std::make_unique<DoNothing>());
+        }
+    } else {
+        temp_ops.reserve(sizeof...(Ops));
+
+        // 使用fold expression展开参数包
+        (temp_ops.push_back(std::unique_ptr<PreprocessOperation>(ops.clone())), ...);
+    }
+    // =========================================================================
+    // 处理RandomErasing（在排序之前）
+    // =========================================================================
+    // RandomErasing是占位操作，需要从PO链中移除，将p注册到GlobalRegistry
+    float random_erasing_p = 0.0f;  // 默认值：没有RandomErasing时p=0
+    std::vector<std::unique_ptr<PreprocessOperation>> filtered_ops;
+
+    for (auto& op : temp_ops) {
+        if (auto* re = dynamic_cast<RandomErasing*>(op.get())) {
+            // 找到RandomErasing，提取p值
+            random_erasing_p = re->get_p();
+            LOG_INFO << "RandomErasing detected in train transforms, p=" << random_erasing_p;
+            // 不添加到filtered_ops（即从PO链中移除）
+        } else {
+            // 保留其他PO
+            filtered_ops.push_back(std::move(op));
+        }
+    }
+
+    // 注册p到GlobalRegistry
+    GlobalRegistry::instance().set_random_erasing_p(random_erasing_p);
 
     // 验证和重排序transform
     // 规则1: RandomHorizontalFlip必须移到最后
@@ -1535,7 +1631,7 @@ void Preprocessor::set_train_transforms(Ops&&... ops) {
     std::vector<std::unique_ptr<PreprocessOperation>> non_flip_ops;
     std::vector<std::unique_ptr<PreprocessOperation>> flip_ops;
 
-    for (auto& op : temp_ops) {
+    for (auto& op : filtered_ops) {
         if (is_random_horizontal_flip(op.get())) {
             flip_ops.push_back(std::move(op));
         } else {
@@ -1576,10 +1672,41 @@ void Preprocessor::set_train_transforms(Ops&&... ops) {
         train_ops_template_.push_back(std::move(op));
     }
 
-    // ==================== 设置所有PO的颜色通道数 ====================
+    // 设定颜色通道数、输出尺寸和输出stride
+    int output_size_temp = default_input_width_;
+    int max_intermediate_res_train = 0;  // 注意，这个值与max_resolution不同，是指中间的最大分辨率
     for (auto& op : train_ops_template_) {
         op->set_num_channels(num_color_channels_);
+        if (op->is_resize() || op->is_crop()) {
+            output_size_temp = op->get_output_size();
+        }
+        else {
+            output_size_temp = op->inference_output_size(output_size_temp);
+            op->set_output_size(output_size_temp);
+        }
+        max_intermediate_res_train = std::max(max_intermediate_res_train, output_size_temp);
+        op->calculate_stride();
     }
+    int final_train_output_size = output_size_temp;
+
+    // ==================== 验证最终输出尺寸 ====================
+    TR_CHECK(final_train_output_size <= max_resolution_, ValueError,
+             "Train transforms final output size (" << final_train_output_size
+             << ") exceeds max_resolution (" << max_resolution_ << ").\n"
+             "  This would cause AB region overflow.\n"
+             "  Solutions:\n"
+             "    1. Increase max_resolution in config_preprocessor()\n"
+             "    2. Reduce the output size of your transform operations\n"
+             "    3. Check if Pad operation is unexpectedly enlarging the output");
+
+    // 更新全局最大中间分辨率
+    int old_max_intermediate = max_intermediate_resolution_;
+    max_intermediate_resolution_ = std::max(max_intermediate_res_train, max_intermediate_resolution_);
+
+    LOG_INFO << "Train transforms: max_intermediate_res_train=" << max_intermediate_res_train
+             << ", final_output=" << final_train_output_size
+             << ", max_intermediate_resolution updated: " << old_max_intermediate
+             << " -> " << max_intermediate_resolution_;
 
 	train_ops_template_[0]->set_as_first();  // 标记首个PO
 
@@ -1589,9 +1716,6 @@ void Preprocessor::set_train_transforms(Ops&&... ops) {
         LOG_INFO << "Train transforms contain RandomHorizontalFlip";
     }
     GlobalRegistry::instance().set_train_with_rhf(train_with_rhf);
-
-    // ==================== 计算Workshop大小（按照PW2.md规范）====================
-    calculate_workshop_sizes();
 
     // 标记train transforms已设置
     train_transforms_set_ = true;
@@ -1625,10 +1749,42 @@ void Preprocessor::set_val_transforms(Ops&&... ops) {
 
     // 将所有ops存入vector以便处理
     std::vector<std::unique_ptr<PreprocessOperation>> temp_ops;
-    temp_ops.reserve(sizeof...(Ops));
 
-    // 使用fold expression展开参数包
-    (temp_ops.push_back(std::unique_ptr<PreprocessOperation>(ops.clone())), ...);
+    if constexpr (sizeof...(Ops) == 0) {
+        // 空参数包：检查数据集类型
+        if (is_imagenet()) {
+            // ImageNet不允许空操作
+            TR_THROW(ValueError,
+                     "set_val_transforms() requires at least one transform operation for ImageNet dataset.\n"
+                     "  Empty transforms are not allowed for ImageNet.\n"
+                     "  ImageNet validation requires at least one preprocessing operation (e.g., Resize, CenterCrop).\n"
+                     "Solution:\n"
+                     "  Provide at least one preprocessing operation.");
+        } else {
+            // 非ImageNet数据集：使用DoNothing作为占位操作
+            temp_ops.push_back(std::make_unique<DoNothing>());
+        }
+    } else {
+        temp_ops.reserve(sizeof...(Ops));
+
+        // 使用fold expression展开参数包
+        (temp_ops.push_back(std::unique_ptr<PreprocessOperation>(ops.clone())), ...);
+    }
+    // =========================================================================
+    // 检查RandomErasing（验证集不允许）
+    // =========================================================================
+    // RandomErasing是训练专用占位操作，验证集不允许使用
+    for (const auto& op : temp_ops) {
+        if (auto* re = dynamic_cast<RandomErasing*>(op.get())) {
+            TR_THROW(ValueError,
+                     "RandomErasing is NOT allowed in validation transforms.\n"
+                     "  RandomErasing is a training-only data augmentation operation.\n"
+                     "  RandomErasing p value: " << re->get_p() << "\n"
+                     "Solution:\n"
+                     "  Remove RandomErasing from validation transforms.\n"
+                     "  RandomErasing should only be used in set_train_transforms().");
+        }
+    }
 
     // 验证和重排序transform（规则同训练集）
     std::vector<std::unique_ptr<PreprocessOperation>> non_flip_ops;
@@ -1675,10 +1831,41 @@ void Preprocessor::set_val_transforms(Ops&&... ops) {
         val_ops_template_.push_back(std::move(op));
     }
 
-    // ==================== 设置所有PO的颜色通道数 ====================
+    // 设定颜色通道数、输出尺寸和输出stride
+    int output_size_temp = default_input_width_;
+    int max_intermediate_res_val = 0;  // 注意，这个值与max_resolution不同，是指中间的最大分辨率
     for (auto& op : val_ops_template_) {
         op->set_num_channels(num_color_channels_);
+        if (op->is_resize() || op->is_crop()) {
+            output_size_temp = op->get_output_size();
+        }
+        else {
+            output_size_temp = op->inference_output_size(output_size_temp);
+            op->set_output_size(output_size_temp);
+        }
+        max_intermediate_res_val = std::max(max_intermediate_res_val, output_size_temp);
+        op->calculate_stride();
     }
+    int final_val_output_size = output_size_temp;
+
+    // ==================== 验证最终输出尺寸 ====================
+    TR_CHECK(final_val_output_size <= max_resolution_, ValueError,
+             "Validation transforms final output size (" << final_val_output_size
+             << ") exceeds max_resolution (" << max_resolution_ << ").\n"
+             "  This would cause AB region overflow.\n"
+             "  Solutions:\n"
+             "    1. Increase max_resolution in config_preprocessor()\n"
+             "    2. Reduce the output size of your transform operations\n"
+             "    3. Check if Pad operation is unexpectedly enlarging the output");
+
+    // 更新全局最大中间分辨率
+    int old_max_intermediate = max_intermediate_resolution_;
+    max_intermediate_resolution_ = std::max(max_intermediate_res_val, max_intermediate_resolution_);
+
+    LOG_INFO << "Val transforms: max_intermediate_res_val=" << max_intermediate_res_val
+             << ", final_output=" << final_val_output_size
+             << ", max_intermediate_resolution updated: " << old_max_intermediate
+             << " -> " << max_intermediate_resolution_;
 
 	val_ops_template_[0]->set_as_first();  // 标记首个PO
 
@@ -1688,6 +1875,20 @@ void Preprocessor::set_val_transforms(Ops&&... ops) {
         LOG_INFO << "Validation transforms contain RandomHorizontalFlip";
     }
     GlobalRegistry::instance().set_val_with_rhf(val_with_rhf);
+
+    // ==================== CPVS互斥检查 ====================
+    if (using_cpvs_) {
+        for (const auto& op : val_ops_template_) {
+            TR_CHECK(!op->introduce_randomness(), ValueError,
+                     "CPVS (Cached Preprocessed Validation Set) optimization "
+                     "is incompatible with randomized validation transforms.\n"
+                     "  Validation transform '" << op->name() << "' introduces randomness.\n"
+                     "  Solutions:\n"
+                     "    1. Use non-random transforms for validation (e.g., Resize, CenterCrop)\n"
+                     "    2. Disable CPVS by setting using_cpvs=false in config_preprocessor()");
+        }
+        LOG_INFO << "CPVS enabled: all validation transforms are deterministic";
+    }
 
     // 标记val transforms已设置
     val_transforms_set_ = true;
@@ -1706,12 +1907,14 @@ template void Preprocessor::set_train_transforms<Resize>(Resize&&);
 template void Preprocessor::set_train_transforms<CenterCrop>(CenterCrop&&);
 template void Preprocessor::set_train_transforms<CenterCrop, Resize>(CenterCrop&&, Resize&&);
 template void Preprocessor::set_train_transforms<RandomResizedCrop>(RandomResizedCrop&&);
+template void Preprocessor::set_train_transforms<FastRandomResizedCrop>(FastRandomResizedCrop&&);
 template void Preprocessor::set_val_transforms<>(void);  // 空参数包
 template void Preprocessor::set_val_transforms<PreprocessOperation&>(PreprocessOperation&);
 template void Preprocessor::set_val_transforms<PreprocessOperation&, PreprocessOperation&>(PreprocessOperation&, PreprocessOperation&);
 template void Preprocessor::set_val_transforms<Resize>(Resize&&);
 template void Preprocessor::set_val_transforms<CenterCrop>(CenterCrop&&);
 template void Preprocessor::set_val_transforms<RandomResizedCrop>(RandomResizedCrop&&);
+template void Preprocessor::set_val_transforms<FastRandomResizedCrop>(FastRandomResizedCrop&&);
 
 void Preprocessor::set_deployment_transforms() {
     // TODO: 后续实现
@@ -1826,12 +2029,24 @@ void Preprocessor::multi_thread_init() {
                     // 计算每个Engine的worker数
                     int num_workers_per_engine = num_preproc_workers_ / world_size_;
 
-                    // 创建EngineBuffer实例
+                    // 创建EngineBuffer实例（仅正常模式）
                     engine_buffer_instances_[i] = std::unique_ptr<EngineBuffer>(
-                        new EngineBuffer()  // 使用默认参数test_mode=false（正常模式）
+                        new EngineBuffer()  // 构造函数无参数，始终为正常模式
                     );
 
                     // 配置EngineBuffer
+                    // 诊断日志：检查sample_size_bytes_是否正常
+                    LOG_INFO << "[Worker " << i << "] Configuring EngineBuffer: "
+                             << "batch_size_=" << batch_size_
+                             << ", sample_size_bytes_=" << sample_size_bytes_
+                             << ", num_workers_per_engine=" << num_workers_per_engine
+                             << ", engine_id=" << i;
+
+                    // 检查sample_size_bytes_是否在合理范围内（224*224*3 = 150528字节）
+                    TR_CHECK(sample_size_bytes_ > 0 && sample_size_bytes_ < 100ULL * 1024ULL * 1024ULL, ValueError,
+                             "sample_size_bytes_ is invalid: " << sample_size_bytes_
+                             << " (expected ~150KB for 224x224x3)");
+
                     engine_buffer_instances_[i]->configure(
                         batch_size_,                      // local_batch_size
                         sample_size_bytes_,               // max_train_sample_bytes
@@ -1840,12 +2055,8 @@ void Preprocessor::multi_thread_init() {
                         i                                 // engine_id（线程ID）
                     );
 
-                    // 更新phase（默认train模式）
-                    engine_buffer_instances_[i]->update_phase(
-                        true,              // is_train
-                        max_resolution_,   // current_resolution
-                        num_color_channels_ // num_color_channels
-                    );
+                    // 更新phase（从GlobalRegistry自动获取配置）
+                    engine_buffer_instances_[i]->reset_and_update();
 
                     LOG_INFO << "[Worker " << i << "] EngineBuffer " << i << " created and configured successfully";
                 }
@@ -1879,12 +2090,17 @@ void Preprocessor::train() {
     TR_CHECK(!is_deployment_mode_, ValueError,
              "train() is not available in deployment mode");
 
+    if (!workshop_size_calculated_) {
+        calculate_workshop_sizes(max_intermediate_resolution_);
+        workshop_size_calculated_ = true;
+    }
+
     // 多线程初始化（如果还未初始化）
     if (!multi_thread_inited_) {
         multi_thread_init();
     }
 
-    if (train_phase_id_ % sdmp_factor_ == 0) {  // Busy train phase行为
+    if (sdmp_factor_ == 1 || train_phase_id_ % sdmp_factor_ == 0) {  // Busy train phase行为
         is_lazy_phase_ = false;
 
         // 更新运行时参数
@@ -1921,8 +2137,7 @@ void Preprocessor::train() {
         pw_param_.is_lazy_phase = true;
         pw_param_.active_s_region_idx = (train_phase_id_ % sdmp_factor_) - 1;
         pw_param_.phase_id = train_phase_id_;
-        pw_param_.current_train_resolution = gr_instance.current_resolution_train();
-        pw_param_.current_val_resolution = gr_instance.current_resolution_val();
+        // Lazy Phase不可以更新分辨率
 
         // ==================== 重置样本计数器 ====================
         total_samples_.store(0, std::memory_order_relaxed);
@@ -2008,12 +2223,17 @@ void Preprocessor::val() {
     // 检查状态
     check_state(ConfigState::Initialized, "val");
 
+    if (!workshop_size_calculated_) {
+        calculate_workshop_sizes(max_intermediate_resolution_);
+        workshop_size_calculated_ = true;
+    }
+
     // 多线程初始化（如果还未初始化）
     if (!multi_thread_inited_) {
         multi_thread_init();
     }
 
-    if (val_phase_id_ == 0) {  // Busy val phase行为
+    if (!using_cpvs_ || val_phase_id_ == 0) {  // Busy val phase行为
         is_lazy_phase_ = false;
 
         // 更新运行时参数
@@ -2058,8 +2278,7 @@ void Preprocessor::val() {
         pw_param_.is_lazy_phase = true;
         pw_param_.active_s_region_idx = -1;  // Val phase不从S区读取
         pw_param_.phase_id = val_phase_id_;
-        pw_param_.current_train_resolution = gr_instance.current_resolution_train();
-        pw_param_.current_val_resolution = gr_instance.current_resolution_val();
+        // Lazy Phase不可以更新分辨率
 
         // ==================== 重置样本计数器 ====================
         total_samples_.store(0, std::memory_order_relaxed);
@@ -2376,7 +2595,16 @@ void Preprocessor::run_fast_without_processing() {
 // Workshop大小计算（按照PW2.md规范）
 // =============================================================================
 
-void Preprocessor::calculate_workshop_sizes() {
+void Preprocessor::calculate_workshop_sizes(int ref_resolution_for_ab) {
+    // ==================== 参数有效性检查 ====================
+    TR_CHECK(max_resolution_ > 0 && max_resolution_ <= 10000, ValueError,
+             "max_resolution_ is invalid: " << max_resolution_);
+    TR_CHECK(num_color_channels_ > 0 && num_color_channels_ <= 10, ValueError,
+             "num_color_channels_ is invalid: " << num_color_channels_);
+
+    LOG_DEBUG << "calculate_workshop_sizes: max_resolution_=" << max_resolution_
+              << ", num_color_channels_=" << num_color_channels_;
+
     // ==================== 辅助对齐函数 ====================
     auto align_64 = [](size_t s) -> size_t {
         return (s + 63) & ~size_t(63);
@@ -2387,22 +2615,29 @@ void Preprocessor::calculate_workshop_sizes() {
     };
 
     // ==================== 1. 计算D区大小 ====================
-    // 根据PW2.md第5-18行的表格
+    // 根据list.md的实际测量数据（2026-02-22统计）
     if (is_imagenet()) {
         // ImageNet需要解码，D区大小取决于压缩级别
         switch (imagenet_compression_level_) {
             case 0:  // RAW或LV0
-                workshop_region_d_size_ = 134217728;  // 128MB (原96MB)
+                // ImageNet DTS LV0解码后最大字节数为95073792 Bytes，对齐到2MB大页后是96468992 Bytes (92MB)
+                workshop_region_d_size_ = 96468992;
                 break;
             case 1:  // LV1
-                workshop_region_d_size_ = 8388608;    // 8MB (原4MB)
+                // ImageNet DTS LV1解码后最大字节数为3046400 Bytes，对齐到2MB大页后是4194304 Bytes (4MB)
+                workshop_region_d_size_ = 4194304;
                 break;
             case 2:  // LV2
+                // ImageNet DTS LV2解码后最大字节数为742400 Bytes，对齐到2MB大页后是2097152 Bytes (2MB)
+                workshop_region_d_size_ = 2097152;
+                break;
             case 3:  // LV3
-                workshop_region_d_size_ = 2097152;    // 2MB (原1MB)
+                // ImageNet DTS LV3解码后最大字节数为742400 Bytes，对齐到2MB大页后是2097152 Bytes (2MB)
+                workshop_region_d_size_ = 2097152;
                 break;
             default:
-                workshop_region_d_size_ = 134217728;  // 默认128MB
+                // 默认使用LV0的大小（最安全）
+                workshop_region_d_size_ = 96468992;
                 break;
         }
     } else {
@@ -2412,13 +2647,21 @@ void Preprocessor::calculate_workshop_sizes() {
 
     // ==================== 2. 计算AB区大小 ====================
     // AB区大小需要对齐到4KB页边界（NUMA优化）
-    // 计算方式：stride × max_res，其中stride是对齐后的行字节数
     // 按照EXP2.md第326-327行的公式
-    size_t max_train_output = max_resolution_ * max_resolution_ * num_color_channels_;
-    size_t max_val_output = max_resolution_ * max_resolution_ * num_color_channels_;
-    size_t stride = ((max_resolution_ * num_color_channels_ + 63) / 64) * 64;  // 64字节对齐
-    size_t ab_size = stride * max_resolution_;
+    // 注意：使用static_cast<size_t>确保乘法不会产生符号扩展问题
+    size_t max_res = static_cast<size_t>(max_resolution_);
+    size_t num_ch = static_cast<size_t>(num_color_channels_);
+    size_t max_train_output = max_res * max_res * num_ch;
+    size_t max_val_output = max_res * max_res * num_ch;
+    size_t stride = ((ref_resolution_for_ab * num_ch + 63) / 64) * 64;  // 64字节对齐
+    size_t ab_size = stride * ref_resolution_for_ab;
     workshop_region_ab_size_ = align_4k(ab_size);  // 对齐到4KB页边界
+
+    LOG_DEBUG << "calculate_workshop_sizes: max_train_output=" << max_train_output
+              << ", max_val_output=" << max_val_output
+              << ", stride=" << stride
+              << ", ab_size=" << ab_size
+              << ", workshop_region_ab_size_=" << workshop_region_ab_size_;
 
     // ==================== 计算S区和C区共用对齐后大小（64字节对齐）====================
     // 这个值用于S区和C区，train和val共享
@@ -2514,6 +2757,11 @@ void Preprocessor::calculate_workshop_sizes() {
 // =============================================================================
 
 void Preprocessor::create_pw_instances(bool is_train) {
+    if (!workshop_size_calculated_) {
+        calculate_workshop_sizes(max_intermediate_resolution_);
+        workshop_size_calculated_ = true;
+    }
+
     // 检查是否已经创建
     if (!pw_instances_.empty()) {
         return;  // 已创建，无需重复创建
@@ -2536,6 +2784,8 @@ void Preprocessor::create_pw_instances(bool is_train) {
         pw_config.engine_id = i % world_size_;
         pw_config.pid_in_engine = i / world_size_;
 
+        pw_config.global_initial_seed = global_initial_seed_;
+
         // 计算workshop大小
         pw_config.region_d_size = workshop_region_d_size_;
         pw_config.region_ab_size = workshop_region_ab_size_;
@@ -2549,13 +2799,14 @@ void Preprocessor::create_pw_instances(bool is_train) {
         pw_config.world_size = world_size_;
         pw_config.sdmp_factor = sdmp_factor_;
         pw_config.using_cpvs = using_cpvs_;
+        pw_config.using_progressive_resolution = using_progressive_resolution_;
         pw_config.num_workers_per_engine = num_workers_per_engine;
 
         // 数据集信息
         pw_config.dataset_type = dataset_type_;
         pw_config.num_color_channels = num_color_channels_;
-        pw_config.raw_image_width = 0;   // ImageNet不需要
-        pw_config.raw_image_height = 0;  // ImageNet不需要
+        pw_config.raw_image_width = default_input_width_;   // ImageNet不需要
+        pw_config.raw_image_height = default_input_width_;  // ImageNet不需要
 
         // 测试模式
         pw_config.test_mode = pw_test_mode_;

@@ -238,6 +238,27 @@ public:
     bool using_cpvs() const;
 
     /**
+     * @brief 设置可复现性保险
+     * @param value 是否启用可复现性保险
+     * @throws TRException::ValueError 如果已初始化后修改或非幂等赋值
+     */
+    void set_reproducibility_insurance(bool value);
+
+    /**
+     * @brief 确保可复现性（set_reproducibility_insurance的别名）
+     * @param value 是否启用可复现性保险
+     * @throws TRException::ValueError 如果已初始化后修改或非幂等赋值
+     */
+    void ensure_reproducibility(bool value);
+
+    /**
+     * @brief 是否启用可复现性保险
+     */
+    bool reproducibility_insurance() const;
+
+    void set_using_progressive_resolution(bool value);
+    bool using_progressive_resolution() const;
+    /**
      * @brief 设置是否为Deployment模式
      * @param value 是否为Deployment模式
      * @throws TRException::ValueError 如果已初始化后修改或非幂等赋值
@@ -386,6 +407,67 @@ public:
     void set_current_resolution_val(int value);
     int current_resolution_val() const;
 
+    /**
+     * @brief 设置训练集crop输出尺寸
+     * @param value crop输出尺寸
+     * @throws TRException::ValueError 如果is_busy() = true
+     */
+    void set_train_crop_output(int value);
+
+    /**
+     * @brief 获取训练集crop输出尺寸
+     */
+    int train_crop_output() const;
+
+    /**
+     * @brief 设置训练集resize输出尺寸
+     * @param value resize输出尺寸
+     * @throws TRException::ValueError 如果is_busy() = true
+     */
+    void set_train_resize_output(int value);
+
+    /**
+     * @brief 获取训练集resize输出尺寸
+     */
+    int train_resize_output() const;
+
+    /**
+     * @brief 设置验证集crop输出尺寸
+     * @param value crop输出尺寸
+     * @throws TRException::ValueError 如果is_busy() = true
+     */
+    void set_val_crop_output(int value);
+
+    /**
+     * @brief 获取验证集crop输出尺寸
+     */
+    int val_crop_output() const;
+
+    /**
+     * @brief 设置验证集resize输出尺寸
+     * @param value resize输出尺寸
+     * @throws TRException::ValueError 如果is_busy() = true
+     */
+    void set_val_resize_output(int value);
+
+    /**
+     * @brief 获取验证集resize输出尺寸
+     */
+    int val_resize_output() const;
+
+    /**
+     * @brief 设置Random Erasing概率参数
+     * @param value Random Erasing概率 [0.0, 1.0]
+     * @throws TRException::ValueError 如果is_busy() = true
+     */
+    void set_random_erasing_p(float value);
+
+    /**
+     * @brief 获取Random Erasing概率参数
+     * @return Random Erasing概率 [0.0, 1.0]
+     */
+    float random_erasing_p() const;
+
     // =========================================================================
     // 字符串命名方法
     // =========================================================================
@@ -470,6 +552,10 @@ private:
     std::atomic<int> fixed_sdmp_factor_{-1};                                   ///< SDMP因子
     std::atomic<bool> fixed_using_cpvs_{false};                                  ///< 是否使用CPVS
     std::atomic<bool> fixed_using_cpvs_set_{false};                             ///< CPVS是否已设置标志
+    std::atomic<bool> fixed_reproducibility_insurance_{false};                  ///< 可复现性保险
+    std::atomic<bool> fixed_reproducibility_insurance_set_{false};              ///< reproducibility_insurance是否已设置标志
+    std::atomic<bool> fixed_using_progressive_resolution_{false};
+    std::atomic<bool> fixed_using_progressive_resolution_set_{false};
     std::atomic<bool> fixed_is_deployment_mode_{false};                         ///< 是否为Deployment模式
     std::atomic<bool> fixed_is_deployment_mode_set_{false};                     ///< Deployment模式是否已设置标志
     std::atomic<bool> fixed_train_with_rhf_{false};                             ///< 训练集是否包含RandomHorizontalFlip
@@ -509,11 +595,21 @@ private:
     std::atomic<size_t> fixed_aligned_max_output_size_{0};                      ///< S区/C区单个样本对齐后大小（max_resolution计算）
 
     // =========================================================================
+    // Random Erasing参数
+    // =========================================================================
+
+    std::atomic<float> fixed_random_erasing_p_{0.0f};                            ///< Random Erasing概率 [0.0, 1.0]
+
+    // =========================================================================
     // alterable型变量
     // =========================================================================
 
     std::atomic<int> alterable_current_resolution_train_{-1};  ///< 当前分辨率（初始值-1）
     std::atomic<int> alterable_current_resolution_val_{-1};  ///< 当前分辨率（初始值-1）
+    std::atomic<int> alterable_train_crop_output_{-1};
+    std::atomic<int> alterable_train_resize_output_{-1};
+    std::atomic<int> alterable_val_crop_output_{-1};
+    std::atomic<int> alterable_val_resize_output_{-1};
 };
 
 } // namespace tr

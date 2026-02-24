@@ -140,7 +140,7 @@ PreprocessWorker::PreprocessWorker(
 
     preprocessor_param_ptr_ = pwp_ptr;
     param_ = *pwp_ptr;
-    uint64_t global_seed = get_default_generator().seed();
+    uint64_t global_seed = config_.global_initial_seed;
     initial_seed_ = global_seed ^ (static_cast<uint64_t>(config_.worker_id) << 32);
 
     // ==================== 从GlobalRegistry复制S区/C区单个样本对齐后大小 ====================
@@ -390,6 +390,74 @@ void PreprocessWorker::update_parameters() {
 
     LOG_DEBUG << "PW " << config_.worker_id << " parameters updated: "
               << (param_.is_train ? "TRAIN" : "VAL");
+
+    // 更新PO链
+    if (config_.using_progressive_resolution && !param_.is_lazy_phase) {
+        if (param_.is_train) {
+            const int new_resize_output = GlobalRegistry::instance().train_resize_output();
+            const int new_crop_output = GlobalRegistry::instance().train_crop_output();
+            // 设定输出尺寸和输出stride
+            int output_size_temp = config_.raw_image_width;
+            for (auto& op : train_ops_) {
+                if (op->is_resize()) {
+                    op->set_output_size(new_resize_output);
+                    output_size_temp = new_resize_output;
+                }
+                else if (op->is_crop()) {
+                    op->set_output_size(new_crop_output);
+                    output_size_temp = new_crop_output;
+                }
+                else {
+                    output_size_temp = op->inference_output_size(output_size_temp);
+                    op->set_output_size(output_size_temp);
+                }
+                op->calculate_stride();
+            }
+
+            // 验证最终输出尺寸是否等于current_train_resolution（仅worker_id==0检查，避免多线程重复报错）
+            if (config_.worker_id == 0) {
+                TR_CHECK(output_size_temp == param_.current_train_resolution,
+                         ValueError,
+                         "Progressive resolution validation failed for TRAIN phase: "
+                         << "final output size from PO chain is " << output_size_temp
+                         << ", but current_train_resolution is " << param_.current_train_resolution
+                         << ". train_resize_output=" << new_resize_output
+                         << ", train_crop_output=" << new_crop_output);
+            }
+        }
+        else {
+            const int new_resize_output = GlobalRegistry::instance().val_resize_output();
+            const int new_crop_output = GlobalRegistry::instance().val_crop_output();
+            // 设定输出尺寸和输出stride
+            int output_size_temp = config_.raw_image_width;
+            for (auto& op : val_ops_) {
+                if (op->is_resize()) {
+                    op->set_output_size(new_resize_output);
+                    output_size_temp = new_resize_output;
+                }
+                else if (op->is_crop()) {
+                    op->set_output_size(new_crop_output);
+                    output_size_temp = new_crop_output;
+                }
+                else {
+                    output_size_temp = op->inference_output_size(output_size_temp);
+                    op->set_output_size(output_size_temp);
+                }
+                op->calculate_stride();
+            }
+
+            // 验证最终输出尺寸是否等于current_val_resolution（仅worker_id==0检查，避免多线程重复报错）
+            if (config_.worker_id == 0) {
+                TR_CHECK(output_size_temp == param_.current_val_resolution,
+                         ValueError,
+                         "Progressive resolution validation failed for VAL phase: "
+                         << "final output size from PO chain is " << output_size_temp
+                         << ", but current_val_resolution is " << param_.current_val_resolution
+                         << ". val_resize_output=" << new_resize_output
+                         << ", val_crop_output=" << new_crop_output);
+            }
+        }
+    }
 }
 
 // -----------------------------------------------------------------------------
@@ -427,18 +495,6 @@ void PreprocessWorker::set_deployment_mode_input_property(
 // ============================================================================
 
 uint8_t* PreprocessWorker::request_s_region_slot(int32_t label, int s_region_idx) {
-    // ==================== 参数验证 ====================
-    TR_CHECK(s_region_idx >= 0 && s_region_idx < config_.num_region_s, ValueError,
-             "Invalid s_region_idx: " << s_region_idx
-             << ", expected [0, " << (config_.num_region_s - 1) << "]");
-
-    TR_CHECK(local_sample_id_ < config_.max_s_samples, ValueError,
-             "S区已满: local_sample_id_=" << local_sample_id_
-             << ", max_s_samples=" << config_.max_s_samples);
-
-    TR_CHECK(s_c_region_stride_ > 0, ValueError,
-             "s_c_region_stride_ not initialized: " << s_c_region_stride_);
-
     // ==================== 计算槽位索引 ====================
     // 所有S区使用相同的slot_index（与local_sample_id_对应）
     int slot_index = local_sample_id_;
@@ -446,12 +502,6 @@ uint8_t* PreprocessWorker::request_s_region_slot(int32_t label, int s_region_idx
     // ==================== 计算目标指针 ====================
     // 使用从GlobalRegistry复制的s_c_region_stride_（64字节对齐的单个样本大小）
     uint8_t* target_ptr = region_s_ptrs_[s_region_idx] + slot_index * s_c_region_stride_;
-
-    // ==================== 保存标签到对应S区的标签向量 ====================
-    TR_CHECK(s_region_idx >= 0 && s_region_idx < static_cast<int>(s_label_vectors_.size()),
-             ValueError, "s_region_idx out of range: " << s_region_idx);
-    TR_CHECK(slot_index < static_cast<int>(s_label_vectors_[s_region_idx].size()),
-             ValueError, "slot_index out of range: " << slot_index);
 
     s_label_vectors_[s_region_idx][slot_index] = label;
 
@@ -467,27 +517,12 @@ uint8_t* PreprocessWorker::request_s_region_slot(int32_t label, int s_region_idx
 }
 
 uint8_t* PreprocessWorker::request_c_region_slot(int32_t label) {
-    // ==================== 参数验证 ====================
-    TR_CHECK(local_sample_id_ < config_.max_c_samples, ValueError,
-             "C区已满: local_sample_id_=" << local_sample_id_
-             << ", max_c_samples=" << config_.max_c_samples);
-
-    TR_CHECK(s_c_region_stride_ > 0, ValueError,
-             "s_c_region_stride_ not initialized: " << s_c_region_stride_);
-
-    TR_CHECK(region_c_ptr_ != nullptr, ValueError,
-             "C区指针未初始化（CPVS未启用）");
-
     // ==================== 计算槽位索引 ====================
     int slot_index = local_sample_id_;
 
     // ==================== 计算目标指针 ====================
     // 使用从GlobalRegistry复制的s_c_region_stride_（64字节对齐的单个样本大小）
     uint8_t* target_ptr = region_c_ptr_ + slot_index * s_c_region_stride_;
-
-    // ==================== 保存标签到C区标签向量 ====================
-    TR_CHECK(slot_index < static_cast<int>(c_label_vector_.size()),
-             ValueError, "slot_index out of range: " << slot_index);
 
     c_label_vector_[slot_index] = label;
 
@@ -529,10 +564,6 @@ uint8_t* PreprocessWorker::request_engine_buffer_slot(int32_t label) {
 }
 
 bool PreprocessWorker::notify_engine_buffer_sample_written() {
-    // ==================== 参数验证 ====================
-    TR_CHECK(engine_buffer_ != nullptr, ValueError,
-             "engine_buffer_ is null (test mode or not configured)");
-
     // ==================== 调用EngineBuffer的notify方法 ====================
     // EngineBuffer会判断是否触发传输（batch满或其他条件）
     bool triggered = engine_buffer_->notify_sample_written();
@@ -546,10 +577,6 @@ bool PreprocessWorker::notify_engine_buffer_sample_written() {
 }
 
 void PreprocessWorker::no_more_samples() {
-    // ==================== 参数验证 ====================
-    TR_CHECK(engine_buffer_ != nullptr, ValueError,
-             "engine_buffer_ is null (test mode or not configured)");
-
     // ==================== 转发到EngineBuffer ====================
     // 使用pid_in_engine作为worker_id（EngineBuffer视角）
     engine_buffer_->no_more_samples(config_.pid_in_engine);
@@ -564,22 +591,11 @@ void PreprocessWorker::no_more_samples() {
 // ============================================================================
 
 void PreprocessWorker::copy_sample_from_s_to_eb(int s_region_idx) {
-    // ==================== 参数验证 ====================
-    TR_CHECK(s_region_idx >= 0 && s_region_idx < config_.num_region_s, ValueError,
-             "Invalid s_region_idx: " << s_region_idx);
-    TR_CHECK(engine_buffer_ != nullptr, ValueError,
-             "engine_buffer_ is null (test mode or not configured)");
 
     // ==================== 步骤1：从s_shuffled_indices_查询槽位编号 ====================
-    TR_CHECK(local_sample_id_ < static_cast<int>(s_shuffled_indices_.size()), ValueError,
-             "local_sample_id_ out of range: " << local_sample_id_);
     int slot_index = s_shuffled_indices_[local_sample_id_];
 
     // ==================== 步骤2：从s_label_vectors_获取标签 ====================
-    TR_CHECK(s_region_idx < static_cast<int>(s_label_vectors_.size()), ValueError,
-             "s_region_idx out of range: " << s_region_idx);
-    TR_CHECK(slot_index < static_cast<int>(s_label_vectors_[s_region_idx].size()), ValueError,
-             "slot_index out of range: " << slot_index);
     int32_t label = s_label_vectors_[s_region_idx][slot_index];
 
     // ==================== 步骤3：计算EngineBuffer写入位置 ====================
@@ -587,7 +603,6 @@ void PreprocessWorker::copy_sample_from_s_to_eb(int s_region_idx) {
 
     // ==================== 步骤4：向EngineBuffer申请写入slot ====================
     uint8_t* eb_ptr = engine_buffer_->request_write_slot(position, batch_id, label);
-    TR_CHECK(eb_ptr != nullptr, ValueError, "EngineBuffer returned nullptr");
 
     // ==================== 步骤5：从S区复制图像数据 ====================
     // 计算当前resolution需要的字节数
@@ -601,27 +616,15 @@ void PreprocessWorker::copy_sample_from_s_to_eb(int s_region_idx) {
     // 复制数据（只复制当前resolution需要的字节数）
     std::memcpy(eb_ptr, s_ptr, num_sample_bytes);
 
-    LOG_DEBUG << "PW " << config_.worker_id
-              << " copy_sample_from_s_to_eb: s_region_idx=" << s_region_idx
-              << ", slot_index=" << slot_index
-              << ", label=" << label
-              << ", bytes=" << num_sample_bytes;
-
     // ==================== 步骤6：通知EngineBuffer样本写入完成 ====================
     notify_engine_buffer_sample_written();
 }
 
 void PreprocessWorker::copy_sample_from_c_to_eb() {
-    // ==================== 参数验证 ====================
-    TR_CHECK(engine_buffer_ != nullptr, ValueError,
-             "engine_buffer_ is null (test mode or not configured)");
-
     // ==================== 步骤1：local_sample_id_直接作为槽位编号 ====================
     int slot_index = local_sample_id_;
 
     // ==================== 步骤2：从c_label_vector_获取标签 ====================
-    TR_CHECK(slot_index < static_cast<int>(c_label_vector_.size()), ValueError,
-             "slot_index out of range: " << slot_index);
     int32_t label = c_label_vector_[slot_index];
 
     // ==================== 步骤3：计算EngineBuffer写入位置 ====================
@@ -629,7 +632,6 @@ void PreprocessWorker::copy_sample_from_c_to_eb() {
 
     // ==================== 步骤4：向EngineBuffer申请写入slot ====================
     uint8_t* eb_ptr = engine_buffer_->request_write_slot(position, batch_id, label);
-    TR_CHECK(eb_ptr != nullptr, ValueError, "EngineBuffer returned nullptr");
 
     // ==================== 步骤5：从C区复制图像数据 ====================
     // 计算当前resolution需要的字节数
@@ -642,11 +644,6 @@ void PreprocessWorker::copy_sample_from_c_to_eb() {
 
     // 复制数据（只复制当前resolution需要的字节数）
     std::memcpy(eb_ptr, c_ptr, num_sample_bytes);
-
-    LOG_DEBUG << "PW " << config_.worker_id
-              << " copy_sample_from_c_to_eb: slot_index=" << slot_index
-              << ", label=" << label
-              << ", bytes=" << num_sample_bytes;
 
     // ==================== 步骤6：通知EngineBuffer样本写入完成 ====================
     notify_engine_buffer_sample_written();
@@ -881,8 +878,8 @@ void PreprocessWorker::end_sample() {
 
 void PreprocessWorker::ensure_rng_initialized() {
     if (!rng_initialized_) {
-        uint64_t base_seed = get_default_generator().seed();
-        uint64_t worker_seed = base_seed ^ (static_cast<uint64_t>(config_.worker_id) << 16);
+        uint64_t base_seed = initial_seed_;  // initial_seed_已经是根据worker_id衍生的
+        uint64_t worker_seed = base_seed ^ (static_cast<uint64_t>(param_.phase_id) << 16);
         rng_.set_seed(worker_seed);
         rng_initialized_ = true;
 
@@ -1095,10 +1092,6 @@ bool PreprocessWorker::work(
 	const bool has_random_horizontal_flip = is_train? train_with_rhf_: val_with_rhf_;
 	const int num_ops = is_train? num_train_ops_: num_val_ops_;
 
-    // 检查是否已分配对应的EngineBuffer（一般模式必需）
-    TR_CHECK(engine_buffer_ != nullptr, ValueError,
-             "engine_buffer_ is null (test mode or not configured)");
-
 	// 选择OP链
     const auto& ops = is_train ? train_ops_ : val_ops_;
     if (ops.empty()) {
@@ -1267,7 +1260,6 @@ bool PreprocessWorker::work(
 					// C区和EngineBuffer都是紧凑布局，可以直接memcpy
 					uint8_t* c_region_source_ptr = region_c_ptr_ + local_sample_id_ * s_c_region_stride_;
 					std::memcpy(final_output_ptr, c_region_source_ptr, res * res * num_color_channels);
-					notify_engine_buffer_sample_written();
 					break;  // 提前结束，本轮无需再预处理！
 				}
 			}
@@ -1444,6 +1436,12 @@ bool PreprocessWorker::work(
 	}
 
 	end_sample();  // 处理完一个样本就应该调用end_sample()，只能在work()和work_lazy()中调用，不应该在其他地方调用
+
+	// ==================== 通知EngineBuffer样本写入完成 ====================
+	// 【修复】NORMAL模式下，work()也需要通知EngineBuffer
+	if (config_.test_mode == false) {
+		notify_engine_buffer_sample_written();
+	}
 
 	// PW0打印样本完成信息
 	/*

@@ -31,7 +31,10 @@ namespace tr {
  */
 class CenterCrop : public PreprocessOperation {
 public:
-    explicit CenterCrop(int output_size = 224) : output_size_(output_size) {}
+    explicit CenterCrop(int output_size = 224, size_t output_alignment = 0)
+        : PreprocessOperation(output_alignment) {
+        output_size_ = output_size;
+    }
 
     void execute(
         const uint8_t* input_ptr,
@@ -44,19 +47,25 @@ public:
         size_t& output_stride,
         Generator* rng = nullptr,
         bool execute_from_full = false,
-        bool compact = true
+        bool forced_compact_output = true
     ) override;
 
     std::unique_ptr<PreprocessOperation> clone() const override {
-        return std::make_unique<CenterCrop>(output_size_);
+        auto cloned = std::make_unique<CenterCrop>(output_size_);
+        // 复制基类成员变量
+        cloned->num_channels_ = num_channels_;
+        cloned->output_size_ = output_size_;  // ← 重要：需要复制output_size_
+        cloned->output_alignment_ = output_alignment_;
+        cloned->use_compact_output_as_default_ = use_compact_output_as_default_;
+        cloned->output_stride_ = output_stride_;
+        cloned->compact_output_stride_ = compact_output_stride_;
+        cloned->rank_first_in_the_po_chain_ = rank_first_in_the_po_chain_;
+        return cloned;
     }
 
     std::string name() const override { return "CenterCrop"; }
     bool introduce_randomness() const override { return false; }
     bool is_crop() const override { return true; }
-
-    void set_output_size(int size) override { output_size_ = size; }
-    int get_output_size() const override { return output_size_; }
 
     DecodeStrategy get_decode_strategy(
         int32_t image_width,
@@ -66,8 +75,6 @@ public:
     ) const override;
 
 private:
-    int output_size_;
-
     // R1在R2内的相对偏移（execute_from_full=false时使用）
     mutable int32_t crop_x_rel_ = 0;  // R1起始X相对于R2的偏移
     mutable int32_t crop_y_rel_ = 0;  // R1起始Y相对于R2的偏移

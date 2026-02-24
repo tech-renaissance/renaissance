@@ -50,12 +50,12 @@ public:
      * @param execute_from_full 是否从完整解码的图像中执行（而非局部解码的图像）
      *                       - false: 从局部解码的R2区域中执行（TurboJPEG局部解码成功）
      *                       - true: 从完整解码的图像中执行（TurboJPEG失败，STB完整解码）
-     * @param compact 是否使用紧凑布局（无行间padding）
-     *                  - true: output_stride会被自动计算为 width * num_channels（紧凑布局）
-     *                  - false: output_stride会被自动计算为64字节对齐（stride布局）
+     * @param forced_compact_output 是否强制使用紧凑布局（无行间padding）
+     *                  - true: 使用compact_output_stride_（紧凑布局，无padding）
+     *                  - false: 使用output_stride_（对齐布局，根据output_alignment_对齐）
      *                  - 注意：仅当output_stride==0时自动计算生效
      *
-     * @note 所有Simd操作都需要stride，调用者负责计算对齐后的stride
+     * @note output_stride自动计算：使用calculate_stride()预计算的缓存值
      * @note 输出指针已预分配，操作内部不分配内存
      * @note 对于CenterCrop等支持局部解码的操作：
      *       - execute_from_full=false: input是R2解码结果（如300x300），PO使用内部保存的R1相对偏移
@@ -72,7 +72,7 @@ public:
         size_t& output_stride,  // 改为引用，支持自动计算后回传
         Generator* rng = nullptr,
         bool execute_from_full = false,
-        bool compact = true  // 新增参数：紧凑布局标志（默认true）
+        bool forced_compact_output = true  // 新增参数：紧凑布局标志（默认true）
     ) = 0;
 
     // =========================================================================
@@ -97,6 +97,31 @@ public:
     virtual bool is_resize() const { return false; }
     virtual bool is_random_horizontal_flip() const { return false; }
     virtual bool require_temp() const { return false; }
+
+    /**
+     * @brief 推断输出尺寸（基于输入尺寸）
+     * @param input_size 输入尺寸（宽度或高度，假设正方形）
+     * @return 输出尺寸
+     *
+     * @note 基类默认实现抛出NotImplementedError
+     * @note 各派生类根据自身特性重写此方法：
+     *   - Resize/Crop类：不重写（保持基类抛出）
+     *   - Pad类：重写返回 input_size + 2*padding
+     *   - 其他类：重写返回 input_size
+     *
+     * 设计说明：
+     * - 用于PO链中推断中间输出尺寸
+     * - 帮助test_two_po等工具正确分配buffer
+     */
+    virtual int inference_output_size(int input_size) {
+        (void)input_size;  // 消除unused parameter警告
+
+        // 默认实现：抛出NotImplementedError
+        TR_NOT_IMPLEMENTED("This class does NOT support output size inferring. "
+                          "Classes that change image size (Resize/Crop) should set output_size explicitly. "
+                          "Classes that preserve size (Flip/Jitter/Noise) should override this method to return input_size.");
+        return input_size;  // 永远不会执行（上面已抛异常）
+    }
 
     // =========================================================================
     // 随机决策接口（用于RandomHorizontalFlip等需要提前决策的操作）
@@ -129,13 +154,6 @@ public:
     // =========================================================================
 
     /**
-     * @brief 设置输出尺寸
-     * @note 仅Crop/Resize类操作需要实现
-     */
-    virtual void set_output_size(int size) { (void)size; }
-    virtual int get_output_size() const { return 0; }
-
-    /**
      * @brief 标记为PO链中的第一个操作
      * @note 只有第一个操作才能决定解码策略
      */
@@ -152,6 +170,18 @@ public:
     }
 
     /**
+     * @brief 构造函数
+     * @param output_alignment 输出对齐字节数（0=紧凑布局，非0=对齐字节数如64）
+     *
+     * @note 如果output_alignment为0，则使用紧凑布局作为默认
+     * @note 如果output_alignment非0，则使用指定对齐字节数
+     */
+    explicit PreprocessOperation(size_t output_alignment = 0)
+        : use_compact_output_as_default_(output_alignment == 0)
+        , output_alignment_(output_alignment)
+    {}
+
+    /**
      * @brief 设置颜色通道数
      * @param num_channels 颜色通道数（1=灰度, 3=RGB）
      *
@@ -165,25 +195,38 @@ public:
     // Stride 计算辅助方法
     // =========================================================================
 
-    /**
-     * @brief 计算64字节对齐的stride
-     * @param width 图像宽度
-     * @return 对齐后的stride（字节）
-     *
-     * @note 公式：((width * num_channels_ + 63) / 64) * 64
-     */
-    static constexpr size_t calculate_stride(int32_t width) {
-        return ((static_cast<size_t>(width) * 3 + 63) / 64) * 64;  // 假设3通道（实际会使用num_channels_）
-    }
+    virtual void set_output_size(int size) { output_size_ = size; }
+    virtual int get_output_size() const { return output_size_; }
 
     /**
-     * @brief 计算64字节对齐的stride（动态通道数）
-     * @param width 图像宽度
-     * @param num_channels 颜色通道数
+     * @brief 计算并缓存输出stride
      * @return 对齐后的stride（字节）
+     *
+     * @note 根据output_alignment_计算stride：
+     *   - output_alignment_ == 0: 紧凑布局，stride = width * num_channels_
+     *   - output_alignment_ > 0: 对齐布局，stride = align_up(width * num_channels_, output_alignment_)
+     * @note 调用时机：
+     *   - Preprocessor初始化时（一次性）
+     *   - PW渐进式分辨率更新时（每个busy phase之初）
      */
-    static constexpr size_t calculate_stride(int32_t width, int num_channels) {
-        return ((static_cast<size_t>(width) * num_channels + 63) / 64) * 64;
+    virtual size_t calculate_stride() {
+        if (-1 == output_size_) {
+            TR_VALUE_ERROR("Output size has not yet been set.");
+        }
+        if (-1 == num_channels_) {
+            TR_VALUE_ERROR("Number of channels has not yet been set.");
+        }
+        if (0 == output_alignment_) {
+            use_compact_output_as_default_ = true;
+            compact_output_stride_ = static_cast<size_t>(output_size_) * num_channels_;
+            output_stride_ = compact_output_stride_;
+        }
+        else {
+            use_compact_output_as_default_ = false;
+            compact_output_stride_ = static_cast<size_t>(output_size_) * num_channels_;
+            output_stride_ = ((static_cast<size_t>(output_size_) * num_channels_ + output_alignment_ - 1) / output_alignment_) * output_alignment_;
+        }
+        return output_stride_;
     }
 
     // =========================================================================
@@ -218,9 +261,14 @@ public:
     }
 
 protected:
-    // ==================== 成员变量 ====================
-    int num_channels_ = 3;  ///< 颜色通道数（默认3=RGB，可由set_num_channels修改为1=灰度）
+    int num_channels_ = -1;
+    int output_size_ = -1;
     bool rank_first_in_the_po_chain_ = false;  ///< 是否为PO链中的第一个操作（只有第一个操作才能决定解码策略）
+    bool use_compact_output_as_default_ = true;  ///< 是否使用紧凑布局作为默认（true=紧凑，false=对齐）
+    size_t output_alignment_ = 0;                 ///< 输出对齐字节数（0=紧凑布局，非0=对齐字节数如64）
+    size_t output_stride_ = 0;                    ///< 缓存的对齐输出stride（在calculate_stride()时计算）
+    size_t compact_output_stride_ = 0;            ///< 缓存的紧凑输出stride（在calculate_stride()时计算）
+
 
     // ==================== 工具方法 ====================
     static constexpr int MCU_SIZE = 16;

@@ -9,7 +9,12 @@
 #include "renaissance/data/resize.h"
 #include "renaissance/data/center_crop.h"
 #include "renaissance/data/random_resized_crop.h"
+#include "renaissance/data/fast_random_resized_crop.h"
 #include "renaissance/data/random_horizontal_flip.h"
+#include "renaissance/data/color_jitter.h"
+#include "renaissance/data/random_rotation.h"
+#include "renaissance/data/random_autocontrast.h"
+#include "renaissance/data/random_brightness.h"
 #include "renaissance/data/do_nothing.h"
 #include "renaissance/base/logger.h"
 #include "renaissance/base/tr_exception.h"
@@ -52,19 +57,22 @@ static constexpr int DEFAULT_JPEG_QUALITY = 90;
 void print_usage(const char* program_name) {
     std::cout << "Usage: " << program_name << " [OPTIONS]\n\n"
               << "Required Options:\n"
-              << "  --po <NAME>         PO to test (Resize/CenterCrop/RandomResizedCrop/RandomHorizontalFlip/DoNothing)\n\n"
+              << "  --po <NAME>         PO to test (Resize/CenterCrop/RandomResizedCrop/FastRandomResizedCrop/RandomHorizontalFlip/ColorJitter/RandomRotation/DoNothing)\n\n"
               << "Optional Options:\n"
               << "  --input <PATH>      Input image path (default: input.jpg)\n"
               << "  --output <PATH>     Output image path (default: workspace/output_<NAME>.jpg)\n"
               << "  --size <N>          Output size (default: 224)\n"
               << "  --quality <N>       JPEG quality for output (default: 90)\n"
-              << "  --seed <N>          Random seed for RandomResizedCrop (default: 42)\n"
+              << "  --seed <N>          Random seed for RandomResizedCrop/FastRandomResizedCrop/ColorJitter (default: 42)\n"
+              << "  --sdmp_factor <N>   SDMP factor for FastRandomResizedCrop (1/2/3/4+, default: 1)\n"
               << "  --help              Show this help message\n\n"
               << "Examples:\n"
               << "  " << program_name << " --po Resize --size 224\n"
               << "  " << program_name << " --po CenterCrop --size 224\n"
               << "  " << program_name << " --po RandomResizedCrop --size 224 --seed 42\n"
+              << "  " << program_name << " --po FastRandomResizedCrop --size 224 --seed 42 --sdmp_factor 2\n"
               << "  " << program_name << " --po RandomHorizontalFlip --size 224\n"
+              << "  " << program_name << " --po ColorJitter --size 224 --seed 42\n"
               << "  " << program_name << " --input custom.jpg --output result.jpg --po Resize --size 128\n";
 }
 
@@ -354,13 +362,27 @@ std::unique_ptr<PreprocessOperation> create_po(const std::string& name, int size
         return std::make_unique<CenterCrop>(size);
     } else if (name == "RandomResizedCrop") {
         return std::make_unique<RandomResizedCrop>(size);
+    } else if (name == "FastRandomResizedCrop") {
+        return std::make_unique<FastRandomResizedCrop>(size);
     } else if (name == "RandomHorizontalFlip") {
         return std::make_unique<RandomHorizontalFlip>();
+    } else if (name == "ColorJitter") {
+        // 默认参数：亮度=0.2，对比度=0.3，饱和度=0.4，色调=0.1
+        return std::make_unique<ColorJitter>(0.2f, 0.3f, 0.4f, 0.1f);
+    } else if (name == "RandomRotation") {
+        // 默认参数：degrees=30，fill=0（黑色）
+        return std::make_unique<RandomRotation>(30.0f, 0);
+    } else if (name == "RandomAutocontrast") {
+        // 默认参数：p=0.5（50%概率）
+        return std::make_unique<RandomAutocontrast>(0.5f);
+    } else if (name == "RandomBrightness") {
+        // 无参数：移位范围硬编码为[-7, 7]
+        return std::make_unique<RandomBrightness>();
     } else if (name == "DoNothing") {
         return std::make_unique<DoNothing>();
     } else {
         std::cerr << "[ERROR] Unknown PO: " << name << "\n";
-        std::cerr << "[INFO] Supported POs: Resize, CenterCrop, RandomResizedCrop, RandomHorizontalFlip, DoNothing\n";
+        std::cerr << "[INFO] Supported POs: Resize, CenterCrop, RandomResizedCrop, FastRandomResizedCrop, RandomHorizontalFlip, ColorJitter, RandomRotation, RandomAutocontrast, RandomBrightness, DoNothing\n";
         return nullptr;
     }
 }
@@ -457,6 +479,10 @@ int main(int argc, char* argv[]) {
 
         std::cout << "[INFO] Created PO: " << po->name() << "\n";
 
+        // 设置颜色通道数和计算stride
+        po->set_num_channels(3);
+        po->calculate_stride();
+
         // 初始化RNG（用于RandomResizedCrop等随机操作）
         Generator rng;
         rng.set_seed(random_seed);
@@ -516,13 +542,16 @@ int main(int argc, char* argv[]) {
             // 执行PO：传递R2解码结果（从起始位置开始）
             // PO内部会根据execute_from_full=false和保存的相对偏移，从R2中提取R1
             std::vector<uint8_t> final_buffer;
-            size_t final_stride = calculate_stride(output_size, 3);
-            final_buffer.resize(final_stride * output_size);
+            size_t final_stride = 0;  // 传入0触发PO自动计算
+            final_buffer.resize(po->get_output_size() * po->get_output_size() * 3);  // 临时分配
 
             int32_t final_w = 0, final_h = 0;
             po->execute(decoded_image.data(), decoded_w, decoded_h, decoded_stride,
                       final_buffer.data(), final_w, final_h, final_stride, &rng,
                       false);  // execute_from_full=false
+
+            // 根据实际计算的stride重新调整buffer大小
+            final_buffer.resize(final_stride * final_h);
 
             // 复制结果到decoded_image
             decoded_image = std::move(final_buffer);
@@ -558,8 +587,8 @@ int main(int argc, char* argv[]) {
 
         if (!strategy.use_partial) {
             // 完整解码后需要执行PO
-            output_stride = calculate_stride(output_size, 3);
-            output_image.resize(output_stride * output_size);
+            output_stride = 0;  // 传入0触发PO自动计算
+            output_image.resize(output_size * output_size * 3);  // 临时分配
 
             auto start_po = std::chrono::high_resolution_clock::now();
 
@@ -572,6 +601,9 @@ int main(int argc, char* argv[]) {
 
             std::cout << "[INFO] PO execution time: " << std::fixed << std::setprecision(2)
                       << po_ms << " ms\n";
+
+            // 根据实际计算的stride重新调整buffer大小
+            output_image.resize(output_stride * output_h);
         } else {
             // 局部解码情况已经在上面执行了PO
             output_image = std::move(decoded_image);

@@ -22,7 +22,7 @@ void CenterCrop::execute(
     size_t& output_stride,
     Generator* rng,
     bool execute_from_full,
-    bool compact
+    bool forced_compact_output
 ) {
     (void)rng;
 
@@ -32,12 +32,11 @@ void CenterCrop::execute(
 
     // ==================== 自动计算output_stride（如果为0）====================
     if (output_stride == 0) {
-        if (compact) {
+        if (forced_compact_output) {
             // 紧凑布局：无padding
-            output_stride = output_size_ * num_channels_;
+            output_stride = compact_output_stride_;
         } else {
-            // Stride布局：64字节对齐
-            output_stride = calculate_stride(output_size_, num_channels_);
+            output_stride = output_stride_;
         }
     }
 
