@@ -294,6 +294,18 @@ public:
      */
     bool val_with_rhf() const;
 
+    /**
+     * @brief 设置训练集是否洗牌
+     * @param value 是否洗牌
+     * @throws TRException::ValueError 如果已初始化后修改或非幂等赋值
+     */
+    void set_shuffle_train(bool value);
+
+    /**
+     * @brief 训练集是否洗牌
+     */
+    bool shuffle_train() const;
+
     // =========================================================================
     // 设备配置相关（DeviceConfigured状态后设置）
     // =========================================================================
@@ -455,6 +467,19 @@ public:
      */
     int val_resize_output() const;
 
+
+    /**
+     * @brief 用户手动设置Epoch ID。警告：仅用户可设置，框架内切勿调用此方法！
+     * @param 用户手动设置的Epoch ID
+     * @throws TRException::ValueError 如果is_busy() = true
+     */
+    void set_user_epoch_id(int value);
+
+    /**
+     * @brief 获取用户手动设置的Epoch ID。警告：仅用于调试，框架内切勿依赖此数值！
+     */
+    int user_epoch_id() const;
+
     /**
      * @brief 设置Random Erasing概率参数
      * @param value Random Erasing概率 [0.0, 1.0]
@@ -562,6 +587,8 @@ private:
     std::atomic<bool> fixed_train_with_rhf_set_{false};                         ///< train_with_rhf是否已设置标志
     std::atomic<bool> fixed_val_with_rhf_{false};                               ///< 验证集是否包含RandomHorizontalFlip
     std::atomic<bool> fixed_val_with_rhf_set_{false};                           ///< val_with_rhf是否已设置标志
+    std::atomic<bool> fixed_shuffle_train_{false};                               ///< 训练集是否洗牌
+    std::atomic<bool> fixed_shuffle_train_set_{false};                           ///< fixed_shuffle_train_是否已设置标志
 
     // =========================================================================
     // 设备配置相关fixed型变量
@@ -610,6 +637,7 @@ private:
     std::atomic<int> alterable_train_resize_output_{-1};
     std::atomic<int> alterable_val_crop_output_{-1};
     std::atomic<int> alterable_val_resize_output_{-1};
+    std::atomic<int> alterable_user_epoch_id_{-1};  // 仅供用户手动设置，调试用，框架内尽量不要依赖此数字！
 };
 
 } // namespace tr

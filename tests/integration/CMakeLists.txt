@@ -331,4 +331,23 @@ set_target_properties(test_pw_ultimate PROPERTIES
 # 注意：不添加为CTest，因为它需要外部数据集
 message(STATUS "PW ultimate test configured: test_pw_ultimate")
 
+# =============================================================================
+# Test: test_engine_crc
+# Purpose: EngineBuffer CRC保存测试 - 验证CRC32计算和CSV保存功能
+# =============================================================================
+add_executable(test_engine_crc
+    test_engine_crc.cpp
+)
+
+target_link_libraries(test_engine_crc
+    renaissance
+)
+
+set_target_properties(test_engine_crc PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/integration
+)
+
+# 注意：不添加为CTest，因为它需要外部数据集
+message(STATUS "EngineBuffer CRC test configured: test_engine_crc")
+
 message(STATUS "=== Integration Tests Configuration Complete ===")

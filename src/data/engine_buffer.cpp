@@ -116,6 +116,10 @@
 #include <algorithm>
 #include <thread>
 #include <chrono>
+#include <fstream>
+#include <filesystem>
+#include <iomanip>
+#include <zlib.h>  // for crc32()
 
 namespace tr {
 
@@ -268,8 +272,6 @@ void EngineBuffer::reset_and_update() {
 
     // 重新计算current_sample_bytes_
     current_sample_bytes_ = current_resolution * current_resolution * num_color_channels;
-
-    std::cout << "[EngineBuffer #" << engine_id_ << "] reset and updated." << std::endl;
 }
 
 uint8_t* EngineBuffer::request_write_slot(int position, int batch_id, int32_t label) {
@@ -534,6 +536,48 @@ bool EngineBuffer::try_final_transfer_locked() {
     return samples > 0;
 }
 
+void EngineBuffer::save_crc_csv(int buf_id, int samples_count) {
+    // 捕获快照，确保整个函数使用一致的样本大小
+    const size_t snapshot_sample_bytes = current_sample_bytes_;
+
+    // 防御性检查：如果sample_bytes为0，说明还未正确初始化
+    if (snapshot_sample_bytes == 0) {
+        LOG_WARN << "[EB#" << engine_id_ << "] current_sample_bytes_ is 0, skipping CRC save";
+        return;
+    }
+
+    int epoch_id = GlobalRegistry::instance().user_epoch_id();
+    // 构造文件名：eb_[engine_id]_[train/val]_[epoch_id].csv
+    std::ostringstream oss;
+    oss << output_path_ << "/" << (is_train_ ? "train" : "val") << "_"
+        << epoch_id << "_eb_" << engine_id_ << ".csv";
+    std::string file_path = oss.str();
+
+    // 以追加模式打开文件（不存在则创建）
+    std::ofstream ofs(file_path, std::ios::app);
+    if (!ofs.is_open()) {
+        LOG_ERROR << "[EB#" << engine_id_ << "] Failed to open CSV file: " << file_path;
+        return;
+    }
+
+    // 遍历当前buffer的所有样本
+    for (int i = 0; i < samples_count; ++i) {
+        // 计算CRC32（使用zlib）
+        uint32_t crc = crc32(0L, Z_NULL, 0);  // 初始化CRC
+        crc = crc32(crc, buffer_data_[buf_id] + i * snapshot_sample_bytes, snapshot_sample_bytes);
+
+        // 获取label
+        int32_t label = buffer_labels_[buf_id][i];
+
+        // 写入格式：[CRC32_hex],[字节数],[label]\n
+        // CRC32输出为8位十六进制大写字符串（如：CE147A89）
+        ofs << std::uppercase << std::hex << std::setfill('0') << std::setw(8) << crc
+            << std::dec << "," << snapshot_sample_bytes << "," << label << "\n";
+    }
+
+    ofs.close();
+}
+
 void EngineBuffer::execute_transfer_locked(int samples_count) {
     int buf_id = current_buffer_.load(std::memory_order_acquire);
 
@@ -541,7 +585,10 @@ void EngineBuffer::execute_transfer_locked(int samples_count) {
     const size_t snapshot_sample_bytes = current_sample_bytes_;
     size_t transfer_bytes = samples_count * sizeof(int32_t) +
                            samples_count * snapshot_sample_bytes;
-
+#ifdef VERIFY_ENGINE_BUFFER_CRC
+    // 保存CRC到CSV文件（在清零样本数之前）
+    save_crc_csv(buf_id, samples_count);
+#endif
     total_transferred_.fetch_add(samples_count, std::memory_order_relaxed);
 
     // 切换 buffer

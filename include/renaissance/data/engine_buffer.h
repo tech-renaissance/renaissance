@@ -107,9 +107,9 @@ private:
     void reset();  // 复位计数器和状态变量（内部辅助函数）
     void execute_transfer_locked(int samples_count);
     bool try_final_transfer_locked();
+    void save_crc_csv(int buf_id, int samples_count);  ///< 保存CRC32到CSV文件
 
     // 配置参数
-    int engine_id_ = -1;
     int real_gpu_id_ = -1;
     int local_batch_size_ = 0;
     int num_workers_per_engine_ = 0;
@@ -118,6 +118,10 @@ private:
     bool is_train_ = true;
     bool using_pinned_memory_ = false;
     bool require_reproducibility_ = false;  ///< 是否要求可复现性（从GlobalRegistry下载）
+
+    // CRC保存相关
+    std::string output_path_ = TR_WORKSPACE;  ///< 输出路径（硬编码为TR_WORKSPACE）
+    int engine_id_ = 0;  ///< 当前epoch ID（从GlobalRegistry获取）
 
     // 双缓冲
     std::atomic<int> current_buffer_{0};
