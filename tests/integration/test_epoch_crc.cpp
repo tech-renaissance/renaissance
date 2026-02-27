@@ -160,8 +160,8 @@ void test_epoch_crc(const std::string& dataset_name,
     prep.config_device("GPU");
 
     // 步骤4: 设置数据变换
-    prep.set_train_transforms();
-    prep.set_val_transforms();
+    prep.set_train_transforms(*std::make_unique<CenterCrop>(224));
+    prep.set_val_transforms(*std::make_unique<CenterCrop>(224));
 
     // 获取DataLoader引用（用于获取样本数等信息）
     DataLoader* loader = nullptr;

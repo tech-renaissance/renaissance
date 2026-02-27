@@ -104,15 +104,15 @@ endif()
 
 # CUDA
 if(TR_USE_CUDA AND DEFINED TR_CUDA_PATH)
-    target_include_directories(device PRIVATE ${TR_CUDA_PATH}/include)
+    target_include_directories(device PUBLIC ${TR_CUDA_PATH}/include)
     # cuDNN头文件（用于CudaDevice）
     if(DEFINED CUDNN_INCLUDE_DIR AND NOT CUDNN_INCLUDE_DIR STREQUAL "")
-        target_include_directories(device PRIVATE ${CUDNN_INCLUDE_DIR})
+        target_include_directories(device PUBLIC ${CUDNN_INCLUDE_DIR})
         # cuDNN 9.x版本子目录
         file(GLOB CUDNN_VERSION_DIRS "${CUDNN_INCLUDE_DIR}/*")
         foreach(CUDNN_VER_DIR ${CUDNN_VERSION_DIRS})
             if(IS_DIRECTORY ${CUDNN_VER_DIR})
-                target_include_directories(device PRIVATE ${CUDNN_VER_DIR})
+                target_include_directories(device PUBLIC ${CUDNN_VER_DIR})
             endif()
         endforeach()
     endif()
@@ -120,13 +120,13 @@ endif()
 
 # MUSA
 if(TR_USE_MUSA AND DEFINED TR_MUSA_PATH)
-    target_include_directories(device PRIVATE ${TR_MUSA_PATH}/include)
+    target_include_directories(device PUBLIC ${TR_MUSA_PATH}/include)
     message(STATUS "Device library: MUSA headers from ${TR_MUSA_PATH}/include")
 
     # muDNN头文件（用于MusaDevice）
     # 注意：muDNN头文件通常与MUSA Runtime在同一目录
     if(DEFINED TR_MUDNN_INCLUDE_DIR)
-        target_include_directories(device PRIVATE ${TR_MUDNN_INCLUDE_DIR})
+        target_include_directories(device PUBLIC ${TR_MUDNN_INCLUDE_DIR})
         message(STATUS "Device library: muDNN headers from ${TR_MUDNN_INCLUDE_DIR}")
     else()
         # 如果没有单独定义TR_MUDNN_INCLUDE_DIR，使用MUSA路径（muDNN通常与MUSA在一起）

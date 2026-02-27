@@ -10,6 +10,8 @@
 #include <stb_image.h>
 #include <turbojpeg.h>
 
+#include <iostream>
+
 #ifdef _WIN32
     #include <windows.h>
 #endif
@@ -157,19 +159,8 @@ PreprocessWorker::PreprocessWorker(
     train_with_rhf_ = GlobalRegistry::instance().train_with_rhf();
     val_with_rhf_ = GlobalRegistry::instance().val_with_rhf();
 
-    LOG_DEBUG << "[PW " << config_.worker_id << " CONSTRUCTOR] "
-              << "test_mode=" << (config_.test_mode ? "ON" : "OFF")
-              << ", engine=" << config_.engine_id
-              << ", pid=" << config_.pid_in_engine
-              << ", engine_buffer=" << (engine_buffer_ ? "SET" : "NULL")
-              << ", global_seed=" << global_seed
-              << ", initial_seed=" << initial_seed_
-              << ", s_c_region_stride_=" << s_c_region_stride_ << " bytes"
-              << ", train_samples=" << dataset_total_train_samples_
-              << ", val_samples=" << dataset_total_val_samples_
-              << ", deployment_mode=" << (is_deployment_mode_ ? "ON" : "OFF")
-              << ", train_with_rhf=" << (train_with_rhf_ ? "YES" : "NO")
-              << ", val_with_rhf=" << (val_with_rhf_ ? "YES" : "NO");
+    require_shuffle_ = GlobalRegistry::instance().shuffle_train();
+    s_shuffled_indices_ = GlobalRegistry::instance().fixed_s_original_indices();
 
     // ==================== 1. 分配Workshop ====================
     allocate_workshop();
@@ -654,20 +645,9 @@ void PreprocessWorker::copy_sample_from_c_to_eb() {
 // ============================================================================
 
 void PreprocessWorker::shuffle_s_indices(int phase_id) {
-    // =========================================================================
-    // 步骤1：从GlobalRegistry复制原始索引向量
-    // =========================================================================
-
-    // 直接向量赋值（O(1)操作，复制整个向量）
-    // fixed_s_original_indices_内容为[0, 1, 2, ..., max_s_samples_-1]
-    s_shuffled_indices_ = GlobalRegistry::instance().fixed_s_original_indices();
-
-    LOG_DEBUG << "PW " << config_.worker_id
-              << " copied fixed_s_original_indices_ to s_shuffled_indices_: size="
-              << s_shuffled_indices_.size();
 
     // =========================================================================
-    // 步骤2：生成洗牌种子（两层种子衍生，保证可复现性和差异性）
+    // 生成洗牌种子（两层种子衍生，保证可复现性和差异性）
     // =========================================================================
 
     // 两层种子衍生设计：
@@ -720,13 +700,8 @@ void PreprocessWorker::shuffle_s_indices(int phase_id) {
 
     uint64_t shuffle_seed = initial_seed_ ^ (static_cast<uint64_t>(phase_id) << 32);
 
-    LOG_DEBUG << "PW " << config_.worker_id
-              << " shuffle seed: initial=" << initial_seed_
-              << ", phase_id=" << phase_id
-              << ", shuffle_seed=" << shuffle_seed;
-
     // =========================================================================
-    // 步骤3：Fisher-Yates洗牌（只洗前current_s_samples_个元素）
+    // Fisher-Yates洗牌（只洗前current_s_samples_个元素）
     // =========================================================================
 
     // =========================================================================
@@ -816,8 +791,6 @@ std::pair<int, int> PreprocessWorker::calculate_write_position() const {
     const int j = config_.pid_in_engine;               // j: 该PW在Engine内的编号
     const int B = config_.local_batch_size;            // B: 批次大小
 
-    // n: 该PW当前phase已处理的样本数（从0开始，每次end_sample()后递增）
-    // 注意：此方法应在end_sample()调用后使用
     const int n = local_sample_id_;
 
     // 计算全局样本序号（跨所有PW的统一序号）
@@ -1631,7 +1604,6 @@ void PreprocessWorker::work_lazy() {
              << ", using_cpvs=" << config_.using_cpvs);
     TR_CHECK(engine_buffer_ != nullptr, ValueError,
              "engine_buffer_ is null (lazy phase requires EngineBuffer)");
-
     LOG_INFO << "PW " << config_.worker_id << " work_lazy starting: "
              << (param_.is_train ? "TRAIN" : "VAL");
 
@@ -1644,12 +1616,20 @@ void PreprocessWorker::work_lazy() {
         TR_CHECK(config_.sdmp_factor > 1, ValueError,
                  "Lazy train phase requires sdmp_factor > 1, got " << config_.sdmp_factor);
 
-        // ==================== 步骤2.1：洗牌S区索引 ====================
-        shuffle_s_indices(param_.phase_id);
-
-        // ==================== 步骤2.2：迭代current_s_samples_次 ====================
-        // 迭代current_s_samples_（busy train phase时S区实际存储的样本总数）
         int active_s_region_idx = param_.active_s_region_idx;
+
+        // =========================================================================
+        // 从GlobalRegistry复制原始索引向量
+        // =========================================================================
+        // 直接向量赋值（O(1)操作，复制整个向量）
+        // fixed_s_original_indices_内容为[0, 1, 2, ..., max_s_samples_-1]
+        // 将s_shuffled_indices_重置为fixed_s_original_indices()，意味着顺序读取
+        s_shuffled_indices_ = GlobalRegistry::instance().fixed_s_original_indices();
+        if (require_shuffle_) {
+            shuffle_s_indices(param_.phase_id);  // 对前current_s_samples_个样本进行洗牌
+        }
+
+        // 迭代current_s_samples_（busy train phase时S区实际存储的样本总数）
         TR_CHECK(active_s_region_idx >= 0 && active_s_region_idx < config_.num_region_s, ValueError,
                  "Invalid active_s_region_idx: " << active_s_region_idx);
 
@@ -1667,17 +1647,11 @@ void PreprocessWorker::work_lazy() {
         // 通知EngineBuffer没有更多样本
         no_more_samples();
 
-        LOG_INFO << "PW " << config_.worker_id << " lazy train phase completed: "
-                 << current_s_samples_ << " samples transferred";
-
     } else {
         // ==================== Lazy Val Phase ====================
         // 迭代current_c_samples_（busy val phase时C区实际存储的样本总数）
         TR_CHECK(config_.using_cpvs, ValueError,
                  "Lazy val phase requires using_cpvs=true");
-
-        LOG_INFO << "PW " << config_.worker_id << " lazy val phase: "
-                 << "iterating " << current_c_samples_ << " samples from C region";
 
         for (int i = 0; i < current_c_samples_; ++i) {
             // 从C区复制到EngineBuffer
@@ -1689,9 +1663,6 @@ void PreprocessWorker::work_lazy() {
 
         // 通知EngineBuffer没有更多样本
         no_more_samples();
-
-        LOG_INFO << "PW " << config_.worker_id << " lazy val phase completed: "
-                 << current_c_samples_ << " samples transferred";
     }
 }
 

@@ -99,25 +99,53 @@ public:
     int current_buffer_id() const;
     bool is_finished() const;
 
+    void set_buffer_readable(int buffer_id, bool readable_flag);  // 深度学习引擎读取buffer完毕后一定一定要记得将buffer设为不可读，否则可能重复读入
+    void set_buffer_writeable(int buffer_id, bool writeable_flag);  // 深度学习引擎读取buffer完毕后一定一定要记得将buffer设为可写，否则将一直阻塞
+    bool buffer_is_readable(int buffer_id);  // 仅供深度学习引擎调用
+    bool buffer_is_writeable(int buffer_id);
+    bool both_buffers_writeable() const;  // 查询两个buffer是否都可写（供Preprocessor检查phase结束条件）
+
+    uint8_t* get_buffer_ptr(int buffer_id);  // 仅供深度学习引擎调用，获取buffer的起始位置指针。注意！是buffer_labels_而不是buffer_data_！
+    size_t get_buffer_actual_transfer_bytes(int buffer_id);  // 仅供深度学习引擎调用，注意，这是包含了整个buffer_labels_区和实际图像字节的
+    int get_buffer_actual_transfer_samples_(int buffer_id);  // 仅供深度学习引擎调用
+
     EngineBuffer();
 
     ~EngineBuffer();
 
 private:
     void reset();  // 复位计数器和状态变量（内部辅助函数）
-    void execute_transfer_locked(int samples_count);
-    bool try_final_transfer_locked();
+    void execute_transfer_locked(int samples_count, bool fill_before_transfer = false);
+    void save_crc_csv(int buf_id, int samples_count);  ///< 保存CRC32到CSV文件
 
     // 配置参数
-    int engine_id_ = -1;
     int real_gpu_id_ = -1;
     int local_batch_size_ = 0;
     int num_workers_per_engine_ = 0;
+    int total_num_train_batches_ = 0;         ///< 训练集的总batch数（考虑filling后，单个EngineBuffer的batch数）
+    int world_size_ = 0;                       ///< 分布式训练world size（从GlobalRegistry下载，fixed变量）
+    size_t num_train_samples_ = 0;             ///< 训练集样本总数（从GlobalRegistry下载，fixed变量）
+
+    // [线程安全]以下变量在reset_and_update()中写入，在PW线程中读取
+    // 必须确保：reset_and_update()在PW开始执行预处理和写入之前调用
+    // 当前实现通过Preprocessor控制调用时序保证安全性（在phase切换时、begin_epoch之前调用）
     size_t current_sample_bytes_ = 0;
-    size_t single_buffer_size_ = 0;
     bool is_train_ = true;
+
+    size_t single_buffer_size_ = 0;
+    bool drop_last_ = false;
+    bool need_filling_ = false;                ///< 是否需要从开头取样本填补到最后一个不完整batch（仅训练集）
     bool using_pinned_memory_ = false;
     bool require_reproducibility_ = false;  ///< 是否要求可复现性（从GlobalRegistry下载）
+    bool engine_buffer_may_have_incomplete_batch_ = false;
+
+    // CRC保存相关
+    std::string output_path_ = TR_WORKSPACE;  ///< 输出路径（硬编码为TR_WORKSPACE）
+    int engine_id_ = 0;  ///< 当前epoch ID（从GlobalRegistry获取）
+
+    // Filling样本相关（用于need_filling_为true时，填充最后一个不完整batch）
+    int32_t filling_label_ = 0;              ///< 填充样本的标签
+    uint8_t* filling_sample_data_ = nullptr;  ///< 填充样本的数据指针
 
     // 双缓冲
     std::atomic<int> current_buffer_{0};
@@ -138,6 +166,17 @@ private:
     std::atomic<int> exhausted_count_{0};
     std::atomic<bool> finished_{false};
     std::vector<bool> worker_exhausted_;  // 简化：用普通 bool + mutex 保护
+
+    // Buffer可读/可写状态
+    std::atomic<bool> buffer_0_is_readable_{false};
+    std::atomic<bool> buffer_1_is_readable_{false};
+    std::atomic<bool> buffer_0_is_writeable_{true};
+    std::atomic<bool> buffer_1_is_writeable_{true};
+
+    std::atomic<size_t> buffer_0_actual_transfer_bytes_{0};
+    std::atomic<size_t> buffer_1_actual_transfer_bytes_{0};
+    std::atomic<int> buffer_0_actual_transfer_samples_{0};
+    std::atomic<int> buffer_1_actual_transfer_samples_{0};
 
     mutable std::mutex mutex_;
     std::condition_variable cv_batch_ready_;

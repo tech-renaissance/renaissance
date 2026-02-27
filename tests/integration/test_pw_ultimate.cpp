@@ -403,7 +403,11 @@ int main(int argc, char* argv[]) {
         }
     }
 
-    // 【第一句】设置可复现性保险（必须在所有其他操作之前）
+    // 【第一句】初始化框架（必须在所有其他操作之前）
+    INIT_FRAMEWORK(device_type);
+    std::cout << "Framework initialized with device: " << device_type << "\n";
+
+    // 【第二句】设置可复现性保险（必须在所有其他操作之前）
     GlobalRegistry::instance().ensure_reproducibility(reproducible);
     if (reproducible) {
         std::cout << "Reproducible mode: ENABLED\n";
