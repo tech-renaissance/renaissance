@@ -116,6 +116,10 @@
 #include <algorithm>
 #include <thread>
 #include <chrono>
+#include <fstream>
+#include <filesystem>
+#include <iomanip>
+#include <zlib.h>  // for crc32()
 
 namespace tr {
 
@@ -125,8 +129,11 @@ namespace tr {
 
 EngineBuffer::EngineBuffer()
 {
-    // 从GlobalRegistry下载可复现性保险标志
+    // 从GlobalRegistry下载fixed型变量（一次性赋值，运行期间不变）
     require_reproducibility_ = GlobalRegistry::instance().reproducibility_insurance();
+    drop_last_ = GlobalRegistry::instance().using_drop_last();
+    world_size_ = GlobalRegistry::instance().world_size();
+    num_train_samples_ = GlobalRegistry::instance().num_train_samples();
 }
 
 // ============================================================================
@@ -140,9 +147,33 @@ void EngineBuffer::configure(
     int num_workers_per_engine,
     int engine_id
 ) {
+    // =========================================================================
+    // 步骤0：立即计算 need_filling_（在赋值 engine_id_ 之前，避免并发风险）
+    // 公式：
+    //   - 如果 num_train_samples_ 能被 world_size_ 整除：所有EngineBuffer都不需要filling
+    //   - 否则：engine_id >= (num_train_samples_ % world_size_) 的EngineBuffer需要filling
+    // =========================================================================
+    int remainder = static_cast<int>(num_train_samples_ % world_size_);
+    bool need_filling = (remainder != 0) && (engine_id >= remainder);
+
+    // 步骤1：赋值成员变量
     engine_id_ = engine_id;
     local_batch_size_ = local_batch_size;
     num_workers_per_engine_ = num_workers_per_engine;
+    need_filling_ = need_filling;  // 使用预先计算的值
+
+    // 计算所有EngineBuffer最终都相同的batch数（与need_filling_和drop_last_无关）
+    // 步骤1：计算单个EngineBuffer最大分配到的样本数（向上取整）
+    size_t max_samples_per_engine = (num_train_samples_ + world_size_ - 1) / world_size_;
+    // 步骤2：计算这些样本能组成多少个batch（向上取整）
+    total_num_train_batches_ = static_cast<int>((max_samples_per_engine + local_batch_size_ - 1) / local_batch_size_);
+    engine_buffer_may_have_incomplete_batch_ = ((num_train_samples_ % (local_batch_size_ * world_size_)) != 0); // 判断当前配置下，是否存在不完整batch
+
+    LOG_DEBUG << "EngineBuffer#" << engine_id_
+              << " filling calculation: world_size=" << world_size_
+              << ", num_train_samples=" << num_train_samples_
+              << ", remainder=" << remainder
+              << ", need_filling=" << need_filling_;
 
     // 初始化 Worker 状态
     worker_exhausted_.assign(num_workers_per_engine, false);
@@ -154,12 +185,15 @@ void EngineBuffer::configure(
     size_t total_buffer_size = labels_size + data_size;
     single_buffer_size_ = total_buffer_size;
 
+    // 为首个样本申请存储空间，字节数为max_sample（使用普通内存，后续会复制到锁页内存）
+    constexpr size_t ALIGNMENT = 64;
+    filling_sample_data_ = static_cast<uint8_t*>(ALIGNED_ALLOC(ALIGNMENT, max_sample));
+    TR_CHECK(filling_sample_data_ != nullptr, MemoryError, "Allocation failed for filling sample");
+
     bool using_gpu = GlobalRegistry::instance().using_gpu();
     if (using_gpu) {
         real_gpu_id_ = GlobalRegistry::instance().gpu_ids()[engine_id_];
     }
-
-    constexpr size_t ALIGNMENT = 64;
 
     for (int i = 0; i < 2; ++i) {
         void* buffer_ptr = nullptr;
@@ -206,6 +240,19 @@ void EngineBuffer::reset() {
     written_count_.store(0, std::memory_order_release);
 
     worker_exhausted_.assign(num_workers_per_engine_, false);
+
+    // 重置filling样本标签
+    filling_label_ = 0;
+
+    buffer_0_is_readable_.store(false, std::memory_order_release);
+    buffer_1_is_readable_.store(false, std::memory_order_release);
+    buffer_0_is_writeable_.store(true, std::memory_order_release);
+    buffer_1_is_writeable_.store(true, std::memory_order_release);
+
+    buffer_0_actual_transfer_bytes_.store(0, std::memory_order_release);
+    buffer_1_actual_transfer_bytes_.store(0, std::memory_order_release);
+    buffer_0_actual_transfer_samples_.store(0, std::memory_order_release);
+    buffer_1_actual_transfer_samples_.store(0, std::memory_order_release);
 }
 
 void EngineBuffer::reset_and_update() {
@@ -236,18 +283,51 @@ void EngineBuffer::reset_and_update() {
 
     // =========================================================================
     // 步骤2：memset清空所有内存（labels和data）
+    // 【性能优化 V3.24.1】已删除memset，原因如下：
     // =========================================================================
-    for (int i = 0; i < 2; ++i) {
-        if (buffer_labels_[i] != nullptr) {
-            // 清空labels区域
-            size_t labels_size = local_batch_size_ * sizeof(int32_t);
-            std::memset(buffer_labels_[i], 0, labels_size);
-
-            // 清空data区域（buffer_data_紧跟在labels之后）
-            size_t data_size = local_batch_size_ * current_sample_bytes_;
-            std::memset(buffer_data_[i], 0, data_size);
-        }
-    }
+    //
+    // ❌ 为什么不需要清空buffer内存？
+    // --------------------------------
+    // 1. 性能原因：
+    //    - 假设 batch_size=256, resolution=224x224x3≈150KB
+    //    - 单个buffer大小：256 × 150KB = 38.4MB
+    //    - 两个buffer总共：76.8MB
+    //    - 每次phase切换（train↔val）都要memset 76.8MB
+    //    - 如果运行100个epochs（200次phase切换），总计写入15.36GB无用数据
+    //    - 严重浪费CPU时间和内存带宽！
+    //
+    // 2. 功能原因：
+    //    - 这些内存马上就会被PreprocessorWorker覆盖写入新数据
+    //    - 所有对buffer的读取都通过samples_count和actual_transfer_samples控制
+    //    - 深度学习引擎只会读取已写入的有效样本，不会读取未初始化的数据
+    //    - EngineBuffer保证：只有显式标记为可读的buffer才会被消费
+    //
+    // 3. 安全性保证：
+    //    - buffer_0_is_writeable_ 和 buffer_1_is_writeable_ 初始为true
+    //    - 只有写入完成后才设为可读（set_buffer_readable）
+    //    - 深度学习引擎消费完会设为可写（set_buffer_writeable）
+    //    - 严格的读写状态机确保不会访问未初始化的数据
+    //
+    // ✅ 优化效果：
+    //    - 减少CPU开销：零化76.8MB需要几毫秒到几十毫秒
+    //    - 减少内存带宽占用：释放带宽供其他线程使用
+    //    - 更快的phase切换：立即可用于写入新数据
+    //
+    // =========================================================================
+    // 以下代码已注释，保留用于调试或验证内存内容的正确性
+    // =========================================================================
+    // for (int i = 0; i < 2; ++i) {
+    //     if (buffer_labels_[i] != nullptr) {
+    //         // 清空labels区域
+    //         size_t labels_size = local_batch_size_ * sizeof(int32_t);
+    //         std::memset(buffer_labels_[i], 0, labels_size);
+    //
+    //         // 清空data区域（buffer_data_紧跟在labels之后）
+    //         size_t data_size = local_batch_size_ * current_sample_bytes_;
+    //         std::memset(buffer_data_[i], 0, data_size);
+    //     }
+    // }
+    // =========================================================================
 
     // =========================================================================
     // 步骤3：从GlobalRegistry更新phase相关配置
@@ -268,11 +348,17 @@ void EngineBuffer::reset_and_update() {
 
     // 重新计算current_sample_bytes_
     current_sample_bytes_ = current_resolution * current_resolution * num_color_channels;
-
-    std::cout << "[EngineBuffer #" << engine_id_ << "] reset and updated." << std::endl;
 }
 
 uint8_t* EngineBuffer::request_write_slot(int position, int batch_id, int32_t label) {
+
+#ifdef NDEBUG
+    TR_CHECK(!finished_.load(std::memory_order_acquire), MemoryError,
+             "Worker attempted to request write slot after EngineBuffer finished"
+             << "\n  EngineBuffer ID: " << engine_id_
+             << "\n  This indicates a critical Worker synchronization bug");
+#endif
+
     // 【Core Dump修复2】在函数入口立即捕获current_sample_bytes_到栈变量
     // 确保整个函数调用使用一致的值，避免reset中途修改导致offset计算错误
     const size_t snapshot_sample_bytes = current_sample_bytes_;
@@ -318,7 +404,8 @@ uint8_t* EngineBuffer::request_write_slot(int position, int batch_id, int32_t la
         // =========================================
 
         // 步骤1：原子分配唯一的request ID（关键修复：消除TOCTOU竞态）
-        size_t my_request = request_count_.fetch_add(1, std::memory_order_acq_rel);
+        // [性能优化]fetch_add使用relaxed语义，因为返回值仅用于计算slot/batch，无需与其他变量同步
+        size_t my_request = request_count_.fetch_add(1, std::memory_order_relaxed);
 
         // 步骤2：基于my_request计算slot和batch
         size_t slot = my_request % local_batch_size_;
@@ -398,6 +485,8 @@ uint8_t* EngineBuffer::request_write_slot(int position, int batch_id, int32_t la
 }
 
 bool EngineBuffer::notify_sample_written() {
+    int current_batch_id = current_batch_id_.load(std::memory_order_acquire);
+    int last_batch_id = total_num_train_batches_ - 1;
     if (require_reproducibility_) {
         // =========================================
         // 可复现模式：严格的批次计数和触发逻辑
@@ -412,7 +501,18 @@ bool EngineBuffer::notify_sample_written() {
             // 双重检查防止并发触发
             int samples = samples_in_batch_.load(std::memory_order_acquire);
             if (samples >= local_batch_size_) {
-                execute_transfer_locked(samples);
+
+                if (drop_last_ && is_train_ && current_batch_id == last_batch_id && engine_buffer_may_have_incomplete_batch_) {
+                    // 如果是需要drop last的情况，且来到了最后一个batch，那么即使这个EngineBuffer已满，也不传输，否则就会比need filling的EngineBuffer多出一个batch
+                    // 标记结束
+                    finished_.store(true, std::memory_order_release);
+                    cv_batch_ready_.notify_all();  // 唤醒所有等待的线程
+                }
+                else {
+                    // 触发传输（execute_transfer_locked内部会递增current_batch_id_并唤醒等待线程）
+                    execute_transfer_locked(local_batch_size_);
+                }
+
                 return true;
             }
         }
@@ -443,8 +543,16 @@ bool EngineBuffer::notify_sample_written() {
                 return false;
             }
 
-            // 触发传输（execute_transfer_locked内部会递增current_batch_id_并唤醒等待线程）
-            execute_transfer_locked(local_batch_size_);
+            if (drop_last_ && is_train_ && current_batch_id == last_batch_id && engine_buffer_may_have_incomplete_batch_) {
+                // 如果是需要drop last的情况，且来到了最后一个batch，那么即使这个EngineBuffer已满，也不传输，否则就会比need filling的EngineBuffer多出一个batch
+                // 标记结束
+                finished_.store(true, std::memory_order_release);
+                cv_batch_ready_.notify_all();  // 唤醒所有等待的线程
+            }
+            else {
+                // 触发传输（execute_transfer_locked内部会递增current_batch_id_并唤醒等待线程）
+                execute_transfer_locked(local_batch_size_);
+            }
 
             return true;
         }
@@ -457,95 +565,163 @@ void EngineBuffer::no_more_samples(int worker_id) {
     TR_CHECK(worker_id >= 0 && worker_id < num_workers_per_engine_, ValueError,
              "Worker ID out of range: " << worker_id);
 
-    if (require_reproducibility_) {
-        // =========================================
-        // 可复现模式：严格的Worker耗尽检测
-        // =========================================
-        std::lock_guard<std::mutex> lock(mutex_);
+    // 将该Worker标记为样本耗尽
+    std::lock_guard<std::mutex> lock(mutex_);
+    if (worker_exhausted_[worker_id]) return;  // 防止重复调用
+    worker_exhausted_[worker_id] = true;
+    int exhausted = exhausted_count_.fetch_add(1, std::memory_order_relaxed) + 1;
 
-        // 防止重复调用
-        if (worker_exhausted_[worker_id]) return;
+    // 检查是否所有 Worker 都已耗尽
+    if (exhausted == num_workers_per_engine_) {
 
-        worker_exhausted_[worker_id] = true;
-        int exhausted = exhausted_count_.fetch_add(1, std::memory_order_relaxed) + 1;
-
-        // 检查是否所有 Worker 都已耗尽
-        if (exhausted == num_workers_per_engine_) {
-            try_final_transfer_locked();
+        // 如果EngineBuffer在本phase的任务已被标记为完成，不做任何事情
+        if (finished_.load(std::memory_order_acquire)) {
+            cv_batch_ready_.notify_all();  // 唤醒所有等待的线程
+            return;
         }
 
-    } else {
-        // =========================================
-        // 非可复现模式：使用exhausted_count_进行final transfer
-        // =========================================
-
-        std::lock_guard<std::mutex> lock(mutex_);
-
-        // 防止重复调用
-        if (worker_exhausted_[worker_id]) return;
-
-        worker_exhausted_[worker_id] = true;
-        int exhausted = exhausted_count_.fetch_add(1, std::memory_order_relaxed) + 1;
-
-        // 检查是否所有Worker都已完成
-        if (exhausted == num_workers_per_engine_) {
+        if (!require_reproducibility_) {  // 非可复现模式
             // 等待所有已分配的slot都写入完成
             size_t request = request_count_.load(std::memory_order_acquire);
             size_t written = written_count_.load(std::memory_order_acquire);
 
             // 如果有已分配但未写入的slot，等待它们完成
             while (request != written) {
-                std::this_thread::sleep_for(std::chrono::microseconds(100));
+                std::this_thread::sleep_for(std::chrono::microseconds(50));
                 request = request_count_.load(std::memory_order_acquire);
                 written = written_count_.load(std::memory_order_acquire);
             }
-
-            // 检查当前buffer是否有未传输的样本
-            size_t pending = written % local_batch_size_;
-
-            if (pending > 0) {
-                // 触发最后一次传输
-                execute_transfer_locked(pending);
-            }
-
-            // 标记结束
-            finished_.store(true, std::memory_order_release);
-            cv_batch_ready_.notify_all();  // 唤醒所有等待的线程
         }
+
+        int samples = samples_in_batch_.load(std::memory_order_acquire);  // 检查当前buffer是否有未传输的样本
+        int current_batch_id = current_batch_id_.load(std::memory_order_acquire);
+        int last_batch_id = total_num_train_batches_ - 1;
+
+        if (is_train_) {
+            if (current_batch_id < last_batch_id) {
+                // 所有Worker全耗尽时，应该已经在最后一个batch，不应该还在前面的batch
+                TR_CHECK(false, ValueError,
+                         "All workers exhausted but current_batch_id (" << current_batch_id
+                         << ") < last_batch_id (" << last_batch_id
+                         << ")\n  EngineBuffer ID: " << engine_id_
+                         << "\n  This indicates batches were not transferred properly");
+            }
+            else if (current_batch_id == last_batch_id) {
+                // 需要判断的最后一个batch
+                if (drop_last_) {
+                    // 什么也不用做。因为这个batch要被抛弃
+                }
+                else {
+                    execute_transfer_locked(samples, need_filling_);  // 如果不需要filling就直接传输，需要filling就filling之后再传输
+                }
+            }
+            else {
+                // 什么也不用做。大于的情况就是，上一个batch已经是最后一个batch了，但由于上一个batch是满的，所以PW到本batch才报告耗尽
+            }
+        }
+        else {  // Val phase，判断简单，有样本就传输，没样本就不传输（filling只适用于train phase）
+            // 有样本，传输最后一个不完整的 batch
+            if (samples > 0) {
+                execute_transfer_locked(samples);
+            }
+        }
+
+        // 标记结束
+        finished_.store(true, std::memory_order_release);
+        cv_batch_ready_.notify_all();  // 唤醒所有等待的线程
     }
 }
 
-bool EngineBuffer::try_final_transfer_locked() {
-    if (finished_.load(std::memory_order_acquire)) {
-        return false;
-    }
-
-    int samples = samples_in_batch_.load(std::memory_order_acquire);
-
-    if (samples > 0) {
-        // 规则2：有样本，传输最后一个不完整的 batch
-        execute_transfer_locked(samples);
-    }
-    // 规则3：无样本，直接结束，无需传输
-
-    finished_.store(true, std::memory_order_release);
-    cv_batch_ready_.notify_all();
-
-    return samples > 0;
-}
-
-void EngineBuffer::execute_transfer_locked(int samples_count) {
+void EngineBuffer::execute_transfer_locked(int samples_count, bool fill_before_transfer) {
     int buf_id = current_buffer_.load(std::memory_order_acquire);
 
     // 【Core Dump修复2】捕获快照
     const size_t snapshot_sample_bytes = current_sample_bytes_;
-    size_t transfer_bytes = samples_count * sizeof(int32_t) +
-                           samples_count * snapshot_sample_bytes;
+    const int current_batch_id = current_batch_id_.load(std::memory_order_acquire);
 
-    total_transferred_.fetch_add(samples_count, std::memory_order_relaxed);
+    // 判断是否是train phase的第一个传输的batch，如果是则保存第一个样本用于filling
+    if (need_filling_ && is_train_ && current_batch_id == 0 && samples_count > 0) {
+        // 保存地址最小的sample（即buffer_data_[buf_id]）的数据
+        std::memcpy(filling_sample_data_, buffer_data_[buf_id], snapshot_sample_bytes);
+        // 保存对应的label
+        filling_label_ = buffer_labels_[buf_id][0];
+    }
 
-    // 切换 buffer
+    int samples_count_after_filling = samples_count;
+
+    // 执行filling，边界条件已在调用处判断
+    if (need_filling_ && is_train_ && fill_before_transfer) {
+        samples_count_after_filling++;
+        std::memcpy(buffer_data_[buf_id] + snapshot_sample_bytes * samples_count, filling_sample_data_, snapshot_sample_bytes);
+        buffer_labels_[buf_id][samples_count] = filling_label_;
+    }
+
+    size_t transfer_bytes = samples_count_after_filling * sizeof(int32_t) +
+                           samples_count_after_filling * snapshot_sample_bytes;
+
+    // 以下是传输逻辑
+    set_buffer_writeable(buf_id, false);  // 设为不可写以保护已写好的buffer
+    if (buf_id == 0) {
+        buffer_0_actual_transfer_samples_.store(samples_count_after_filling, std::memory_order_release);
+        buffer_0_actual_transfer_bytes_.store(transfer_bytes, std::memory_order_release);
+    }
+    else {
+        buffer_1_actual_transfer_samples_.store(samples_count_after_filling, std::memory_order_release);
+        buffer_1_actual_transfer_bytes_.store(transfer_bytes, std::memory_order_release);
+    }
+    set_buffer_readable(buf_id, true);
+#ifdef VERIFY_ENGINE_BUFFER_CRC
+    // 保存CRC到CSV文件（在清零样本数之前）
+    save_crc_csv(buf_id, samples_count_after_filling);
+#endif
+
+    // 重要！下面这句以后要删除
+    set_buffer_writeable(buf_id, true);  // TODO: 深度学习引擎开发好后，删除此句，由深度学习引擎来执行，仅EngineBuffer单元测试阶段默认立即变为可写
+    // 重要！上面这句以后要删除
+
+    // 以上是传输逻辑
+
+    total_transferred_.fetch_add(samples_count_after_filling, std::memory_order_relaxed);
+
+    // =========================================================================
+    // 切换buffer（关键同步点）
+    // =========================================================================
     int next_buf = 1 - buf_id;
+
+    // [设计说明]等待next_buf可写（可能阻塞很长时间）
+    //
+    // 为什么两个buffer都不可写？
+    // ---------------------
+    // 1. buf_id（刚写满）：已设为可读，等待或正在被深度学习引擎读取
+    // 2. next_buf（上一个batch）：可能正在被深度学习引擎读取
+    //
+    // 为什么必须持有锁等待？
+    // -------------------
+    // 如果此时释放锁，其他Workers会抢到锁并尝试写入，但：
+    // - buf_id不可写（刚写满，数据还未被消费）
+    // - next_buf不可写（正在被读取）
+    // - 强行写入会破坏已写但未读的数据，导致数据丢失或损坏
+    //
+    // 正确的行为：
+    // ----------
+    // 1. 当前Worker持有锁，等待next_buf可写
+    // 2. 其他Workers在mutex_上等待（它们无法写入任何buffer）
+    // 3. 一旦next_buf可写，立即完成切换并释放锁
+    // 4. cv_batch_ready_.notify_all()唤醒其他Workers
+    // 5. 其他Workers获取锁并开始写入next_buf
+    //
+    // 等待时长说明：
+    // -----------
+    // - 正常情况：几微秒到几毫秒
+    // - 深度学习瓶颈：数分钟到数小时（大batch、慢设备、嵌入式CPU）
+    // - 这是正常的背压机制：预处理被下游深度学习引擎阻塞
+    //
+    while (!buffer_is_writeable(next_buf)) {
+        // 等待深度学习引擎消费完毕next_buf并设为可写
+        std::this_thread::sleep_for(std::chrono::microseconds(50));
+    }
+
+    set_buffer_readable(next_buf, false);  // 切换前先将其设为不可读，以免深度学习引擎读入未完成的buffer
     current_buffer_.store(next_buf, std::memory_order_release);
 
     // 重置 batch 状态
@@ -554,6 +730,51 @@ void EngineBuffer::execute_transfer_locked(int samples_count) {
     // 递增 batch ID，唤醒等待的 Worker
     current_batch_id_.fetch_add(1, std::memory_order_release);
     cv_batch_ready_.notify_all();
+}
+
+
+
+
+void EngineBuffer::save_crc_csv(int buf_id, int samples_count) {
+    // 捕获快照，确保整个函数使用一致的样本大小
+    const size_t snapshot_sample_bytes = current_sample_bytes_;
+
+    // 防御性检查：如果sample_bytes为0，说明还未正确初始化
+    if (snapshot_sample_bytes == 0) {
+        LOG_WARN << "[EB#" << engine_id_ << "] current_sample_bytes_ is 0, skipping CRC save";
+        return;
+    }
+
+    int epoch_id = GlobalRegistry::instance().user_epoch_id();
+    // 构造文件名：eb_[engine_id]_[train/val]_[epoch_id].csv
+    std::ostringstream oss;
+    oss << output_path_ << "/" << (is_train_ ? "train" : "val") << "_"
+        << epoch_id << "_eb_" << engine_id_ << ".csv";
+    std::string file_path = oss.str();
+
+    // 以追加模式打开文件（不存在则创建）
+    std::ofstream ofs(file_path, std::ios::app);
+    if (!ofs.is_open()) {
+        LOG_ERROR << "[EB#" << engine_id_ << "] Failed to open CSV file: " << file_path;
+        return;
+    }
+
+    // 遍历当前buffer的所有样本
+    for (int i = 0; i < samples_count; ++i) {
+        // 计算CRC32（使用zlib）
+        uint32_t crc = crc32(0L, Z_NULL, 0);  // 初始化CRC
+        crc = crc32(crc, buffer_data_[buf_id] + i * snapshot_sample_bytes, snapshot_sample_bytes);
+
+        // 获取label
+        int32_t label = buffer_labels_[buf_id][i];
+
+        // 写入格式：[CRC32_hex],[字节数],[label]\n
+        // CRC32输出为8位十六进制大写字符串（如：CE147A89）
+        ofs << std::uppercase << std::hex << std::setfill('0') << std::setw(8) << crc
+            << std::dec << "," << snapshot_sample_bytes << "," << label << "\n";
+    }
+
+    ofs.close();
 }
 
 size_t EngineBuffer::total_samples_transferred() const {
@@ -566,6 +787,90 @@ int EngineBuffer::current_buffer_id() const {
 
 bool EngineBuffer::is_finished() const {
     return finished_.load(std::memory_order_acquire);
+}
+
+// ============================================================================
+// Buffer状态管理方法（供深度学习引擎调用）
+// ============================================================================
+
+void EngineBuffer::set_buffer_readable(int buffer_id, bool readable_flag) {
+    TR_CHECK(buffer_id == 0 || buffer_id == 1, ValueError,
+             "buffer_id must be 0 or 1, got " << buffer_id);
+
+    if (buffer_id == 0) {
+        buffer_0_is_readable_.store(readable_flag, std::memory_order_release);
+    } else {
+        buffer_1_is_readable_.store(readable_flag, std::memory_order_release);
+    }
+}
+
+void EngineBuffer::set_buffer_writeable(int buffer_id, bool writeable_flag) {
+    TR_CHECK(buffer_id == 0 || buffer_id == 1, ValueError,
+             "buffer_id must be 0 or 1, got " << buffer_id);
+
+    if (buffer_id == 0) {
+        buffer_0_is_writeable_.store(writeable_flag, std::memory_order_release);
+    } else {
+        buffer_1_is_writeable_.store(writeable_flag, std::memory_order_release);
+    }
+}
+
+bool EngineBuffer::buffer_is_readable(int buffer_id) {
+    TR_CHECK(buffer_id == 0 || buffer_id == 1, ValueError,
+             "buffer_id must be 0 or 1, got " << buffer_id);
+
+    if (buffer_id == 0) {
+        return buffer_0_is_readable_.load(std::memory_order_acquire);
+    } else {
+        return buffer_1_is_readable_.load(std::memory_order_acquire);
+    }
+}
+
+bool EngineBuffer::buffer_is_writeable(int buffer_id) {
+    TR_CHECK(buffer_id == 0 || buffer_id == 1, ValueError,
+             "buffer_id must be 0 or 1, got " << buffer_id);
+
+    if (buffer_id == 0) {
+        return buffer_0_is_writeable_.load(std::memory_order_acquire);
+    } else {
+        return buffer_1_is_writeable_.load(std::memory_order_acquire);
+    }
+}
+
+uint8_t* EngineBuffer::get_buffer_ptr(int buffer_id) {
+    TR_CHECK(buffer_id == 0 || buffer_id == 1, ValueError,
+             "buffer_id must be 0 or 1, got " << buffer_id);
+
+    // 返回buffer_labels_的起始位置（包含labels和data）
+    return reinterpret_cast<uint8_t*>(buffer_labels_[buffer_id]);
+}
+
+size_t EngineBuffer::get_buffer_actual_transfer_bytes(int buffer_id) {
+    TR_CHECK(buffer_id == 0 || buffer_id == 1, ValueError,
+             "buffer_id must be 0 or 1, got " << buffer_id);
+
+    if (buffer_id == 0) {
+        return buffer_0_actual_transfer_bytes_.load(std::memory_order_acquire);
+    } else {
+        return buffer_1_actual_transfer_bytes_.load(std::memory_order_acquire);
+    }
+}
+
+int EngineBuffer::get_buffer_actual_transfer_samples_(int buffer_id) {
+    TR_CHECK(buffer_id == 0 || buffer_id == 1, ValueError,
+             "buffer_id must be 0 or 1, got " << buffer_id);
+
+    if (buffer_id == 0) {
+        return buffer_0_actual_transfer_samples_.load(std::memory_order_acquire);
+    } else {
+        return buffer_1_actual_transfer_samples_.load(std::memory_order_acquire);
+    }
+}
+
+bool EngineBuffer::both_buffers_writeable() const {
+    // 查询两个buffer是否都可写（用于phase结束检查）
+    return buffer_0_is_writeable_.load(std::memory_order_acquire) &&
+           buffer_1_is_writeable_.load(std::memory_order_acquire);
 }
 
 EngineBuffer::~EngineBuffer() {
@@ -591,6 +896,12 @@ EngineBuffer::~EngineBuffer() {
             buffer_labels_[i] = nullptr;
             buffer_data_[i] = nullptr;
         }
+    }
+
+    // 释放filling样本内存
+    if (filling_sample_data_ != nullptr) {
+        ALIGNED_FREE(filling_sample_data_);
+        filling_sample_data_ = nullptr;
     }
 }
 

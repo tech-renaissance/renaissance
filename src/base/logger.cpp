@@ -131,4 +131,12 @@ void Logger::log_exception(const TRException& e) {
         0, e.what());
 }
 
+void Logger::init() {
+    // 空实现：Logger的构造函数已完成所有初始化工作
+}
+
+void Logger::cleanup() {
+    // 空实现：Logger的析构函数会处理资源清理
+}
+
 } // namespace tr

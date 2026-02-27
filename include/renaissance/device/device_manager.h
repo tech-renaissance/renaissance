@@ -141,6 +141,19 @@ public:
      */
     void print_devices() const;
 
+    /**
+     * @brief 初始化（供Initializer调用）
+     * @details 空实现，保留接口一致性
+     * @note 实际初始化由构造函数调用 initialize() 完成
+     */
+    void init();
+
+    /**
+     * @brief 清理（供Initializer调用）
+     * @details 清理NCCL资源（如果已激活）
+     */
+    void cleanup();
+
 #ifdef TR_USE_NCCL
     // ===== NCCL通信管理 =====
 

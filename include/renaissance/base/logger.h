@@ -100,6 +100,18 @@ public:
      */
     void log_exception(const TRException& e);
 
+    /**
+     * @brief 初始化Logger（供Initializer调用）
+     * @details 空实现，保留接口一致性
+     */
+    void init();
+
+    /**
+     * @brief 清理Logger（供Initializer调用）
+     * @details 空实现，保留接口一致性
+     */
+    void cleanup();
+
 private:
     Logger();
     ~Logger();
