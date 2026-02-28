@@ -69,7 +69,8 @@ void print_usage(const char* program_name) {
               << "    --epoch 5 --phase val     Test 6th validation set (after 5 full epochs)\n\n"
               << "Note: FULLY mode only loads data once (epoch 0), later epochs just shuffle.\n"
               << "      CRC logs saved to: " << TR_WORKSPACE << "/logs/\n"
-              << "      CSV format: worker_id,size,label,first_byte,crc32\n";
+              << "      CSV format: worker_id,size,label,first_byte,crc32\n"
+              << "Command Sample: /root/epfs/R/renaissance/build/bin/tests/pw/test_epoch_crc --dataset imagenet --format raw --phase train --epoch 2 --path /root/epfs/dataset/imagenet --mode partial --shuffle --lv 0 --workers 16 --preproc 8\n\n";
 }
 
 /**
@@ -87,7 +88,7 @@ bool run_phase(Preprocessor& prep, int epoch_id, bool is_train,
     config.num_workers = num_preproc_workers;  // 使用实际的preprocess worker数量
     config.enable_logging = enable_crc_logging;  // 关键：控制是否输出CRC
     config.calc_crc = enable_crc_logging;
-    config.jpeg_decode = true;      // 启用JPEG解码
+    config.jpeg_decode = false;      // 禁用JPEG解码
     config.apply_crop = false;
     config.simulate_delay = false;
 
@@ -148,20 +149,25 @@ void test_epoch_crc(const std::string& dataset_name,
                    [](unsigned char c) { return std::toupper(c); });
     bool target_is_train = (phase_upper == "TRAIN");
 
-    // 步骤1: 选择数据集
-    prep.config_dataset(dataset_name, dts_format, compression_level);
-
-    // 步骤2: 配置DataLoader
-    prep.config_dataloader(dataset_path, num_load_workers, num_preproc_workers,
-                          partial_mode, enable_shuffle, false);  // 使用enable_shuffle参数
-
-    // 步骤3: 配置Preprocessor（必须先调用config_preprocessor）
-    prep.config_preprocessor(-1, 32, 224, 3, 1, false);
-    prep.config_device("GPU");
-
-    // 步骤4: 设置数据变换
-    prep.set_train_transforms(*std::make_unique<CenterCrop>(224));
-    prep.set_val_transforms(*std::make_unique<CenterCrop>(224));
+    // 使用新的Setup构建器API配置Preprocessor
+    Preprocessor::setup()
+        .dataset(dataset_name, dataset_path)
+        .using_dts_format(dts_format, compression_level)
+        .batch_size(32)  // TEST_WITHOUT_PW模式可以使用小batch
+        .max_output_resolution(224)
+        .color_channels(3)
+        .num_load_workers(num_load_workers)
+        .num_preproc_workers(num_preproc_workers)
+        .partial_mode(partial_mode)
+        .shuffle_train(enable_shuffle)
+        .download(false)
+        .sdmp_factor(1)
+        .using_cpvs(false)
+        .pw_test_mode(false)
+        .device("GPU")
+        .train_transforms(*std::make_unique<DoNothing>())
+        .val_transforms(*std::make_unique<DoNothing>())
+        .commit();
 
     // 获取DataLoader引用（用于获取样本数等信息）
     DataLoader* loader = nullptr;
@@ -373,6 +379,9 @@ int main(int argc, char* argv[]) {
             return 1;
         }
     }
+
+    // 【第一句】初始化框架（必须在所有其他操作之前）
+    INIT_FRAMEWORK("GPU");
 
     // 验证必需参数
     if (dataset_arg.empty() || format_arg.empty() || phase_arg.empty() || target_epoch < 0) {

@@ -10,6 +10,8 @@
 #include <stb_image.h>
 #include <turbojpeg.h>
 
+#include <iostream>
+
 #ifdef _WIN32
     #include <windows.h>
 #endif
@@ -157,19 +159,8 @@ PreprocessWorker::PreprocessWorker(
     train_with_rhf_ = GlobalRegistry::instance().train_with_rhf();
     val_with_rhf_ = GlobalRegistry::instance().val_with_rhf();
 
-    LOG_DEBUG << "[PW " << config_.worker_id << " CONSTRUCTOR] "
-              << "test_mode=" << (config_.test_mode ? "ON" : "OFF")
-              << ", engine=" << config_.engine_id
-              << ", pid=" << config_.pid_in_engine
-              << ", engine_buffer=" << (engine_buffer_ ? "SET" : "NULL")
-              << ", global_seed=" << global_seed
-              << ", initial_seed=" << initial_seed_
-              << ", s_c_region_stride_=" << s_c_region_stride_ << " bytes"
-              << ", train_samples=" << dataset_total_train_samples_
-              << ", val_samples=" << dataset_total_val_samples_
-              << ", deployment_mode=" << (is_deployment_mode_ ? "ON" : "OFF")
-              << ", train_with_rhf=" << (train_with_rhf_ ? "YES" : "NO")
-              << ", val_with_rhf=" << (val_with_rhf_ ? "YES" : "NO");
+    require_shuffle_ = GlobalRegistry::instance().shuffle_train();
+    s_shuffled_indices_ = GlobalRegistry::instance().fixed_s_original_indices();
 
     // ==================== 1. 分配Workshop ====================
     allocate_workshop();
@@ -187,13 +178,8 @@ PreprocessWorker::PreprocessWorker(
 	num_train_ops_ = static_cast<int>(train_ops_.size());
 	num_val_ops_ = static_cast<int>(val_ops_.size());
 
-    LOG_DEBUG << "PW " << config_.worker_id << " cloned POs: "
-              << num_train_ops_ << " train, "
-              << num_val_ops_ << " val";
-
     // ==================== 3. 创建内置DoNothing操作 ====================
     built_in_do_nothing_ = new DoNothing();
-    LOG_DEBUG << "PW " << config_.worker_id << " built-in DoNothing created";
 
     // ==================== 4. 初始化TurboJPEG 3.x ====================
     tj_handle_ = tj3Init(TJINIT_DECOMPRESS);
@@ -204,16 +190,9 @@ PreprocessWorker::PreprocessWorker(
     tj3Set(tj_handle_, TJPARAM_FASTDCT, 1);
     tj3Set(tj_handle_, TJPARAM_FASTUPSAMPLE, 1);
 
-    LOG_DEBUG << "PW " << config_.worker_id << " TurboJPEG 3.x initialized";
-
-    // 打印容量配置
-    LOG_DEBUG << "PW " << config_.worker_id << " capacity: max_s_samples=" << config_.max_s_samples
-              << ", max_c_samples=" << config_.max_c_samples;
-
     // ==================== 4. 初始化标签向量 ====================
     if (config_.max_c_samples > 0) {
         c_label_vector_.resize(config_.max_c_samples);
-        LOG_DEBUG << "PW " << config_.worker_id << " C区标签向量初始化: size=" << config_.max_c_samples;
     }
 
     if (config_.num_region_s > 0 && config_.max_s_samples > 0) {
@@ -221,12 +200,7 @@ PreprocessWorker::PreprocessWorker(
         for (int i = 0; i < config_.num_region_s; ++i) {
             s_label_vectors_[i].resize(config_.max_s_samples);
         }
-        LOG_DEBUG << "PW " << config_.worker_id << " S区标签向量初始化: num=" << config_.num_region_s
-                  << ", each_size=" << config_.max_s_samples;
     }
-
-    LOG_INFO << "PW " << config_.worker_id << " created"
-             << ", workshop=" << (workshop_size_ / (1024.0*1024.0)) << " MB";
 }
 
 PreprocessWorker::~PreprocessWorker() {
@@ -244,8 +218,6 @@ PreprocessWorker::~PreprocessWorker() {
         delete built_in_do_nothing_;
         built_in_do_nothing_ = nullptr;
     }
-
-    LOG_DEBUG << "PW " << config_.worker_id << " destroyed";
 }
 
 // ============================================================================
@@ -267,9 +239,6 @@ void PreprocessWorker::allocate_workshop() {
 
     // 总大小对齐到4KB页
     workshop_size_ = align_4k(workshop_size_);
-
-    LOG_DEBUG << "PW " << config_.worker_id << " allocating workshop: "
-              << (workshop_size_ / (1024.0*1024.0)) << " MB";
 
     // ==================== 分配内存 ====================
 #ifdef _WIN32
@@ -297,24 +266,16 @@ void PreprocessWorker::allocate_workshop() {
     uint8_t* ptr = workshop_;
 
     region_d_ = ptr;
-    LOG_DEBUG << "PW " << config_.worker_id << " D区: " << static_cast<void*>(ptr)
-              << ", size=" << (config_.region_d_size / 1024) << " KB";
     ptr += align_64(config_.region_d_size);
 
     region_a_ = ptr;
-    LOG_DEBUG << "PW " << config_.worker_id << " A区: " << static_cast<void*>(ptr)
-              << ", size=" << (config_.region_ab_size / 1024) << " KB";
     ptr += align_64(config_.region_ab_size);
 
     region_b_ = ptr;
-    LOG_DEBUG << "PW " << config_.worker_id << " B区: " << static_cast<void*>(ptr)
-              << ", size=" << (config_.region_ab_size / 1024) << " KB";
     ptr += align_64(config_.region_ab_size);
 
     if (config_.region_t_size > 0) {
         region_t_ = ptr;
-        LOG_DEBUG << "PW " << config_.worker_id << " T区: " << static_cast<void*>(ptr)
-                  << ", size=" << (config_.region_t_size / 1024) << " KB";
         ptr += align_64(config_.region_t_size);
     }
 
@@ -322,16 +283,11 @@ void PreprocessWorker::allocate_workshop() {
     region_s_ptrs_.resize(config_.num_region_s);
     for (int i = 0; i < config_.num_region_s; ++i) {
         region_s_ptrs_[i] = ptr;
-        LOG_DEBUG << "PW " << config_.worker_id << " S" << (i+1) << "区: "
-                  << static_cast<void*>(ptr)
-                  << ", size=" << (config_.region_s_size / (1024.0*1024.0)) << " MB";
         ptr += align_4k(config_.region_s_size);
     }
 
     if (config_.region_c_size > 0) {
         region_c_ptr_ = ptr;
-        LOG_DEBUG << "PW " << config_.worker_id << " C区: " << static_cast<void*>(ptr)
-                  << ", size=" << (config_.region_c_size / (1024.0*1024.0)) << " MB";
         ptr += align_64(config_.region_c_size);
     }
 
@@ -349,8 +305,6 @@ void PreprocessWorker::free_workshop() {
         free(workshop_);
 #endif
         workshop_ = nullptr;
-
-        LOG_DEBUG << "PW " << config_.worker_id << " workshop freed";
     }
 }
 
@@ -385,11 +339,6 @@ void PreprocessWorker::update_parameters() {
     TR_CHECK(tj_handle_ != nullptr, MemoryError,
              "Failed to reinitialize TurboJPEG for PW " << config_.worker_id);
     tj3Set(tj_handle_, TJPARAM_FASTDCT, 1);
-
-    LOG_DEBUG << "PW " << config_.worker_id << " TurboJPEG handle reinitialized";
-
-    LOG_DEBUG << "PW " << config_.worker_id << " parameters updated: "
-              << (param_.is_train ? "TRAIN" : "VAL");
 
     // 更新PO链
     if (config_.using_progressive_resolution && !param_.is_lazy_phase) {
@@ -482,12 +431,6 @@ void PreprocessWorker::set_deployment_mode_input_property(
     config_.raw_image_width = width;
     config_.raw_image_height = height;
     config_.num_color_channels = num_channels;
-
-    // ==================== Debug日志 ====================
-    LOG_DEBUG << "PW " << config_.worker_id
-              << " deployment_mode_input_property updated: "
-              << width << "x" << height
-              << ", channels=" << num_channels;
 }
 
 // ============================================================================
@@ -505,14 +448,6 @@ uint8_t* PreprocessWorker::request_s_region_slot(int32_t label, int s_region_idx
 
     s_label_vectors_[s_region_idx][slot_index] = label;
 
-    // ==================== Debug日志 ====================
-    LOG_DEBUG << "PW " << config_.worker_id
-              << " request_s_region_slot: s_region_idx=" << s_region_idx
-              << ", slot_index=" << slot_index
-              << ", label=" << label
-              << ", s_c_region_stride_=" << s_c_region_stride_
-              << ", target_ptr=" << static_cast<void*>(target_ptr);
-
     return target_ptr;
 }
 
@@ -525,13 +460,6 @@ uint8_t* PreprocessWorker::request_c_region_slot(int32_t label) {
     uint8_t* target_ptr = region_c_ptr_ + slot_index * s_c_region_stride_;
 
     c_label_vector_[slot_index] = label;
-
-    // ==================== Debug日志 ====================
-    LOG_DEBUG << "PW " << config_.worker_id
-              << " request_c_region_slot: slot_index=" << slot_index
-              << ", label=" << label
-              << ", s_c_region_stride_=" << s_c_region_stride_
-              << ", target_ptr=" << static_cast<void*>(target_ptr);
 
     return target_ptr;
 }
@@ -553,13 +481,6 @@ uint8_t* PreprocessWorker::request_engine_buffer_slot(int32_t label) {
     // 批次边界保护：自动防止快Worker覆盖慢Worker数据
     uint8_t* write_ptr = engine_buffer_->request_write_slot(position, batch_id, label);
 
-    // ==================== Debug日志 ====================
-    LOG_DEBUG << "PW " << config_.worker_id
-              << " request_engine_buffer_slot: label=" << label
-              << ", batch_id=" << batch_id
-              << ", position=" << position
-              << ", write_ptr=" << static_cast<void*>(write_ptr);
-
     return write_ptr;
 }
 
@@ -568,11 +489,6 @@ bool PreprocessWorker::notify_engine_buffer_sample_written() {
     // EngineBuffer会判断是否触发传输（batch满或其他条件）
     bool triggered = engine_buffer_->notify_sample_written();
 
-    // ==================== Debug日志 ====================
-    LOG_DEBUG << "PW " << config_.worker_id
-              << " notify_engine_buffer_sample_written: local_sample_id_=" << local_sample_id_
-              << ", triggered=" << triggered;
-
     return triggered;
 }
 
@@ -580,10 +496,6 @@ void PreprocessWorker::no_more_samples() {
     // ==================== 转发到EngineBuffer ====================
     // 使用pid_in_engine作为worker_id（EngineBuffer视角）
     engine_buffer_->no_more_samples(config_.pid_in_engine);
-
-    // ==================== Debug日志 ====================
-    LOG_DEBUG << "PW " << config_.worker_id
-              << " no_more_samples: pid_in_engine=" << config_.pid_in_engine;
 }
 
 // ============================================================================
@@ -654,20 +566,9 @@ void PreprocessWorker::copy_sample_from_c_to_eb() {
 // ============================================================================
 
 void PreprocessWorker::shuffle_s_indices(int phase_id) {
-    // =========================================================================
-    // 步骤1：从GlobalRegistry复制原始索引向量
-    // =========================================================================
-
-    // 直接向量赋值（O(1)操作，复制整个向量）
-    // fixed_s_original_indices_内容为[0, 1, 2, ..., max_s_samples_-1]
-    s_shuffled_indices_ = GlobalRegistry::instance().fixed_s_original_indices();
-
-    LOG_DEBUG << "PW " << config_.worker_id
-              << " copied fixed_s_original_indices_ to s_shuffled_indices_: size="
-              << s_shuffled_indices_.size();
 
     // =========================================================================
-    // 步骤2：生成洗牌种子（两层种子衍生，保证可复现性和差异性）
+    // 生成洗牌种子（两层种子衍生，保证可复现性和差异性）
     // =========================================================================
 
     // 两层种子衍生设计：
@@ -720,13 +621,8 @@ void PreprocessWorker::shuffle_s_indices(int phase_id) {
 
     uint64_t shuffle_seed = initial_seed_ ^ (static_cast<uint64_t>(phase_id) << 32);
 
-    LOG_DEBUG << "PW " << config_.worker_id
-              << " shuffle seed: initial=" << initial_seed_
-              << ", phase_id=" << phase_id
-              << ", shuffle_seed=" << shuffle_seed;
-
     // =========================================================================
-    // 步骤3：Fisher-Yates洗牌（只洗前current_s_samples_个元素）
+    // Fisher-Yates洗牌（只洗前current_s_samples_个元素）
     // =========================================================================
 
     // =========================================================================
@@ -761,9 +657,6 @@ void PreprocessWorker::shuffle_s_indices(int phase_id) {
     int n = current_s_samples_;
 
     if (n <= 1) {
-        // 样本数<=1，无需洗牌
-        LOG_DEBUG << "PW " << config_.worker_id
-                  << " skip shuffle: current_s_samples_=" << n << " (<=1)";
         return;
     }
 
@@ -797,9 +690,6 @@ void PreprocessWorker::shuffle_s_indices(int phase_id) {
         // 交换s_shuffled_indices_[i]和s_shuffled_indices_[j]
         std::swap(s_shuffled_indices_[i], s_shuffled_indices_[j]);
     }
-
-    LOG_DEBUG << "PW " << config_.worker_id
-              << " shuffled s_shuffled_indices_: range=[0," << (n-1) << "]";
 }
 
 // ============================================================================
@@ -816,8 +706,6 @@ std::pair<int, int> PreprocessWorker::calculate_write_position() const {
     const int j = config_.pid_in_engine;               // j: 该PW在Engine内的编号
     const int B = config_.local_batch_size;            // B: 批次大小
 
-    // n: 该PW当前phase已处理的样本数（从0开始，每次end_sample()后递增）
-    // 注意：此方法应在end_sample()调用后使用
     const int n = local_sample_id_;
 
     // 计算全局样本序号（跨所有PW的统一序号）
@@ -841,15 +729,6 @@ std::pair<int, int> PreprocessWorker::calculate_write_position() const {
     TR_CHECK(batch_id >= 0, ValueError,
              "Invalid batch_id: " << batch_id);
 #endif
-
-    LOG_DEBUG << "PW " << config_.worker_id
-              << " calculate_write_position: j=" << j
-              << ", n=" << n
-              << ", M=" << M
-              << ", global_seq=" << global_seq
-              << ", batch_id=" << batch_id
-              << ", position=" << position;
-
     return {batch_id, position};
 }
 
@@ -882,8 +761,6 @@ void PreprocessWorker::ensure_rng_initialized() {
         uint64_t worker_seed = base_seed ^ (static_cast<uint64_t>(param_.phase_id) << 16);
         rng_.set_seed(worker_seed);
         rng_initialized_ = true;
-
-        LOG_DEBUG << "PW " << config_.worker_id << " RNG initialized with seed=" << worker_seed;
     }
 }
 
@@ -900,8 +777,6 @@ bool PreprocessWorker::decode_full(
 ) {
     // 使用TurboJPEG 3.x API读取header
     if (tj3DecompressHeader(tj_handle_, jpeg_data, jpeg_size) != 0) {
-        LOG_DEBUG << "PW " << config_.worker_id << " tj3DecompressHeader failed, trying STB fallback";
-
         #if TR_USE_STB
         int stb_width, stb_height;
         if (decode_jpeg_with_stb(jpeg_data, jpeg_size, region_d_,
@@ -924,10 +799,6 @@ bool PreprocessWorker::decode_full(
     // 验证D区容量
     size_t required_size = stride * height;
     if (required_size > config_.region_d_size) {
-        LOG_DEBUG << "PW " << config_.worker_id << " image too large for D区, trying STB fallback: "
-                  << "need " << (required_size / (1024.0*1024.0)) << " MB, "
-                  << "have " << (config_.region_d_size / (1024.0*1024.0)) << " MB";
-
         #if TR_USE_STB
         int stb_width, stb_height;
         if (decode_jpeg_with_stb(jpeg_data, jpeg_size, region_d_,
@@ -944,8 +815,6 @@ bool PreprocessWorker::decode_full(
     // 使用TurboJPEG 3.x API完整解码
     if (tj3Decompress8(tj_handle_, jpeg_data, jpeg_size,
                        region_d_, static_cast<int>(stride), TJPF_RGB) != 0) {
-        LOG_DEBUG << "PW " << config_.worker_id << " tj3Decompress8 failed, trying STB fallback";
-
         #if TR_USE_STB
         int stb_width, stb_height;
         if (decode_jpeg_with_stb(jpeg_data, jpeg_size, region_d_,
@@ -972,18 +841,11 @@ bool PreprocessWorker::decode_partial(
 ) {
     // 步骤1：先读取JPEG头获取原始图像尺寸
     if (tj3DecompressHeader(tj_handle_, jpeg_data, jpeg_size) != 0) {
-        LOG_DEBUG << "PW " << config_.worker_id << " tj3DecompressHeader failed in partial decode: "
-                  << tj3GetErrorStr(tj_handle_);
         return false;
     }
 
     int original_width = tj3Get(tj_handle_, TJPARAM_JPEGWIDTH);
     int original_height = tj3Get(tj_handle_, TJPARAM_JPEGHEIGHT);
-
-    LOG_DEBUG << "PW " << config_.worker_id
-              << " partial decode: original=" << original_width << "x" << original_height
-              << ", R2=(" << strategy.decode_x << "," << strategy.decode_y
-              << "," << strategy.decode_w << "x" << strategy.decode_h << ")";
 
     // 步骤2：设置TurboJPEG裁剪区域（R2，MCU对齐）
     tjregion crop_region;
@@ -993,8 +855,6 @@ bool PreprocessWorker::decode_partial(
     crop_region.h = strategy.decode_h;
 
     if (tj3SetCroppingRegion(tj_handle_, crop_region) != 0) {
-        LOG_DEBUG << "PW " << config_.worker_id << " tj3SetCroppingRegion failed: "
-                  << tj3GetErrorStr(tj_handle_);
         return false;
     }
 
@@ -1005,21 +865,14 @@ bool PreprocessWorker::decode_partial(
 
     size_t required_size = stride * decoded_height;
     if (required_size > config_.region_d_size) {
-        LOG_DEBUG << "PW " << config_.worker_id << " R2 decode region too large, returning false for STB fallback";
         return false;
     }
 
     // 步骤4：解码MCU对齐的R2区域
     if (tj3Decompress8(tj_handle_, jpeg_data, jpeg_size,
                        region_d_, static_cast<int>(stride), TJPF_RGB) != 0) {
-        LOG_DEBUG << "PW " << config_.worker_id << " tj3Decompress8 (partial) failed: "
-                  << tj3GetErrorStr(tj_handle_);
         return false;
     }
-
-    LOG_DEBUG << "PW " << config_.worker_id
-              << " partial decode success: R2=" << decoded_width << "x" << decoded_height
-              << " at D区, stride=" << stride;
 
     return true;
 }
@@ -1085,6 +938,7 @@ bool PreprocessWorker::work(
     const int res = is_train ? param_.current_train_resolution
                              : param_.current_val_resolution;
 	const int num_color_channels = config_.num_color_channels;
+
 	const int phase_id = param_.phase_id;
     const bool is_lazy_phase = param_.is_lazy_phase;
 	const int sdmp_factor = config_.sdmp_factor;
@@ -1119,7 +973,6 @@ bool PreprocessWorker::work(
         // ImageNet：必须先读JPEG头（使用TurboJPEG 3.x API）
         if (tj3DecompressHeader(tj_handle_, data_ptr, data_size) != 0) {
             // TurboJPEG读取头失败，尝试STB fallback
-            LOG_DEBUG << "PW " << config_.worker_id << " failed to read JPEG header, trying STB fallback";
 
             #if TR_USE_STB
             int stb_w, stb_h;
@@ -1167,7 +1020,6 @@ bool PreprocessWorker::work(
                 execute_from_full = false;
             } else {
                 // 局部解码失败，尝试STB完整解码
-                LOG_DEBUG << "PW " << config_.worker_id << " partial decode failed, trying STB fallback";
                 #if TR_USE_STB
                 int stb_w, stb_h;
                 if (decode_jpeg_with_stb(data_ptr, data_size, region_d_,
@@ -1194,8 +1046,6 @@ bool PreprocessWorker::work(
             // 完整解码
             if (!decode_full(data_ptr, data_size, initial_w, initial_h, initial_stride)) {
                 // 完整解码失败，尝试STB fallback
-                LOG_DEBUG << "PW " << config_.worker_id << " full decode failed, trying STB fallback";
-
                 #if TR_USE_STB
                 int stb_w, stb_h;
                 if (decode_jpeg_with_stb(data_ptr, data_size, region_d_,
@@ -1443,15 +1293,6 @@ bool PreprocessWorker::work(
 		notify_engine_buffer_sample_written();
 	}
 
-	// PW0打印样本完成信息
-	/*
-	if (config_.worker_id == 0 && !is_train && param_.phase_id == 0) {
-		std::cout << "[PW0] Sample " << (local_sample_id_ - 1)
-		          << " completed, current_c_samples_=" << current_c_samples_
-		          << std::endl;
-	}
-	*/
-
     return true;
 }
 
@@ -1493,8 +1334,6 @@ bool PreprocessWorker::work_test_mode(
         // ImageNet：必须先读JPEG头（使用TurboJPEG 3.x API）
         if (tj3DecompressHeader(tj_handle_, data_ptr, data_size) != 0) {
             // TurboJPEG读取头失败，尝试STB fallback
-            LOG_DEBUG << "PW " << config_.worker_id << " failed to read JPEG header, trying STB fallback";
-
             #if TR_USE_STB
             int stb_w, stb_h;
             size_t dummy_stride;
@@ -1543,7 +1382,6 @@ bool PreprocessWorker::work_test_mode(
                 execute_from_full = false;
             } else {
                 // 局部解码失败，尝试STB完整解码
-                LOG_DEBUG << "PW " << config_.worker_id << " partial decode failed, trying STB fallback";
                 #if TR_USE_STB
                 int stb_w, stb_h;
                 if (decode_jpeg_with_stb(data_ptr, data_size, region_d_,
@@ -1570,8 +1408,6 @@ bool PreprocessWorker::work_test_mode(
             // 完整解码
             if (!decode_full(data_ptr, data_size, initial_w, initial_h, initial_stride)) {
                 // 完整解码失败，尝试STB fallback
-                LOG_DEBUG << "PW " << config_.worker_id << " full decode failed, trying STB fallback";
-
                 #if TR_USE_STB
                 int stb_w, stb_h;
                 if (decode_jpeg_with_stb(data_ptr, data_size, region_d_,
@@ -1632,9 +1468,6 @@ void PreprocessWorker::work_lazy() {
     TR_CHECK(engine_buffer_ != nullptr, ValueError,
              "engine_buffer_ is null (lazy phase requires EngineBuffer)");
 
-    LOG_INFO << "PW " << config_.worker_id << " work_lazy starting: "
-             << (param_.is_train ? "TRAIN" : "VAL");
-
     // ==================== 步骤1：复位local_sample_id_ ====================
     local_sample_id_ = 0;
 
@@ -1644,17 +1477,22 @@ void PreprocessWorker::work_lazy() {
         TR_CHECK(config_.sdmp_factor > 1, ValueError,
                  "Lazy train phase requires sdmp_factor > 1, got " << config_.sdmp_factor);
 
-        // ==================== 步骤2.1：洗牌S区索引 ====================
-        shuffle_s_indices(param_.phase_id);
-
-        // ==================== 步骤2.2：迭代current_s_samples_次 ====================
-        // 迭代current_s_samples_（busy train phase时S区实际存储的样本总数）
         int active_s_region_idx = param_.active_s_region_idx;
+
+        // =========================================================================
+        // 从GlobalRegistry复制原始索引向量
+        // =========================================================================
+        // 直接向量赋值（O(1)操作，复制整个向量）
+        // fixed_s_original_indices_内容为[0, 1, 2, ..., max_s_samples_-1]
+        // 将s_shuffled_indices_重置为fixed_s_original_indices()，意味着顺序读取
+        s_shuffled_indices_ = GlobalRegistry::instance().fixed_s_original_indices();
+        if (require_shuffle_) {
+            shuffle_s_indices(param_.phase_id);  // 对前current_s_samples_个样本进行洗牌
+        }
+
+        // 迭代current_s_samples_（busy train phase时S区实际存储的样本总数）
         TR_CHECK(active_s_region_idx >= 0 && active_s_region_idx < config_.num_region_s, ValueError,
                  "Invalid active_s_region_idx: " << active_s_region_idx);
-
-        LOG_INFO << "PW " << config_.worker_id << " lazy train phase: "
-                 << "iterating " << current_s_samples_ << " samples from S region " << active_s_region_idx;
 
         for (int i = 0; i < current_s_samples_; ++i) {
             // 从S区复制到EngineBuffer
@@ -1667,17 +1505,11 @@ void PreprocessWorker::work_lazy() {
         // 通知EngineBuffer没有更多样本
         no_more_samples();
 
-        LOG_INFO << "PW " << config_.worker_id << " lazy train phase completed: "
-                 << current_s_samples_ << " samples transferred";
-
     } else {
         // ==================== Lazy Val Phase ====================
         // 迭代current_c_samples_（busy val phase时C区实际存储的样本总数）
         TR_CHECK(config_.using_cpvs, ValueError,
                  "Lazy val phase requires using_cpvs=true");
-
-        LOG_INFO << "PW " << config_.worker_id << " lazy val phase: "
-                 << "iterating " << current_c_samples_ << " samples from C region";
 
         for (int i = 0; i < current_c_samples_; ++i) {
             // 从C区复制到EngineBuffer
@@ -1689,9 +1521,6 @@ void PreprocessWorker::work_lazy() {
 
         // 通知EngineBuffer没有更多样本
         no_more_samples();
-
-        LOG_INFO << "PW " << config_.worker_id << " lazy val phase completed: "
-                 << current_c_samples_ << " samples transferred";
     }
 }
 

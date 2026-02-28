@@ -18,6 +18,8 @@
 #include "renaissance/data/center_crop.h"
 #include "renaissance/data/random_resized_crop.h"
 #include "renaissance/data/fast_random_resized_crop.h"
+#include "renaissance/data/random_crop.h"
+#include "renaissance/data/random_horizontal_flip.h"
 #include "renaissance/data/do_nothing.h"
 #include "renaissance/data/gaussian_blur.h"
 #include "renaissance/data/random_grayscale.h"
@@ -84,6 +86,7 @@ Preprocessor::Preprocessor()
     , sdmp_factor_(1)
     , using_cpvs_(false)
     , using_progressive_resolution_(false)
+    , partial_mode_(false)
     , sample_size_bytes_(0)
     , buffer_size_bytes_(0)
     , is_deployment_mode_(false)
@@ -103,15 +106,32 @@ Preprocessor::Preprocessor()
     , workshop_size_calculated_(false)
     , global_initial_seed_(0)
 {
+    // 检查用户是否已调用 Initializer::init()
+    TR_CHECK(GlobalRegistry::instance().initializer_inited(),
+             ValueError,
+             "Preprocessor constructor called before framework initialization\n"
+             "  You must call INIT_FRAMEWORK() at the beginning of main() before using any framework components\n"
+             "  Example:\n"
+             "    int main() {\n"
+             "        INIT_FRAMEWORK();  // Must be first!\n"
+             "        // ... rest of your code ...\n"
+             "        return 0;\n"
+             "    }");
+
     LOG_DEBUG << "Preprocessor constructed";
 }
 
 Preprocessor::~Preprocessor() {
-    LOG_INFO << "Preprocessor destructor started";
-
     // engine_buffer_instances_会自动析构，触发EngineBuffer析构
-
     LOG_INFO << "Preprocessor destructor completed";
+}
+
+// =============================================================================
+// 新 API 实现（流畅配置模式）
+// =============================================================================
+
+Setup Preprocessor::setup() {
+    return Setup();
 }
 
 // =============================================================================
@@ -131,6 +151,9 @@ void Preprocessor::configure(const Config& config) {
     worker_sample_counts_.clear();
     worker_sample_counts_.resize(config_.num_workers, 0);
 
+#ifdef TEST_WITHOUT_PW
+// 以下解码分区和日志都仅用于测试
+
     // 分配解码缓冲区（如果启用解码）
     if (config_.jpeg_decode) {
         allocate_decode_buffers();
@@ -140,18 +163,348 @@ void Preprocessor::configure(const Config& config) {
     if (config_.enable_logging) {
         try {
             std::filesystem::create_directories(config_.log_dir);
-            LOG_INFO << "Log directory created: " << config_.log_dir;
         } catch (const std::exception& e) {
             TR_VALUE_ERROR("Failed to create log directory: " << config_.log_dir
                           << "\n  Error: " << e.what());
         }
     }
 
-    LOG_INFO << "Preprocessor configured: workers=" << config_.num_workers
-             << ", enable_logging=" << (config_.enable_logging ? "true" : "false")
-             << ", jpeg_decode=" << (config_.jpeg_decode ? "true" : "false")
-             << ", apply_crop=" << (config_.apply_crop ? "true" : "false")
-             << ", log_dir=" << config_.log_dir;
+#endif  // #ifdef TEST_WITHOUT_PW
+}
+
+void Preprocessor::set_train_transforms(const std::vector<std::unique_ptr<PreprocessOperation>>& train_transforms) {
+#ifndef TEST_WITHOUT_PW
+// 测试模式不需要transform，跳过
+
+    // 检查状态：必须是DeviceConfigured状态
+    if (config_state_ != ConfigState::DeviceConfigured) {
+        TR_THROW(ValueError,
+                 "set_train_transforms failed: invalid state machine state.\n"
+                 "  Current state: " << state_name(config_state_) << "\n"
+                 "  Expected state: DeviceConfigured\n"
+                 "  Solution:\n"
+                 "    Please complete the following steps in order:\n"
+                 "      1. config_dataset()\n"
+                 "      2. config_dataloader()\n"
+                 "      3. config_preprocessor()\n"
+                 "      4. config_device()");
+    }
+
+    // 清空旧的transform模板
+    train_ops_template_.clear();
+
+    // 将所有ops存入vector以便处理（使用移动语义）
+    std::vector<std::unique_ptr<PreprocessOperation>> temp_ops;
+    temp_ops.reserve(train_transforms.size());
+    for (auto& op : const_cast<std::vector<std::unique_ptr<PreprocessOperation>>&>(train_transforms)) {
+        temp_ops.push_back(std::move(op));
+    }
+
+    if (temp_ops.size() == 0) {
+        // 空参数包：检查数据集类型
+        if (is_imagenet()) {
+            // ImageNet不允许空操作
+            TR_THROW(ValueError,
+                     "set_train_transforms() requires at least one transform operation for ImageNet dataset.\n"
+                     "  Empty transforms are not allowed for ImageNet.\n"
+                     "  ImageNet requires at least one preprocessing operation (e.g., Resize, CenterCrop, RandomResizedCrop).\n"
+                     "Solution:\n"
+                     "  Provide at least one preprocessing operation.");
+        } else {
+            // 非ImageNet数据集：使用DoNothing作为占位操作
+            temp_ops.push_back(std::make_unique<DoNothing>());
+        }
+    }
+
+    // =========================================================================
+    // 处理RandomErasing（在排序之前）
+    // =========================================================================
+    // RandomErasing是占位操作，需要从PO链中移除，将p注册到GlobalRegistry
+    float random_erasing_p = 0.0f;  // 默认值：没有RandomErasing时p=0
+    std::vector<std::unique_ptr<PreprocessOperation>> filtered_ops;
+
+    for (auto& op : temp_ops) {
+        if (auto* re = dynamic_cast<RandomErasing*>(op.get())) {
+            // 找到RandomErasing，提取p值
+            random_erasing_p = re->get_p();
+            // 不添加到filtered_ops（即从PO链中移除）
+        } else {
+            // 保留其他PO
+            filtered_ops.push_back(std::move(op));
+        }
+    }
+
+    // 注册p到GlobalRegistry
+    GlobalRegistry::instance().set_random_erasing_p(random_erasing_p);
+
+    // 验证和重排序transform
+    // 规则1: RandomHorizontalFlip必须移到最后
+    // 规则2: ImageNet的第一个PO必须是Crop/Resize（除非测试模式且是DoNothing）
+
+    std::vector<std::unique_ptr<PreprocessOperation>> non_flip_ops;
+    std::vector<std::unique_ptr<PreprocessOperation>> flip_ops;
+
+    for (auto& op : filtered_ops) {
+        if (Preprocessor::is_random_horizontal_flip(op.get())) {
+            flip_ops.push_back(std::move(op));
+        } else {
+            non_flip_ops.push_back(std::move(op));
+        }
+    }
+
+    // 验证第一个PO（对于ImageNet）
+    if (!non_flip_ops.empty() && is_imagenet()) {
+        const auto* first_op = non_flip_ops[0].get();
+        bool is_do_nothing_op = Preprocessor::is_do_nothing(first_op);
+
+        if (pw_test_mode_) {
+            // 测试模式：允许DoNothing作为第一个PO
+            if (is_do_nothing_op) {
+            } else if (!Preprocessor::is_crop_or_resize_op(first_op)) {
+                TR_THROW(ValueError,
+                         "For ImageNet, first transform must be CenterCrop, Resize, or DoNothing in test mode."
+                         << " Got: " << typeid(*first_op).name());
+            }
+        } else {
+            // 正常模式：第一个PO必须是Crop/Resize
+            if (!Preprocessor::is_crop_or_resize_op(first_op)) {
+                TR_THROW(ValueError,
+                         "For ImageNet, first transform must be CenterCrop or Resize. "
+                         << "Got: " << typeid(*first_op).name());
+            }
+        }
+    }
+
+    // 合并：非flip操作在前，flip操作在后
+    train_ops_template_.clear();
+    for (auto& op : non_flip_ops) {
+        train_ops_template_.push_back(std::move(op));
+    }
+    for (auto& op : flip_ops) {
+        train_ops_template_.push_back(std::move(op));
+    }
+
+    // 设定颜色通道数、输出尺寸和输出stride
+    int output_size_temp = default_input_width_;
+    int max_intermediate_res_train = 0;  // 注意，这个值与max_resolution不同，是指中间的最大分辨率
+    for (auto& op : train_ops_template_) {
+        op->set_num_channels(num_color_channels_);
+        if (op->is_resize() || op->is_crop()) {
+            output_size_temp = op->get_output_size();
+        }
+        else {
+            output_size_temp = op->inference_output_size(output_size_temp);
+            op->set_output_size(output_size_temp);
+        }
+        max_intermediate_res_train = std::max(max_intermediate_res_train, output_size_temp);
+        op->calculate_stride();
+    }
+    int final_train_output_size = output_size_temp;
+
+    // ==================== 验证最终输出尺寸 ====================
+    TR_CHECK(final_train_output_size <= max_resolution_, ValueError,
+             "Train transforms final output size (" << final_train_output_size
+             << ") exceeds max_resolution (" << max_resolution_ << ").\n"
+             "  This would cause AB region overflow.\n"
+             "  Solutions:\n"
+             "    1. Increase max_resolution in config_preprocessor()\n"
+             "    2. Reduce the output size of your transform operations\n"
+             "    3. Check if Pad operation is unexpectedly enlarging the output");
+
+    // 更新全局最大中间分辨率
+    int old_max_intermediate = max_intermediate_resolution_;
+    max_intermediate_resolution_ = std::max(max_intermediate_res_train, max_intermediate_resolution_);
+
+	train_ops_template_[0]->set_as_first();  // 标记首个PO
+
+    // ==================== 检测是否包含RandomHorizontalFlip（复用排序时的检测结果）====================
+    bool train_with_rhf = !flip_ops.empty();  // 排序时已经检测过
+
+    GlobalRegistry::instance().set_train_with_rhf(train_with_rhf);
+
+    // 标记train transforms已设置
+    train_transforms_set_ = true;
+
+    // 更新状态
+    update_config_state();
+
+#else  // #ifdef TEST_WITHOUT_PW
+    // 测试模式：只设置标志，不处理transforms
+    train_transforms_set_ = true;
+    update_config_state();
+    LOG_DEBUG << "Train transforms set (TEST_WITHOUT_PW mode)";
+#endif  // #ifndef TEST_WITHOUT_PW
+}
+
+void Preprocessor::set_val_transforms(const std::vector<std::unique_ptr<PreprocessOperation>>& val_transforms) {
+#ifndef TEST_WITHOUT_PW
+// 测试模式不需要transform，跳过
+
+    // 检查状态：必须是DeviceConfigured或TransformsSet状态
+    // （因为set_train_transforms可能已经调用过了）
+    if (config_state_ != ConfigState::DeviceConfigured &&
+        config_state_ != ConfigState::TransformsSet) {
+        TR_THROW(ValueError,
+                 "set_val_transforms failed: invalid state machine state.\n"
+                 "  Current state: " << state_name(config_state_) << "\n"
+                 "  Expected state: DeviceConfigured or TransformsSet\n"
+                 "  Solution:\n"
+                 "    Please complete the following steps in order:\n"
+                 "      1. config_dataset()\n"
+                 "      2. config_dataloader()\n"
+                 "      3. config_preprocessor()\n"
+                 "      4. config_device()");
+    }
+
+    // 清空旧的transform模板
+    val_ops_template_.clear();
+
+    // 将所有ops存入vector以便处理（使用移动语义）
+    std::vector<std::unique_ptr<PreprocessOperation>> temp_ops;
+    temp_ops.reserve(val_transforms.size());
+    for (auto& op : const_cast<std::vector<std::unique_ptr<PreprocessOperation>>&>(val_transforms)) {
+        temp_ops.push_back(std::move(op));
+    }
+
+    if (temp_ops.size() == 0) {
+        // 空参数包：检查数据集类型
+        if (is_imagenet()) {
+            // ImageNet不允许空操作
+            TR_THROW(ValueError,
+                     "set_val_transforms() requires at least one transform operation for ImageNet dataset.\n"
+                     "  Empty transforms are not allowed for ImageNet.\n"
+                     "  ImageNet validation requires at least one preprocessing operation (e.g., Resize, CenterCrop).\n"
+                     "Solution:\n"
+                     "  Provide at least one preprocessing operation.");
+        } else {
+            // 非ImageNet数据集：使用DoNothing作为占位操作
+            temp_ops.push_back(std::make_unique<DoNothing>());
+        }
+    }
+
+    // =========================================================================
+    // 检查RandomErasing（验证集不允许）
+    // =========================================================================
+    // RandomErasing是训练专用占位操作，验证集不允许使用
+    for (const auto& op : temp_ops) {
+        if (auto* re = dynamic_cast<RandomErasing*>(op.get())) {
+            TR_THROW(ValueError,
+                     "RandomErasing is NOT allowed in validation transforms.\n"
+                     "  RandomErasing is a training-only data augmentation operation.\n"
+                     "  RandomErasing p value: " << re->get_p() << "\n"
+                     "Solution:\n"
+                     "  Remove RandomErasing from validation transforms.\n"
+                     "  RandomErasing should only be used in set_train_transforms().");
+        }
+    }
+
+    // 验证和重排序transform（规则同训练集）
+    std::vector<std::unique_ptr<PreprocessOperation>> non_flip_ops;
+    std::vector<std::unique_ptr<PreprocessOperation>> flip_ops;
+
+    for (auto& op : temp_ops) {
+        if (Preprocessor::is_random_horizontal_flip(op.get())) {
+            flip_ops.push_back(std::move(op));
+        } else {
+            non_flip_ops.push_back(std::move(op));
+        }
+    }
+
+    // 验证第一个PO（对于ImageNet）
+    if (!non_flip_ops.empty() && is_imagenet()) {
+        const auto* first_op = non_flip_ops[0].get();
+        bool is_do_nothing_op = Preprocessor::is_do_nothing(first_op);
+
+        if (pw_test_mode_) {
+            // 测试模式：允许DoNothing作为第一个PO
+            if (is_do_nothing_op) {
+            } else if (!Preprocessor::is_crop_or_resize_op(first_op)) {
+                TR_THROW(ValueError,
+                         "For ImageNet, first transform must be CenterCrop, Resize, or DoNothing in test mode. "
+                         << "Got: " << typeid(*first_op).name());
+            }
+        } else {
+            // 正常模式：验证集通常需要CenterCrop或Resize
+            if (!Preprocessor::is_crop_or_resize_op(first_op)) {
+                TR_THROW(ValueError,
+                         "For ImageNet validation, first transform must be CenterCrop or Resize. "
+                         << "Got: " << typeid(*first_op).name());
+            }
+        }
+    }
+
+    // 合并：非flip操作在前，flip操作在后
+    val_ops_template_.clear();
+    for (auto& op : non_flip_ops) {
+        val_ops_template_.push_back(std::move(op));
+    }
+    for (auto& op : flip_ops) {
+        val_ops_template_.push_back(std::move(op));
+    }
+
+    // 设定颜色通道数、输出尺寸和输出stride
+    int output_size_temp = default_input_width_;
+    int max_intermediate_res_val = 0;  // 注意，这个值与max_resolution不同，是指中间的最大分辨率
+    for (auto& op : val_ops_template_) {
+        op->set_num_channels(num_color_channels_);
+        if (op->is_resize() || op->is_crop()) {
+            output_size_temp = op->get_output_size();
+        }
+        else {
+            output_size_temp = op->inference_output_size(output_size_temp);
+            op->set_output_size(output_size_temp);
+        }
+        max_intermediate_res_val = std::max(max_intermediate_res_val, output_size_temp);
+        op->calculate_stride();
+    }
+    int final_val_output_size = output_size_temp;
+
+    // ==================== 验证最终输出尺寸 ====================
+    TR_CHECK(final_val_output_size <= max_resolution_, ValueError,
+             "Validation transforms final output size (" << final_val_output_size
+             << ") exceeds max_resolution (" << max_resolution_ << ").\n"
+             "  This would cause AB region overflow.\n"
+             "  Solutions:\n"
+             "    1. Increase max_resolution in config_preprocessor()\n"
+             "    2. Reduce the output size of your transform operations\n"
+             "    3. Check if Pad operation is unexpectedly enlarging the output");
+
+    // 更新全局最大中间分辨率
+    int old_max_intermediate = max_intermediate_resolution_;
+    max_intermediate_resolution_ = std::max(max_intermediate_res_val, max_intermediate_resolution_);
+
+	val_ops_template_[0]->set_as_first();  // 标记首个PO
+
+    // ==================== 检测是否包含RandomHorizontalFlip（复用排序时的检测结果）====================
+    bool val_with_rhf = !flip_ops.empty();  // 排序时已经检测过
+    if (val_with_rhf) {
+    }
+    GlobalRegistry::instance().set_val_with_rhf(val_with_rhf);
+
+    // ==================== CPVS互斥检查 ====================
+    if (using_cpvs_) {
+        for (const auto& op : val_ops_template_) {
+            TR_CHECK(!op->introduce_randomness(), ValueError,
+                     "CPVS (Cached Preprocessed Validation Set) optimization "
+                     "is incompatible with randomized validation transforms.\n"
+                     "  Validation transform '" << op->name() << "' introduces randomness.\n"
+                     "  Solutions:\n"
+                     "    1. Use non-random transforms for validation (e.g., Resize, CenterCrop)\n"
+                     "    2. Disable CPVS by setting using_cpvs=false in config_preprocessor()");
+        }
+    }
+
+    // 标记val transforms已设置
+    val_transforms_set_ = true;
+
+    // 更新状态
+    update_config_state();
+
+#else  // #ifdef TEST_WITHOUT_PW
+    // 测试模式：只设置标志，不处理transforms
+    val_transforms_set_ = true;
+    update_config_state();
+#endif  // #ifndef TEST_WITHOUT_PW
 }
 
 // =============================================================================
@@ -159,7 +512,6 @@ void Preprocessor::configure(const Config& config) {
 // =============================================================================
 
 void Preprocessor::run(DataLoader& loader) {
-    LOG_INFO << "Preprocessor starting with " << config_.num_workers << " workers (persistent mode)";
 
     // 记录开始时间（整个epoch）
     auto epoch_start_time = std::chrono::high_resolution_clock::now();
@@ -168,9 +520,11 @@ void Preprocessor::run(DataLoader& loader) {
     total_samples_.store(0, std::memory_order_relaxed);
     std::fill(worker_sample_counts_.begin(), worker_sample_counts_.end(), 0);
 
+#ifdef TEST_WITHOUT_PW
+// 只有测试模式有日志
+
     // 清空旧的日志文件（如果启用日志）
     if (config_.enable_logging) {
-        LOG_INFO << "Clearing old log files in: " << config_.log_dir;
         for (int i = 0; i < config_.num_workers; ++i) {
             std::ostringstream oss;
             oss << config_.log_dir << "/worker_" << i << ".csv";
@@ -180,11 +534,15 @@ void Preprocessor::run(DataLoader& loader) {
             std::ofstream(log_path, std::ios::out | std::ios::trunc).close();
         }
     }
+#endif  // #ifdef TEST_WITHOUT_PW
 
     int buffer_count = 0;
 
     // 重置buffer计数
     buffer_count_ = 0;
+
+#ifndef TEST_WITHOUT_PW
+// 测试模式没有PW和EngineBuffer，不需要同步
 
     // 【方案A 关键修复1】重置所有同步状态
     workers_finished_.store(0, std::memory_order_seq_cst);
@@ -196,6 +554,7 @@ void Preprocessor::run(DataLoader& loader) {
 
     // 【方案A 关键修复2】添加内存屏障，确保所有线程看到一致的状态
     std::atomic_thread_fence(std::memory_order_seq_cst);
+#endif  // #ifndef TEST_WITHOUT_PW
 
     // =========================================================================
     // Step 1.2：持久线程池模式（替代原来的创建-销毁模式）
@@ -204,26 +563,24 @@ void Preprocessor::run(DataLoader& loader) {
     // 启动持久线程池（只执行一次）
     start_worker_pool(loader);
 
-    LOG_INFO << "Persistent worker pool started, entering main loop";
-
     do {
-        buffer_count++;
-        LOG_INFO << "=== Buffer " << buffer_count << ": Notifying workers ===";
-
         // 通知worker开始新buffer
         notify_workers_new_buffer();
 
         // 等待worker完成当前buffer
-        wait_workers_complete_buffer();
-
-        LOG_INFO << "=== Buffer " << buffer_count << ": All workers finished ===";
+        bool fully_second = (!partial_mode_) && ((pw_param_.is_train? train_phase_id_: val_phase_id_) > 0);
+        if (fully_second) {
+            // 这里解释一下，因为FULLY MODE的第二个以后的phase都是从已有的存储中读取，没有buffer的概念，直到处理完整个数据集才结束，所以不应该设置超时
+            wait_workers_complete_buffer(true);  // 永久等待
+        }
+        else {  // PARTIAL MODE或第一个phase（必定加载）
+            wait_workers_complete_buffer(false);  // 20s超时
+        }
 
         // 触发DataLoader加载下一个buffer（会等待当前buffer被消费完）
         if (loader.has_more_buffers()) {
-            LOG_INFO << "Triggering next buffer load...";
             loader.load_next_buffer();
         } else {
-            LOG_INFO << "No more buffers to load, epoch completed";
             break;
         }
 
@@ -253,10 +610,6 @@ void Preprocessor::run(DataLoader& loader) {
         LOG_DEBUG << "Worker " << i << ": " << count << " samples (total)";
     }
 
-    LOG_INFO << "Worker sample distribution (whole epoch): min=" << min_count
-             << ", max=" << max_count
-             << ", diff=" << (max_count - min_count);
-
     // 验证样本数均匀性（姜总工的要求：最多相差1）
     if (max_count - min_count > 1) {
         LOG_WARN << "Worker sample distribution is not uniform: difference="
@@ -271,6 +624,9 @@ void Preprocessor::run(DataLoader& loader) {
 // =============================================================================
 
 void Preprocessor::allocate_decode_buffers() {
+#ifdef TEST_WITHOUT_PW
+// 只有测试模式需要这个区。正常模式的解码由PW完成，不需要这个区
+
     free_decode_buffers();  // 先释放旧的
 
     worker_decode_buffers_.resize(config_.num_workers);
@@ -331,19 +687,13 @@ void Preprocessor::allocate_decode_buffers() {
             LOG_DEBUG << "Allocated 128MB decode buffer for worker " << i << " (crop disabled)";
         }
     }
-
-    if (config_.apply_crop) {
-        LOG_INFO << "Allocated " << config_.num_workers
-                 << " decode buffers (128MB each) + crop output buffers ("
-                 << (crop_buffer_size / 1024.0 / 1024.0) << "MB each)";
-    } else {
-        LOG_INFO << "Allocated " << config_.num_workers
-                 << " decode buffers (128MB each + persistent handle, total "
-                 << (config_.num_workers * 128) << "MB)";
-    }
+#endif  // #ifdef TEST_WITHOUT_PW
 }
 
 void Preprocessor::free_decode_buffers() {
+#ifdef TEST_WITHOUT_PW
+// 只有测试模式有这个区
+
     for (auto& buf : worker_decode_buffers_) {
         // ✅ 销毁持久handle
         if (buf.handle) {
@@ -370,6 +720,7 @@ void Preprocessor::free_decode_buffers() {
     worker_decode_buffers_.clear();
 
     LOG_DEBUG << "Freed all decode buffers, crop buffers, and handles";
+#endif  // #ifdef TEST_WITHOUT_PW
 }
 
 // =============================================================================
@@ -378,6 +729,11 @@ void Preprocessor::free_decode_buffers() {
 
 void* Preprocessor::ResizerCache::get_resizer(size_t src_w, size_t src_h,
                                               size_t dst_w, size_t dst_h) {
+#ifndef TEST_WITHOUT_PW
+// 正常模式如果调用这个方法，就要报错
+    TR_THROW(ValueError, "ResizerCache::get_resizer can only be used in TEST_WITHOUT_PW mode.");
+#endif
+
     // 如果尺寸匹配，复用缓存的 resizer
     if (cached_resizer_ &&
         cached_src_w_ == src_w && cached_src_h_ == src_h &&
@@ -420,6 +776,11 @@ void Preprocessor::apply_random_resized_crop(int worker_id,
                                             int width,
                                             int height,
                                             size_t pitch) {
+#ifndef TEST_WITHOUT_PW
+// 正常模式如果调用这个方法，就要报错
+    TR_THROW(ValueError, "ResizerCache::get_resizer can only be used in TEST_WITHOUT_PW mode.");
+#endif
+
     constexpr int NUM_CHANNELS = 3;
     constexpr int MAX_ATTEMPTS = 10;
 
@@ -521,8 +882,6 @@ void Preprocessor::reset() {
 // =============================================================================
 
 void Preprocessor::start_worker_pool(DataLoader& loader) {
-    LOG_INFO << "Starting " << config_.num_workers << " persistent worker threads";
-
     worker_pool_.clear();
     worker_pool_.reserve(config_.num_workers);
 
@@ -531,22 +890,16 @@ void Preprocessor::start_worker_pool(DataLoader& loader) {
             // Worker线程：直接调用worker_func_persistent()
             // worker_func_persistent()内部会持续处理多个buffer直到整个epoch结束
             worker_func_persistent(i, loader);
-
-            LOG_INFO << "Persistent Worker " << i << " exiting";
         });
     }
 
     // 等待所有线程启动完成
     std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
-    LOG_INFO << "All persistent workers started successfully";
 }
 
 // ---------------------------------------------------------------------------
 
 void Preprocessor::stop_worker_pool() {
-    LOG_INFO << "Stopping persistent worker pool";
-
     // 设置停止标志
     stop_flag_.store(true, std::memory_order_release);
 
@@ -562,8 +915,6 @@ void Preprocessor::stop_worker_pool() {
 
     worker_pool_.clear();
     stop_flag_.store(false, std::memory_order_release);
-
-    LOG_INFO << "All persistent workers stopped";
 }
 
 // ---------------------------------------------------------------------------
@@ -576,20 +927,24 @@ void Preprocessor::notify_workers_new_buffer() {
     std::atomic_thread_fence(std::memory_order_seq_cst);
 
     // 最后再唤醒Worker
-    current_buffer_seq_.fetch_add(1, std::memory_order_acq_rel);
+    int old_seq = current_buffer_seq_.fetch_add(1, std::memory_order_acq_rel);
+    LOG_DEBUG << "[PREPROC] notify_workers_new_buffer(): old_seq=" << old_seq << ", new_seq=" << (old_seq + 1);
 }
 
 // ---------------------------------------------------------------------------
 
-void Preprocessor::wait_workers_complete_buffer() {
+void Preprocessor::wait_workers_complete_buffer(bool wait_forever) {
     // 等待所有worker完成当前buffer
     int expected = config_.num_workers;
     auto start = std::chrono::steady_clock::now();
-    const auto TIMEOUT = std::chrono::seconds(10);  // 10秒超时
+    const auto TIMEOUT = std::chrono::seconds(20);  // 20秒超时
+
+    LOG_DEBUG << "[PREPROC] wait_workers_complete_buffer(): START, expected=" << expected
+             << ", wait_forever=" << wait_forever;
 
     while (workers_finished_.load(std::memory_order_acquire) < expected) {
         auto elapsed = std::chrono::steady_clock::now() - start;
-        if (elapsed > TIMEOUT) {
+        if (!wait_forever && elapsed > TIMEOUT) {
             int current = workers_finished_.load(std::memory_order_acquire);
             LOG_ERROR << "TIMEOUT waiting for workers to complete buffer! "
                       << "workers_finished_=" << current << "/" << expected
@@ -665,6 +1020,10 @@ static bool decode_jpeg_with_stb(
 // ---------------------------------------------------------------------------
 
 void Preprocessor::worker_func_persistent(int worker_id, DataLoader& loader) {
+
+#ifndef TEST_WITHOUT_PW
+// 注意：如果是正常运作，那就需要绑核和PW和EngineBuffer，但如果是无PW的测试，以下就应该跳过
+
     // ==================== Step 0: CPU绑核（GPU_CLOUD + auto_binding）====================
 #if defined(TR_SCENE_GPU_CLOUD)
     if (auto_cpu_binding_ && !selected_gpu_ids_.empty()) {
@@ -790,13 +1149,22 @@ void Preprocessor::worker_func_persistent(int worker_id, DataLoader& loader) {
     }
 
     // ==================== 【Core Dump修复1】同步屏障 ====================
-    // 所有Worker（Leader和Follower）必须等待所有EngineBuffer重置完成
-    while (engine_reset_barrier_.load(std::memory_order_acquire) < world_size_) {
-        std::this_thread::sleep_for(std::chrono::microseconds(10));
+    // 只有Leader（worker_id < world_size_）参与barrier同步
+    // Follower直接跳过，无需等待
+    if (worker_id < world_size_) {
+        while (engine_reset_barrier_.load(std::memory_order_acquire) < world_size_) {
+            std::this_thread::sleep_for(std::chrono::microseconds(10));
+        }
     }
 
     // 【Core Dump修复1】内存屏障：确保所有线程看到重置后的最新内存状态
     std::atomic_thread_fence(std::memory_order_acq_rel);
+#endif  // #ifndef TEST_WITHOUT_PW
+
+
+
+#ifdef TEST_WITHOUT_PW
+// 注意：以下日志是仅用于测试的，所以是#ifdef TEST_WITHOUT_PW才启用
 
     // 打开CSV日志文件（如果启用）
     std::ofstream log_file;
@@ -824,6 +1192,7 @@ void Preprocessor::worker_func_persistent(int worker_id, DataLoader& loader) {
             }
         }
     }
+#endif  // #ifdef TEST_WITHOUT_PW
 
     size_t local_count = 0;
     size_t sample_count = 0;  // 总样本计数器（用于打印前10个样本的CRC）
@@ -840,10 +1209,12 @@ void Preprocessor::worker_func_persistent(int worker_id, DataLoader& loader) {
         }
 
         if (stop_flag_.load(std::memory_order_acquire)) {  // 得到最终退出信号
+#ifndef TEST_WITHOUT_PW
 			if (pw_instances_[worker_id]) {
 				// 让PW向对应的EngineBuffer表明已无更多样本
 				pw_instances_[worker_id]->no_more_samples();
 			}
+#endif  // #ifndef TEST_WITHOUT_PW
             break;
         }
 
@@ -852,118 +1223,90 @@ void Preprocessor::worker_func_persistent(int worker_id, DataLoader& loader) {
         const uint8_t* data_ptr;
         size_t data_size;
 
-		if (pw_test_mode_) {
-			while (loader.get_next_sample(worker_id, label, data_ptr, data_size)) {
-				if (pw_instances_[worker_id]) {
-					pw_instances_[worker_id]->work_test_mode(label, data_ptr, data_size);
-					local_count++;
-					total_samples_.fetch_add(1, std::memory_order_relaxed);
-					sample_count++;
+
+
+		while (loader.get_next_sample(worker_id, label, data_ptr, data_size)) {
+
+
+#ifdef TEST_WITHOUT_PW
+// 所谓快速模式，只能在测试时使用
+
+			// 快速模式：直接计数，不执行任何预处理
+			if (fast_mode_ && !config_.jpeg_decode && !config_.calc_crc) {
+				local_count++;
+				total_samples_.fetch_add(1, std::memory_order_relaxed);
+				continue;
+			}
+#else
+			// ==================== PW模式（V4.1）：调用PW处理样本 ====================
+			if (pw_instances_[worker_id]) {
+				// 调用PW的work方法处理样本
+				pw_instances_[worker_id]->work(label, data_ptr, data_size);
+				local_count++;
+				total_samples_.fetch_add(1, std::memory_order_relaxed);
+				sample_count++;
+				continue;
+			}
+
+			// 如果PW没创建成功，报错
+			LOG_ERROR << "Worker " << worker_id << " PW instance not created, skipping sample";
+#endif
+
+
+
+#ifdef TEST_WITHOUT_PW
+// 计算CRC和日志输出仅用于测试。这里的JPEG解码也是与PW的解码功能不同的，是独立的测试，因此在正常模式要禁止
+
+			int first_byte = -1;
+			uint32_t crc_value = 0;  // CRC32校验值（如果启用）
+			// 计算CRC32（如果启用）
+			if (config_.calc_crc) {
+				crc_value = crc32(0L, Z_NULL, 0);  // 初始化CRC
+				crc_value = crc32(crc_value, data_ptr, static_cast<uInt>(data_size));
+
+				// 【调试】打印前10个样本和第962-973个样本的CRC（覆盖第二个buffer的前10个）
+				if (sample_count < 10 || (sample_count >= 961 && sample_count < 973)) {
+					LOG_DEBUG << "[PREPROC CRC] Worker=" << worker_id
+							 << ", Sample #" << (sample_count + 1)
+							 << ", DataPtr=" << static_cast<const void*>(data_ptr)
+							 << ", Size=" << data_size
+							 << ", Label=" << label
+							 << ", CRC32=0x" << std::hex << std::uppercase << crc_value << std::dec;
 				}
 			}
-		}
-		else {
-			while (loader.get_next_sample(worker_id, label, data_ptr, data_size)) {
-				// 快速模式：直接计数，不执行任何预处理
-				if (fast_mode_) {
-					local_count++;
-					total_samples_.fetch_add(1, std::memory_order_relaxed);
-					continue;
-				}
 
-				// ==================== PW模式（V4.1）：调用PW处理样本 ====================
-				if (pw_instances_[worker_id]) {
-					// 调用PW的work方法处理样本
-					pw_instances_[worker_id]->work(label, data_ptr, data_size);
-					local_count++;
-					total_samples_.fetch_add(1, std::memory_order_relaxed);
-					sample_count++;
-					continue;
-				}
+			// JPEG解码（如果启用）
+			if (config_.jpeg_decode) {
+				tjhandle handle = worker_decode_buffers_[worker_id].handle;
+				if (handle) {
+					int width, height, subsamp, colorspace;
 
-				// 如果PW没创建成功，报错
-				LOG_ERROR << "Worker " << worker_id << " PW instance not created, skipping sample";
-				continue;
-				int first_byte = -1;
-				uint32_t crc_value = 0;  // CRC32校验值（如果启用）
+					// 获取JPEG头信息
+					if (tjDecompressHeader3(handle, data_ptr, static_cast<unsigned long>(data_size),
+										  &width, &height, &subsamp, &colorspace) == 0) {
 
-				// 计算CRC32（如果启用）
-				if (config_.calc_crc) {
-					crc_value = crc32(0L, Z_NULL, 0);  // 初始化CRC
-					crc_value = crc32(crc_value, data_ptr, static_cast<uInt>(data_size));
+						// ✅ 64字节对齐的stride（与PW/test_po/fast_crop一致）
+						int pitch = ((width * 3 + 63) / 64) * 64;
 
-					// 【调试】打印前10个样本和第962-973个样本的CRC（覆盖第二个buffer的前10个）
-					if (sample_count < 10 || (sample_count >= 961 && sample_count < 973)) {
-						LOG_DEBUG << "[PREPROC CRC] Worker=" << worker_id
-								 << ", Sample #" << (sample_count + 1)
-								 << ", DataPtr=" << static_cast<const void*>(data_ptr)
-								 << ", Size=" << data_size
-								 << ", Label=" << label
-								 << ", CRC32=0x" << std::hex << std::uppercase << crc_value << std::dec;
-					}
-				}
+						// 解码到worker专属的128MB缓冲区
+						uint8_t* decode_buffer = worker_decode_buffers_[worker_id].memory;
 
-				// JPEG解码（如果启用）
-				if (config_.jpeg_decode) {
-					tjhandle handle = worker_decode_buffers_[worker_id].handle;
-					if (handle) {
-						int width, height, subsamp, colorspace;
+						// ✅ 使用优化flags（FASTDCT + NOREALLOC，提升30-50%性能）
+						if (tjDecompress2(handle, data_ptr, static_cast<unsigned long>(data_size),
+										 decode_buffer, width, pitch, height,
+										 TJPF_RGB, TJFLAG_FASTDCT | TJFLAG_NOREALLOC) == 0) {
+							// 记录解码后第一个字节
+							first_byte = static_cast<int>(decode_buffer[0]);
 
-						// 获取JPEG头信息
-						if (tjDecompressHeader3(handle, data_ptr, static_cast<unsigned long>(data_size),
-											  &width, &height, &subsamp, &colorspace) == 0) {
-
-							// ✅ 64字节对齐的stride（与PW/test_po/fast_crop一致）
-							int pitch = ((width * 3 + 63) / 64) * 64;
-
-							// 解码到worker专属的128MB缓冲区
-							uint8_t* decode_buffer = worker_decode_buffers_[worker_id].memory;
-
-							// ✅ 使用优化flags（FASTDCT + NOREALLOC，提升30-50%性能）
-							if (tjDecompress2(handle, data_ptr, static_cast<unsigned long>(data_size),
-											 decode_buffer, width, pitch, height,
-											 TJPF_RGB, TJFLAG_FASTDCT | TJFLAG_NOREALLOC) == 0) {
-								// 记录解码后第一个字节
-								first_byte = static_cast<int>(decode_buffer[0]);
-
-								// ✅ RandomResizedCrop（如果启用）
-								if (config_.apply_crop) {
-									apply_random_resized_crop(worker_id, decode_buffer,
-															 width, height, pitch);
-									// 注意：crop结果在crop_output_buffer中，可用于后续处理
-								}
-							} else {
-								// TurboJPEG解码失败，尝试使用STB备用解码
-								#if TR_USE_STB
-								uint8_t* stb_decode_buffer = worker_decode_buffers_[worker_id].memory;
-								size_t stb_buffer_size = worker_decode_buffers_[worker_id].size;
-								int stb_width, stb_height;
-								if (decode_jpeg_with_stb(data_ptr, data_size,
-														   stb_decode_buffer, stb_buffer_size,
-														   stb_width, stb_height)) {
-									// STB解码成功
-									width = stb_width;
-									height = stb_height;
-									int pitch = ((width * 3 + 63) / 64) * 64;  // 64字节对齐
-									first_byte = static_cast<int>(stb_decode_buffer[0]);
-
-									// ✅ RandomResizedCrop（如果启用）
-									if (config_.apply_crop) {
-										apply_random_resized_crop(worker_id, stb_decode_buffer,
-																 width, height, pitch);
-									}
-								} else {
-									// STB备用解码也失败
-									LOG_ERROR << "[Worker " << worker_id << "] Failed to decode JPEG: "
-											 << "both TurboJPEG and STB failed (sample size=" << data_size
-											 << ", label=" << label << "), skipping sample";
-								}
-								#endif
+							// ✅ RandomResizedCrop（如果启用）
+							if (config_.apply_crop) {
+								apply_random_resized_crop(worker_id, decode_buffer,
+														 width, height, pitch);
+								// 注意：crop结果在crop_output_buffer中，可用于后续处理
 							}
-						}
-						// TurboJPEG读取头失败，尝试使用STB备用解码
-						#if TR_USE_STB
-						else {
+						} else {
+							// TurboJPEG解码失败，尝试使用STB备用解码
+							#if TR_USE_STB
 							uint8_t* stb_decode_buffer = worker_decode_buffers_[worker_id].memory;
 							size_t stb_buffer_size = worker_decode_buffers_[worker_id].size;
 							int stb_width, stb_height;
@@ -971,52 +1314,92 @@ void Preprocessor::worker_func_persistent(int worker_id, DataLoader& loader) {
 													   stb_decode_buffer, stb_buffer_size,
 													   stb_width, stb_height)) {
 								// STB解码成功
-								int pitch = ((stb_width * 3 + 63) / 64) * 64;  // 64字节对齐
+								width = stb_width;
+								height = stb_height;
+								int pitch = ((width * 3 + 63) / 64) * 64;  // 64字节对齐
 								first_byte = static_cast<int>(stb_decode_buffer[0]);
 
 								// ✅ RandomResizedCrop（如果启用）
 								if (config_.apply_crop) {
 									apply_random_resized_crop(worker_id, stb_decode_buffer,
-															 stb_width, stb_height, pitch);
+															 width, height, pitch);
 								}
 							} else {
 								// STB备用解码也失败
-								LOG_ERROR << "[Worker " << worker_id << "] Failed to decode JPEG header: "
+								LOG_ERROR << "[Worker " << worker_id << "] Failed to decode JPEG: "
 										 << "both TurboJPEG and STB failed (sample size=" << data_size
 										 << ", label=" << label << "), skipping sample";
 							}
+							#endif
 						}
-						#endif
 					}
-				}
+					// TurboJPEG读取头失败，尝试使用STB备用解码
+					#if TR_USE_STB
+					else {
+						uint8_t* stb_decode_buffer = worker_decode_buffers_[worker_id].memory;
+						size_t stb_buffer_size = worker_decode_buffers_[worker_id].size;
+						int stb_width, stb_height;
+						if (decode_jpeg_with_stb(data_ptr, data_size,
+												   stb_decode_buffer, stb_buffer_size,
+												   stb_width, stb_height)) {
+							// STB解码成功
+							int pitch = ((stb_width * 3 + 63) / 64) * 64;  // 64字节对齐
+							first_byte = static_cast<int>(stb_decode_buffer[0]);
 
-				// 模拟预处理延迟（可选）
-				if (config_.simulate_delay) {
-					std::this_thread::sleep_for(
-						std::chrono::microseconds(config_.delay_us)
-					);
-				}
-
-				// 写入CSV日志（分离格式）
-				if (config_.enable_logging) {
-					// worker_x.csv: worker_id,size,label,first_byte (无表头)
-					log_file << worker_id << "," << data_size << "," << label << "," << first_byte << "\n";
-
-					// crc_x.csv: crc32 (无表头)
-					if (config_.calc_crc) {
-						crc_file << std::uppercase << std::hex << std::setfill('0') << std::setw(8) << crc_value << "\n";
+							// ✅ RandomResizedCrop（如果启用）
+							if (config_.apply_crop) {
+								apply_random_resized_crop(worker_id, stb_decode_buffer,
+														 stb_width, stb_height, pitch);
+							}
+						} else {
+							// STB备用解码也失败
+							LOG_ERROR << "[Worker " << worker_id << "] Failed to decode JPEG header: "
+									 << "both TurboJPEG and STB failed (sample size=" << data_size
+									 << ", label=" << label << "), skipping sample";
+						}
 					}
+					#endif
 				}
-
-				sample_count++;  // 增加总样本计数
-				local_count++;
-				total_samples_.fetch_add(1, std::memory_order_relaxed);
 			}
+
+			// 模拟预处理延迟（可选）
+			if (config_.simulate_delay) {
+				std::this_thread::sleep_for(
+					std::chrono::microseconds(config_.delay_us)
+				);
+			}
+
+			// 写入CSV日志（分离格式）
+			if (config_.enable_logging) {
+				// worker_x.csv: worker_id,size,label,first_byte (无表头)
+				log_file << worker_id << "," << data_size << "," << label << "," << first_byte << "\n";
+
+				// crc_x.csv: crc32 (无表头)
+				if (config_.calc_crc) {
+					crc_file << std::uppercase << std::hex << std::setfill('0') << std::setw(8) << crc_value << "\n";
+				}
+			}
+
+// 如果是正常模式，以下几个计数器已经递增并且continue了
+			sample_count++;  // 增加总样本计数
+			local_count++;
+			total_samples_.fetch_add(1, std::memory_order_relaxed);
+#endif  // #ifdef TEST_WITHOUT_PW
 		}
+
+
+
+
+
+
+
         // =========================================================================
         // 当前buffer处理完毕，报告完成状态
         // =========================================================================
-        workers_finished_.fetch_add(1, std::memory_order_acq_rel);
+        int finished_count = workers_finished_.fetch_add(1, std::memory_order_acq_rel);
+        if (worker_id == 0) {
+            LOG_DEBUG << "[PW0] Buffer completed, workers_finished_ now=" << (finished_count + 1);
+        }
     }
 
     // =========================================================================
@@ -1027,12 +1410,14 @@ void Preprocessor::worker_func_persistent(int worker_id, DataLoader& loader) {
         worker_sample_counts_[worker_id] += local_count;
     }
 
+#ifdef TEST_WITHOUT_PW
     if (log_file.is_open()) {
         log_file.close();
     }
     if (crc_file.is_open()) {
         crc_file.close();
     }
+#endif  // #ifdef TEST_WITHOUT_PW
 }
 
 // =============================================================================
@@ -1207,6 +1592,39 @@ bool Preprocessor::is_imagenet() const {
     return dataset_type_ == DatasetType::imagenet;
 }
 
+void Preprocessor::wait_all_engine_buffers_consumed() {
+#ifndef TEST_WITHOUT_PW
+// 测试的情况下没有PW和EngineBuffer，因此此方法应该跳过
+
+    // 等待所有EngineBuffer的两个buffer都可写（深度学习引擎读取完毕）
+    // 永久等待，直到深度学习引擎消费完所有数据
+    // 检查间隔1ms，在快速机器上分秒必争
+    LOG_DEBUG << "Waiting for all EngineBuffers to be consumed by deep learning engine...";
+
+    const auto CHECK_INTERVAL = std::chrono::milliseconds(1);  // 1ms检查间隔
+
+    while (true) {
+        // 检查所有EngineBuffer的两个buffer是否都可写
+        bool all_consumed = true;
+        for (size_t i = 0; i < engine_buffer_instances_.size(); ++i) {
+            if (!engine_buffer_instances_[i]->both_buffers_writeable()) {
+                all_consumed = false;
+                break;
+            }
+        }
+
+        if (all_consumed) {
+            LOG_DEBUG << "All EngineBuffers consumed, ready to end phase";
+            return;
+        }
+
+        // 短暂休眠后再次检查
+        std::this_thread::sleep_for(CHECK_INTERVAL);
+    }
+
+#endif  // TEST_WITHOUT_PW
+}
+
 // =============================================================================
 // 新配置方法：config_dataset
 // =============================================================================
@@ -1214,72 +1632,7 @@ bool Preprocessor::is_imagenet() const {
 void Preprocessor::config_dataset(const std::string& dataset_name,
                                   bool dts_format,
                                   int compression_level) {
-    // 检查状态
-    check_state(ConfigState::Unconfigured, "config_dataset");
-
-    // 禁用Deployment模式
-    TR_CHECK(!is_deployment_mode_, ValueError,
-             "Cannot call config_dataset() in deployment mode");
-
-    // 解析数据集类型
-    dataset_type_ = parse_dataset_type(dataset_name);
-
-    // 对于RAW格式，compression_level设为-1（表示不使用DTS压缩）
-    if (dts_format) {
-        imagenet_compression_level_ = compression_level;
-    } else {
-        imagenet_compression_level_ = -1;  // RAW格式
-    }
-
-    // 根据数据集类型和格式选择具体Loader
-    switch (dataset_type_) {
-        case DatasetType::mnist:
-            if (dts_format) {
-                current_dataloader_ = &MnistLoaderDts::instance();
-            } else {
-                current_dataloader_ = &MnistLoaderRaw::instance();
-            }
-            default_input_width_ = 28;
-            break;
-
-        case DatasetType::cifar_10:
-        case DatasetType::cifar_100:
-            if (dts_format) {
-                current_dataloader_ = &CifarLoaderDts::instance();
-                // 统一设置detected_num_classes_，而不是让Loader通过文件路径检测
-                CifarLoaderDts::instance().set_detected_num_classes(
-                    dataset_type_ == DatasetType::cifar_10 ? 10 : 100
-                );
-            } else {
-                current_dataloader_ = &CifarLoaderRaw::instance();
-                // 统一设置detected_num_classes_，而不是让Loader通过文件路径检测
-                CifarLoaderRaw::instance().set_detected_num_classes(
-                    dataset_type_ == DatasetType::cifar_10 ? 10 : 100
-                );
-            }
-            default_input_width_ = 32;
-            break;
-
-        case DatasetType::imagenet:
-            if (dts_format) {
-                current_dataloader_ = &ImageNetLoaderDts::instance();
-            } else {
-                current_dataloader_ = &ImageNetLoaderRaw::instance();
-            }
-            break;
-    }
-
-    // 更新状态
-    config_state_ = ConfigState::DatasetSelected;
-
-    // 注册到全局注册表
-    GlobalRegistry::instance().set_dataset_type(dataset_type_);
-
-    LOG_INFO << "Configured dataset: " << dataset_name
-             << " (" << (dts_format ? "DTS" : "RAW") << ")";
-    if (dataset_type_ == DatasetType::imagenet && dts_format) {
-        LOG_INFO << "  Compression level: LV" << compression_level;
-    }
+    config_dataset(parse_dataset_type(dataset_name), dts_format, compression_level);
 }
 
 void Preprocessor::config_dataset(DatasetType dataset_type,
@@ -1291,18 +1644,12 @@ void Preprocessor::config_dataset(DatasetType dataset_type,
     // 禁用Deployment模式
     TR_CHECK(!is_deployment_mode_, ValueError,
              "Cannot call config_dataset() in deployment mode");
-
-    // 保存参数
     dataset_type_ = dataset_type;
-
-    // 对于RAW格式，compression_level设为-1（表示不使用DTS压缩）
     if (dts_format) {
         imagenet_compression_level_ = compression_level;
     } else {
         imagenet_compression_level_ = -1;  // RAW格式
     }
-
-    // 根据数据集类型和格式选择具体Loader
     switch (dataset_type_) {
         case DatasetType::mnist:
             if (dts_format) {
@@ -1312,18 +1659,15 @@ void Preprocessor::config_dataset(DatasetType dataset_type,
             }
             default_input_width_ = 28;
             break;
-
         case DatasetType::cifar_10:
         case DatasetType::cifar_100:
             if (dts_format) {
                 current_dataloader_ = &CifarLoaderDts::instance();
-                // 统一设置detected_num_classes_，而不是让Loader通过文件路径检测
                 CifarLoaderDts::instance().set_detected_num_classes(
                     dataset_type_ == DatasetType::cifar_10 ? 10 : 100
                 );
             } else {
                 current_dataloader_ = &CifarLoaderRaw::instance();
-                // 统一设置detected_num_classes_，而不是让Loader通过文件路径检测
                 CifarLoaderRaw::instance().set_detected_num_classes(
                     dataset_type_ == DatasetType::cifar_10 ? 10 : 100
                 );
@@ -1339,24 +1683,12 @@ void Preprocessor::config_dataset(DatasetType dataset_type,
             }
             break;
     }
-
-    // 更新状态
     config_state_ = ConfigState::DatasetSelected;
-
-    // 注册到全局注册表
     GlobalRegistry::instance().set_dataset_type(dataset_type_);
-
-    // ==================== 向GlobalRegistry注册训练集和验证集样本总数 ====================
-    // 这应该在config_dataset()之后立刻注册，因为后续的计算可能需要这些值
     size_t num_train = current_dataloader_->num_train_samples();
     size_t num_val = current_dataloader_->num_val_samples();
     GlobalRegistry::instance().set_num_train_samples(num_train);
     GlobalRegistry::instance().set_num_val_samples(num_val);
-
-    LOG_INFO << "Configured dataset type: " << static_cast<int>(dataset_type_)
-             << " (" << (dts_format ? "DTS" : "RAW") << ")"
-             << ", num_train=" << num_train
-             << ", num_val=" << num_val;
 }
 
 // =============================================================================
@@ -1375,10 +1707,12 @@ void Preprocessor::config_dataloader(const std::string& dataset_path,
     // 保存线程数到成员变量
     num_load_workers_ = num_load_workers;
     num_preproc_workers_ = num_preproc_workers;
+    partial_mode_ = partial_mode;
 
     // 注册到全局注册表
     GlobalRegistry::instance().set_num_load_workers(num_load_workers);
     GlobalRegistry::instance().set_num_preproc_workers(num_preproc_workers);
+    GlobalRegistry::instance().set_shuffle_train(shuffle_train);
 
     TR_CHECK(current_dataloader_ != nullptr, ValueError,
              "DataLoader not selected. Please call config_dataset() first");
@@ -1389,7 +1723,6 @@ void Preprocessor::config_dataloader(const std::string& dataset_path,
 
     // 下载/解压（如果需要）
     if (download) {
-        LOG_INFO << "Checking dataset files...";
         try {
             current_dataloader_->download(dataset_path);
 
@@ -1436,10 +1769,6 @@ void Preprocessor::config_dataloader(const std::string& dataset_path,
 
     // 更新状态
     config_state_ = ConfigState::DataLoaderConfigured;
-
-    LOG_INFO << "DataLoader configured: "
-             << "load_workers=" << num_load_workers_
-             << ", preproc_workers=" << num_preproc_workers_;
 }
 
 // =============================================================================
@@ -1454,7 +1783,8 @@ void Preprocessor::config_preprocessor(int world_size,
                                        bool using_cpvs,
                                        bool pw_test_mode,
                                        bool using_progressive_resolution,
-                                       int max_intermediate_resolution) {
+                                       int max_intermediate_resolution,
+                                       bool drop_last) {
     // 检查状态
     check_state(ConfigState::DataLoaderConfigured, "config_preprocessor");
 
@@ -1473,7 +1803,17 @@ void Preprocessor::config_preprocessor(int world_size,
     max_resolution_ = max_final_resolution;
     bool user_specified_max_intermediate = (max_intermediate_resolution > 0);
     max_intermediate_resolution_ = (max_intermediate_resolution > 0 ? max_intermediate_resolution : max_final_resolution);
-    num_color_channels_ = num_color_channels;
+
+    if (dataset_type_ == DatasetType::mnist) {
+        num_color_channels_ = 1;
+    }
+    else if (dataset_type_ == DatasetType::cifar_10 || dataset_type_ == DatasetType::cifar_100 || dataset_type_ == DatasetType::imagenet) {
+        num_color_channels_ = 3;
+    }
+    else {
+        num_color_channels_ = num_color_channels;
+    }
+
     sdmp_factor_ = sdmp_factor;
     using_cpvs_ = using_cpvs;
     using_progressive_resolution_ = using_progressive_resolution;
@@ -1491,21 +1831,16 @@ void Preprocessor::config_preprocessor(int world_size,
     GlobalRegistry::instance().set_val_resize_output(max_final_resolution);
     GlobalRegistry::instance().set_current_resolution_train(max_final_resolution);  // 初始值
     GlobalRegistry::instance().set_current_resolution_val(max_final_resolution);  // 初始值
-    GlobalRegistry::instance().set_num_color_channels(num_color_channels);
+    GlobalRegistry::instance().set_num_color_channels(num_color_channels_);  // 使用修正后的值
     GlobalRegistry::instance().set_sdmp_factor(sdmp_factor);
     GlobalRegistry::instance().set_using_cpvs(using_cpvs);
     GlobalRegistry::instance().set_using_progressive_resolution(using_progressive_resolution);
+    GlobalRegistry::instance().set_using_drop_last(drop_last);
 
     // 计算单个样本大小（使用 size_t 避免溢出）
     size_t max_res = static_cast<size_t>(max_final_resolution);
     size_t num_ch = static_cast<size_t>(num_color_channels);
     sample_size_bytes_ = max_res * max_res * num_ch;
-
-    LOG_INFO << "config_preprocessor: max_final_resolution=" << max_final_resolution
-             << ", max_intermediate_resolution=" << max_intermediate_resolution_
-             << (user_specified_max_intermediate ? " (user-specified)" : " (auto-calculated)")
-             << ", num_color_channels=" << num_color_channels
-             << ", sample_size_bytes_=" << sample_size_bytes_;
 
     // 计算单个缓冲区大小
     buffer_size_bytes_ = batch_size * sample_size_bytes_;
@@ -1521,13 +1856,6 @@ void Preprocessor::config_preprocessor(int world_size,
 
     // 更新状态
     config_state_ = ConfigState::PreprocessorConfigured;
-
-    LOG_INFO << "Preprocessor configured: "
-             << "world_size=" << world_size
-             << ", batch_size=" << batch_size
-             << ", max_final_resolution=" << max_final_resolution
-             << ", num_preproc_workers=" << num_preproc_workers_
-             << ", pw_test_mode=" << (pw_test_mode ? "ON" : "OFF");
 }
 
 // =============================================================================
@@ -1560,361 +1888,34 @@ namespace {
     }
 } // anonymous namespace
 
-template<typename... Ops>
-void Preprocessor::set_train_transforms(Ops&&... ops) {
-    // 检查状态：必须是DeviceConfigured状态
-    if (config_state_ != ConfigState::DeviceConfigured) {
-        TR_THROW(ValueError,
-                 "set_train_transforms failed: invalid state machine state.\n"
-                 "  Current state: " << state_name(config_state_) << "\n"
-                 "  Expected state: DeviceConfigured\n"
-                 "  Solution:\n"
-                 "    Please complete the following steps in order:\n"
-                 "      1. config_dataset()\n"
-                 "      2. config_dataloader()\n"
-                 "      3. config_preprocessor()\n"
-                 "      4. config_device()");
-    }
+// ============================================================================
+// 辅助函数实现（静态成员函数）
+// ============================================================================
 
-    // 清空旧的transform模板
-    train_ops_template_.clear();
-
-    // 将所有ops存入vector以便处理
-    std::vector<std::unique_ptr<PreprocessOperation>> temp_ops;
-
-    if constexpr (sizeof...(Ops) == 0) {
-        // 空参数包：检查数据集类型
-        if (is_imagenet()) {
-            // ImageNet不允许空操作
-            TR_THROW(ValueError,
-                     "set_train_transforms() requires at least one transform operation for ImageNet dataset.\n"
-                     "  Empty transforms are not allowed for ImageNet.\n"
-                     "  ImageNet requires at least one preprocessing operation (e.g., Resize, CenterCrop, RandomResizedCrop).\n"
-                     "Solution:\n"
-                     "  Provide at least one preprocessing operation.");
-        } else {
-            // 非ImageNet数据集：使用DoNothing作为占位操作
-            temp_ops.push_back(std::make_unique<DoNothing>());
-        }
-    } else {
-        temp_ops.reserve(sizeof...(Ops));
-
-        // 使用fold expression展开参数包
-        (temp_ops.push_back(std::unique_ptr<PreprocessOperation>(ops.clone())), ...);
-    }
-    // =========================================================================
-    // 处理RandomErasing（在排序之前）
-    // =========================================================================
-    // RandomErasing是占位操作，需要从PO链中移除，将p注册到GlobalRegistry
-    float random_erasing_p = 0.0f;  // 默认值：没有RandomErasing时p=0
-    std::vector<std::unique_ptr<PreprocessOperation>> filtered_ops;
-
-    for (auto& op : temp_ops) {
-        if (auto* re = dynamic_cast<RandomErasing*>(op.get())) {
-            // 找到RandomErasing，提取p值
-            random_erasing_p = re->get_p();
-            LOG_INFO << "RandomErasing detected in train transforms, p=" << random_erasing_p;
-            // 不添加到filtered_ops（即从PO链中移除）
-        } else {
-            // 保留其他PO
-            filtered_ops.push_back(std::move(op));
-        }
-    }
-
-    // 注册p到GlobalRegistry
-    GlobalRegistry::instance().set_random_erasing_p(random_erasing_p);
-
-    // 验证和重排序transform
-    // 规则1: RandomHorizontalFlip必须移到最后
-    // 规则2: ImageNet的第一个PO必须是Crop/Resize（除非测试模式且是DoNothing）
-
-    std::vector<std::unique_ptr<PreprocessOperation>> non_flip_ops;
-    std::vector<std::unique_ptr<PreprocessOperation>> flip_ops;
-
-    for (auto& op : filtered_ops) {
-        if (is_random_horizontal_flip(op.get())) {
-            flip_ops.push_back(std::move(op));
-        } else {
-            non_flip_ops.push_back(std::move(op));
-        }
-    }
-
-    // 验证第一个PO（对于ImageNet）
-    if (!non_flip_ops.empty() && is_imagenet()) {
-        const auto* first_op = non_flip_ops[0].get();
-        bool is_do_nothing_op = is_do_nothing(first_op);
-
-        if (pw_test_mode_) {
-            // 测试模式：允许DoNothing作为第一个PO
-            if (is_do_nothing_op) {
-                LOG_INFO << "Test mode: DoNothing is allowed as first transform for ImageNet";
-            } else if (!is_crop_or_resize_op(first_op)) {
-                TR_THROW(ValueError,
-                         "For ImageNet, first transform must be CenterCrop, Resize, or DoNothing in test mode."
-                         << " Got: " << typeid(*first_op).name());
-            }
-        } else {
-            // 正常模式：第一个PO必须是Crop/Resize
-            if (!is_crop_or_resize_op(first_op)) {
-                TR_THROW(ValueError,
-                         "For ImageNet, first transform must be CenterCrop or Resize. "
-                         << "Got: " << typeid(*first_op).name());
-            }
-        }
-    }
-
-    // 合并：非flip操作在前，flip操作在后
-    train_ops_template_.clear();
-    for (auto& op : non_flip_ops) {
-        train_ops_template_.push_back(std::move(op));
-    }
-    for (auto& op : flip_ops) {
-        train_ops_template_.push_back(std::move(op));
-    }
-
-    // 设定颜色通道数、输出尺寸和输出stride
-    int output_size_temp = default_input_width_;
-    int max_intermediate_res_train = 0;  // 注意，这个值与max_resolution不同，是指中间的最大分辨率
-    for (auto& op : train_ops_template_) {
-        op->set_num_channels(num_color_channels_);
-        if (op->is_resize() || op->is_crop()) {
-            output_size_temp = op->get_output_size();
-        }
-        else {
-            output_size_temp = op->inference_output_size(output_size_temp);
-            op->set_output_size(output_size_temp);
-        }
-        max_intermediate_res_train = std::max(max_intermediate_res_train, output_size_temp);
-        op->calculate_stride();
-    }
-    int final_train_output_size = output_size_temp;
-
-    // ==================== 验证最终输出尺寸 ====================
-    TR_CHECK(final_train_output_size <= max_resolution_, ValueError,
-             "Train transforms final output size (" << final_train_output_size
-             << ") exceeds max_resolution (" << max_resolution_ << ").\n"
-             "  This would cause AB region overflow.\n"
-             "  Solutions:\n"
-             "    1. Increase max_resolution in config_preprocessor()\n"
-             "    2. Reduce the output size of your transform operations\n"
-             "    3. Check if Pad operation is unexpectedly enlarging the output");
-
-    // 更新全局最大中间分辨率
-    int old_max_intermediate = max_intermediate_resolution_;
-    max_intermediate_resolution_ = std::max(max_intermediate_res_train, max_intermediate_resolution_);
-
-    LOG_INFO << "Train transforms: max_intermediate_res_train=" << max_intermediate_res_train
-             << ", final_output=" << final_train_output_size
-             << ", max_intermediate_resolution updated: " << old_max_intermediate
-             << " -> " << max_intermediate_resolution_;
-
-	train_ops_template_[0]->set_as_first();  // 标记首个PO
-
-    // ==================== 检测是否包含RandomHorizontalFlip（复用排序时的检测结果）====================
-    bool train_with_rhf = !flip_ops.empty();  // 排序时已经检测过
-    if (train_with_rhf) {
-        LOG_INFO << "Train transforms contain RandomHorizontalFlip";
-    }
-    GlobalRegistry::instance().set_train_with_rhf(train_with_rhf);
-
-    // 标记train transforms已设置
-    train_transforms_set_ = true;
-
-    // 更新状态
-    update_config_state();
-
-    LOG_INFO << "Train transforms set: " << train_ops_template_.size() << " operations";
+bool Preprocessor::is_do_nothing(const PreprocessOperation* op) {
+    return dynamic_cast<const DoNothing*>(op) != nullptr;
 }
 
-template<typename... Ops>
-void Preprocessor::set_val_transforms(Ops&&... ops) {
-    // 检查状态：必须是DeviceConfigured或TransformsSet状态
-    // （因为set_train_transforms可能已经调用过了）
-    if (config_state_ != ConfigState::DeviceConfigured &&
-        config_state_ != ConfigState::TransformsSet) {
-        TR_THROW(ValueError,
-                 "set_val_transforms failed: invalid state machine state.\n"
-                 "  Current state: " << state_name(config_state_) << "\n"
-                 "  Expected state: DeviceConfigured or TransformsSet\n"
-                 "  Solution:\n"
-                 "    Please complete the following steps in order:\n"
-                 "      1. config_dataset()\n"
-                 "      2. config_dataloader()\n"
-                 "      3. config_preprocessor()\n"
-                 "      4. config_device()");
-    }
-
-    // 清空旧的transform模板
-    val_ops_template_.clear();
-
-    // 将所有ops存入vector以便处理
-    std::vector<std::unique_ptr<PreprocessOperation>> temp_ops;
-
-    if constexpr (sizeof...(Ops) == 0) {
-        // 空参数包：检查数据集类型
-        if (is_imagenet()) {
-            // ImageNet不允许空操作
-            TR_THROW(ValueError,
-                     "set_val_transforms() requires at least one transform operation for ImageNet dataset.\n"
-                     "  Empty transforms are not allowed for ImageNet.\n"
-                     "  ImageNet validation requires at least one preprocessing operation (e.g., Resize, CenterCrop).\n"
-                     "Solution:\n"
-                     "  Provide at least one preprocessing operation.");
-        } else {
-            // 非ImageNet数据集：使用DoNothing作为占位操作
-            temp_ops.push_back(std::make_unique<DoNothing>());
-        }
-    } else {
-        temp_ops.reserve(sizeof...(Ops));
-
-        // 使用fold expression展开参数包
-        (temp_ops.push_back(std::unique_ptr<PreprocessOperation>(ops.clone())), ...);
-    }
-    // =========================================================================
-    // 检查RandomErasing（验证集不允许）
-    // =========================================================================
-    // RandomErasing是训练专用占位操作，验证集不允许使用
-    for (const auto& op : temp_ops) {
-        if (auto* re = dynamic_cast<RandomErasing*>(op.get())) {
-            TR_THROW(ValueError,
-                     "RandomErasing is NOT allowed in validation transforms.\n"
-                     "  RandomErasing is a training-only data augmentation operation.\n"
-                     "  RandomErasing p value: " << re->get_p() << "\n"
-                     "Solution:\n"
-                     "  Remove RandomErasing from validation transforms.\n"
-                     "  RandomErasing should only be used in set_train_transforms().");
-        }
-    }
-
-    // 验证和重排序transform（规则同训练集）
-    std::vector<std::unique_ptr<PreprocessOperation>> non_flip_ops;
-    std::vector<std::unique_ptr<PreprocessOperation>> flip_ops;
-
-    for (auto& op : temp_ops) {
-        if (is_random_horizontal_flip(op.get())) {
-            flip_ops.push_back(std::move(op));
-        } else {
-            non_flip_ops.push_back(std::move(op));
-        }
-    }
-
-    // 验证第一个PO（对于ImageNet）
-    if (!non_flip_ops.empty() && is_imagenet()) {
-        const auto* first_op = non_flip_ops[0].get();
-        bool is_do_nothing_op = is_do_nothing(first_op);
-
-        if (pw_test_mode_) {
-            // 测试模式：允许DoNothing作为第一个PO
-            if (is_do_nothing_op) {
-                LOG_INFO << "Test mode: DoNothing is allowed as first transform for ImageNet";
-            } else if (!is_crop_or_resize_op(first_op)) {
-                TR_THROW(ValueError,
-                         "For ImageNet, first transform must be CenterCrop, Resize, or DoNothing in test mode. "
-                         << "Got: " << typeid(*first_op).name());
-            }
-        } else {
-            // 正常模式：验证集通常需要CenterCrop或Resize
-            if (!is_crop_or_resize_op(first_op)) {
-                TR_THROW(ValueError,
-                         "For ImageNet validation, first transform must be CenterCrop or Resize. "
-                         << "Got: " << typeid(*first_op).name());
-            }
-        }
-    }
-
-    // 合并：非flip操作在前，flip操作在后
-    val_ops_template_.clear();
-    for (auto& op : non_flip_ops) {
-        val_ops_template_.push_back(std::move(op));
-    }
-    for (auto& op : flip_ops) {
-        val_ops_template_.push_back(std::move(op));
-    }
-
-    // 设定颜色通道数、输出尺寸和输出stride
-    int output_size_temp = default_input_width_;
-    int max_intermediate_res_val = 0;  // 注意，这个值与max_resolution不同，是指中间的最大分辨率
-    for (auto& op : val_ops_template_) {
-        op->set_num_channels(num_color_channels_);
-        if (op->is_resize() || op->is_crop()) {
-            output_size_temp = op->get_output_size();
-        }
-        else {
-            output_size_temp = op->inference_output_size(output_size_temp);
-            op->set_output_size(output_size_temp);
-        }
-        max_intermediate_res_val = std::max(max_intermediate_res_val, output_size_temp);
-        op->calculate_stride();
-    }
-    int final_val_output_size = output_size_temp;
-
-    // ==================== 验证最终输出尺寸 ====================
-    TR_CHECK(final_val_output_size <= max_resolution_, ValueError,
-             "Validation transforms final output size (" << final_val_output_size
-             << ") exceeds max_resolution (" << max_resolution_ << ").\n"
-             "  This would cause AB region overflow.\n"
-             "  Solutions:\n"
-             "    1. Increase max_resolution in config_preprocessor()\n"
-             "    2. Reduce the output size of your transform operations\n"
-             "    3. Check if Pad operation is unexpectedly enlarging the output");
-
-    // 更新全局最大中间分辨率
-    int old_max_intermediate = max_intermediate_resolution_;
-    max_intermediate_resolution_ = std::max(max_intermediate_res_val, max_intermediate_resolution_);
-
-    LOG_INFO << "Val transforms: max_intermediate_res_val=" << max_intermediate_res_val
-             << ", final_output=" << final_val_output_size
-             << ", max_intermediate_resolution updated: " << old_max_intermediate
-             << " -> " << max_intermediate_resolution_;
-
-	val_ops_template_[0]->set_as_first();  // 标记首个PO
-
-    // ==================== 检测是否包含RandomHorizontalFlip（复用排序时的检测结果）====================
-    bool val_with_rhf = !flip_ops.empty();  // 排序时已经检测过
-    if (val_with_rhf) {
-        LOG_INFO << "Validation transforms contain RandomHorizontalFlip";
-    }
-    GlobalRegistry::instance().set_val_with_rhf(val_with_rhf);
-
-    // ==================== CPVS互斥检查 ====================
-    if (using_cpvs_) {
-        for (const auto& op : val_ops_template_) {
-            TR_CHECK(!op->introduce_randomness(), ValueError,
-                     "CPVS (Cached Preprocessed Validation Set) optimization "
-                     "is incompatible with randomized validation transforms.\n"
-                     "  Validation transform '" << op->name() << "' introduces randomness.\n"
-                     "  Solutions:\n"
-                     "    1. Use non-random transforms for validation (e.g., Resize, CenterCrop)\n"
-                     "    2. Disable CPVS by setting using_cpvs=false in config_preprocessor()");
-        }
-        LOG_INFO << "CPVS enabled: all validation transforms are deterministic";
-    }
-
-    // 标记val transforms已设置
-    val_transforms_set_ = true;
-
-    // 更新状态
-    update_config_state();
-
-    LOG_INFO << "Validation transforms set: " << val_ops_template_.size() << " operations";
+bool Preprocessor::is_crop_or_resize_op(const PreprocessOperation* op) {
+    return op->is_crop() || op->is_resize();
 }
 
-// 显式实例化模板（支持常用的transform组合）
-template void Preprocessor::set_train_transforms<>(void);  // 空参数包
-template void Preprocessor::set_train_transforms<PreprocessOperation&>(PreprocessOperation&);
-template void Preprocessor::set_train_transforms<PreprocessOperation&, PreprocessOperation&>(PreprocessOperation&, PreprocessOperation&);
-template void Preprocessor::set_train_transforms<Resize>(Resize&&);
-template void Preprocessor::set_train_transforms<CenterCrop>(CenterCrop&&);
-template void Preprocessor::set_train_transforms<CenterCrop, Resize>(CenterCrop&&, Resize&&);
-template void Preprocessor::set_train_transforms<RandomResizedCrop>(RandomResizedCrop&&);
-template void Preprocessor::set_train_transforms<FastRandomResizedCrop>(FastRandomResizedCrop&&);
-template void Preprocessor::set_val_transforms<>(void);  // 空参数包
-template void Preprocessor::set_val_transforms<PreprocessOperation&>(PreprocessOperation&);
-template void Preprocessor::set_val_transforms<PreprocessOperation&, PreprocessOperation&>(PreprocessOperation&, PreprocessOperation&);
-template void Preprocessor::set_val_transforms<Resize>(Resize&&);
-template void Preprocessor::set_val_transforms<CenterCrop>(CenterCrop&&);
-template void Preprocessor::set_val_transforms<RandomResizedCrop>(RandomResizedCrop&&);
-template void Preprocessor::set_val_transforms<FastRandomResizedCrop>(FastRandomResizedCrop&&);
+bool Preprocessor::is_random_horizontal_flip(const PreprocessOperation* op) {
+    return dynamic_cast<const RandomHorizontalFlip*>(op) != nullptr;
+}
+
+
+
+// ============================================================================
+// 模板函数set_train_transforms和set_val_transforms已移至头文件
+// 这样可以支持任意数量的PreprocessOperation参数（1~N个）
+// ============================================================================
+
+
+// ============================================================================
+// 显式实例化已移除
+// 模板函数将按需实例化，支持任意数量的PreprocessOperation参数（1~N个）
+// ============================================================================
 
 void Preprocessor::set_deployment_transforms() {
     // TODO: 后续实现
@@ -1966,10 +1967,6 @@ void Preprocessor::config_deployment_mode(int batch_size,
 
     // 更新状态
     config_state_ = ConfigState::PreprocessorConfigured;
-
-    LOG_INFO << "Deployment mode configured: "
-             << "batch_size=" << batch_size
-             << ", max_resolution=" << max_resolution;
 }
 
 // =============================================================================
@@ -1977,7 +1974,8 @@ void Preprocessor::config_deployment_mode(int batch_size,
 // =============================================================================
 
 void Preprocessor::multi_thread_init() {
-    LOG_INFO << "Multi-thread initialization started";
+#ifndef TEST_WITHOUT_PW
+// 测试模式不需要PW和EngineBuffer，因此此方法应该跳过
 
     // 创建临时线程池（用于绑核等初始化操作）
     std::vector<std::thread> init_threads;
@@ -2024,7 +2022,6 @@ void Preprocessor::multi_thread_init() {
 
                 // 如果当前EngineBuffer还没创建，就创建它
                 if (!engine_buffer_instances_[i]) {
-                    LOG_INFO << "[Worker " << i << "] Creating EngineBuffer instance for Engine " << i;
 
                     // 计算每个Engine的worker数
                     int num_workers_per_engine = num_preproc_workers_ / world_size_;
@@ -2033,14 +2030,6 @@ void Preprocessor::multi_thread_init() {
                     engine_buffer_instances_[i] = std::unique_ptr<EngineBuffer>(
                         new EngineBuffer()  // 构造函数无参数，始终为正常模式
                     );
-
-                    // 配置EngineBuffer
-                    // 诊断日志：检查sample_size_bytes_是否正常
-                    LOG_INFO << "[Worker " << i << "] Configuring EngineBuffer: "
-                             << "batch_size_=" << batch_size_
-                             << ", sample_size_bytes_=" << sample_size_bytes_
-                             << ", num_workers_per_engine=" << num_workers_per_engine
-                             << ", engine_id=" << i;
 
                     // 检查sample_size_bytes_是否在合理范围内（224*224*3 = 150528字节）
                     TR_CHECK(sample_size_bytes_ > 0 && sample_size_bytes_ < 100ULL * 1024ULL * 1024ULL, ValueError,
@@ -2057,8 +2046,6 @@ void Preprocessor::multi_thread_init() {
 
                     // 更新phase（从GlobalRegistry自动获取配置）
                     engine_buffer_instances_[i]->reset_and_update();
-
-                    LOG_INFO << "[Worker " << i << "] EngineBuffer " << i << " created and configured successfully";
                 }
             }
 
@@ -2073,10 +2060,13 @@ void Preprocessor::multi_thread_init() {
         }
     }
 
+    // 重置EngineBuffer同步屏障（multi_thread_init中的reset_and_update不计入barrier）
+    engine_reset_barrier_.store(0, std::memory_order_release);
+
+#endif  // #ifndef TEST_WITHOUT_PW
+
     // 设置初始化完成标志
     multi_thread_inited_ = true;
-
-    LOG_INFO << "Multi-thread initialization completed (workers=" << num_preproc_workers_ << ")";
 }
 
 // -----------------------------------------------------------------------------
@@ -2119,13 +2109,15 @@ void Preprocessor::train() {
         this->run(*current_dataloader_);  // 原有run方法，包含完整预处理
         current_dataloader_->end_epoch();
 
+        // 等待深度学习引擎读取完毕所有EngineBuffer的数据
+        wait_all_engine_buffers_consumed();
+
         // 结束训练阶段
         gr_instance.end_train();
 
         // 输出时间统计（仅在测试模式下输出简单信息，详细统计由test程序负责）
         // 注意：test程序会计算更详细的统计信息（包括吞吐量），所以这里不再输出
 
-        // 递增iteration_id
         train_iteration_id_++;  // train_iteration_id_标志DataLoader读取训练集的次数，不一定等于epoch数或phase数
     }
     else {  // Lazy train phase行为
@@ -2148,6 +2140,15 @@ void Preprocessor::train() {
         // ==================== 展开Lazy Train Phase ====================
         // 参照worker_func_persistent的结构，但不涉及DataLoader
 
+        // 【修复竞态条件】步骤1：先完成所有EngineBuffer的reset_and_update()
+        for (int i = 0; i < world_size_; ++i) {
+            int engine_id = i;
+            if (engine_buffer_instances_[engine_id]) {
+                engine_buffer_instances_[engine_id]->reset_and_update();
+            }
+        }
+
+        // 【修复竞态条件】步骤2：然后所有worker再并行执行work_lazy()
         std::vector<std::thread> lazy_threads;
         for (int i = 0; i < num_preproc_workers_; ++i) {
             lazy_threads.emplace_back([this, i]() {
@@ -2179,17 +2180,8 @@ void Preprocessor::train() {
                     pw_instances_[i]->update_parameters();
                 }
 
-                // ==================== Step 3: EngineBuffer更新 ====================
-                // 只有每个Engine的第一个PW（worker_id < world_size_）负责更新对应的EngineBuffer
-                if (i < world_size_) {
-                    int engine_id = i % world_size_;
-                    if (engine_buffer_instances_[engine_id]) {
-                        engine_buffer_instances_[engine_id]->reset_and_update();
-                        LOG_DEBUG << "[Lazy Train Worker " << i << "] EngineBuffer " << engine_id << " reset_and_update called";
-                    }
-                }
-
-                // ==================== Step 4: 调用PW的work_lazy() ====================
+                // ==================== Step 3: 调用PW的work_lazy() ====================
+                // 注意：EngineBuffer已经在所有worker线程启动前完成reset_and_update()
                 if (pw_instances_[i]) {
                     pw_instances_[i]->work_lazy();
                 }
@@ -2209,6 +2201,9 @@ void Preprocessor::train() {
         // Lazy Phase从S区复制数据，没有通过DataLoader累加total_samples_
         // 所以需要手动设置为训练集样本总数
         total_samples_.store(current_dataloader_->num_train_samples(), std::memory_order_relaxed);
+
+        // 等待深度学习引擎读取完毕所有EngineBuffer的数据
+        wait_all_engine_buffers_consumed();
 
         // 结束训练阶段
         gr_instance.end_train();
@@ -2260,13 +2255,18 @@ void Preprocessor::val() {
             current_dataloader_->end_epoch();
         }
 
+        // 等待深度学习引擎读取完毕所有EngineBuffer的数据
+        wait_all_engine_buffers_consumed();
+
         // 结束验证阶段
         gr_instance.end_val();
 
         // 输出时间统计（仅在测试模式下输出简单信息，详细统计由test程序负责）
         // 注意：test程序会计算更详细的统计信息（包括吞吐量），所以这里不再输出
 
-        // 递增iteration_id
+
+
+        // 递增DataLoader调用计数
         val_iteration_id_++;  // val_iteration_id_标志DataLoader读取验证集的次数，不一定等于epoch数或phase数
     }
     else {  // Lazy val phase行为
@@ -2289,6 +2289,15 @@ void Preprocessor::val() {
         // ==================== 展开Lazy Val Phase ====================
         // 参照worker_func_persistent的结构，但不涉及DataLoader
 
+        // 【修复竞态条件】步骤1：先完成所有EngineBuffer的reset_and_update()
+        for (int i = 0; i < world_size_; ++i) {
+            int engine_id = i;
+            if (engine_buffer_instances_[engine_id]) {
+                engine_buffer_instances_[engine_id]->reset_and_update();
+            }
+        }
+
+        // 【修复竞态条件】步骤2：然后所有worker再并行执行work_lazy()
         std::vector<std::thread> lazy_threads;
         for (int i = 0; i < num_preproc_workers_; ++i) {
             lazy_threads.emplace_back([this, i]() {
@@ -2320,17 +2329,8 @@ void Preprocessor::val() {
                     pw_instances_[i]->update_parameters();
                 }
 
-                // ==================== Step 3: EngineBuffer更新 ====================
-                // 只有每个Engine的第一个PW（worker_id < world_size_）负责更新对应的EngineBuffer
-                if (i < world_size_) {
-                    int engine_id = i % world_size_;
-                    if (engine_buffer_instances_[engine_id]) {
-                        engine_buffer_instances_[engine_id]->reset_and_update();
-                        LOG_DEBUG << "[Lazy Val Worker " << i << "] EngineBuffer " << engine_id << " reset_and_update called";
-                    }
-                }
-
-                // ==================== Step 4: 调用PW的work_lazy() ====================
+                // ==================== Step 3: 调用PW的work_lazy() ====================
+                // 注意：EngineBuffer已经在所有worker线程启动前完成reset_and_update()
                 if (pw_instances_[i]) {
                     pw_instances_[i]->work_lazy();
                 }
@@ -2350,6 +2350,9 @@ void Preprocessor::val() {
         // Lazy Phase从C区复制数据，没有通过DataLoader累加total_samples_
         // 所以需要手动设置为验证集样本总数
         total_samples_.store(current_dataloader_->num_val_samples(), std::memory_order_relaxed);
+
+        // 等待深度学习引擎读取完毕所有EngineBuffer的数据
+        wait_all_engine_buffers_consumed();
 
         // 结束验证阶段
         gr_instance.end_val();
@@ -2423,17 +2426,7 @@ namespace {
 }
 
 void Preprocessor::test_dataloader() {
-    // 检查状态：允许DataLoaderConfigured或Initialized状态
-    if (config_state_ != ConfigState::DataLoaderConfigured &&
-        config_state_ != ConfigState::Initialized) {
-        TR_THROW(ValueError,
-                 "test_dataloader failed: invalid state machine state.\n"
-                 "  Current state: " << state_name(config_state_) << "\n"
-                 "  Expected states: DataLoaderConfigured or Initialized\n"
-                 "  Solution:\n"
-                 "    Please call config_dataset() followed by config_dataloader().");
-    }
-
+#ifdef TEST_WITHOUT_PW
     TR_CHECK(!is_deployment_mode_, ValueError,
              "test_dataloader() is not available in deployment mode");
 
@@ -2534,6 +2527,9 @@ void Preprocessor::test_dataloader() {
     // 目的：将DataLoader重置到"刚刚加载完文件头"的状态
     //       这样下次调用时才会重新加载数据
     current_dataloader_->reset_after_warmup();
+#else
+        TR_THROW(ValueError, "test_dataloader() can only be used in TEST_WITHOUT_PW mode.");
+#endif  // #ifdef TEST_WITHOUT_PW
 }
 
 // =============================================================================
@@ -2541,6 +2537,7 @@ void Preprocessor::test_dataloader() {
 // =============================================================================
 
 void Preprocessor::run_fast_without_processing() {
+#ifdef TEST_WITHOUT_PW
     /**
      * 快速运行（不执行预处理）
      *
@@ -2566,15 +2563,19 @@ void Preprocessor::run_fast_without_processing() {
     start_worker_pool(loader);
 
     // 主循环：处理所有buffers
-    int buffer_count = 0;
     do {
-        buffer_count++;
-
         // 通知worker开始新buffer
         notify_workers_new_buffer();
 
         // 等待worker完成当前buffer
-        wait_workers_complete_buffer();
+        bool fully_second = (!partial_mode_) && ((pw_param_.is_train? train_phase_id_: val_phase_id_) > 0);
+        if (fully_second) {
+            // 这里解释一下，因为FULLY MODE的第二个以后的phase都是从已有的存储中读取，没有buffer的概念，直到处理完整个数据集才结束，所以不应该设置超时
+            wait_workers_complete_buffer(true);  // 永久等待
+        }
+        else {  // PARTIAL MODE或第一个phase（必定加载）
+            wait_workers_complete_buffer(false);  // 20s超时
+        }
 
         // 触发DataLoader加载下一个buffer
         if (loader.has_more_buffers()) {
@@ -2589,6 +2590,9 @@ void Preprocessor::run_fast_without_processing() {
 
     // 清除快速模式标志
     fast_mode_ = false;
+#else
+        TR_THROW(ValueError, "run_fast_without_processing() can only be used in TEST_WITHOUT_PW mode.");
+#endif  // #ifdef TEST_WITHOUT_PW
 }
 
 // =============================================================================
@@ -2596,6 +2600,9 @@ void Preprocessor::run_fast_without_processing() {
 // =============================================================================
 
 void Preprocessor::calculate_workshop_sizes(int ref_resolution_for_ab) {
+#ifndef TEST_WITHOUT_PW
+// 测试模式不需要进行workshop大小计算，因为没有PW
+
     // ==================== 参数有效性检查 ====================
     TR_CHECK(max_resolution_ > 0 && max_resolution_ <= 10000, ValueError,
              "max_resolution_ is invalid: " << max_resolution_);
@@ -2742,14 +2749,7 @@ void Preprocessor::calculate_workshop_sizes(int ref_resolution_for_ab) {
     } else {
         workshop_region_c_size_ = 0;
     }
-
-    // ==================== 输出汇总信息 ====================
-    LOG_INFO << "Workshop大小计算完成:"
-             << "\n  D区: " << (workshop_region_d_size_ / (1024.0*1024.0)) << " MB"
-             << "\n  AB区: " << (workshop_region_ab_size_ / (1024.0*1024.0)) << " MB (对齐后)"
-             << "\n  T区: " << (workshop_region_t_size_ / 1024.0) << " KB"
-             << "\n  S区: " << (workshop_region_s_size_ / (1024.0*1024.0)) << " MB (x" << workshop_num_region_s_ << ")"
-             << "\n  C区: " << (workshop_region_c_size_ / (1024.0*1024.0)) << " MB";
+#endif  // #ifndef TEST_WITHOUT_PW
 }
 
 // =============================================================================
@@ -2757,6 +2757,9 @@ void Preprocessor::calculate_workshop_sizes(int ref_resolution_for_ab) {
 // =============================================================================
 
 void Preprocessor::create_pw_instances(bool is_train) {
+#ifndef TEST_WITHOUT_PW
+// 测试模式跳过此方法，因为不需要PW
+
     if (!workshop_size_calculated_) {
         calculate_workshop_sizes(max_intermediate_resolution_);
         workshop_size_calculated_ = true;
@@ -2766,9 +2769,6 @@ void Preprocessor::create_pw_instances(bool is_train) {
     if (!pw_instances_.empty()) {
         return;  // 已创建，无需重复创建
     }
-
-    LOG_INFO << "Creating " << num_preproc_workers_ << " PW instances ("
-             << (is_train ? "train" : "val") << " mode)";
 
     // 确保pw_instances_有足够的空间
     pw_instances_.resize(num_preproc_workers_);
@@ -2835,18 +2835,19 @@ void Preprocessor::create_pw_instances(bool is_train) {
             )
         );
     }
-
-    LOG_INFO << "PW instances created successfully";
+#endif  // #ifndef TEST_WITHOUT_PW
 }
 
 void Preprocessor::destroy_pw_instances() {
+#ifndef TEST_WITHOUT_PW
+// 测试模式跳过此方法，因为不需要PW
+
     if (pw_instances_.empty()) {
         return;  // 已销毁或从未创建
     }
 
-    LOG_INFO << "Destroying PW instances";
     pw_instances_.clear();
-    LOG_INFO << "PW instances destroyed";
+#endif  // #ifndef TEST_WITHOUT_PW
 }
 
 // =============================================================================
@@ -2923,10 +2924,10 @@ void Preprocessor::config_device(const std::string& engine_device, bool auto_cpu
     // 步骤4：验证GPU数量与world_size一致
     int actual_gpu_count = (engine_device_ == "GPU") ? selected_gpu_ids_.size() : 0;
     if (world_size_ == -1) {
-        // world_size未设置，自动设置为实际GPU数量
-        world_size_ = actual_gpu_count;
-    } else if (world_size_ != actual_gpu_count) {
-        // world_size已设置但不匹配，报错
+        // world_size未设置，自动设置为实际GPU数量（CPU模式下默认为1）
+        world_size_ = (actual_gpu_count > 0) ? actual_gpu_count : 1;
+    } else if (world_size_ != actual_gpu_count && actual_gpu_count > 0) {
+        // world_size已设置但不匹配，报错（仅在GPU模式下检查）
         TR_CHECK(actual_gpu_count == world_size_, ValueError,
                  "GPU count mismatch: selected " << actual_gpu_count
                  << " GPUs, but world_size=" << world_size_
@@ -2943,9 +2944,6 @@ void Preprocessor::config_device(const std::string& engine_device, bool auto_cpu
         calculate_cpu_binding_strategy();
     } else {
         auto_cpu_binding_ = false;  // 禁用绑核
-        if (engine_device_ == "GPU") {
-            LOG_INFO << "CPU binding disabled (not in GPU_CLOUD scene or disabled by user)";
-        }
     }
 #else
     auto_cpu_binding_ = false;
@@ -3199,6 +3197,251 @@ void Preprocessor::register_device_config() {
     registry.set_cpu_binding_enabled(auto_cpu_binding_);
 
     // 注意：CPU绑定映射已在 calculate_cpu_binding_strategy() 中注册
+}
+
+void Preprocessor::init() {
+    // 空实现：Preprocessor的实际初始化通过配置方法完成
+}
+
+void Preprocessor::cleanup() {
+    // 空实现：Preprocessor的资源由析构函数自动处理
+}
+
+// ============================================================================
+// Setup 类实现
+// ============================================================================
+
+// Setup 构造/析构
+Setup::Setup()
+    : state_(std::make_unique<State>()) {
+}
+
+Setup::~Setup() {
+    if (state_ && !state_->committed) {
+        LOG_WARN << "Setup object destroyed without calling commit(). "
+                 << "Configuration was not applied.";
+    }
+}
+
+Setup::Setup(Setup&& other) noexcept
+    : state_(std::move(other.state_)) {
+}
+
+Setup& Setup::operator=(Setup&& other) noexcept {
+    if (this != &other) {
+        state_ = std::move(other.state_);
+    }
+    return *this;
+}
+
+// 链式调用实现
+Setup& Setup::dataset(const std::string& name, const std::string& path) {
+    state_->dataset_name = name;
+    state_->dataset_path = path;
+    return *this;
+}
+
+Setup& Setup::batch_size(int size) {
+    state_->batch_size = size;
+    return *this;
+}
+
+Setup& Setup::max_output_resolution(int res) {
+    state_->max_output_resolution = res;
+    return *this;
+}
+
+Setup& Setup::color_channels(int ch) {
+    state_->color_channels = ch;
+    return *this;
+}
+
+Setup& Setup::num_load_workers(int num) {
+    state_->num_load_workers = num;
+    return *this;
+}
+
+Setup& Setup::num_preproc_workers(int num) {
+    state_->num_preproc_workers = num;
+    return *this;
+}
+
+Setup& Setup::device(const std::string& type_str) {
+    state_->device_type_str = type_str;
+    return *this;
+}
+
+Setup& Setup::gpu_ids(const std::vector<int>& ids) {
+    state_->gpu_ids = ids;
+    return *this;
+}
+
+Setup& Setup::gpu_ids(const std::string& id_str) {
+    state_->gpu_ids.clear();
+
+    std::istringstream iss(id_str);
+    std::string token;
+    while (std::getline(iss, token, ',')) {
+        try {
+            int id = std::stoi(token);
+            state_->gpu_ids.push_back(id);
+        } catch (...) {
+            TR_VALUE_ERROR("Invalid GPU ID string: '" << id_str << "'");
+        }
+    }
+
+    return *this;
+}
+
+Setup& Setup::using_dts_format(bool dts, int level) {
+    state_->using_dts_format = dts;
+    state_->dts_compression_level = dts? level: 0;
+    return *this;
+}
+
+Setup& Setup::partial_mode(bool partial) {
+    state_->partial_mode = partial;
+    return *this;
+}
+
+Setup& Setup::shuffle_train(bool shuffle) {
+    state_->shuffle_train = shuffle;
+    return *this;
+}
+
+Setup& Setup::download(bool enable) {
+    state_->download = enable;
+    return *this;
+}
+
+Setup& Setup::sdmp_factor(int factor) {
+    state_->sdmp_factor = factor;
+    return *this;
+}
+
+Setup& Setup::using_cpvs(bool enable) {
+    state_->using_cpvs = enable;
+    return *this;
+}
+
+Setup& Setup::pw_test_mode(bool enable) {
+    state_->pw_test_mode = enable;
+    return *this;
+}
+
+Setup& Setup::max_intermediate_resolution(int res) {
+    state_->max_intermediate_resolution = res;
+    return *this;
+}
+
+Setup& Setup::drop_last(bool enable) {
+    state_->drop_last = enable;
+    return *this;
+}
+
+Setup& Setup::using_progressive_resolution(bool enable) {
+    state_->using_progressive_resolution = enable;
+    return *this;
+}
+
+Setup& Setup::cpu_binding(bool enable) {
+    state_->cpu_binding = enable;
+    return *this;
+}
+
+// commit() 实现
+void Setup::commit() {
+    if (state_->committed) {
+        LOG_WARN << "Setup::commit() called multiple times. Ignoring duplicate calls.";
+        return;
+    }
+
+    // 验证必需参数
+    if (state_->dataset_name.empty()) {
+        TR_VALUE_ERROR("Dataset name not specified. "
+                       "Please call .dataset() before commit().");
+    }
+
+    if (state_->dataset_path.empty()) {
+        TR_VALUE_ERROR("Dataset path not specified. "
+                       "Please call .dataset() with a valid path.");
+    }
+
+    if (state_->batch_size <= 0) {
+        TR_VALUE_ERROR("Invalid batch_size: " << state_->batch_size
+                       << ". Please call .batch_size() with a positive value.");
+    }
+
+    if (state_->max_output_resolution <= 0) {
+        TR_VALUE_ERROR("Invalid max output resolution: " << state_->max_output_resolution
+                       << ". Please call .max_output_resolution() with a positive value.");
+    }
+
+    if (state_->color_channels != 1 && state_->color_channels != 3) {
+        TR_VALUE_ERROR("Invalid color channels: " << state_->color_channels
+                       << ". Please call .color_channels() with 1 or 3.");
+    }
+
+    if (state_->num_load_workers <= 0) {
+        TR_VALUE_ERROR("Invalid number of load workers: " << state_->num_load_workers
+                       << ". Please call .num_load_workers() with a positive value.");
+    }
+
+    if (state_->num_preproc_workers <= 0) {
+        TR_VALUE_ERROR("Invalid number of preprocess workers: " << state_->num_preproc_workers
+                       << ". Please call .num_preproc_workers() with a positive value.");
+    }
+
+    // 按 Preprocessor 状态机顺序应用配置
+    auto& prep = Preprocessor::instance();
+
+    // Step 1: Dataset - 直接传递字符串
+    prep.config_dataset(state_->dataset_name, state_->using_dts_format, state_->dts_compression_level);
+
+    // Step 2: DataLoader
+    {
+        prep.config_dataloader(
+            state_->dataset_path,
+            state_->num_load_workers,
+            state_->num_preproc_workers,
+            state_->partial_mode,
+            state_->shuffle_train,
+            state_->download
+        );
+    }
+
+    // Step 3: Preprocessor
+    {
+        prep.config_preprocessor(
+            -1,
+            state_->batch_size,
+            state_->max_output_resolution,
+            state_->color_channels,
+            state_->sdmp_factor,
+            state_->using_cpvs,
+            state_->pw_test_mode,
+            state_->using_progressive_resolution,
+            state_->max_intermediate_resolution,
+            state_->drop_last
+        );
+    }
+
+    // Step 4: Device
+    {
+        if (state_->gpu_ids.empty()) {
+            prep.config_device(state_->device_type_str, state_->cpu_binding);
+        } else {
+            prep.config_device(state_->device_type_str, state_->gpu_ids, state_->cpu_binding);
+        }
+    }
+
+    // Step 5: Transforms
+    {
+        prep.set_train_transforms(state_->train_ops);
+        prep.set_val_transforms(state_->val_ops);
+    }
+
+    state_->committed = true;
 }
 
 } // namespace tr

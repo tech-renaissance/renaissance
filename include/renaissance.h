@@ -106,6 +106,7 @@
 #endif
 
 #include "renaissance/utils/profiler.h"
+#include "renaissance/utils/initializer.h"
 
 #ifdef TR_USE_PYTHON_SESSION
 #include "renaissance/utils/python_session.h"

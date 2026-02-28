@@ -57,6 +57,10 @@ void GlobalRegistry::initialize() {
              ValueError, "fixed_sdmp_factor not set");
     TR_CHECK(fixed_using_cpvs_set_.load(std::memory_order_relaxed),
              ValueError, "fixed_using_cpvs not set");
+    TR_CHECK(fixed_using_drop_last_set_.load(std::memory_order_relaxed),
+             ValueError, "fixed_using_drop_last not set");
+    TR_CHECK(fixed_shuffle_train_set_.load(std::memory_order_relaxed),
+             ValueError, "fixed_shuffle_train not set");
 
     // 设备配置相关检查
     TR_CHECK(fixed_using_gpu_set_.load(std::memory_order_relaxed),
@@ -68,6 +72,14 @@ void GlobalRegistry::initialize() {
     initialized_.store(true, std::memory_order_release);
 
     LOG_INFO << "GlobalRegistry initialized successfully";
+}
+
+void GlobalRegistry::init() {
+    // 空实现：实际初始化由 begin_train() / begin_val() 触发的 initialize() 完成
+}
+
+void GlobalRegistry::cleanup() {
+    // 空实现：GlobalRegistry 无需额外清理
 }
 
 // =============================================================================
@@ -406,6 +418,47 @@ bool GlobalRegistry::using_cpvs() const {
     return fixed_using_cpvs_.load(std::memory_order_relaxed);
 }
 
+void GlobalRegistry::set_using_drop_last(bool value) {
+    bool old_value = fixed_using_drop_last_.load(std::memory_order_relaxed);
+    bool old_set = fixed_using_drop_last_set_.load(std::memory_order_relaxed);
+
+    // 检查是否是首次赋值
+    if (!old_set) {
+        fixed_using_drop_last_.store(value, std::memory_order_release);
+        fixed_using_drop_last_set_.store(true, std::memory_order_release);
+        LOG_INFO << "GlobalRegistry: fixed_using_drop_last set to " << (value ? "true" : "false");
+        return;
+    }
+
+    // 检查是否已经初始化
+    if (initialized_.load(std::memory_order_acquire)) {
+        TR_VALUE_ERROR("Cannot modify fixed_using_drop_last after initialization. "
+                      "Current value: " << (old_value ? "true" : "false")
+                      << ", Attempted value: " << (value ? "true" : "false"));
+    }
+
+    // 检查是否是幂等赋值
+    if (old_value == value) {
+        return;
+    }
+
+    TR_VALUE_ERROR("Cannot modify fixed_using_drop_last after first assignment. "
+                  "Current value: " << (old_value ? "true" : "false")
+                  << ", Attempted value: " << (value ? "true" : "false"));
+}
+
+bool GlobalRegistry::using_drop_last() const {
+    return fixed_using_drop_last_.load(std::memory_order_relaxed);
+}
+
+bool GlobalRegistry::initializer_inited() const {
+    return fixed_initializer_inited_.load(std::memory_order_relaxed);
+}
+
+void GlobalRegistry::set_initializer_inited(bool value) {
+    fixed_initializer_inited_.store(value, std::memory_order_relaxed);
+}
+
 void GlobalRegistry::set_reproducibility_insurance(bool value) {
     bool old_value = fixed_reproducibility_insurance_.load(std::memory_order_relaxed);
     bool old_set = fixed_reproducibility_insurance_set_.load(std::memory_order_relaxed);
@@ -574,6 +627,39 @@ void GlobalRegistry::set_val_with_rhf(bool value) {
 
 bool GlobalRegistry::val_with_rhf() const {
     return fixed_val_with_rhf_.load(std::memory_order_relaxed);
+}
+
+void GlobalRegistry::set_shuffle_train(bool value) {
+    bool old_value = fixed_shuffle_train_.load(std::memory_order_relaxed);
+    bool old_set = fixed_shuffle_train_set_.load(std::memory_order_relaxed);
+
+    // 检查是否是首次赋值
+    if (!old_set) {
+        fixed_shuffle_train_.store(value, std::memory_order_release);
+        fixed_shuffle_train_set_.store(true, std::memory_order_release);
+        LOG_INFO << "GlobalRegistry: fixed_shuffle_train set to " << (value ? "true" : "false");
+        return;
+    }
+
+    // 检查是否已经初始化
+    if (initialized_.load(std::memory_order_acquire)) {
+        TR_VALUE_ERROR("Cannot modify fixed_shuffle_train after initialization. "
+                      "Current value: " << (old_value ? "true" : "false")
+                      << ", Attempted value: " << (value ? "true" : "false"));
+    }
+
+    // 检查是否是幂等赋值
+    if (old_value == value) {
+        return;
+    }
+
+    TR_VALUE_ERROR("Cannot modify fixed_shuffle_train after first assignment. "
+                  "Current value: " << (old_value ? "true" : "false")
+                  << ", Attempted value: " << (value ? "true" : "false"));
+}
+
+bool GlobalRegistry::shuffle_train() const {
+    return fixed_shuffle_train_.load(std::memory_order_relaxed);
 }
 
 // =============================================================================
@@ -831,6 +917,61 @@ int GlobalRegistry::val_resize_output() const {
     return alterable_val_resize_output_.load(std::memory_order_relaxed);
 }
 
+void GlobalRegistry::set_user_epoch_id(int value) {
+    // ========================================================================
+    // 警告：此方法仅供用户手动设置Epoch ID，框架内部代码严禁调用
+    // ========================================================================
+    //
+    // 用途说明：
+    //   - 此方法专门为测试程序或用户脚本提供手动控制epoch ID的能力
+    //   - 主要用于生成带epoch编号的调试文件（如CSV日志）
+    //   - 用户可以在运行时自由设置任何整数值作为epoch标识
+    //
+    // 严重警告：
+    //   - 框架内部代码永远不要调用此方法
+    //   - 此方法的值完全由用户控制，框架不得依赖其数值进行任何逻辑判断
+    //   - 框架应使用train_phase_id_或val_phase_id_来追踪实际的训练/验证阶段
+    //   - 违反此规则将导致严重的逻辑错误和数据不一致
+    //
+    // 设计意图：
+    //   - user_epoch_id_ 与框架内部epoch计数完全解耦
+    //   - 框架内部epoch计数由begin_train()/end_train()自动管理
+    //   - user_epoch_id_仅用于输出文件命名、日志标记等用户可见场景
+    //   - 两者的分离确保了框架逻辑的独立性和可靠性
+    //
+    // ========================================================================
+
+    // 检查是否处于忙碌状态
+    TR_CHECK(!is_busy(), ValueError,
+             "Cannot modify alterable_user_epoch_id_ while busy. "
+             "is_busy() = true, train_counter_ = " << train_counter_.load(std::memory_order_relaxed)
+             << ", val_counter_ = " << val_counter_.load(std::memory_order_relaxed));
+
+    // 允许修改
+    alterable_user_epoch_id_.store(value, std::memory_order_release);
+    LOG_INFO << "GlobalRegistry: alterable_user_epoch_id_ set to " << value;
+}
+
+int GlobalRegistry::user_epoch_id() const {
+    // ========================================================================
+    // 警告：此方法仅供用户获取手动设置的Epoch ID，框架内部代码严禁依赖
+    // ========================================================================
+    //
+    // 用途说明：
+    //   - 返回用户通过set_user_epoch_id()设置的值
+    //   - 主要用于调试输出、文件命名等场景
+    //
+    // 严重警告：
+    //   - 框架内部代码绝不能依赖此返回值进行任何逻辑判断，否则将引起严重混乱，可能导致程序崩溃
+    //   - 框架应使用train_phase_id_或val_phase_id_来判断当前阶段
+    //   - 此返回值可能为任意整数（包括负数、0、超大值等）
+    //   - 框架不得假设此值具有任何特定的含义或范围
+    //
+    // ========================================================================
+
+    return alterable_user_epoch_id_.load(std::memory_order_relaxed);
+}
+
 void GlobalRegistry::set_random_erasing_p(float value) {
     // 检查是否处于忙碌状态
     TR_CHECK(!is_busy(), ValueError,
@@ -882,6 +1023,8 @@ int GlobalRegistry::get_value_int(const std::string& name) const {
         return alterable_val_crop_output_.load(std::memory_order_relaxed);
     } else if (name == "val_resize_output") {
         return alterable_val_resize_output_.load(std::memory_order_relaxed);
+    } else if (name == "user_epoch_id_") {
+        return alterable_user_epoch_id_.load(std::memory_order_relaxed);
     } else {
         TR_VALUE_ERROR("Unknown variable name: " << name);
         return 0;  // Unreachable
@@ -900,6 +1043,10 @@ float GlobalRegistry::get_value_float(const std::string& name) const {
 bool GlobalRegistry::get_value_bool(const std::string& name) const {
     if (name == "using_cpvs") {
         return fixed_using_cpvs_.load(std::memory_order_relaxed);
+    } else if (name == "using_drop_last") {
+        return fixed_using_drop_last_.load(std::memory_order_relaxed);
+    } else if (name == "shuffle_train") {
+        return fixed_shuffle_train_.load(std::memory_order_relaxed);
     } else if (name == "using_progressive_resolution") {
         return fixed_using_progressive_resolution_.load(std::memory_order_relaxed);
     } else {
@@ -959,6 +1106,10 @@ void GlobalRegistry::set_value_bool(const std::string& name, bool value) {
 
     if (name == "using_cpvs") {
         set_using_cpvs(value);
+    } else if (name == "using_drop_last") {
+        set_using_drop_last(value);
+    } else if (name == "shuffle_train") {
+        set_shuffle_train(value);
     } else if (name == "using_progressive_resolution") {
         set_using_progressive_resolution(value);
     } else {

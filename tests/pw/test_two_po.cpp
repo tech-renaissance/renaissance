@@ -23,12 +23,13 @@
 #include "renaissance/data/do_nothing.h"
 #include "renaissance/base/logger.h"
 #include "renaissance/base/tr_exception.h"
+#include "renaissance/utils/initializer.h"
 
 #include <turbojpeg.h>
 
 // STB Image备用解码（用于处理TurboJPEG无法解码的特殊JPEG格式）
+// 注意：不定义STB_IMAGE_IMPLEMENTATION，因为data.lib已经提供了
 #if TR_USE_STB
-    #define STB_IMAGE_IMPLEMENTATION
     #include <stb_image.h>
 #endif
 
@@ -76,7 +77,8 @@ void print_usage(const char* program_name) {
               << "  " << program_name << " --po1 RandomResizedCrop --po2 RandomHorizontalFlip --size 224\n"
               << "  " << program_name << " --po1 Resize --po2 CenterCrop --size 128 --seed 123\n"
               << "  " << program_name << " --po1 CenterCrop --po2 ColorJitter --size 224\n"
-              << "  " << program_name << " --po1 RandomCrop --po2 Pad --size 224\n";
+              << "  " << program_name << " --po1 RandomCrop --po2 Pad --size 224\n"
+              << "Command Sample: /root/epfs/R/renaissance/build/bin/tests/pw/test_two_po --po1 CenterCrop --po2 ColorJitter --input /root/epfs/R/renaissance/input.jpg --output /root/epfs/R/renaissance/workspace --size 224 --seed 42\n\n";
 }
 
 /**
@@ -410,6 +412,9 @@ std::unique_ptr<PreprocessOperation> create_po(const std::string& name, int size
 // =============================================================================
 
 int main(int argc, char* argv[]) {
+    // 初始化框架（必须在所有其他操作之前）
+    INIT_FRAMEWORK("GPU");
+
     // 解析参数
     std::string input_path = "input.jpg";
     std::string output_path = "workspace/output_two_po.jpg";

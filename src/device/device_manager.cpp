@@ -8,6 +8,7 @@
  */
 
 #include "renaissance/device/device_manager.h"
+#include "renaissance/base/global_registry.h"
 #include "renaissance/device/cpu_device.h"
 
 #ifdef TR_USE_CUDA
@@ -28,6 +29,18 @@ DeviceManager& DeviceManager::instance() noexcept {
 }
 
 DeviceManager::DeviceManager() {
+    // 检查用户是否已调用 Initializer::init()
+    TR_CHECK(GlobalRegistry::instance().initializer_inited(),
+             ValueError,
+             "DeviceManager constructor called before framework initialization\n"
+             "  You must call INIT_FRAMEWORK() at the beginning of main() before using any framework components\n"
+             "  Example:\n"
+             "    int main() {\n"
+             "        INIT_FRAMEWORK();  // Must be first!\n"
+             "        // ... rest of your code ...\n"
+             "        return 0;\n"
+             "    }");
+
     LOG_INFO << "Initializing DeviceManager...";
     initialize();
     LOG_INFO << "DeviceManager initialized. CUDA: " << cuda_count_
@@ -383,5 +396,19 @@ void DeviceManager::cleanup_nccl() {
     LOG_INFO << "NCCL cleaned up";
 }
 #endif
+
+void DeviceManager::init() {
+    // 空实现：实际初始化由构造函数调用 initialize() 完成
+}
+
+void DeviceManager::cleanup() {
+#ifdef TR_USE_NCCL
+    // 清理NCCL资源（如果已激活）
+    if (nccl_active_) {
+        cleanup_nccl();
+    }
+#endif
+    // 其他资源由析构函数自动处理
+}
 
 } // namespace tr

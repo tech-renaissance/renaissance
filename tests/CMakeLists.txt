@@ -69,6 +69,71 @@ message(STATUS "=== Unit Tests Configuration ===")
 message(STATUS "Unit tests will be built in: ${TESTS_OUTPUT_DIR}")
 
 # ============================================================================
+# Windows DLL 复制函数（必须在 add_subdirectory 之前定义）
+# ============================================================================
+
+if(WIN32)
+    # 为所有测试目标复制所需的 DLL 到输出目录
+    function(copy_test_dlls target_name)
+        # 收集需要复制的 DLL
+        set(DLLS_TO_COPY "")
+
+        # 1. cuDNN DLL（如果使用了CUDA）
+        if(TR_USE_CUDA AND DEFINED TR_CUDNN_PATH)
+            # 查找 cuDNN bin 目录（支持 9.x 的版本子目录结构）
+            file(GLOB CUDNN_VERSION_DIRS "${TR_CUDNN_PATH}/bin/*")
+            foreach(CUDNN_VER_DIR ${CUDNN_VERSION_DIRS})
+                if(IS_DIRECTORY ${CUDNN_VER_DIR})
+                    # 查找架构子目录
+                    file(GLOB CUDNN_ARCH_DIRS "${CUDNN_VER_DIR}/*")
+                    foreach(CUDNN_ARCH_DIR ${CUDNN_ARCH_DIRS})
+                        if(IS_DIRECTORY ${CUDNN_ARCH_DIR})
+                            # 找到 cudnn64_9.dll
+                            if(EXISTS "${CUDNN_ARCH_DIR}/cudnn64_9.dll")
+                                list(APPEND DLLS_TO_COPY "${CUDNN_ARCH_DIR}/cudnn64_9.dll")
+                                break()
+                            endif()
+                        endif()
+                    endforeach()
+                    if(DLLS_TO_COPY)
+                        break()
+                    endif()
+                endif()
+            endforeach()
+
+            # 如果没找到，尝试直接在 bin 目录查找
+            if(NOT DLLS_TO_COPY AND EXISTS "${TR_CUDNN_PATH}/bin/cudnn64_9.dll")
+                list(APPEND DLLS_TO_COPY "${TR_CUDNN_PATH}/bin/cudnn64_9.dll")
+            endif()
+        endif()
+
+        # 2. libcurl DLL（如果使用了libcurl）
+        if(TR_USE_LIBCURL AND DEFINED TR_CURL_PATH)
+            # vcpkg 的 libcurl DLL 在 bin 目录
+            if(EXISTS "${TR_CURL_PATH}/bin/libcurl.dll")
+                list(APPEND DLLS_TO_COPY "${TR_CURL_PATH}/bin/libcurl.dll")
+            elseif(EXISTS "${TR_CURL_PATH}/x64/bin/libcurl.dll")
+                # 某些 vcpkg 版本可能使用 x64 子目录
+                list(APPEND DLLS_TO_COPY "${TR_CURL_PATH}/x64/bin/libcurl.dll")
+            endif()
+        endif()
+
+        # 复制所有找到的 DLL
+        if(DLLS_TO_COPY)
+            foreach(dll_path ${DLLS_TO_COPY})
+                add_custom_command(TARGET ${target_name} POST_BUILD
+                    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                        "${dll_path}"
+                        $<TARGET_FILE_DIR:${target_name}>
+                    COMMENT "Copying ${dll_path} to output directory"
+                )
+            endforeach()
+            message(STATUS "DLLs configured for ${target_name}: ${DLLS_TO_COPY}")
+        endif()
+    endfunction()
+endif()
+
+# ============================================================================
 # 包含dependency子目录（依赖库Hello World测试）
 # ============================================================================
 
@@ -218,5 +283,4 @@ endif()
 
 # ============================================================================
 
-message(STATUS "=== Unit Tests Configuration Complete ===")
 message(STATUS "=== Unit Tests Configuration Complete ===")

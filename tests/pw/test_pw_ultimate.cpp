@@ -24,6 +24,7 @@ void print_usage(const char* program_name) {
               << "Optional Options:\n"
               << "  --format <fmt>       Dataset format: raw, dts (default: raw)\n"
               << "  --mode <MODE>        DataLoader mode: fully, partial (default: partial)\n"
+              << "  --shuffle            Enable shuffle train data (default: disabled)\n"
               << "  --lv <0-3>           DTS compression level (default: 0)\n"
               << "  --cpu-bind           Enable CPU binding (default: disabled)\n"
               << "  --batch-size <N>     Batch size (default: 256)\n"
@@ -86,7 +87,9 @@ void print_usage(const char* program_name) {
               << "  " << program_name << " --dataset mnist --path /data/mnist --format raw --mode fully --po-train1 Resize\n"
               << "  " << program_name << " --dataset cifar10 --path /data/cifar --po-train1 CenterCrop --sdmp 3 --epoch 2\n"
               << "  " << program_name << " --dataset imagenet --path /data/imagenet --po-train1 RandomResizedCrop --reproducible\n\n"
-              << "Note: This test uses Preprocessor NORMAL mode (with EngineBuffer)\n";
+              << "Note: This test uses Preprocessor NORMAL mode (with EngineBuffer)\n\n"
+              << "Command Sample: /root/epfs/R/renaissance/build/bin/tests/pw/test_progressive_resolution --path /root/epfs/dataset/mnist --reproducible\n"
+              << "Command Sample: /root/epfs/R/renaissance/build/bin/tests/pw/test_pw_ultimate --dataset imagenet --path /root/epfs/dataset/imagenet --format raw --lv 0 --mode fully --cpu-bind --batch-size 512 --resolution 224 --loaders 16 --preproc 112 --device GPU --gpu-ids \"0,1,2,3,4,5,6,7\" --epoch 28 --po-train1 FastRandomResizedCrop --po-train2 RandomHorizontalFlip --po-val1 Resize --po-val2 CenterCrop --seed 42 --sdmp 2 --cpvs true\n\n";
 }
 
 /**
@@ -256,6 +259,7 @@ int main(int argc, char* argv[]) {
     std::string format_arg = "raw";
     std::string mode_arg = "partial";
     int compression_level = 0;
+    bool shuffle_train = false;  // 是否打乱训练集数据
     bool auto_cpu_binding = false;
     int batch_size = 256;
     bool using_cpvs = false;
@@ -316,6 +320,8 @@ int main(int argc, char* argv[]) {
             format_arg = argv[++i];
         } else if (arg == "--mode" && i + 1 < argc) {
             mode_arg = argv[++i];
+        } else if (arg == "--shuffle") {
+            shuffle_train = true;
         } else if (arg == "--lv" && i + 1 < argc) {
             compression_level = std::stoi(argv[++i]);
             if (compression_level < 0 || compression_level > 3) {
@@ -491,32 +497,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    // 配置Preprocessor
-    auto& prep = Preprocessor::instance();
-
-    // 步骤1：配置数据集
-    std::cout << "\n=== Configuring Dataset ===\n";
-    std::cout << "Dataset: " << dataset_type_str;
-    std::cout << "\nFormat: " << (use_dts ? "DTS" : "RAW");
-    if (use_dts) {
-        std::cout << " LV" << compression_level;
-    }
-    std::cout << "\nPath: " << dataset_path << "\n";
-    prep.config_dataset(dataset_type, use_dts, compression_level);
-
-    // 步骤2：配置DataLoader
-    std::cout << "\n=== Configuring DataLoader ===\n";
-    std::cout << "Load workers: " << num_load_workers << "\n";
-    std::cout << "Preprocess workers: " << num_preproc_workers << "\n";
-    std::cout << "Mode: " << (partial_mode ? "Partial" : "Fully") << "\n";
-    prep.config_dataloader(dataset_path,
-                          num_load_workers,
-                          num_preproc_workers,
-                          partial_mode,
-                          false, // shuffle_train（确保可复现）
-                          false); // download
-
-    // 步骤2.5：计算正确的max_resolution（基于PO链最终输出）
+    // 计算正确的max_resolution（基于PO链最终输出）
     std::cout << "\n=== Calculating Max Resolution ===\n";
     int train_final_output = calculate_po_chain_final_output(po_train1, po_train2, resolution);
     int val_final_output = calculate_po_chain_final_output(po_val1, po_val2, resolution);
@@ -526,97 +507,100 @@ int main(int argc, char* argv[]) {
     std::cout << "Val PO chain final output: " << val_final_output << "\n";
     std::cout << "Calculated max_resolution: " << calculated_max_resolution << "\n";
 
-    // 步骤3：配置Preprocessor（使用计算出的max_resolution）
-    std::cout << "\n=== Configuring Preprocessor ===\n";
+    // 输出配置信息
+    std::cout << "\n=== Configuration Summary ===\n";
+    std::cout << "Dataset: " << dataset_type_str;
+    std::cout << "\nFormat: " << (use_dts ? "DTS" : "RAW");
+    if (use_dts) {
+        std::cout << " LV" << compression_level;
+    }
+    std::cout << "\nPath: " << dataset_path << "\n";
+    std::cout << "Load workers: " << num_load_workers << "\n";
+    std::cout << "Preprocess workers: " << num_preproc_workers << "\n";
+    std::cout << "Mode: " << (partial_mode ? "Partial" : "Fully") << "\n";
+    std::cout << "Shuffle train: " << (shuffle_train ? "enabled" : "disabled") << "\n";
     std::cout << "Resolution parameter: " << resolution << "\n";
     std::cout << "Calculated max_resolution: " << calculated_max_resolution << "\n";
     std::cout << "Batch size: " << batch_size << "\n";
     std::cout << "SDMP factor: " << sdmp_factor << "\n";
     std::cout << "CPVS: " << (using_cpvs ? "enabled" : "disabled") << "\n";
     std::cout << "Device: " << device_type << "\n";
+    if (device_type == "GPU" && !gpu_ids_str.empty()) {
+        std::cout << "GPU IDs: " << gpu_ids_str << "\n";
+    }
+    std::cout << "CPU binding: " << (auto_cpu_binding ? "enabled" : "disabled") << "\n";
     std::cout << "Test mode: false (NORMAL mode with EngineBuffer)\n";
 
-    prep.config_preprocessor(
-        -1,     // world_size（-1表示由config_device自动设置）
-        batch_size,
-        calculated_max_resolution,  // 使用计算出的max_resolution
-        3,      // num_color_channels
-        sdmp_factor,
-        using_cpvs,
-        false   // pw_test_mode（false = NORMAL mode）
-    );
-
-    // 配置Device
-    if (device_type == "GPU" && !gpu_ids_str.empty()) {
-        // 显式指定GPU ID列表
-        prep.config_device(device_type, gpu_ids_str, auto_cpu_binding);
-        std::cout << "GPU IDs: " << gpu_ids_str << "\n";
-    } else {
-        // 使用默认GPU或CPU
-        prep.config_device(device_type, auto_cpu_binding);
-    }
-
-    // 步骤4：设置数据变换
+    // 创建PO对象
     std::cout << "\n=== Setting Transforms ===\n";
 
-    // Train transforms
+    // Train PO 1（必需）
     std::cout << "Train PO 1: " << po_train1 << " (" << resolution << ")\n";
     auto train_po1 = create_resize_crop_po(po_train1, resolution, scale_min, scale_max,
                                            ratio_min, ratio_max);
     if (!train_po1) return 1;
 
-    if (!po_train2.empty()) {
-        std::cout << "Train PO 2: " << po_train2;
-        if (is_resize_or_crop_po(po_train2)) {
-            std::cout << " (" << resolution << ")\n";
-            auto train_po2 = create_resize_crop_po(po_train2, resolution, scale_min, scale_max,
-                                                   ratio_min, ratio_max);
-            if (!train_po2) return 1;
-            prep.set_train_transforms(*train_po1, *train_po2);
-        } else {
-            std::cout << " (inference from previous PO)\n";
-            auto train_po2 = create_po(po_train2, scale_min, scale_max,
-                                       ratio_min, ratio_max, flip_prob,
-                                       brightness, contrast, saturation, hue, degrees, fill, autocontrast_p,
-                                       blur_sigma_min, blur_sigma_max, grayscale_p,
-                                       noise_mean, noise_sigma);
-            if (!train_po2) return 1;
-            prep.set_train_transforms(*train_po1, *train_po2);
-        }
+    // Train PO 2（可选，如果为空则使用DoNothing）
+    std::unique_ptr<PreprocessOperation> train_po2;
+    if (po_train2.empty()) {
+        std::cout << "Train PO 2: DoNothing (default)\n";
+        train_po2 = std::make_unique<DoNothing>();
     } else {
-        prep.set_train_transforms(*train_po1);
+        std::cout << "Train PO 2: " << po_train2 << "\n";
+        train_po2 = is_resize_or_crop_po(po_train2)
+            ? create_resize_crop_po(po_train2, resolution, scale_min, scale_max, ratio_min, ratio_max)
+            : create_po(po_train2, scale_min, scale_max, ratio_min, ratio_max, flip_prob,
+                       brightness, contrast, saturation, hue, degrees, fill, autocontrast_p,
+                       blur_sigma_min, blur_sigma_max, grayscale_p, noise_mean, noise_sigma);
+        if (!train_po2) return 1;
     }
 
-    // Val transforms
+    // Val PO 1（必需）
     std::cout << "Val PO 1: " << po_val1 << " (" << resolution << ")\n";
     auto val_po1 = create_resize_crop_po(po_val1, resolution, scale_min, scale_max,
                                          ratio_min, ratio_max);
     if (!val_po1) return 1;
 
-    if (!po_val2.empty()) {
-        std::cout << "Val PO 2: " << po_val2;
-        if (is_resize_or_crop_po(po_val2)) {
-            std::cout << " (" << resolution << ")\n";
-            auto val_po2 = create_resize_crop_po(po_val2, resolution, scale_min, scale_max,
-                                                 ratio_min, ratio_max);
-            if (!val_po2) return 1;
-            prep.set_val_transforms(*val_po1, *val_po2);
-        } else {
-            std::cout << " (inference from previous PO)\n";
-            auto val_po2 = create_po(po_val2, scale_min, scale_max,
-                                     ratio_min, ratio_max, flip_prob,
-                                     brightness, contrast, saturation, hue, degrees, fill, autocontrast_p,
-                                     blur_sigma_min, blur_sigma_max, grayscale_p,
-                                     noise_mean, noise_sigma);
-            if (!val_po2) return 1;
-            prep.set_val_transforms(*val_po1, *val_po2);
-        }
+    // Val PO 2（可选，如果为空则使用DoNothing）
+    std::unique_ptr<PreprocessOperation> val_po2;
+    if (po_val2.empty()) {
+        std::cout << "Val PO 2: DoNothing (default)\n";
+        val_po2 = std::make_unique<DoNothing>();
     } else {
-        prep.set_val_transforms(*val_po1);
+        std::cout << "Val PO 2: " << po_val2 << "\n";
+        val_po2 = is_resize_or_crop_po(po_val2)
+            ? create_resize_crop_po(po_val2, resolution, scale_min, scale_max, ratio_min, ratio_max)
+            : create_po(po_val2, scale_min, scale_max, ratio_min, ratio_max, flip_prob,
+                       brightness, contrast, saturation, hue, degrees, fill, autocontrast_p,
+                       blur_sigma_min, blur_sigma_max, grayscale_p, noise_mean, noise_sigma);
+        if (!val_po2) return 1;
     }
 
     std::cout << "Random seed: " << random_seed << "\n";
-    prep.multi_thread_init();
+
+    // 获取Preprocessor实例（后续调用train()和val()需要）
+    auto& prep = Preprocessor::instance();
+
+    // 使用Setup构建器配置Preprocessor（统一调用，无需分支）
+    Preprocessor::setup()
+        .dataset(dataset_type_str, dataset_path)
+        .using_dts_format(use_dts, compression_level)
+        .batch_size(batch_size)
+        .max_output_resolution(calculated_max_resolution)
+        .color_channels(3)
+        .num_load_workers(num_load_workers)
+        .num_preproc_workers(num_preproc_workers)
+        .partial_mode(partial_mode)
+        .shuffle_train(shuffle_train)
+        .download(false)
+        .sdmp_factor(sdmp_factor)
+        .using_cpvs(using_cpvs)
+        .pw_test_mode(false)
+        .cpu_binding(auto_cpu_binding)
+        .device(device_type)
+        .train_transforms(*train_po1, *train_po2)
+        .val_transforms(*val_po1, *val_po2)
+        .commit();
 
     // 设置全局随机种子
     manual_seed(random_seed);

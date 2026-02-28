@@ -10,9 +10,13 @@
 
 #pragma once
 
+#include "renaissance/base/global_registry.h"
 #include "renaissance/data/data_loader.h"
-#include "renaissance/data/preprocess_worker.h"
+#include "renaissance/data/preprocess_operation.h"
+#include "renaissance/data/do_nothing.h"
+#include "renaissance/data/random_erasing.h"
 #include "renaissance/data/preprocess_worker_parameter.h"
+#include "renaissance/data/preprocess_worker.h"
 
 #if defined(TR_SCENE_GPU_CLOUD)
 #include "renaissance/data/hardware_topology.h"
@@ -30,6 +34,218 @@
 #include <memory>
 
 namespace tr {
+
+/**
+ * @class Setup
+ * @brief Preprocessor 配置构建器（流畅 API）
+ *
+ * 使用方法：
+ * \code
+ * Preprocessor::setup()
+ *     .dataset("imagenet", "/data/imagenet")
+ *     .batch_size(512)
+ *     .resolution(224)
+ *     .device("GPU")
+ *     .train_transforms(RandomResizedCrop(224), RandomHorizontalFlip())
+ *     .val_transforms(Resize(256), CenterCrop(224))
+ *     .commit();
+ * \endcode
+ */
+class Setup {
+public:
+    Setup();
+    ~Setup();
+
+    // 禁止拷贝，允许移动
+    Setup(const Setup&) = delete;
+    Setup& operator=(const Setup&) = delete;
+    Setup(Setup&&) noexcept;
+    Setup& operator=(Setup&&) noexcept;
+
+    // =========================================================================
+    // 方式1：结构体参数（适合复杂配置）
+    // =========================================================================
+
+    /**
+     * @brief 配置数据集（结构体版本）
+     */
+    Setup& dataset(const std::string& name, const std::string& path);
+
+    /**
+     * @brief 配置计算参数（结构体版本）
+     */
+    Setup& batch_size(int size);
+    Setup& max_output_resolution(int res);
+    Setup& color_channels(int ch);
+    Setup& num_load_workers(int num);
+    Setup& num_preproc_workers(int num);
+
+    /**
+     * @brief 配置设备类型（字符串版本，如 "GPU" 或 "CPU"）
+     */
+    Setup& device(const std::string& type_str);
+
+    /**
+     * @brief 配置 GPU ID 列表
+     */
+    Setup& gpu_ids(const std::vector<int>& ids);
+
+    /**
+     * @brief 配置 GPU ID 列表（字符串版本，如 "0,1,2,3"）
+     */
+    Setup& gpu_ids(const std::string& id_str);
+
+    /**
+     * @brief 配置 DTS 压缩级别（0-3，仅 DTS 格式有效）
+     */
+    Setup& using_dts_format(bool dts, int level = 0);
+
+    /**
+     * @brief 配置数据加载模式（PARTIAL vs FULLY）
+     */
+    Setup& partial_mode(bool partial);
+
+    /**
+     * @brief 配置是否打乱训练集数据
+     */
+    Setup& shuffle_train(bool shuffle);
+
+    /**
+     * @brief 配置是否自动下载数据集
+     */
+    Setup& download(bool enable);
+
+    /**
+     * @brief 配置 SDMP（Stale Data Multi-Phase）因子
+     */
+    Setup& sdmp_factor(int factor);
+
+    /**
+     * @brief 配置是否使用 CPVS（Cached Preprocessed Validation Set）
+     */
+    Setup& using_cpvs(bool enable);
+
+    /**
+     * @brief 配置是否启用 PW 测试模式
+     */
+    Setup& pw_test_mode(bool enable);
+
+    /**
+     * @brief 配置最大中间分辨率（-1=自动计算）
+     */
+    Setup& max_intermediate_resolution(int res);
+
+    /**
+     * @brief 配置是否丢弃最后一个不完整的 batch
+     */
+    Setup& drop_last(bool enable);
+
+    /**
+     * @brief 配置是否使用渐进式分辨率
+     */
+    Setup& using_progressive_resolution(bool enable);
+
+    /**
+     * @brief 配置是否启用 CPU 绑核
+     */
+    Setup& cpu_binding(bool enable);
+
+    // =========================================================================
+    // Transforms 配置
+    // =========================================================================
+
+    /**
+     * @brief 配置训练集数据变换
+     * @tparam Ops PreprocessOperation 类型（自动推导）
+     */
+    template<typename... Ops>
+    Setup& train_transforms(Ops&&... ops) {
+        store_train_ops(std::forward<Ops>(ops)...);
+        return *this;
+    }
+
+    /**
+     * @brief 配置验证集数据变换
+     * @tparam Ops PreprocessOperation 类型（自动推导）
+     */
+    template<typename... Ops>
+    Setup& val_transforms(Ops&&... ops) {
+        store_val_ops(std::forward<Ops>(ops)...);
+        return *this;
+    }
+
+    // =========================================================================
+    // 提交配置
+    // =========================================================================
+
+    /**
+     * @brief 验证配置完整性，并按内部状态机正确顺序一次性应用所有配置
+     * @throws TRException::ConfigError 如果配置不完整或参数非法
+     */
+    void commit();
+
+private:
+    friend class Preprocessor;
+
+    /**
+     * @brief 内部状态（Pimpl 模式）
+     */
+    struct State {
+        // 数据集配置
+        std::string dataset_name;
+        std::string dataset_path;
+        bool using_dts_format = false;
+        int dts_compression_level = 0;
+
+        // 计算配置
+        int batch_size = -1;
+        int max_output_resolution = -1;
+        int color_channels = 3;
+        int num_load_workers = 1;
+        int num_preproc_workers = 1;
+
+        // 设备配置
+        std::string device_type_str;
+        std::vector<int> gpu_ids;
+        bool cpu_binding = true;
+
+        // 高级参数
+        bool partial_mode = true;
+        bool shuffle_train = true;
+        bool download = false;
+        int sdmp_factor = 1;
+        bool using_cpvs = false;
+        bool pw_test_mode = false;
+        int max_intermediate_resolution = -1;
+        bool drop_last = false;
+        bool using_progressive_resolution = false;
+
+        // Transforms
+        std::vector<std::unique_ptr<PreprocessOperation>> train_ops;
+        std::vector<std::unique_ptr<PreprocessOperation>> val_ops;
+
+        // 状态标志
+        bool committed = false;
+    };
+
+    std::unique_ptr<State> state_;
+
+    /**
+     * @brief 存储训练集 transforms（模板实现）
+     */
+    template<typename... Ops>
+    void store_train_ops(Ops&&... ops) {
+        (state_->train_ops.push_back(std::forward<Ops>(ops).clone()), ...);
+    }
+
+    /**
+     * @brief 存储验证集 transforms（模板实现）
+     */
+    template<typename... Ops>
+    void store_val_ops(Ops&&... ops) {
+        (state_->val_ops.push_back(std::forward<Ops>(ops).clone()), ...);
+    }
+};
 
 /**
  * @class Preprocessor
@@ -84,6 +300,30 @@ public:
      */
     static Preprocessor& instance();
 
+    // =========================================================================
+    // 新 API（流畅配置模式）
+    // =========================================================================
+
+    /**
+     * @brief 开始配置流程，返回 Setup 构建器
+     * @return Setup 对象，支持链式调用
+     *
+     * @example
+     *   Preprocessor::setup()
+     *       .dataset("imagenet", "/data/imagenet")
+     *       .batch_size(512)
+     *       .resolution(224)
+     *       .device(DeviceType::GPU)
+     *       .train_transforms(RandomResizedCrop(224), RandomHorizontalFlip())
+     *       .val_transforms(Resize(256), CenterCrop(224))
+     *       .commit();
+     *
+     *   // 运行训练
+     *   Preprocessor::instance().run_train();
+     *   Preprocessor::instance().run_val();
+     */
+    static Setup setup();  // 实现在 preprocessor.cpp 中
+
 private:
     /**
      * @brief 构造函数（私有，单例模式）
@@ -95,13 +335,18 @@ private:
      */
     ~Preprocessor();
 
+    // =========================================================================
+    // 友元声明
+    // =========================================================================
+
+    friend class Setup;
+
     // 禁止拷贝和移动
     Preprocessor(const Preprocessor&) = delete;
     Preprocessor& operator=(const Preprocessor&) = delete;
     Preprocessor(Preprocessor&&) = delete;
     Preprocessor& operator=(Preprocessor&&) = delete;
 
-public:
     // =========================================================================
     // 新配置方法（状态机）
     // =========================================================================
@@ -137,17 +382,20 @@ public:
                              bool using_cpvs = false,
                              bool pw_test_mode = false,
                              bool using_progressive_resolution = false,
-                             int max_intermediate_resolution = -1);
+                             int max_intermediate_resolution = -1,
+                             bool drop_last = false);
 
     // 步骤4：设置数据变换
-    template<typename... Ops>
-    void set_train_transforms(Ops&&... ops);
+    void set_train_transforms(const std::vector<std::unique_ptr<PreprocessOperation>>& train_transforms);
 
-    template<typename... Ops>
-    void set_val_transforms(Ops&&... ops);
+    void set_val_transforms(const std::vector<std::unique_ptr<PreprocessOperation>>& val_transforms);
 
-    // Deployment模式专用
     void set_deployment_transforms();  // TODO: 后续实现
+
+    // 辅助函数（供模板函数使用）
+    static bool is_do_nothing(const PreprocessOperation* op);
+    static bool is_crop_or_resize_op(const PreprocessOperation* op);
+    static bool is_random_horizontal_flip(const PreprocessOperation* op);
 
     // =========================================================================
     // 设备配置方法（DeviceConfigured状态）
@@ -199,6 +447,7 @@ public:
      */
     void multi_thread_init();
 
+public:
     // 训练一个epoch（= begin_epoch + run + end_epoch）
     void train();
 
@@ -379,6 +628,22 @@ public:
         }
     };
 
+    // =========================================================================
+    // Initializer接口
+    // =========================================================================
+
+    /**
+     * @brief 初始化（供Initializer调用）
+     * @details 空实现，保留接口一致性
+     */
+    void init();
+
+    /**
+     * @brief 清理（供Initializer调用）
+     * @details 空实现，保留接口一致性
+     */
+    void cleanup();
+
 private:
     // =========================================================================
     // 新成员变量（统一配置）
@@ -391,6 +656,7 @@ private:
     // DataLoader配置（保存线程数）
     int num_load_workers_;       // IO线程数
     int num_preproc_workers_;    // 预处理线程数
+    bool partial_mode_ = false;    // 预处理线程数
 
     // Preprocessor配置
     int world_size_;
@@ -520,6 +786,9 @@ private:
     // 判断是否是ImageNet数据集
     bool is_imagenet() const;
 
+    // 等待所有EngineBuffer被深度学习引擎消耗完毕（用于phase结束检查）
+    void wait_all_engine_buffers_consumed();
+
     /**
      * @brief Worker解码缓冲区（V4.1 - 增加RandomResizedCrop支持）
      */
@@ -644,7 +913,7 @@ private:
     void start_worker_pool(DataLoader& loader);
     void stop_worker_pool();
     void notify_workers_new_buffer();
-    void wait_workers_complete_buffer();
+    void wait_workers_complete_buffer(bool wait_forever = false);
     void worker_func_persistent(int worker_id, DataLoader& loader);
 
     // =========================================================================
@@ -713,6 +982,8 @@ private:
     int max_intermediate_resolution_ = 0;
     bool workshop_size_calculated_ = false;
     uint64_t global_initial_seed_ = 0;
+
+// ============================================================================
 };
 
 } // namespace tr

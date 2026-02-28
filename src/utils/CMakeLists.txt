@@ -12,6 +12,7 @@ message(STATUS "=== Utils Library Configuration ===")
 # 创建utils库
 add_library(utils STATIC
     profiler.cpp
+    initializer.cpp
 )
 
 # 添加头文件路径

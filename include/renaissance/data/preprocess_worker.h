@@ -482,6 +482,7 @@ private:
     size_t dataset_total_train_samples_ = 0;  ///< 训练集样本总数（从GlobalRegistry复制）
     size_t dataset_total_val_samples_ = 0;    ///< 验证集样本总数（从GlobalRegistry复制）
     bool is_deployment_mode_ = false;     ///< 是否为Deployment模式（从GlobalRegistry复制）
+    bool require_shuffle_ = false;
 
     // =========================================================================
     // 内部方法
