@@ -31,9 +31,9 @@ add_executable(test_pw_ultimate
 # 链接renaissance库（但data.lib中的engine_buffer.cpp会被上面的覆盖）
 target_link_libraries(test_pw_ultimate PRIVATE renaissance)
 
-# 为engine_buffer.cpp源文件单独定义宏
-set_source_files_properties(${CMAKE_SOURCE_DIR}/src/data/engine_buffer.cpp PROPERTIES
-    COMPILE_DEFINITIONS "FOR_ENGINE_BUFFER_UNIT_TESTS_ONLY"
+# 为test_pw_ultimate目标定义宏
+target_compile_definitions(test_pw_ultimate PRIVATE
+    FOR_ENGINE_BUFFER_UNIT_TESTS_ONLY
 )
 
 # 添加data库所需的额外包含目录
@@ -64,9 +64,11 @@ add_executable(test_engine_crc
 # 链接renaissance库（但data.lib中的engine_buffer.cpp会被上面的覆盖）
 target_link_libraries(test_engine_crc PRIVATE renaissance)
 
-# 为engine_buffer.cpp源文件单独定义宏
-set_source_files_properties(${CMAKE_SOURCE_DIR}/src/data/engine_buffer.cpp PROPERTIES
-    COMPILE_DEFINITIONS "VERIFY_ENGINE_BUFFER_CRC;FOR_ENGINE_BUFFER_UNIT_TESTS_ONLY;ENGINE_BUFFER_SAVE_FIRST_IMAGE"
+# 为test_engine_crc目标定义宏（开启所有三个功能）
+target_compile_definitions(test_engine_crc PRIVATE
+    VERIFY_ENGINE_BUFFER_CRC
+    FOR_ENGINE_BUFFER_UNIT_TESTS_ONLY
+    ENGINE_BUFFER_SAVE_FIRST_IMAGE
 )
 
 # 添加data库所需的额外包含目录
@@ -97,9 +99,10 @@ add_executable(test_progressive_resolution
 # 链接renaissance库（但data.lib中的engine_buffer.cpp会被上面的覆盖）
 target_link_libraries(test_progressive_resolution PRIVATE renaissance)
 
-# 为engine_buffer.cpp源文件单独定义宏
-set_source_files_properties(${CMAKE_SOURCE_DIR}/src/data/engine_buffer.cpp PROPERTIES
-    COMPILE_DEFINITIONS "FOR_ENGINE_BUFFER_UNIT_TESTS_ONLY;ENGINE_BUFFER_SAVE_FIRST_IMAGE"
+# 为test_progressive_resolution目标定义宏（仅开启图像保存和单元测试）
+target_compile_definitions(test_progressive_resolution PRIVATE
+    FOR_ENGINE_BUFFER_UNIT_TESTS_ONLY
+    ENGINE_BUFFER_SAVE_FIRST_IMAGE
 )
 
 # 添加data库所需的额外包含目录
@@ -130,9 +133,9 @@ add_executable(test_dataloader_performance
 # 链接renaissance库（但data.lib中的preprocessor.cpp会被上面的覆盖）
 target_link_libraries(test_dataloader_performance PRIVATE renaissance)
 
-# 为preprocessor.cpp源文件定义TEST_WITHOUT_PW宏
-set_source_files_properties(${CMAKE_SOURCE_DIR}/src/data/preprocessor.cpp PROPERTIES
-    COMPILE_DEFINITIONS "TEST_WITHOUT_PW"
+# 为test_dataloader_performance目标定义TEST_WITHOUT_PW宏
+target_compile_definitions(test_dataloader_performance PRIVATE
+    TEST_WITHOUT_PW
 )
 
 # 添加data库所需的额外包含目录
@@ -163,9 +166,9 @@ add_executable(test_epoch_crc
 # 链接renaissance库（但data.lib中的preprocessor.cpp会被上面的覆盖）
 target_link_libraries(test_epoch_crc PRIVATE renaissance)
 
-# 为preprocessor.cpp源文件定义TEST_WITHOUT_PW宏
-set_source_files_properties(${CMAKE_SOURCE_DIR}/src/data/preprocessor.cpp PROPERTIES
-    COMPILE_DEFINITIONS "TEST_WITHOUT_PW"
+# 为test_epoch_crc目标定义TEST_WITHOUT_PW宏
+target_compile_definitions(test_epoch_crc PRIVATE
+    TEST_WITHOUT_PW
 )
 
 # 添加data库所需的额外包含目录

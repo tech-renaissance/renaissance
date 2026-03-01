@@ -49,7 +49,7 @@ void print_usage(const char* program_name) {
               << "  " << program_name << " --dataset cifar10 --path /data/cifar --val-first --epoch 3\n"
               << "  " << program_name << " --dataset cifar10 --path /data/cifar --po-train1 RandomResizedCrop --reproducible\n\n"
               << "Note: CRC files will be saved to " TR_WORKSPACE "/eb_[engine_id]_[train/val]_[epoch].csv\n"
-              << "Command Sample: /root/epfs/R/renaissance/build/bin/tests/pw/test_engine_crc --dataset mnist --path /root/epfs/dataset/mnist --format raw --batch-size 256 --cpvs --sdmp 2 --shuffle --reproducible --epoch 3 --resolution 28 --po-train1 DoNothing --po-train2 DoNothing --preproc 112 --device GPU --gpu-ids \"0,1,2,3,4,5,6,7\" --seed 42\n\n";
+              << "Command Sample: /root/epfs/R/renaissance/build/bin/tests/pw/test_engine_crc --dataset mnist --path /root/epfs/dataset/mnist --format raw --batch-size 256 --cpvs true --sdmp 2 --shuffle --reproducible --epoch 3 --resolution 28 --po-train1 DoNothing --po-train2 DoNothing --preproc 112 --device GPU --gpu-ids \"0,1,2,3,4,5,6,7\" --seed 42\n\n";
 }
 
 /**
