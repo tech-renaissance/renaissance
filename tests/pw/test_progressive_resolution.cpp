@@ -192,16 +192,14 @@ int main(int argc, char* argv[]) {
         .using_progressive_resolution(true)  // 重要！必须有这句才能使得PW动态更新PO的输出分辨率！
         .max_intermediate_resolution(max_intermediate_resolution)
         .color_channels(1)  // MNIST是灰度图
-        .num_load_workers(num_load_workers)
-        .num_preproc_workers(num_preproc_workers)
-        .partial_mode(partial_mode)
+        .load_workers(num_load_workers)
+        .preprocess_workers(num_preproc_workers)
+        .fully_mode(!partial_mode)
         .shuffle_train(shuffle_train)
         .download(false)
         .sdmp_factor(sdmp_factor)
         .using_cpvs(using_cpvs)
-        .pw_test_mode(false)
         .cpu_binding(false)
-        .device(device_type)
         .train_transforms(*train_po1, *train_po2)
         .val_transforms(*val_po1, *val_po2)
         .commit();

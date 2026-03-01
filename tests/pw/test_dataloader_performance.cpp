@@ -93,15 +93,13 @@ void test_config(const std::string& dataset_name,
         .batch_size(32)  // TEST_WITHOUT_PW模式可以使用小batch
         .max_output_resolution(224)
         .color_channels(3)
-        .num_load_workers(num_load_workers)
-        .num_preproc_workers(num_preproc_workers)
-        .partial_mode(partial_mode)
+        .load_workers(num_load_workers)
+        .preprocess_workers(num_preproc_workers)
+        .fully_mode(!partial_mode)
         .shuffle_train(true)  // 性能测试通常使用shuffle
         .download(false)
         .sdmp_factor(1)
         .using_cpvs(false)
-        .pw_test_mode(false)
-        .device("GPU")
         .train_transforms(*std::make_unique<DoNothing>())
         .val_transforms(*std::make_unique<DoNothing>())
         .commit();

@@ -25,6 +25,11 @@ GlobalRegistry& GlobalRegistry::instance() {
 // =============================================================================
 
 GlobalRegistry::GlobalRegistry() {
+    // 初始化EngineBuffer指针数组为16个nullptr
+    for (size_t i = 0; i < 16; ++i) {
+        alterable_engine_buffer_ptrs_[i].store(nullptr, std::memory_order_relaxed);
+    }
+
     LOG_DEBUG << "GlobalRegistry constructed";
 }
 
@@ -57,6 +62,8 @@ void GlobalRegistry::initialize() {
              ValueError, "fixed_sdmp_factor not set");
     TR_CHECK(fixed_using_cpvs_set_.load(std::memory_order_relaxed),
              ValueError, "fixed_using_cpvs not set");
+    TR_CHECK(fixed_require_normalization_set_.load(std::memory_order_relaxed),
+             ValueError, "fixed_require_normalization not set");
     TR_CHECK(fixed_using_drop_last_set_.load(std::memory_order_relaxed),
              ValueError, "fixed_using_drop_last not set");
     TR_CHECK(fixed_shuffle_train_set_.load(std::memory_order_relaxed),
@@ -67,6 +74,19 @@ void GlobalRegistry::initialize() {
              ValueError, "fixed_using_gpu not set");
     TR_CHECK(fixed_cpu_binding_enabled_set_.load(std::memory_order_relaxed),
              ValueError, "fixed_cpu_binding_enabled not set");
+
+    // 归一化参数检查（需要加锁）
+    {
+        std::lock_guard<std::mutex> lock(device_mutex_);
+
+        // 只有在require_normalization为true时，才检查mean和std
+        if (fixed_require_normalization_.load(std::memory_order_relaxed)) {
+            TR_CHECK(!fixed_normalize_mean_.empty(), ValueError,
+                     "fixed_normalize_mean_ not set (require_normalization is true)");
+            TR_CHECK(!fixed_normalize_std_.empty(), ValueError,
+                     "fixed_normalize_std_ not set (require_normalization is true)");
+        }
+    }
 
     // 所有检查通过，设置initialized标志
     initialized_.store(true, std::memory_order_release);
@@ -416,6 +436,39 @@ void GlobalRegistry::set_using_cpvs(bool value) {
 
 bool GlobalRegistry::using_cpvs() const {
     return fixed_using_cpvs_.load(std::memory_order_relaxed);
+}
+
+void GlobalRegistry::set_require_normalization(bool value) {
+    bool old_value = fixed_require_normalization_.load(std::memory_order_relaxed);
+    bool old_set = fixed_require_normalization_set_.load(std::memory_order_relaxed);
+
+    // 检查是否是首次赋值
+    if (!old_set) {
+        fixed_require_normalization_.store(value, std::memory_order_release);
+        fixed_require_normalization_set_.store(true, std::memory_order_release);
+        LOG_INFO << "GlobalRegistry: fixed_require_normalization set to " << (value ? "true" : "false");
+        return;
+    }
+
+    // 检查是否已经初始化
+    if (initialized_.load(std::memory_order_acquire)) {
+        TR_VALUE_ERROR("Cannot modify fixed_require_normalization after initialization. "
+                      "Current value: " << (old_value ? "true" : "false")
+                      << ", Attempted value: " << (value ? "true" : "false"));
+    }
+
+    // 检查是否是幂等赋值
+    if (old_value == value) {
+        return;
+    }
+
+    TR_VALUE_ERROR("Cannot modify fixed_require_normalization after first assignment. "
+                  "Current value: " << (old_value ? "true" : "false")
+                  << ", Attempted value: " << (value ? "true" : "false"));
+}
+
+bool GlobalRegistry::require_normalization() const {
+    return fixed_require_normalization_.load(std::memory_order_relaxed);
 }
 
 void GlobalRegistry::set_using_drop_last(bool value) {
@@ -784,6 +837,72 @@ void GlobalRegistry::set_cpu_binding_map(const std::vector<int>& map) {
 const std::vector<int>& GlobalRegistry::cpu_binding_map() const {
     std::lock_guard<std::mutex> lock(device_mutex_);
     return fixed_cpu_binding_map_;
+}
+
+void GlobalRegistry::set_normalize_mean(const std::vector<float>& mean) {
+    std::lock_guard<std::mutex> lock(device_mutex_);
+
+    if (fixed_normalize_mean_.empty()) {
+        fixed_normalize_mean_ = mean;
+        std::string mean_str = "[";
+        for (size_t i = 0; i < mean.size(); ++i) {
+            if (i > 0) mean_str += ", ";
+            mean_str += std::to_string(mean[i]);
+        }
+        mean_str += "]";
+        LOG_INFO << "GlobalRegistry: fixed_normalize_mean_ set to " << mean_str;
+        return;
+    }
+
+    if (initialized_.load(std::memory_order_acquire)) {
+        TR_VALUE_ERROR("Cannot modify fixed_normalize_mean_ after initialization");
+    }
+
+    if (fixed_normalize_mean_ == mean) {
+        return;  // 幂等赋值
+    }
+
+    TR_VALUE_ERROR("Cannot modify fixed_normalize_mean_ after first assignment");
+}
+
+const std::vector<float>& GlobalRegistry::normalize_mean() const {
+    std::lock_guard<std::mutex> lock(device_mutex_);
+    TR_CHECK(!fixed_normalize_mean_.empty(), ValueError,
+             "fixed_normalize_mean_ not set");
+    return fixed_normalize_mean_;
+}
+
+void GlobalRegistry::set_normalize_std(const std::vector<float>& std) {
+    std::lock_guard<std::mutex> lock(device_mutex_);
+
+    if (fixed_normalize_std_.empty()) {
+        fixed_normalize_std_ = std;
+        std::string std_str = "[";
+        for (size_t i = 0; i < std.size(); ++i) {
+            if (i > 0) std_str += ", ";
+            std_str += std::to_string(std[i]);
+        }
+        std_str += "]";
+        LOG_INFO << "GlobalRegistry: fixed_normalize_std_ set to " << std_str;
+        return;
+    }
+
+    if (initialized_.load(std::memory_order_acquire)) {
+        TR_VALUE_ERROR("Cannot modify fixed_normalize_std_ after initialization");
+    }
+
+    if (fixed_normalize_std_ == std) {
+        return;  // 幂等赋值
+    }
+
+    TR_VALUE_ERROR("Cannot modify fixed_normalize_std_ after first assignment");
+}
+
+const std::vector<float>& GlobalRegistry::normalize_std() const {
+    std::lock_guard<std::mutex> lock(device_mutex_);
+    TR_CHECK(!fixed_normalize_std_.empty(), ValueError,
+             "fixed_normalize_std_ not set");
+    return fixed_normalize_std_;
 }
 
 // =============================================================================
@@ -1213,6 +1332,43 @@ size_t GlobalRegistry::num_val_samples() const {
     size_t value = fixed_num_val_samples_.load(std::memory_order_relaxed);
     TR_CHECK(value > 0, ValueError, "fixed_num_val_samples not set");
     return value;
+}
+
+// =============================================================================
+// alterable变量：EngineBuffer指针数组
+// =============================================================================
+
+void GlobalRegistry::set_engine_buffer_ptr(size_t index, void* ptr) {
+    // 检查索引范围
+    TR_CHECK(index < 16, IndexError,
+             "EngineBuffer index out of range: " << index << " (max: 15)");
+
+    // 检查是否处于忙碌状态
+    TR_CHECK(!is_busy(), ValueError,
+             "Cannot modify alterable_engine_buffer_ptrs_[" << index << "] while busy. "
+             "is_busy() = true, train_counter_ = " << train_counter_.load(std::memory_order_relaxed)
+             << ", val_counter_ = " << val_counter_.load(std::memory_order_relaxed));
+
+    // 允许修改（包括设置为nullptr）
+    alterable_engine_buffer_ptrs_[index].store(ptr, std::memory_order_release);
+
+    if (ptr != nullptr) {
+        LOG_DEBUG << "GlobalRegistry: alterable_engine_buffer_ptrs_[" << index << "] set to " << ptr;
+    } else {
+        LOG_DEBUG << "GlobalRegistry: alterable_engine_buffer_ptrs_[" << index << "] set to nullptr";
+    }
+}
+
+void* GlobalRegistry::engine_buffer_ptr(size_t index) const {
+    // 检查索引范围
+    TR_CHECK(index < 16, IndexError,
+             "EngineBuffer index out of range: " << index << " (max: 15)");
+
+    return alterable_engine_buffer_ptrs_[index].load(std::memory_order_relaxed);
+}
+
+std::atomic<void*>* GlobalRegistry::engine_buffer_ptrs() const {
+    return const_cast<std::atomic<void*>*>(alterable_engine_buffer_ptrs_);
 }
 
 } // namespace tr
