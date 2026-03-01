@@ -251,6 +251,18 @@ public:
     bool using_cpvs() const;
 
     /**
+     * @brief 设置是否需要归一化
+     * @param value 是否需要归一化
+     * @throws TRException::ValueError 如果已初始化后修改或非幂等赋值
+     */
+    void set_require_normalization(bool value);
+
+    /**
+     * @brief 是否需要归一化
+     */
+    bool require_normalization() const;
+
+    /**
      * @brief 设置是否丢弃最后不完整batch
      * @param value 是否丢弃最后不完整batch
      * @throws TRException::ValueError 如果已初始化后修改或非幂等赋值
@@ -399,6 +411,32 @@ public:
     const std::vector<int>& cpu_binding_map() const;
 
     /**
+     * @brief 设置数据归一化均值向量
+     * @param mean 归一化均值向量（每个通道一个均值）
+     * @throws TRException::ValueError 如果已初始化后修改或非幂等赋值
+     */
+    void set_normalize_mean(const std::vector<float>& mean);
+
+    /**
+     * @brief 获取数据归一化均值向量
+     * @return 归一化均值向量的常量引用
+     */
+    const std::vector<float>& normalize_mean() const;
+
+    /**
+     * @brief 设置数据归一化标准差向量
+     * @param std 归一化标准差向量（每个通道一个标准差）
+     * @throws TRException::ValueError 如果已初始化后修改或非幂等赋值
+     */
+    void set_normalize_std(const std::vector<float>& std);
+
+    /**
+     * @brief 获取数据归一化标准差向量
+     * @return 归一化标准差向量的常量引用
+     */
+    const std::vector<float>& normalize_std() const;
+
+    /**
      * @brief 设置S区原始索引向量
      * @param indices 索引向量（内容应为[0, 1, 2, ..., max_s_samples-1]）
      * @throws TRException::ValueError 如果已初始化后修改或非幂等赋值
@@ -534,6 +572,34 @@ public:
     float random_erasing_p() const;
 
     // =========================================================================
+    // alterable变量：专属getter/setter方法（EngineBuffer指针数组）
+    // =========================================================================
+
+    /**
+     * @brief 设置EngineBuffer指针数组中的某个元素
+     * @param index 数组索引（0-15）
+     * @param ptr EngineBuffer指针
+     * @throws TRException::ValueError 如果is_busy() = true 或 index超出范围
+     * @note 该数组固定大小为16，存储16个PreprocessorWorker的EngineBuffer指针
+     */
+    void set_engine_buffer_ptr(size_t index, void* ptr);
+
+    /**
+     * @brief 获取EngineBuffer指针数组中的某个元素
+     * @param index 数组索引（0-15）
+     * @return EngineBuffer指针
+     * @throws TRException::IndexError 如果index超出范围
+     */
+    void* engine_buffer_ptr(size_t index) const;
+
+    /**
+     * @brief 获取EngineBuffer指针数组的指针
+     * @return 指向EngineBuffer指针数组的指针（固定大小16）
+     * @note 该数组固定大小为16
+     */
+    std::atomic<void*>* engine_buffer_ptrs() const;
+
+    // =========================================================================
     // 字符串命名方法
     // =========================================================================
 
@@ -617,6 +683,8 @@ private:
     std::atomic<int> fixed_sdmp_factor_{-1};                                   ///< SDMP因子
     std::atomic<bool> fixed_using_cpvs_{false};                                  ///< 是否使用CPVS
     std::atomic<bool> fixed_using_cpvs_set_{false};                             ///< CPVS是否已设置标志
+    std::atomic<bool> fixed_require_normalization_{false};                      ///< 是否需要归一化
+    std::atomic<bool> fixed_require_normalization_set_{false};                  ///< require_normalization是否已设置标志
     std::atomic<bool> fixed_using_drop_last_{false};                            ///< 是否丢弃最后不完整batch
     std::atomic<bool> fixed_using_drop_last_set_{false};                        ///< using_drop_last是否已设置标志
     std::atomic<bool> fixed_reproducibility_insurance_{false};                  ///< 可复现性保险
@@ -643,7 +711,9 @@ private:
     std::atomic<bool> fixed_cpu_binding_enabled_{false};                         ///< 是否启用CPU绑核
     std::atomic<bool> fixed_cpu_binding_enabled_set_{false};                    ///< CPU绑核是否已设置标志
     std::vector<int> fixed_cpu_binding_map_;                                     ///< CPU绑核映射表（需要mutex保护）
-    mutable std::mutex device_mutex_;                                            ///< 保护GPU IDs和绑核映射表的mutex
+    std::vector<float> fixed_normalize_mean_;                                     ///< 数据归一化均值向量（需要mutex保护）
+    std::vector<float> fixed_normalize_std_;                                     ///< 数据归一化标准差向量（需要mutex保护）
+    mutable std::mutex device_mutex_;                                            ///< 保护GPU IDs、绑核映射表、归一化参数的mutex
 
     // =========================================================================
     // S区洗牌索引向量
@@ -673,6 +743,8 @@ private:
     // =========================================================================
     // alterable型变量
     // =========================================================================
+
+    std::atomic<void*> alterable_engine_buffer_ptrs_[16];  ///< EngineBuffer指针数组（固定大小16，实际存储0-16个指针，未使用的为nullptr）
 
     std::atomic<int> alterable_current_resolution_train_{-1};  ///< 当前分辨率（初始值-1）
     std::atomic<int> alterable_current_resolution_val_{-1};  ///< 当前分辨率（初始值-1）

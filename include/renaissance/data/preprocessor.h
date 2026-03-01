@@ -32,6 +32,8 @@
 #include <mutex>
 #include <cmath>
 #include <memory>
+#include <array>
+#include <tuple>
 
 namespace tr {
 
@@ -76,59 +78,54 @@ public:
      */
     Setup& batch_size(int size);
     Setup& max_output_resolution(int res);
-    Setup& color_channels(int ch);
-    Setup& num_load_workers(int num);
-    Setup& num_preproc_workers(int num);
+    Setup& color_channels(int ch);  // 对于内置数据集，会自动设置颜色通道，无需调用，但调用了也无妨
+    Setup& load_workers(int num);
+    Setup& preprocess_workers(int num);
 
     /**
-     * @brief 配置设备类型（字符串版本，如 "GPU" 或 "CPU"）
-     */
-    Setup& device(const std::string& type_str);
-
-    /**
-     * @brief 配置 GPU ID 列表
+     * @brief 配置 GPU ID 列表。不设置的话就是自动选择所有可见GPU
      */
     Setup& gpu_ids(const std::vector<int>& ids);
 
     /**
-     * @brief 配置 GPU ID 列表（字符串版本，如 "0,1,2,3"）
+     * @brief 配置 GPU ID 列表（字符串版本，如 "0,1,2,3"）。不设置的话就是自动选择所有可见GPU
      */
     Setup& gpu_ids(const std::string& id_str);
 
     /**
      * @brief 配置 DTS 压缩级别（0-3，仅 DTS 格式有效）
      */
-    Setup& using_dts_format(bool dts, int level = 0);
+    Setup& using_dts_format(bool dts = true, int level = 0);
 
     /**
      * @brief 配置数据加载模式（PARTIAL vs FULLY）
      */
-    Setup& partial_mode(bool partial);
+    Setup& fully_mode(bool fully = true);
+
+    /**
+     * @brief 配置数据加载模式（PARTIAL vs FULLY）。不建议使用这个API，建议使用fully_mode()来配置，因为默认就是partial mode
+     */
+    Setup& partial_mode(bool partial = true);
 
     /**
      * @brief 配置是否打乱训练集数据
      */
-    Setup& shuffle_train(bool shuffle);
+    Setup& shuffle_train(bool shuffle = true);
 
     /**
      * @brief 配置是否自动下载数据集
      */
-    Setup& download(bool enable);
+    Setup& download(bool enable = true);
 
     /**
-     * @brief 配置 SDMP（Stale Data Multi-Phase）因子
+     * @brief 配置 SDMP（Single Decode Multiple Preprocess）因子
      */
     Setup& sdmp_factor(int factor);
 
     /**
      * @brief 配置是否使用 CPVS（Cached Preprocessed Validation Set）
      */
-    Setup& using_cpvs(bool enable);
-
-    /**
-     * @brief 配置是否启用 PW 测试模式
-     */
-    Setup& pw_test_mode(bool enable);
+    Setup& using_cpvs(bool enable = true);
 
     /**
      * @brief 配置最大中间分辨率（-1=自动计算）
@@ -138,17 +135,31 @@ public:
     /**
      * @brief 配置是否丢弃最后一个不完整的 batch
      */
-    Setup& drop_last(bool enable);
+    Setup& drop_last(bool enable = true);
 
     /**
      * @brief 配置是否使用渐进式分辨率
      */
-    Setup& using_progressive_resolution(bool enable);
+    Setup& using_progressive_resolution(bool enable = true);
 
     /**
      * @brief 配置是否启用 CPU 绑核
      */
-    Setup& cpu_binding(bool enable);
+    Setup& cpu_binding(bool enable = true);
+
+    /**
+     * @brief 配置归一化参数（RGB图像，3通道）
+     * @param mean_value 3通道均值，如 {0.485f, 0.456f, 0.406f}
+     * @param stddev_value 3通道标准差，如 {0.229f, 0.224f, 0.225f}
+     */
+    Setup& normalize(std::array<float, 3> mean_value, std::array<float, 3> stddev_value);
+
+    /**
+     * @brief 配置归一化参数（灰度图像，1通道）
+     * @param mean_value 1通道均值，如 {0.5f}
+     * @param stddev_value 1通道标准差，如 {0.5f}
+     */
+    Setup& normalize(std::array<float, 1> mean_value, std::array<float, 1> stddev_value);
 
     // =========================================================================
     // Transforms 配置
@@ -205,7 +216,6 @@ private:
         int num_preproc_workers = 1;
 
         // 设备配置
-        std::string device_type_str;
         std::vector<int> gpu_ids;
         bool cpu_binding = true;
 
@@ -219,6 +229,10 @@ private:
         int max_intermediate_resolution = -1;
         bool drop_last = false;
         bool using_progressive_resolution = false;
+
+        // 归一化参数
+        std::vector<float> normalize_mean;
+        std::vector<float> normalize_std;
 
         // Transforms
         std::vector<std::unique_ptr<PreprocessOperation>> train_ops;
@@ -446,8 +460,11 @@ private:
      * 4. 设置multi_thread_inited_标志
      */
     void multi_thread_init();
+    void ensure_inited();
 
 public:
+    bool is_ready() {return multi_thread_inited_;}
+
     // 训练一个epoch（= begin_epoch + run + end_epoch）
     void train();
 
@@ -985,344 +1002,5 @@ private:
 
 // ============================================================================
 };
-
-template<typename... Ops>
-inline void Preprocessor::set_train_transforms(Ops&&... ops) {
-    // 检查状态：必须是DeviceConfigured状态
-    if (config_state_ != ConfigState::DeviceConfigured) {
-        TR_THROW(ValueError,
-                 "set_train_transforms failed: invalid state machine state.\n"
-                 "  Current state: " << state_name(config_state_) << "\n"
-                 "  Expected state: DeviceConfigured\n"
-                 "  Solution:\n"
-                 "    Please complete the following steps in order:\n"
-                 "      1. config_dataset()\n"
-                 "      2. config_dataloader()\n"
-                 "      3. config_preprocessor()\n"
-                 "      4. config_device()");
-    }
-
-    // 清空旧的transform模板
-    train_ops_template_.clear();
-
-    // 将所有ops存入vector以便处理
-    std::vector<std::unique_ptr<PreprocessOperation>> temp_ops;
-
-    if constexpr (sizeof...(Ops) == 0) {
-        // 空参数包：检查数据集类型
-        if (is_imagenet()) {
-            // ImageNet不允许空操作
-            TR_THROW(ValueError,
-                     "set_train_transforms() requires at least one transform operation for ImageNet dataset.\n"
-                     "  Empty transforms are not allowed for ImageNet.\n"
-                     "  ImageNet requires at least one preprocessing operation (e.g., Resize, CenterCrop, RandomResizedCrop).\n"
-                     "Solution:\n"
-                     "  Provide at least one preprocessing operation.");
-        } else {
-            // 非ImageNet数据集：使用DoNothing作为占位操作
-            temp_ops.emplace_back(new DoNothing());
-        }
-    } else {
-        temp_ops.reserve(sizeof...(Ops));
-
-        // 使用fold expression展开参数包
-        (temp_ops.push_back(std::unique_ptr<PreprocessOperation>(ops.clone())), ...);
-    }
-    // =========================================================================
-    // 处理RandomErasing（在排序之前）
-    // =========================================================================
-    // RandomErasing是占位操作，需要从PO链中移除，将p注册到GlobalRegistry
-    float random_erasing_p = 0.0f;  // 默认值：没有RandomErasing时p=0
-    std::vector<std::unique_ptr<PreprocessOperation>> filtered_ops;
-
-    for (auto& op : temp_ops) {
-        if (auto* re = dynamic_cast<RandomErasing*>(op.get())) {
-            // 找到RandomErasing，提取p值
-            random_erasing_p = re->get_p();
-            LOG_INFO << "RandomErasing detected in train transforms, p=" << random_erasing_p;
-            // 不添加到filtered_ops（即从PO链中移除）
-        } else {
-            // 保留其他PO
-            filtered_ops.push_back(std::move(op));
-        }
-    }
-
-    // 注册p到GlobalRegistry
-    GlobalRegistry::instance().set_random_erasing_p(random_erasing_p);
-
-    // 验证和重排序transform
-    // 规则1: RandomHorizontalFlip必须移到最后
-    // 规则2: ImageNet的第一个PO必须是Crop/Resize（除非测试模式且是DoNothing）
-
-    std::vector<std::unique_ptr<PreprocessOperation>> non_flip_ops;
-    std::vector<std::unique_ptr<PreprocessOperation>> flip_ops;
-
-    for (auto& op : filtered_ops) {
-        if (Preprocessor::is_random_horizontal_flip(op.get())) {
-            flip_ops.push_back(std::move(op));
-        } else {
-            non_flip_ops.push_back(std::move(op));
-        }
-    }
-
-    // 验证第一个PO（对于ImageNet）
-    if (!non_flip_ops.empty() && is_imagenet()) {
-        const auto* first_op = non_flip_ops[0].get();
-        bool is_do_nothing_op = Preprocessor::is_do_nothing(first_op);
-
-        if (pw_test_mode_) {
-            // 测试模式：允许DoNothing作为第一个PO
-            if (is_do_nothing_op) {
-                LOG_INFO << "Test mode: DoNothing is allowed as first transform for ImageNet";
-            } else if (!Preprocessor::is_crop_or_resize_op(first_op)) {
-                TR_THROW(ValueError,
-                         "For ImageNet, first transform must be CenterCrop, Resize, or DoNothing in test mode."
-                         << " Got: " << typeid(*first_op).name());
-            }
-        } else {
-            // 正常模式：第一个PO必须是Crop/Resize
-            if (!Preprocessor::is_crop_or_resize_op(first_op)) {
-                TR_THROW(ValueError,
-                         "For ImageNet, first transform must be CenterCrop or Resize. "
-                         << "Got: " << typeid(*first_op).name());
-            }
-        }
-    }
-
-    // 合并：非flip操作在前，flip操作在后
-    train_ops_template_.clear();
-    for (auto& op : non_flip_ops) {
-        train_ops_template_.push_back(std::move(op));
-    }
-    for (auto& op : flip_ops) {
-        train_ops_template_.push_back(std::move(op));
-    }
-
-    // 设定颜色通道数、输出尺寸和输出stride
-    int output_size_temp = default_input_width_;
-    int max_intermediate_res_train = 0;  // 注意，这个值与max_resolution不同，是指中间的最大分辨率
-    for (auto& op : train_ops_template_) {
-        op->set_num_channels(num_color_channels_);
-        if (op->is_resize() || op->is_crop()) {
-            output_size_temp = op->get_output_size();
-        }
-        else {
-            output_size_temp = op->inference_output_size(output_size_temp);
-            op->set_output_size(output_size_temp);
-        }
-        max_intermediate_res_train = std::max(max_intermediate_res_train, output_size_temp);
-        op->calculate_stride();
-    }
-    int final_train_output_size = output_size_temp;
-
-    // ==================== 验证最终输出尺寸 ====================
-    TR_CHECK(final_train_output_size <= max_resolution_, ValueError,
-             "Train transforms final output size (" << final_train_output_size
-             << ") exceeds max_resolution (" << max_resolution_ << ").\n"
-             "  This would cause AB region overflow.\n"
-             "  Solutions:\n"
-             "    1. Increase max_resolution in config_preprocessor()\n"
-             "    2. Reduce the output size of your transform operations\n"
-             "    3. Check if Pad operation is unexpectedly enlarging the output");
-
-    // 更新全局最大中间分辨率
-    int old_max_intermediate = max_intermediate_resolution_;
-    max_intermediate_resolution_ = std::max(max_intermediate_res_train, max_intermediate_resolution_);
-
-    LOG_INFO << "Train transforms: max_intermediate_res_train=" << max_intermediate_res_train
-             << ", final_output=" << final_train_output_size
-             << ", max_intermediate_resolution updated: " << old_max_intermediate
-             << " -> " << max_intermediate_resolution_;
-
-	train_ops_template_[0]->set_as_first();  // 标记首个PO
-
-    // ==================== 检测是否包含RandomHorizontalFlip（复用排序时的检测结果）====================
-    bool train_with_rhf = !flip_ops.empty();  // 排序时已经检测过
-    if (train_with_rhf) {
-        LOG_INFO << "Train transforms contain RandomHorizontalFlip";
-    }
-    GlobalRegistry::instance().set_train_with_rhf(train_with_rhf);
-
-    // 标记train transforms已设置
-    train_transforms_set_ = true;
-
-    // 更新状态
-    update_config_state();
-
-    LOG_INFO << "Train transforms set: " << train_ops_template_.size() << " operations";
-}
-
-template<typename... Ops>
-inline void Preprocessor::set_val_transforms(Ops&&... ops) {
-    // 检查状态：必须是DeviceConfigured或TransformsSet状态
-    // （因为set_train_transforms可能已经调用过了）
-    if (config_state_ != ConfigState::DeviceConfigured &&
-        config_state_ != ConfigState::TransformsSet) {
-        TR_THROW(ValueError,
-                 "set_val_transforms failed: invalid state machine state.\n"
-                 "  Current state: " << state_name(config_state_) << "\n"
-                 "  Expected state: DeviceConfigured or TransformsSet\n"
-                 "  Solution:\n"
-                 "    Please complete the following steps in order:\n"
-                 "      1. config_dataset()\n"
-                 "      2. config_dataloader()\n"
-                 "      3. config_preprocessor()\n"
-                 "      4. config_device()");
-    }
-
-    // 清空旧的transform模板
-    val_ops_template_.clear();
-
-    // 将所有ops存入vector以便处理
-    std::vector<std::unique_ptr<PreprocessOperation>> temp_ops;
-
-    if constexpr (sizeof...(Ops) == 0) {
-        // 空参数包：检查数据集类型
-        if (is_imagenet()) {
-            // ImageNet不允许空操作
-            TR_THROW(ValueError,
-                     "set_val_transforms() requires at least one transform operation for ImageNet dataset.\n"
-                     "  Empty transforms are not allowed for ImageNet.\n"
-                     "  ImageNet validation requires at least one preprocessing operation (e.g., Resize, CenterCrop).\n"
-                     "Solution:\n"
-                     "  Provide at least one preprocessing operation.");
-        } else {
-            // 非ImageNet数据集：使用DoNothing作为占位操作
-            temp_ops.emplace_back(new DoNothing());
-        }
-    } else {
-        temp_ops.reserve(sizeof...(Ops));
-
-        // 使用fold expression展开参数包
-        (temp_ops.push_back(std::unique_ptr<PreprocessOperation>(ops.clone())), ...);
-    }
-    // =========================================================================
-    // 检查RandomErasing（验证集不允许）
-    // =========================================================================
-    // RandomErasing是训练专用占位操作，验证集不允许使用
-    for (const auto& op : temp_ops) {
-        if (auto* re = dynamic_cast<RandomErasing*>(op.get())) {
-            TR_THROW(ValueError,
-                     "RandomErasing is NOT allowed in validation transforms.\n"
-                     "  RandomErasing is a training-only data augmentation operation.\n"
-                     "  RandomErasing p value: " << re->get_p() << "\n"
-                     "Solution:\n"
-                     "  Remove RandomErasing from validation transforms.\n"
-                     "  RandomErasing should only be used in set_train_transforms().");
-        }
-    }
-
-    // 验证和重排序transform（规则同训练集）
-    std::vector<std::unique_ptr<PreprocessOperation>> non_flip_ops;
-    std::vector<std::unique_ptr<PreprocessOperation>> flip_ops;
-
-    for (auto& op : temp_ops) {
-        if (Preprocessor::is_random_horizontal_flip(op.get())) {
-            flip_ops.push_back(std::move(op));
-        } else {
-            non_flip_ops.push_back(std::move(op));
-        }
-    }
-
-    // 验证第一个PO（对于ImageNet）
-    if (!non_flip_ops.empty() && is_imagenet()) {
-        const auto* first_op = non_flip_ops[0].get();
-        bool is_do_nothing_op = Preprocessor::is_do_nothing(first_op);
-
-        if (pw_test_mode_) {
-            // 测试模式：允许DoNothing作为第一个PO
-            if (is_do_nothing_op) {
-                LOG_INFO << "Test mode: DoNothing is allowed as first transform for ImageNet";
-            } else if (!Preprocessor::is_crop_or_resize_op(first_op)) {
-                TR_THROW(ValueError,
-                         "For ImageNet, first transform must be CenterCrop, Resize, or DoNothing in test mode. "
-                         << "Got: " << typeid(*first_op).name());
-            }
-        } else {
-            // 正常模式：验证集通常需要CenterCrop或Resize
-            if (!Preprocessor::is_crop_or_resize_op(first_op)) {
-                TR_THROW(ValueError,
-                         "For ImageNet validation, first transform must be CenterCrop or Resize. "
-                         << "Got: " << typeid(*first_op).name());
-            }
-        }
-    }
-
-    // 合并：非flip操作在前，flip操作在后
-    val_ops_template_.clear();
-    for (auto& op : non_flip_ops) {
-        val_ops_template_.push_back(std::move(op));
-    }
-    for (auto& op : flip_ops) {
-        val_ops_template_.push_back(std::move(op));
-    }
-
-    // 设定颜色通道数、输出尺寸和输出stride
-    int output_size_temp = default_input_width_;
-    int max_intermediate_res_val = 0;  // 注意，这个值与max_resolution不同，是指中间的最大分辨率
-    for (auto& op : val_ops_template_) {
-        op->set_num_channels(num_color_channels_);
-        if (op->is_resize() || op->is_crop()) {
-            output_size_temp = op->get_output_size();
-        }
-        else {
-            output_size_temp = op->inference_output_size(output_size_temp);
-            op->set_output_size(output_size_temp);
-        }
-        max_intermediate_res_val = std::max(max_intermediate_res_val, output_size_temp);
-        op->calculate_stride();
-    }
-    int final_val_output_size = output_size_temp;
-
-    // ==================== 验证最终输出尺寸 ====================
-    TR_CHECK(final_val_output_size <= max_resolution_, ValueError,
-             "Validation transforms final output size (" << final_val_output_size
-             << ") exceeds max_resolution (" << max_resolution_ << ").\n"
-             "  This would cause AB region overflow.\n"
-             "  Solutions:\n"
-             "    1. Increase max_resolution in config_preprocessor()\n"
-             "    2. Reduce the output size of your transform operations\n"
-             "    3. Check if Pad operation is unexpectedly enlarging the output");
-
-    // 更新全局最大中间分辨率
-    int old_max_intermediate = max_intermediate_resolution_;
-    max_intermediate_resolution_ = std::max(max_intermediate_res_val, max_intermediate_resolution_);
-
-    LOG_INFO << "Val transforms: max_intermediate_res_val=" << max_intermediate_res_val
-             << ", final_output=" << final_val_output_size
-             << ", max_intermediate_resolution updated: " << old_max_intermediate
-             << " -> " << max_intermediate_resolution_;
-
-	val_ops_template_[0]->set_as_first();  // 标记首个PO
-
-    // ==================== 检测是否包含RandomHorizontalFlip（复用排序时的检测结果）====================
-    bool val_with_rhf = !flip_ops.empty();  // 排序时已经检测过
-    if (val_with_rhf) {
-        LOG_INFO << "Validation transforms contain RandomHorizontalFlip";
-    }
-    GlobalRegistry::instance().set_val_with_rhf(val_with_rhf);
-
-    // ==================== CPVS互斥检查 ====================
-    if (using_cpvs_) {
-        for (const auto& op : val_ops_template_) {
-            TR_CHECK(!op->introduce_randomness(), ValueError,
-                     "CPVS (Cached Preprocessed Validation Set) optimization "
-                     "is incompatible with randomized validation transforms.\n"
-                     "  Validation transform '" << op->name() << "' introduces randomness.\n"
-                     "  Solutions:\n"
-                     "    1. Use non-random transforms for validation (e.g., Resize, CenterCrop)\n"
-                     "    2. Disable CPVS by setting using_cpvs=false in config_preprocessor()");
-        }
-        LOG_INFO << "CPVS enabled: all validation transforms are deterministic";
-    }
-
-    // 标记val transforms已设置
-    val_transforms_set_ = true;
-
-    // 更新状态
-    update_config_state();
-
-    LOG_INFO << "Validation transforms set: " << val_ops_template_.size() << " operations";
-}
 
 } // namespace tr
