@@ -5,21 +5,14 @@ set(DATA_SOURCES
     storage.cpp
     tensor.cpp
     preprocessor.cpp
-    # V3.8.0 新版DataLoader
     imagenet_loader_dts.cpp
-    # V3.9.0 MNIST和CIFAR DTS Loader
     mnist_loader_dts.cpp
     cifar_loader_dts.cpp
-    # V4.0.0 ImageNet Raw Loader
     imagenet_loader_raw.cpp
-    # V4.0.0 MNIST and CIFAR Raw Loader
     mnist_loader_raw.cpp
     cifar_loader_raw.cpp
-    # V3.10.0 SampleLoader
     sample_loader.cpp
-    # V3.9.0 公共组件
     file_handle.cpp
-    # P0阶段：PreprocessOperation及子类
     preprocess_operation.cpp
     resize.cpp
     center_crop.cpp
@@ -29,13 +22,13 @@ set(DATA_SOURCES
     color_jitter.cpp
     random_rotation.cpp
     random_autocontrast.cpp
-    random_brightness.cpp
     gaussian_blur.cpp
     gaussian_noise.cpp
     random_grayscale.cpp
     pad.cpp
     random_crop.cpp
     random_erasing.cpp
+    random_scale.cpp
     do_nothing.cpp
     # V4.1 PreprocessWorker
     preprocess_worker.cpp

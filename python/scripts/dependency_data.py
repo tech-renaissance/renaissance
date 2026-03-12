@@ -16,13 +16,13 @@ SCENE_DEPS = {
     "pc_cuda": {
         "name": "PC-CUDA",
         "description": "Windows + NVIDIA GPU + MSVC",
-        "required": ["cmake", "ninja", "msvc", "cuda", "cudnn", "onednn", "xnnpack", "zlib", "libcurl", "libarchive", "libjpeg-turbo", "mimalloc", "stb", "simd", "python", "numpy"],
+        "required": ["cmake", "ninja", "msvc", "cuda", "cudnn", "cudnn-frontend", "cutlass", "eigen", "xnnpack", "zlib", "libcurl", "libarchive", "libjpeg-turbo", "mimalloc", "stb", "simd", "python", "numpy"],
         "optional": [],
         "cmake_opts": [
             "-DTR_SCENE_PC_CUDA=ON",
             "-DTR_USE_CUDA=ON",
             "-DTR_USE_MUSA=OFF",
-            "-DTR_USE_ONEDNN=ON",
+            "-DTR_USE_EIGEN=ON",
             "-DTR_USE_XNNPACK=ON",
             "-DTR_USE_STB=ON",
             "-DTR_USE_LIBJPEG=ON",
@@ -36,13 +36,13 @@ SCENE_DEPS = {
     "gpu_cloud": {
         "name": "GPU_CLOUD",
         "description": "Linux + Multi-NVIDIA GPU + GCC",
-        "required": ["cmake", "ninja", "gcc", "cuda", "cudnn", "nccl", "onednn", "xnnpack", "zlib", "libcurl", "libarchive", "libjpeg-turbo", "mimalloc", "stb", "simd", "python", "numpy"],
+        "required": ["cmake", "ninja", "gcc", "cuda", "cudnn", "nccl", "cudnn-frontend", "cutlass", "eigen", "xnnpack", "zlib", "libcurl", "libarchive", "libjpeg-turbo", "mimalloc", "stb", "simd", "python", "numpy"],
         "optional": [],
         "cmake_opts": [
             "-DTR_SCENE_GPU_CLOUD=ON",
             "-DTR_USE_CUDA=ON",
             "-DTR_USE_MUSA=OFF",
-            "-DTR_USE_ONEDNN=ON",
+            "-DTR_USE_EIGEN=ON",
             "-DTR_USE_XNNPACK=ON",
             "-DTR_USE_NCCL=ON",
             "-DTR_USE_MULTI_GPU=ON",
@@ -58,13 +58,13 @@ SCENE_DEPS = {
     "pc_musa": {
         "name": "PC-MUSA",
         "description": "Linux + Moore Threads GPU + GCC",
-        "required": ["cmake", "ninja", "gcc", "musa", "mudnn", "onednn", "xnnpack", "zlib", "libcurl", "libarchive", "libjpeg-turbo", "mimalloc", "stb", "simd", "python", "numpy"],
+        "required": ["cmake", "ninja", "gcc", "musa", "mudnn", "eigen", "xnnpack", "zlib", "libcurl", "libarchive", "libjpeg-turbo", "mimalloc", "stb", "simd", "python", "numpy"],
         "optional": [],
         "cmake_opts": [
             "-DTR_SCENE_PC_MUSA=ON",
             "-DTR_USE_CUDA=OFF",
             "-DTR_USE_MUSA=ON",
-            "-DTR_USE_ONEDNN=ON",
+            "-DTR_USE_EIGEN=ON",
             "-DTR_USE_XNNPACK=ON",
             "-DTR_USE_STB=ON",
             "-DTR_USE_LIBJPEG=ON",
@@ -78,13 +78,13 @@ SCENE_DEPS = {
     "cpu_cloud": {
         "name": "CPU_CLOUD",
         "description": "Windows/Linux x86 CPU Cloud Server + GCC/MSVC",
-        "required": ["cmake", "ninja", "onednn", "xnnpack", "zlib", "libcurl", "libarchive", "libjpeg-turbo", "mimalloc", "stb", "simd", "python", "numpy"],
+        "required": ["cmake", "ninja", "eigen", "xnnpack", "zlib", "libcurl", "libarchive", "libjpeg-turbo", "mimalloc", "stb", "simd", "python", "numpy"],
         "optional": ["gcc", "msvc"],  # 编译器为可选，根据平台选择
         "cmake_opts": [
             "-DTR_SCENE_CPU_CLOUD=ON",
             "-DTR_USE_CUDA=OFF",
             "-DTR_USE_MUSA=OFF",
-            "-DTR_USE_ONEDNN=ON",
+            "-DTR_USE_EIGEN=ON",
             "-DTR_USE_XNNPACK=ON",
             "-DTR_USE_STB=ON",
             "-DTR_USE_LIBJPEG=ON",
@@ -222,7 +222,7 @@ DEP_CONFIG = {
         "bin_subdir": "bin",
         "version_cmd": ["nvcc", "--version"],
         "version_pattern": r"release (\d+\.\d+)",
-        "min_version": "13.0",
+        "min_version": "13.1",
         "install_hint": "https://developer.nvidia.com/cuda-toolkit"
     },
 
@@ -247,7 +247,7 @@ DEP_CONFIG = {
         ],
         "version_cmd": ["grep", "CUDNN_MAJOR", "-A", "2", "{include}/cudnn_version.h"],  # 默认使用cudnn_version.h
         "version_pattern": r"#define CUDNN_MAJOR\s+(\d+).*#define CUDNN_MINOR\s+(\d+).*#define CUDNN_PATCHLEVEL\s+(\d+)",
-        "min_version": "9.19",
+        "min_version": "9.17",
         "install_hint": "https://developer.nvidia.com/cudnn",
         "use_path_version": True  # 使用路径推导版本号
     },
@@ -289,7 +289,7 @@ DEP_CONFIG = {
             "C:/Users/*/AppData/Local/Programs/Python/Python3*",
             "T:/Softwares/msys64/mingw64/bin"
         ],
-        "paths_linux": ["~/venv/py314/bin", "/home/tech-renaissance/venv/py314/bin", "/usr/bin", "/usr/local/bin", "/opt/python/bin"],
+        "paths_linux": ["/opt/venv/bin", "~/venv/py314/bin", "/home/tech-renaissance/venv/py314/bin", "/usr/bin", "/usr/local/bin", "/opt/python/bin"],
         "version_cmd": ["python", "--version"],
         "version_pattern": r"Python (\d+\.\d+\.\d+)",
         "min_version": "3.12.0",
@@ -306,13 +306,16 @@ DEP_CONFIG = {
     },
 
     # 基础库
-    "onednn": {
-        "name": "oneDNN",
+    "eigen": {
+        "name": "Eigen",
         "exe": [],  # 通过头文件检测
-        "header": ["dnnl.hpp", "dnn.hpp"],
-        "env": ["ONEDNN_ROOT", "DNNL_ROOT"],
-        "vcpkg_packages": ["onednn"],
-        "install_hint": "vcpkg install onednn"
+        "header": ["Eigen/Core", "eigen3/Eigen/Core"],
+        "env": ["EIGEN3_ROOT", "EIGEN_ROOT"],
+        "vcpkg_packages": ["eigen3"],
+        "min_version": "3.4",
+        "version_pattern": r"EIGEN_WORLD_VERSION\s+(\d+).*EIGEN_MAJOR_VERSION\s+(\d+).*EIGEN_MINOR_VERSION\s+(\d+)",
+        "version_cmd": ["grep", "-E", "EIGEN_WORLD_VERSION|EIGEN_MAJOR_VERSION|EIGEN_MINOR_VERSION", "{include}/Eigen/src/Core/util/Macros.h"],
+        "install_hint": "vcpkg install eigen3"
     },
 
     "zlib": {
@@ -357,10 +360,10 @@ DEP_CONFIG = {
         "header": "xnnpack.h",
         "lib_files": ["xnnpack.dll", "libxnnpack.so"],
         "env": ["XNNPACK_ROOT"],
-        "paths_win": ["C:\\XNNPACK"],  # Windows手动安装路径（静态库）
+        "paths_win": ["C:\\XNNPACK", "C:/Program Files/XNNPACK*"],  # Windows手动安装路径（静态库）
+        "paths_linux": ["/opt/xnnpack"],  # Linux自编译路径（优先于vcpkg）
         "vcpkg_packages": ["xnnpack"],
-        "version_pattern": r"(\d{4}-\d{2}-\d{2})",  # 日期格式: 2024-08-20
-        "install_hint": "vcpkg install xnnpack"
+        "install_hint": "vcpkg install xnnpack (Windows) | Build from https://github.com/google/XNNPACK (Linux)"
     },
 
     # 新增依赖项
@@ -377,11 +380,14 @@ DEP_CONFIG = {
     "simd": {
         "name": "Simd",
         "exe": [],  # 通过头文件检测
-        "header": "Simd/SimdLib.h",  # 检测SimdLib.h
+        "header": ["Simd/SimdLib.h", "Simd/SimdVersion.h"],  # 检测SimdLib.h或SimdVersion.h
         "env": ["SIMD_ROOT"],
+        "paths_linux": ["/opt/simd/src"],  # Linux自编译路径，头文件在src目录下
         "vcpkg_packages": ["simd"],
-        "version_pattern": r"SIMD_VERSION\s+\"([^\"]+)\"",  # 版本字符串格式
-        "install_hint": "vcpkg install simd"
+        "version_cmd": ["grep", "SIMD_VERSION", "{path}/Simd/SimdVersion.h"],
+        "version_pattern": r"#define\s+SIMD_VERSION\s+\"([^\"]+)\"",  # 版本字符串格式: "6.2.159"
+        "min_version": "6.0",
+        "install_hint": "vcpkg install simd (Windows) | Build from https://github.com/ermig1979/Simd (Linux)"
     },
 
     "stb": {
@@ -420,8 +426,34 @@ DEP_CONFIG = {
         "paths_linux": ["/usr/local/nccl", "/usr", "/opt/nccl", "/usr/local/cuda"],
         "version_cmd": ["grep", "-E", "NCCL_MAJOR|NCCL_MINOR|NCCL_PATCH", "{include}/nccl.h"],
         "version_pattern": r"#define NCCL_MAJOR\s+(\d+).*#define NCCL_MINOR\s+(\d+).*#define NCCL_PATCH\s+(\d+)",
-        "min_version": "2.28",
+        "min_version": "2.29",
         "install_hint": "Download from https://developer.nvidia.com/nccl"
+    },
+
+    "cudnn-frontend": {
+        "name": "cuDNN Frontend",
+        "exe": [],  # 通过头文件检测
+        "header": ["cudnn_frontend.h", "cudnn_frontend_version.h"],
+        "env": ["CUDNN_FRONTEND_ROOT"],
+        "paths_win": ["C:/Program Files/cudnn-frontend*"],
+        "paths_linux": ["/opt/cudnn-frontend"],
+        "version_cmd": ["grep", "-E", "CUDNN_FRONTEND_MAJOR_VERSION|CUDNN_FRONTEND_MINOR_VERSION|CUDNN_FRONTEND_PATCH_VERSION", "{include}/cudnn_frontend_version.h"],
+        "version_pattern": r"#define CUDNN_FRONTEND_MAJOR_VERSION\s+(\d+).*#define CUDNN_FRONTEND_MINOR_VERSION\s+(\d+).*#define CUDNN_FRONTEND_PATCH_VERSION\s+(\d+)",
+        "min_version": "1.0",
+        "install_hint": "Download from https://github.com/NVIDIA/cudnn-frontend"
+    },
+
+    "cutlass": {
+        "name": "CUTLASS",
+        "exe": [],  # 通过头文件检测
+        "header": ["cutlass/version.h"],
+        "env": ["CUTLASS_ROOT"],
+        "paths_win": ["C:/Program Files/cutlass*"],
+        "paths_linux": ["/opt/cutlass"],
+        "version_cmd": ["grep", "-E", "CUTLASS_MAJOR|CUTLASS_MINOR|CUTLASS_PATCH", "{include}/cutlass/version.h"],
+        "version_pattern": r"#define CUTLASS_MAJOR\s+(\d+).*#define CUTLASS_MINOR\s+(\d+).*#define CUTLASS_PATCH\s+(\d+)",
+        "min_version": "4.0",
+        "install_hint": "Download from https://github.com/NVIDIA/cutlass"
     }
 }
 
@@ -448,7 +480,7 @@ INSTALL_SUGGESTIONS = {
         "both": "Download from https://developer.nvidia.com/cuda-toolkit"
     },
     "cudnn": {
-        "both": "Download cuDNN 9.19.0+ for CUDA 13.x from: https://developer.download.nvidia.com/compute/cudnn/redist/cudnn/linux-x86_64/ Then extract and copy files to CUDA directory"
+        "both": "Download cuDNN 9.17.0+ for CUDA 13.x from: https://developer.download.nvidia.com/compute/cudnn/redist/cudnn/linux-x86_64/ Then extract and copy files to CUDA directory"
     },
     "python": {
         "both": "Download from https://python.org or run: conda create -n renaissance python=3.11"
@@ -456,8 +488,8 @@ INSTALL_SUGGESTIONS = {
     "numpy": {
         "both": "Run: pip install numpy"
     },
-    "onednn": {
-        "both": "Run: vcpkg install dnnl"
+    "eigen": {
+        "both": "Run: vcpkg install eigen3"
     },
     "zlib": {
         "windows": "Run: vcpkg install zlib",
@@ -502,25 +534,25 @@ INSTALL_SUGGESTIONS = {
 
 DETAILED_INSTALL_GUIDES = {
     "cudnn": {
-        "title": "cuDNN 9.19.0+ Installation Guide (Linux x86_64, CUDA 13.x)",
+        "title": "cuDNN 9.17.0+ Installation Guide (Linux x86_64, CUDA 13.x)",
         "steps": [
             "1. Visit NVIDIA cuDNN redistribution page:",
             "   https://developer.download.nvidia.com/compute/cudnn/redist/cudnn/linux-x86_64/",
-            "2. Find cuDNN version 9.19.0 or higher for CUDA 13.x",
+            "2. Find cuDNN version 9.17.0 or higher for CUDA 13.x",
             "3. Download the file (usually .tar.xz format) named like:",
-            "   cudnn-linux-x86_64-9.19.0_cuda13-archive.tar.xz",
+            "   cudnn-linux-x86_64-9.17.0_cuda13-archive.tar.xz",
             "4. Extract the archive:",
-            "   tar -xf cudnn-linux-x86_64-9.19.0_cuda13-archive.tar.xz",
+            "   tar -xf cudnn-linux-x86_64-9.17.0_cuda13-archive.tar.xz",
             "5. Copy files to your CUDA installation directory:",
-            "   cd cudnn-linux-x86_64-9.19.0_cuda13-archive",
-            "   sudo cp include/cudnn*.h /usr/local/cuda-13.0/include",
-            "   sudo cp -P lib/libcudnn* /usr/local/cuda-13.0/lib64",
-            "   sudo chmod a+r /usr/local/cuda-13.0/include/cudnn*.h /usr/local/cuda-13.0/lib64/libcudnn*",
+            "   cd cudnn-linux-x86_64-9.17.0_cuda13-archive",
+            "   sudo cp include/cudnn*.h /usr/local/cuda-13.1/include",
+            "   sudo cp -P lib/libcudnn* /usr/local/cuda-13.1/lib64",
+            "   sudo chmod a+r /usr/local/cuda-13.1/include/cudnn*.h /usr/local/cuda-13.1/lib64/libcudnn*",
             "6. Verify installation:",
-            "   cat /usr/local/cuda-13.0/include/cudnn_version.h | grep CUDNN_MAJOR -A 2"
+            "   cat /usr/local/cuda-13.1/include/cudnn_version.h | grep CUDNN_MAJOR -A 2"
         ],
         "notes": [
-            "Make sure to use cuDNN version 9.19.0+ for CUDA 13.x compatibility",
+            "Make sure to use cuDNN version 9.17.0+ for CUDA 13.x compatibility",
             "If CUDA is installed in different location, adjust paths accordingly",
             "The cuDNN library files should match your CUDA version exactly"
         ]

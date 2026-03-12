@@ -11,7 +11,8 @@
       "Bash(./build/windows-msvc-release/bin/tests/integration/test_engine_crc.exe:*)",
       "Bash(for:*)",
       "Bash(do echo:*)",
-      "Bash(done:*)"
+      "Bash(done:*)",
+      "Bash(./build/windows-msvc-release/bin/tests/pw/test_two_po:*)"
     ]
   }
 }

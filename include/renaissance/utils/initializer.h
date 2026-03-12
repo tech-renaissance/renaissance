@@ -12,6 +12,7 @@
 
 #include <string>
 #include <functional>
+#include "renaissance/base/rng.h"  // for manual_seed()
 
 namespace tr {
 
@@ -104,3 +105,51 @@ private:
  * \endcode
  */
 #define INIT_FRAMEWORK(...) tr::Initializer::init(__VA_ARGS__)
+
+/**
+ * @brief 设置可复现性标志（便捷宏）
+ * @param value 是否启用可复现性（true=启用，false=禁用）
+ *
+ * \par 使用示例：
+ * \code
+ * int main() {
+ *     INIT_FRAMEWORK("GPU");
+ *     ENSURE_REPRODUCIBILITY(true);         // 启用可复现性
+ *     ENSURE_REPRODUCIBILITY(false);        // 禁用可复现性
+ *
+ *     // ... 使用框架功能 ...
+ *     return 0;
+ * }
+ * \endcode
+ *
+ * \note 此宏会调用 GlobalRegistry::set_reproducibility_insurance()
+ */
+#define ENSURE_REPRODUCIBILITY(value) \
+    do { \
+        tr::GlobalRegistry::instance().set_reproducibility_insurance(value); \
+    } while(0)
+
+/**
+ * @brief 设置全局随机数种子（便捷宏）
+ * @param seed 种子值（任意无符号64位整数）
+ *
+ * \par 使用示例：
+ * \code
+ * int main() {
+ *     INIT_FRAMEWORK("GPU");
+ *     MANUAL_SEED(42);                    // 设置随机种子
+ *     ENSURE_REPRODUCIBILITY(true);       // 启用可复现性
+ *
+ *     // ... 使用框架功能 ...
+ *     return 0;
+ * }
+ * \endcode
+ *
+ * \note 此宏会调用 tr::manual_seed()
+ * \note 应在 INIT_FRAMEWORK() 之后调用
+ * \note 相同的seed会产生完全相同的随机数序列
+ */
+#define MANUAL_SEED(seed) \
+    do { \
+        tr::manual_seed(seed); \
+    } while(0)

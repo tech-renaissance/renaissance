@@ -42,7 +42,7 @@ void print_usage(const char* program_name) {
               << "                      - If resize/crop: uses --resolution parameter\n"
               << "                      - If other: infers output from previous PO\n"
               << "                      Supported: RandomHorizontalFlip, ColorJitter, RandomRotation,\n"
-              << "                                  RandomAutocontrast, RandomBrightness, GaussianBlur, GaussianNoise,\n"
+              << "                                  RandomAutocontrast, RandomScale, GaussianBlur, GaussianNoise,\n"
               << "                                  RandomGrayscale, Pad, DoNothing\n"
               << "  --po-val1 <PO>       First val PO (MUST be resize/crop, default: same as po-train1)\n"
               << "  --po-val2 <PO>       Second val PO (optional, same rules as po-train2)\n"
@@ -69,9 +69,8 @@ void print_usage(const char* program_name) {
               << "  --fill <N>           Fill value for areas outside the image (default: 0)\n"
               << "PO Parameters (RandomAutocontrast):\n"
               << "  --autocontrast-p <F> Probability of applying autocontrast (default: 0.5)\n"
-              << "PO Parameters (RandomBrightness):\n"
-              << "  WARNING: RandomBrightness is NOT recommended for datasets other than MNIST!\n"
-              << "  Shift range is hardcoded to [-7, 7], no configurable parameters.\n"
+              << "PO Parameters (RandomScale):\n"
+              << "  WARNING: RandomScale uses default ratio range [0.8, 1.2], no configurable parameters.\n"
               << "PO Parameters (GaussianBlur):\n"
               << "  --blur-sigma-min <F> Minimum sigma for Gaussian blur (default: 0.1)\n"
               << "  --blur-sigma-max <F> Maximum sigma for Gaussian blur (default: 2.0)\n"
@@ -159,8 +158,8 @@ std::unique_ptr<PreprocessOperation> create_po(const std::string& po_name,
         return std::make_unique<RandomRotation>(degrees, static_cast<uint8_t>(fill));
     } else if (po_lower == "randomautocontrast") {
         return std::make_unique<RandomAutocontrast>(autocontrast_p);
-    } else if (po_lower == "randombrightness") {
-        return std::make_unique<RandomBrightness>();
+    } else if (po_lower == "randomscale") {
+        return std::make_unique<RandomScale>(0.8f, 1.2f);
     } else if (po_lower == "gaussianblur") {
         return std::make_unique<GaussianBlur>(blur_sigma_min, blur_sigma_max);
     } else if (po_lower == "randomgrayscale") {
@@ -173,7 +172,7 @@ std::unique_ptr<PreprocessOperation> create_po(const std::string& po_name,
         return std::make_unique<DoNothing>();
     } else {
         std::cerr << "Error: Unknown PO type: " << po_name << "\n";
-        std::cerr << "Supported: Resize, CenterCrop, RandomResizedCrop, FastRandomResizedCrop, RandomHorizontalFlip, ColorJitter, RandomRotation, RandomAutocontrast, RandomBrightness, GaussianBlur, GaussianNoise, RandomGrayscale, Pad, RandomCrop, DoNothing\n";
+        std::cerr << "Supported: Resize, CenterCrop, RandomResizedCrop, FastRandomResizedCrop, RandomHorizontalFlip, ColorJitter, RandomRotation, RandomAutocontrast, RandomScale, GaussianBlur, GaussianNoise, RandomGrayscale, Pad, RandomCrop, DoNothing\n";
         return nullptr;
     }
 }
@@ -411,10 +410,11 @@ int main(int argc, char* argv[]) {
 
     // 【第一句】初始化框架（必须在所有其他操作之前）
     INIT_FRAMEWORK(device_type);
+    ENSURE_REPRODUCIBILITY(reproducible);
+    MANUAL_SEED(random_seed);
     std::cout << "Framework initialized with device: " << device_type << "\n";
 
-    // 【第二句】设置可复现性保险（必须在所有其他操作之前）
-    GlobalRegistry::instance().ensure_reproducibility(reproducible);
+    // 显示可复现性模式
     if (reproducible) {
         std::cout << "Reproducible mode: ENABLED\n";
     } else {
@@ -588,22 +588,17 @@ int main(int argc, char* argv[]) {
         .batch_size(batch_size)
         .max_output_resolution(calculated_max_resolution)
         .color_channels(3)
-        .num_load_workers(num_load_workers)
-        .num_preproc_workers(num_preproc_workers)
-        .partial_mode(partial_mode)
+        .load_workers(num_load_workers)
+        .preprocess_workers(num_preproc_workers)
+        .fully_mode(!partial_mode)
         .shuffle_train(shuffle_train)
         .download(false)
         .sdmp_factor(sdmp_factor)
         .using_cpvs(using_cpvs)
-        .pw_test_mode(false)
         .cpu_binding(auto_cpu_binding)
-        .device(device_type)
         .train_transforms(*train_po1, *train_po2)
         .val_transforms(*val_po1, *val_po2)
         .commit();
-
-    // 设置全局随机种子
-    manual_seed(random_seed);
 
     // 步骤5：运行多个epoch
     std::cout << "\n=== Running " << num_epochs << " Epoch(s) ===\n\n";

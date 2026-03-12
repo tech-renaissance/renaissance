@@ -122,6 +122,13 @@ Preprocessor::Preprocessor()
 }
 
 Preprocessor::~Preprocessor() {
+    // 清理GlobalRegistry中的所有EngineBuffer指针（16个元素全部设为nullptr）
+    auto& registry = GlobalRegistry::instance();
+    for (size_t i = 0; i < 16; ++i) {
+        registry.set_engine_buffer_ptr(i, nullptr);
+    }
+    LOG_DEBUG << "All EngineBuffer pointers cleared from GlobalRegistry";
+
     // engine_buffer_instances_会自动析构，触发EngineBuffer析构
     LOG_INFO << "Preprocessor destructor completed";
 }
@@ -2036,6 +2043,13 @@ void Preprocessor::multi_thread_init() {
                              "sample_size_bytes_ is invalid: " << sample_size_bytes_
                              << " (expected ~150KB for 224x224x3)");
 
+                    // ✅ 注册到GlobalRegistry（在锁保护下，确保第i号EB注册到第i号位置）
+                    {
+                        auto& registry = GlobalRegistry::instance();
+                        registry.set_engine_buffer_ptr(i, engine_buffer_instances_[i].get());
+                        LOG_DEBUG << "EngineBuffer[" << i << "] registered to GlobalRegistry at index " << i;
+                    }
+
                     engine_buffer_instances_[i]->configure(
                         batch_size_,                      // local_batch_size
                         sample_size_bytes_,               // max_train_sample_bytes
@@ -2065,11 +2079,24 @@ void Preprocessor::multi_thread_init() {
 
 #endif  // #ifndef TEST_WITHOUT_PW
 
+    LOG_INFO << "Preprocessor initialized.";
     // 设置初始化完成标志
     multi_thread_inited_ = true;
 }
 
 // -----------------------------------------------------------------------------
+
+void Preprocessor::ensure_inited() {
+    if (!workshop_size_calculated_) {
+        calculate_workshop_sizes(max_intermediate_resolution_);
+        workshop_size_calculated_ = true;
+    }
+
+    // 多线程初始化（如果还未初始化）
+    if (!multi_thread_inited_) {
+        multi_thread_init();
+    }
+}
 
 void Preprocessor::train() {
     GlobalRegistry& gr_instance = GlobalRegistry::instance();
@@ -2080,15 +2107,7 @@ void Preprocessor::train() {
     TR_CHECK(!is_deployment_mode_, ValueError,
              "train() is not available in deployment mode");
 
-    if (!workshop_size_calculated_) {
-        calculate_workshop_sizes(max_intermediate_resolution_);
-        workshop_size_calculated_ = true;
-    }
-
-    // 多线程初始化（如果还未初始化）
-    if (!multi_thread_inited_) {
-        multi_thread_init();
-    }
+    ensure_inited();
 
     if (sdmp_factor_ == 1 || train_phase_id_ % sdmp_factor_ == 0) {  // Busy train phase行为
         is_lazy_phase_ = false;
@@ -2218,15 +2237,7 @@ void Preprocessor::val() {
     // 检查状态
     check_state(ConfigState::Initialized, "val");
 
-    if (!workshop_size_calculated_) {
-        calculate_workshop_sizes(max_intermediate_resolution_);
-        workshop_size_calculated_ = true;
-    }
-
-    // 多线程初始化（如果还未初始化）
-    if (!multi_thread_inited_) {
-        multi_thread_init();
-    }
+    ensure_inited();
 
     if (!using_cpvs_ || val_phase_id_ == 0) {  // Busy val phase行为
         is_lazy_phase_ = false;
@@ -3256,18 +3267,13 @@ Setup& Setup::color_channels(int ch) {
     return *this;
 }
 
-Setup& Setup::num_load_workers(int num) {
+Setup& Setup::load_workers(int num) {
     state_->num_load_workers = num;
     return *this;
 }
 
-Setup& Setup::num_preproc_workers(int num) {
+Setup& Setup::preprocess_workers(int num) {
     state_->num_preproc_workers = num;
-    return *this;
-}
-
-Setup& Setup::device(const std::string& type_str) {
-    state_->device_type_str = type_str;
     return *this;
 }
 
@@ -3299,6 +3305,12 @@ Setup& Setup::using_dts_format(bool dts, int level) {
     return *this;
 }
 
+Setup& Setup::fully_mode(bool fully) {
+    state_->partial_mode = !fully;
+    return *this;
+}
+
+// 不建议使用这个API，建议使用fully_mode()来配置，因为默认就是partial mode
 Setup& Setup::partial_mode(bool partial) {
     state_->partial_mode = partial;
     return *this;
@@ -3324,11 +3336,6 @@ Setup& Setup::using_cpvs(bool enable) {
     return *this;
 }
 
-Setup& Setup::pw_test_mode(bool enable) {
-    state_->pw_test_mode = enable;
-    return *this;
-}
-
 Setup& Setup::max_intermediate_resolution(int res) {
     state_->max_intermediate_resolution = res;
     return *this;
@@ -3346,6 +3353,20 @@ Setup& Setup::using_progressive_resolution(bool enable) {
 
 Setup& Setup::cpu_binding(bool enable) {
     state_->cpu_binding = enable;
+    return *this;
+}
+
+Setup& Setup::normalize(std::array<float, 3> mean_value, std::array<float, 3> stddev_value) {
+    // 将std::array转换为std::vector并存储到State中
+    state_->normalize_mean.assign(mean_value.begin(), mean_value.end());
+    state_->normalize_std.assign(stddev_value.begin(), stddev_value.end());
+    return *this;
+}
+
+Setup& Setup::normalize(std::array<float, 1> mean_value, std::array<float, 1> stddev_value) {
+    // 将std::array转换为std::vector并存储到State中
+    state_->normalize_mean.assign(mean_value.begin(), mean_value.end());
+    state_->normalize_std.assign(stddev_value.begin(), stddev_value.end());
     return *this;
 }
 
@@ -3392,6 +3413,10 @@ void Setup::commit() {
                        << ". Please call .num_preproc_workers() with a positive value.");
     }
 
+    // 从 GlobalRegistry 读取 device 配置（INIT_FRAMEWORK 已设置）
+    auto& registry = GlobalRegistry::instance();
+    std::string device_type = registry.using_gpu() ? "GPU" : "CPU";
+
     // 按 Preprocessor 状态机顺序应用配置
     auto& prep = Preprocessor::instance();
 
@@ -3419,7 +3444,7 @@ void Setup::commit() {
             state_->color_channels,
             state_->sdmp_factor,
             state_->using_cpvs,
-            state_->pw_test_mode,
+            false,
             state_->using_progressive_resolution,
             state_->max_intermediate_resolution,
             state_->drop_last
@@ -3428,10 +3453,23 @@ void Setup::commit() {
 
     // Step 4: Device
     {
+        auto& registry = GlobalRegistry::instance();
+
         if (state_->gpu_ids.empty()) {
-            prep.config_device(state_->device_type_str, state_->cpu_binding);
+            // 用户没有通过Setup指定gpu_ids
+            // 检查GlobalRegistry是否已经设置了gpu_ids
+            const std::vector<int>& registry_gpu_ids = registry.gpu_ids();
+
+            if (registry_gpu_ids.empty()) {
+                // GlobalRegistry也没有设置，使用不指定gpu_ids的版本
+                prep.config_device(device_type, state_->cpu_binding);
+            } else {
+                // GlobalRegistry已设置gpu_ids，从那里下载
+                prep.config_device(device_type, registry_gpu_ids, state_->cpu_binding);
+            }
         } else {
-            prep.config_device(state_->device_type_str, state_->gpu_ids, state_->cpu_binding);
+            // 用户通过Setup指定了gpu_ids，使用用户指定的
+            prep.config_device(device_type, state_->gpu_ids, state_->cpu_binding);
         }
     }
 
@@ -3441,6 +3479,24 @@ void Setup::commit() {
         prep.set_val_transforms(state_->val_ops);
     }
 
+    // Step 6: 归一化参数（注册到GlobalRegistry）
+    {
+        auto& registry = GlobalRegistry::instance();
+
+        // 判断是否需要归一化（如果用户调用了normalize方法，vector就不为空）
+        bool need_normalization = !state_->normalize_mean.empty() && !state_->normalize_std.empty();
+
+        // 注册归一化标志
+        registry.set_require_normalization(need_normalization);
+
+        // 如果需要归一化，则注册mean和std
+        if (need_normalization) {
+            registry.set_normalize_mean(state_->normalize_mean);
+            registry.set_normalize_std(state_->normalize_std);
+        }
+    }
+
+    prep.ensure_inited();
     state_->committed = true;
 }
 

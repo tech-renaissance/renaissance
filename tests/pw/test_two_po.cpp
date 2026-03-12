@@ -6,24 +6,7 @@
  * @author 技术觉醒团队
  */
 
-#include "renaissance/data/resize.h"
-#include "renaissance/data/center_crop.h"
-#include "renaissance/data/random_resized_crop.h"
-#include "renaissance/data/fast_random_resized_crop.h"
-#include "renaissance/data/random_horizontal_flip.h"
-#include "renaissance/data/color_jitter.h"
-#include "renaissance/data/random_rotation.h"
-#include "renaissance/data/random_autocontrast.h"
-#include "renaissance/data/random_brightness.h"
-#include "renaissance/data/gaussian_blur.h"
-#include "renaissance/data/gaussian_noise.h"
-#include "renaissance/data/random_grayscale.h"
-#include "renaissance/data/pad.h"
-#include "renaissance/data/random_crop.h"
-#include "renaissance/data/do_nothing.h"
-#include "renaissance/base/logger.h"
-#include "renaissance/base/tr_exception.h"
-#include "renaissance/utils/initializer.h"
+#include "renaissance.h"
 
 #include <turbojpeg.h>
 
@@ -64,8 +47,8 @@ static constexpr int DEFAULT_JPEG_QUALITY = 90;
 void print_usage(const char* program_name) {
     std::cout << "Usage: " << program_name << " [OPTIONS]\n\n"
               << "Required Options:\n"
-              << "  --po1 <NAME>        First PO (Resize/CenterCrop/RandomResizedCrop/FastRandomResizedCrop/RandomHorizontalFlip/ColorJitter/RandomRotation/RandomAutocontrast/RandomBrightness/GaussianBlur/GaussianNoise/RandomGrayscale/Pad/RandomCrop/DoNothing)\n"
-              << "  --po2 <NAME>        Second PO (Resize/CenterCrop/RandomResizedCrop/FastRandomResizedCrop/RandomHorizontalFlip/ColorJitter/RandomRotation/RandomAutocontrast/RandomBrightness/GaussianBlur/GaussianNoise/RandomGrayscale/Pad/RandomCrop/DoNothing)\n\n"
+              << "  --po1 <NAME>        First PO (Resize/CenterCrop/RandomResizedCrop/FastRandomResizedCrop/RandomScale/RandomHorizontalFlip/ColorJitter/RandomRotation/RandomAutocontrast/GaussianBlur/GaussianNoise/RandomGrayscale/Pad/RandomCrop/DoNothing)\n"
+              << "  --po2 <NAME>        Second PO (Resize/CenterCrop/RandomResizedCrop/FastRandomResizedCrop/RandomScale/RandomHorizontalFlip/ColorJitter/RandomRotation/RandomAutocontrast/GaussianBlur/GaussianNoise/RandomGrayscale/Pad/RandomCrop/DoNothing)\n\n"
               << "Optional Options:\n"
               << "  --input <PATH>      Input image path (default: input.jpg)\n"
               << "  --output <PATH>     Output image path (default: workspace/output_two_po.jpg)\n"
@@ -76,7 +59,7 @@ void print_usage(const char* program_name) {
               << "Examples:\n"
               << "  " << program_name << " --po1 RandomResizedCrop --po2 RandomHorizontalFlip --size 224\n"
               << "  " << program_name << " --po1 Resize --po2 CenterCrop --size 128 --seed 123\n"
-              << "  " << program_name << " --po1 CenterCrop --po2 ColorJitter --size 224\n"
+              << "  " << program_name << " --po1 CenterCrop --po2 RandomScale --size 224\n"
               << "  " << program_name << " --po1 RandomCrop --po2 Pad --size 224\n"
               << "Command Sample: /root/epfs/R/renaissance/build/bin/tests/pw/test_two_po --po1 CenterCrop --po2 ColorJitter --input /root/epfs/R/renaissance/input.jpg --output /root/epfs/R/renaissance/workspace --size 224 --seed 42\n\n";
 }
@@ -369,6 +352,9 @@ std::unique_ptr<PreprocessOperation> create_po(const std::string& name, int size
         return std::make_unique<RandomResizedCrop>(size);
     } else if (name == "FastRandomResizedCrop") {
         return std::make_unique<FastRandomResizedCrop>(size);
+    } else if (name == "RandomScale") {
+        // 默认参数：min_ratio=0.8, max_ratio=1.2
+        return std::make_unique<RandomScale>(0.8f, 1.2f);
     } else if (name == "RandomHorizontalFlip") {
         return std::make_unique<RandomHorizontalFlip>();
     } else if (name == "ColorJitter") {
@@ -380,9 +366,9 @@ std::unique_ptr<PreprocessOperation> create_po(const std::string& name, int size
     } else if (name == "RandomAutocontrast") {
         // 默认参数：p=0.5（50%概率）
         return std::make_unique<RandomAutocontrast>(0.5f);
-    } else if (name == "RandomBrightness") {
-        // 无参数：移位范围硬编码为[-7, 7]
-        return std::make_unique<RandomBrightness>();
+    } else if (name == "RandomScale") {
+        // 默认参数：min_ratio=0.8, max_ratio=1.2
+        return std::make_unique<RandomScale>(0.8f, 1.2f);
     } else if (name == "GaussianBlur") {
         // 默认参数：sigma范围[0.1, 2.0]
         return std::make_unique<GaussianBlur>(0.1f, 2.0f);
@@ -402,7 +388,7 @@ std::unique_ptr<PreprocessOperation> create_po(const std::string& name, int size
         return std::make_unique<DoNothing>();
     } else {
         std::cerr << "[ERROR] Unknown PO: " << name << "\n";
-        std::cerr << "[INFO] Supported POs: Resize, CenterCrop, RandomResizedCrop, FastRandomResizedCrop, RandomHorizontalFlip, ColorJitter, RandomRotation, RandomAutocontrast, RandomBrightness, GaussianBlur, GaussianNoise, RandomGrayscale, Pad, RandomCrop, DoNothing\n";
+        std::cerr << "[INFO] Supported POs: Resize, CenterCrop, RandomResizedCrop, FastRandomResizedCrop, RandomScale, RandomHorizontalFlip, ColorJitter, RandomRotation, RandomAutocontrast, GaussianBlur, GaussianNoise, RandomGrayscale, Pad, RandomCrop, DoNothing\n";
         return nullptr;
     }
 }

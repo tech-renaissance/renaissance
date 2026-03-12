@@ -1153,13 +1153,18 @@ def search_dependency(name: str, sys_info: Dict, suppress_print: bool = False) -
 
     # 第一层：vcpkg搜索 (最高优先级)
     # 特殊处理：Windows下XNNPACK跳过vcpkg，优先使用本地安装
+    # 特殊处理：Linux下XNNPACK和Simd优先搜索/opt路径，vcpkg作为后备
+    linux_opt_first = not is_win and name in ["xnnpack", "simd"]
+
     if VCPKG_ROOT and config.get("vcpkg_packages"):
         if not (is_win and name == "xnnpack"):
-            vcpkg_found = search_in_vcpkg(name, config, is_win)
-            if vcpkg_found["found"]:
-                result = vcpkg_found
-                result["from_vcpkg"] = True
-                return result
+            # Linux下XNNPACK和Simd不优先搜索vcpkg，让/opt路径优先
+            if not linux_opt_first:
+                vcpkg_found = search_in_vcpkg(name, config, is_win)
+                if vcpkg_found["found"]:
+                    result = vcpkg_found
+                    result["from_vcpkg"] = True
+                    return result
 
     # 第二层：环境变量
     for env in config.get("env", []):
@@ -1225,6 +1230,75 @@ def search_dependency(name: str, sys_info: Dict, suppress_print: bool = False) -
                     if result["found"]:
                         break
 
+            # 特殊处理：Windows下cuDNN Frontend的搜索（类似/opt目录结构）
+            if is_win and name == "cudnn-frontend" and not result["found"]:
+                # 直接展开通配符路径并搜索
+                win_paths = config.get("paths_win", [])
+                headers = config["header"] if isinstance(config["header"], list) else [config["header"]]
+
+                for path_pattern in win_paths:
+                    # 展开通配符
+                    import glob
+                    matches = glob.glob(path_pattern)
+                    for match_path in matches:
+                        # 在include子目录中搜索头文件
+                        for header in headers:
+                            header_path = os.path.join(match_path, "include", header)
+                            if os.path.exists(header_path):
+                                result["path"] = match_path
+                                result["found"] = True
+                                break
+                        if result["found"]:
+                            break
+                    if result["found"]:
+                        break
+
+            # 特殊处理：Windows下XNNPACK的搜索（C:/Program Files下）
+            if is_win and name == "xnnpack" and not result["found"]:
+                # 直接展开通配符路径并搜索
+                win_paths = config.get("paths_win", [])
+                headers = config["header"] if isinstance(config["header"], list) else [config["header"]]
+
+                for path_pattern in win_paths:
+                    # 展开通配符
+                    import glob
+                    matches = glob.glob(path_pattern)
+                    for match_path in matches:
+                        # 在include子目录中搜索头文件
+                        for header in headers:
+                            header_path = os.path.join(match_path, "include", header)
+                            if os.path.exists(header_path):
+                                result["path"] = match_path
+                                result["found"] = True
+                                break
+                        if result["found"]:
+                            break
+                    if result["found"]:
+                        break
+
+            # 特殊处理：Windows下CUTLASS的搜索（C:/Program Files下）
+            if is_win and name == "cutlass" and not result["found"]:
+                # 直接展开通配符路径并搜索
+                win_paths = config.get("paths_win", [])
+                headers = config["header"] if isinstance(config["header"], list) else [config["header"]]
+
+                for path_pattern in win_paths:
+                    # 展开通配符
+                    import glob
+                    matches = glob.glob(path_pattern)
+                    for match_path in matches:
+                        # 在include子目录中搜索头文件
+                        for header in headers:
+                            header_path = os.path.join(match_path, "include", header)
+                            if os.path.exists(header_path):
+                                result["path"] = match_path
+                                result["found"] = True
+                                break
+                        if result["found"]:
+                            break
+                    if result["found"]:
+                        break
+
             # 如果还没找到，使用常规搜索
             if not result["found"]:
                 headers = config["header"] if isinstance(config["header"], list) else [config["header"]]
@@ -1287,9 +1361,35 @@ def search_dependency(name: str, sys_info: Dict, suppress_print: bool = False) -
                 elif os.path.exists(exe_path + ".exe"):
                     cmd[0] = exe_path + ".exe"
 
-            success, output = run_cmd(cmd)
-            if success and "version_pattern" in config:
-                result["version"] = extract_version(output, config["version_pattern"])
+            # 特殊处理：Windows下cuDNN Frontend/CUTLASS的版本检测（无grep命令）
+            if is_win and name in ["cudnn-frontend", "cutlass"] and "version_cmd" in config:
+                # 直接读取头文件内容解析版本号
+                include_path = os.path.join(result["path"], "include")
+                version_header = None
+
+                if name == "cudnn-frontend":
+                    version_header = os.path.join(include_path, "cudnn_frontend_version.h")
+                elif name == "cutlass":
+                    version_header = os.path.join(include_path, "cutlass", "version.h")
+
+                if version_header and os.path.exists(version_header):
+                    try:
+                        with open(version_header, 'r', encoding='utf-8', errors='ignore') as f:
+                            content = f.read()
+
+                        if "version_pattern" in config:
+                            match = re.search(config["version_pattern"], content, re.DOTALL)
+                            if match:
+                                result["version"] = ".".join(match.groups()) if match.groups() else match.group(1)
+                    except Exception:
+                        pass
+                success = False  # 标记跳过了命令执行
+                output = ""
+            else:
+                # 标准版本命令检测（Linux或Windows下其他依赖）
+                success, output = run_cmd(cmd)
+                if success and "version_pattern" in config:
+                    result["version"] = extract_version(output, config["version_pattern"])
 
             # 特殊处理：对于NCCL，需要从多行输出中组合版本号
             if name == "nccl" and success:
@@ -1305,6 +1405,13 @@ def search_dependency(name: str, sys_info: Dict, suppress_print: bool = False) -
                 if compare_version(result["version"], config["min_version"]) < 0:
                     result["found"] = False
                     result["error"] = f"Version {result['version']} < {config['min_version']}"
+
+    # Linux下XNNPACK和Simd的后备搜索：如果/opt路径没找到，尝试vcpkg
+    if linux_opt_first and not result["found"] and VCPKG_ROOT and config.get("vcpkg_packages"):
+        vcpkg_found = search_in_vcpkg(name, config, is_win)
+        if vcpkg_found["found"]:
+            result = vcpkg_found
+            result["from_vcpkg"] = True
 
     return result
 
@@ -1740,17 +1847,29 @@ def generate_cmake_config(scene: str, deps: Dict, sys_info: Dict) -> str:
             lines.append(f'set(TR_NCCL_INCLUDE_DIR "{nccl_path}/include")')
             lines.append(f'set(TR_NCCL_LIBRARY_DIR "{nccl_path}/lib")')
 
+    # cuDNN Frontend路径（仅CUDA场景）
+    if "cudnn-frontend" in deps and deps["cudnn-frontend"]["found"]:
+        cudnn_frontend_path = deps["cudnn-frontend"]["path"].replace("\\", "/")
+        lines.append(f'set(TR_CUDNN_FRONTEND_PATH "{cudnn_frontend_path}")')
+        lines.append(f'set(TR_CUDNN_FRONTEND_INCLUDE_DIR "{cudnn_frontend_path}/include")')
+
+    # CUTLASS路径（仅CUDA场景）
+    if "cutlass" in deps and deps["cutlass"]["found"]:
+        cutlass_path = deps["cutlass"]["path"].replace("\\", "/")
+        lines.append(f'set(TR_CUTLASS_PATH "{cutlass_path}")')
+        lines.append(f'set(TR_CUTLASS_INCLUDE_DIR "{cutlass_path}/include")')
+
     # vcpkg安装的依赖项路径 (使用实际的vcpkg包名)
     vcpkg_packages = {
-        "onednn": "oneDNN",           # vcpkg包名: onednn
-        "xnnpack": "XNNPACK",         # vcpkg包名: xnnpack
-        "mimalloc": "mimalloc",       # vcpkg包名: mimalloc
-        "zlib": "zlib",              # vcpkg包名: zlib
-        "libcurl": "CURL",           # vcpkg包名: curl
-        "libarchive": "LIBARCHIVE",  # vcpkg包名: libarchive
-        "libjpeg-turbo": "JPEG",     # vcpkg包名: libjpeg-turbo
-        "stb": "STB",               # vcpkg包名: stb
-        "simd": "Simd"              # vcpkg包名: simd
+        "eigen": "EIGEN",            # vcpkg包名: eigen3
+        "xnnpack": "XNNPACK",        # vcpkg包名: xnnpack
+        "mimalloc": "MIMALLOC",      # vcpkg包名: mimalloc
+        "zlib": "ZLIB",             # vcpkg包名: zlib
+        "libcurl": "CURL",          # vcpkg包名: curl
+        "libarchive": "LIBARCHIVE", # vcpkg包名: libarchive
+        "libjpeg-turbo": "JPEG",    # vcpkg包名: libjpeg-turbo
+        "stb": "STB",              # vcpkg包名: stb
+        "simd": "SIMD"             # vcpkg包名: simd
     }
 
     for dep_key, cmake_name in vcpkg_packages.items():
@@ -1772,7 +1891,7 @@ def generate_cmake_config(scene: str, deps: Dict, sys_info: Dict) -> str:
                         "libcurl": "curl",
                         "libarchive": "libarchive",
                         "libjpeg-turbo": "libjpeg-turbo",
-                        "onednn": "onednn",
+                        "eigen": "eigen3",
                         "xnnpack": "xnnpack",
                         "mimalloc": "mimalloc",
                         "zlib": "zlib",
@@ -1800,7 +1919,7 @@ def generate_cmake_config(scene: str, deps: Dict, sys_info: Dict) -> str:
                             "libcurl": "curl",
                             "libarchive": "libarchive",
                             "libjpeg-turbo": "libjpeg-turbo",
-                            "onednn": "onednn",
+                            "eigen": "eigen3",
                             "xnnpack": "xnnpack",
                             "mimalloc": "mimalloc",
                             "zlib": "zlib",
@@ -1834,7 +1953,7 @@ def generate_cmake_config(scene: str, deps: Dict, sys_info: Dict) -> str:
                         "libcurl": "curl",
                         "libarchive": "libarchive",
                         "libjpeg-turbo": "libjpeg-turbo",
-                        "onednn": "onednn",
+                        "eigen": "eigen3",
                         "xnnpack": "xnnpack",
                         "mimalloc": "mimalloc",
                         "zlib": "zlib",
@@ -2183,13 +2302,13 @@ def get_installed_triplet(dep_name: str, sys_info: Dict) -> str:
         return None
 
     # 搜索依赖项的实际安装记录
-    # 支持多种包名格式：onednn, libcurl, libjpeg-turbo等
+    # 支持多种包名格式：eigen3, libcurl, libjpeg-turbo等
     import re
 
     # 可能的包名列表
     possible_names = []
-    if dep_name == "onednn":
-        possible_names = ["onednn"]
+    if dep_name == "eigen":
+        possible_names = ["eigen3"]
     elif dep_name == "libcurl":
         possible_names = ["curl"]
     elif dep_name == "libarchive":
