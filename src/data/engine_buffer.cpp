@@ -886,7 +886,7 @@ void EngineBuffer::save_crc_csv(int buf_id, int samples_count) {
     int epoch_id = GlobalRegistry::instance().user_epoch_id();
 
     std::ostringstream oss;
-    oss << output_path_ << "/" << (is_train_ ? "train" : "val") << "_"
+    oss << output_path_ << "/crc_" << (is_train_ ? "train" : "val") << "_"
         << epoch_id << "_eb_" << engine_id_ << ".csv";
     std::string file_path = oss.str();
 

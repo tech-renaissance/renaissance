@@ -49,7 +49,7 @@ void print_usage(const char* program_name) {
               << "  " << program_name << " --dataset cifar10 --path /data/cifar --val-first --epoch 3\n"
               << "  " << program_name << " --dataset cifar10 --path /data/cifar --po-train1 RandomResizedCrop --reproducible\n\n"
               << "Note: CRC files will be saved to " TR_WORKSPACE "/eb_[engine_id]_[train/val]_[epoch].csv\n"
-              << "Command Sample: /root/epfs/R/renaissance/build/bin/tests/pw/test_engine_crc --dataset mnist --path /root/epfs/dataset/mnist --format raw --batch-size 256 --cpvs --sdmp 2 --shuffle --reproducible --epoch 3 --resolution 28 --po-train1 DoNothing --po-train2 DoNothing --preproc 112 --device GPU --gpu-ids \"0,1,2,3,4,5,6,7\" --seed 42\n\n";
+              << "Command Sample: /root/epfs/R/renaissance/build/bin/tests/pw/test_engine_crc --dataset mnist --path /root/epfs/dataset/mnist --format raw --batch-size 256 --cpvs true --sdmp 2 --shuffle --reproducible --epoch 3 --resolution 28 --po-train1 DoNothing --po-train2 DoNothing --preproc 112 --device GPU --gpu-ids \"0,1,2,3,4,5,6,7\" --seed 42\n\n";
 }
 
 /**
@@ -281,10 +281,11 @@ int main(int argc, char* argv[]) {
 
     // 【第一句】初始化框架（必须在所有其他操作之前）
     INIT_FRAMEWORK(device_type);
+    ENSURE_REPRODUCIBILITY(reproducible);
+    MANUAL_SEED(random_seed);
     std::cout << "Framework initialized with device: " << device_type << "\n";
 
-    // 【第二句】设置可复现性保险
-    GlobalRegistry::instance().ensure_reproducibility(reproducible);
+    // 显示可复现性模式
     if (reproducible) {
         std::cout << "Reproducible mode: ENABLED\n";
     } else {
@@ -469,22 +470,17 @@ int main(int argc, char* argv[]) {
         .batch_size(batch_size)
         .max_output_resolution(calculated_max_resolution)
         .color_channels(3)
-        .num_load_workers(num_load_workers)
-        .num_preproc_workers(num_preproc_workers)
-        .partial_mode(partial_mode)
+        .load_workers(num_load_workers)
+        .preprocess_workers(num_preproc_workers)
+        .fully_mode(!partial_mode)
         .shuffle_train(shuffle_train)
         .download(false)
         .sdmp_factor(sdmp_factor)
         .using_cpvs(using_cpvs)
-        .pw_test_mode(false)
         .cpu_binding(false)
-        .device(device_type)
         .train_transforms(*train_po1, *train_po2, *train_po3)
         .val_transforms(*val_po1, *val_po2, *val_po3)
         .commit();
-
-    // 设置全局随机种子
-    manual_seed(random_seed);
 
     // 步骤5：运行多个epoch
     std::cout << "\n=== Running " << num_epochs << " Epoch(s) ===\n\n";

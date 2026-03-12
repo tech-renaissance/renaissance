@@ -108,10 +108,11 @@ int main(int argc, char* argv[]) {
 
     // 【第一句】初始化框架（必须在所有其他操作之前）
     INIT_FRAMEWORK(device_type);
+    ENSURE_REPRODUCIBILITY(reproducible);
+    MANUAL_SEED(random_seed);
     std::cout << "Framework initialized with device: " << device_type << "\n";
 
-    // 【第二句】设置可复现性保险
-    GlobalRegistry::instance().ensure_reproducibility(reproducible);
+    // 显示可复现性模式
     if (reproducible) {
         std::cout << "Reproducible mode: ENABLED\n";
     } else {
@@ -192,22 +193,17 @@ int main(int argc, char* argv[]) {
         .using_progressive_resolution(true)  // 重要！必须有这句才能使得PW动态更新PO的输出分辨率！
         .max_intermediate_resolution(max_intermediate_resolution)
         .color_channels(1)  // MNIST是灰度图
-        .num_load_workers(num_load_workers)
-        .num_preproc_workers(num_preproc_workers)
-        .partial_mode(partial_mode)
+        .load_workers(num_load_workers)
+        .preprocess_workers(num_preproc_workers)
+        .fully_mode(!partial_mode)
         .shuffle_train(shuffle_train)
         .download(false)
         .sdmp_factor(sdmp_factor)
         .using_cpvs(using_cpvs)
-        .pw_test_mode(false)
         .cpu_binding(false)
-        .device(device_type)
         .train_transforms(*train_po1, *train_po2)
         .val_transforms(*val_po1, *val_po2)
         .commit();
-
-    // 设置全局随机种子
-    manual_seed(random_seed);
 
     // 定义渐进式分辨率方案
     struct ResolutionSchedule {
