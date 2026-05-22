@@ -1257,10 +1257,11 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
                 gn.input_ids.insert(gn.input_ids.begin(), prev_inf_output_id);
             }
 
-            // SoftmaxCE inference: 注入基线 ID（labels → loss + top1 + top5）
+            // SoftmaxCE inference: 注入基线 ID（scaling + labels → loss + inv_scaling + pred + probs + top1 + top5）
             if (gn.compute_op == ComputeOp::SOFTMAX_CE_FP32_FWD ||
                 gn.compute_op == ComputeOp::SOFTMAX_CE_FP32_INF) {
                 const auto& b = memory_plan.baseline();
+                gn.input_ids.push_back(b.scaling);
                 gn.input_ids.push_back(b.label_a);
                 gn.output_ids.insert(gn.output_ids.begin(), b.loss);
                 gn.output_ids.push_back(b.top1);

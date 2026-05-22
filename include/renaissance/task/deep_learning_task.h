@@ -40,6 +40,7 @@ namespace tr {
  * - 用户无法手动构图，防止自动生成 IR 与手动作图的双重权威冲突
  */
 class DeepLearningTask : public TaskBase {
+    friend class TaskBase;
 public:
     DeepLearningTask();
     ~DeepLearningTask() override;

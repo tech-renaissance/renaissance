@@ -242,10 +242,16 @@ PreCaptureResult pre_capture(const GraphAtlas& compile_atlas,
                 const MemoryPlan* mp = it->second;
                 contexts[rank]->set_memory_plan(mp);
 
+                int node_idx = 0;
                 for (const auto& node : key.cg->nodes(key.gid)) {
-                    if (node.kind != GraphNode::Kind::COMPUTE) continue;
-                    if (!require_warmup(node.compute_op)) continue;
+                    if (node.kind != GraphNode::Kind::COMPUTE) { ++node_idx; continue; }
+                    if (!require_warmup(node.compute_op)) { ++node_idx; continue; }
+                    TR_LOG_INFO("graph") << "[B2-DBG] warmup k=" << k
+                                         << " gid=" << static_cast<int>(key.gid)
+                                         << " node=" << node_idx
+                                         << " op=" << static_cast<int>(node.compute_op);
                     warmup_single_cudnn_op(node, *mp, *contexts[rank]);
+                    ++node_idx;
                 }
             }
             cudaDeviceSynchronize();

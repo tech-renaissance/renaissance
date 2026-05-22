@@ -1282,6 +1282,14 @@ void TaskBase::init_all() {
     }
 
     // 第 1 步：标准初始化全部 DTensor（按各自的 init_config）
+    LOG_INFO << "[DEBUG] init_all: dtensors count=" << active_memory_plan_->dtensors().size();
+    for (size_t i = 0; i < active_memory_plan_->dtensors().size(); ++i) {
+        const auto& dt = active_memory_plan_->dtensors()[i];
+        LOG_INFO << "[DEBUG] dtensor[" << i << "] id=" << dt.id
+                 << " region=" << static_cast<int>(dt.region)
+                 << " shape=" << dt.shape.to_string()
+                 << " init=" << static_cast<int>(dt.init_config.kind);
+    }
     for (const auto& dtensor : active_memory_plan_->dtensors()) {
         init(dtensor);
     }

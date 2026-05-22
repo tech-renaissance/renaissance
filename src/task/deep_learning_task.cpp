@@ -540,12 +540,15 @@ StreamKind DeepLearningTask::stream_for(GraphId gid) {
 float DeepLearningTask::fetch_lr_for_batch(int batch_id) const {
     return std::visit([this, batch_id](auto&& sch) -> float {
         using T = std::decay_t<decltype(sch)>;
-        if constexpr (std::is_same_v<T, std::monostate>) return 0.0f;
-        if (sch.is_step_by_batch()) {
-            int global_step = current_epoch_ * sch.steps_per_epoch() + batch_id;
-            return sch.get_lr_by_batch(global_step);
+        if constexpr (std::is_same_v<T, std::monostate>) {
+            return 0.0f;
         } else {
-            return sch.get_lr_by_epoch(current_epoch_);
+            if (sch.is_step_by_batch()) {
+                int global_step = current_epoch_ * sch.steps_per_epoch() + batch_id;
+                return sch.get_lr_by_batch(global_step);
+            } else {
+                return sch.get_lr_by_epoch(current_epoch_);
+            }
         }
     }, sched_cfg_);
 }
@@ -566,13 +569,13 @@ void DeepLearningTask::build_exec_table() {
             captured_result_.graphs[idx].native_exec(rank));
     };
 
+    auto S = [](GraphSlot s) { return static_cast<size_t>(s); };
+
     for (int rank = 0; rank < K; ++rank) {
         gpu_exec_.device_ids[rank] = context(rank).device_id();
 
         auto& g = gpu_exec_.graphs[rank];
         g.resize(static_cast<size_t>(GraphSlot::COUNT), nullptr);
-
-        auto S = [](GraphSlot s) { return static_cast<size_t>(s); };
 
         g[S(GraphSlot::XFER_A)]           = resolve(GraphId::TRANSFER_A, rank);
         g[S(GraphSlot::XFER_B)]           = resolve(GraphId::TRANSFER_B, rank);
@@ -609,9 +612,11 @@ void DeepLearningTask::build_exec_table() {
     for (int rank = 0; rank < K; ++rank) {
         if (captured_result_.atlas.index(0, GraphId::FIRST_FWD_A) >= 0)
             TR_CHECK(gpu_exec_.graphs[rank][S(GraphSlot::FIRST_FWD_A)],
+                     ValueError,
                      "FIRST_FWD_A is nullptr");
         if (captured_result_.atlas.index(0, GraphId::FIRST_FWD_B) >= 0)
             TR_CHECK(gpu_exec_.graphs[rank][S(GraphSlot::FIRST_FWD_B)],
+                     ValueError,
                      "FIRST_FWD_B is nullptr");
     }
 #endif
@@ -707,14 +712,16 @@ TrainingResult DeepLearningTask::run_gpu() {
         }
 
         // N+1 线程：1 个 Preprocessor 线程 + K 个 rank 线程
-        std::exception_ptr prep_exc;
-        std::thread prep_thread([&]() {
-            try { prep.train(); }
-            catch (...) { prep_exc = std::current_exception(); }
-        });
+        // [DRY-RUN] Preprocessor 线程注释
+        // std::exception_ptr prep_exc;
+        // std::thread prep_thread([&]() {
+        //     try { prep.train(); }
+        //     catch (...) { prep_exc = std::current_exception(); }
+        // });
         run_train_epoch_gpu();
-        prep_thread.join();
-        if (prep_exc) std::rethrow_exception(prep_exc);
+        // [DRY-RUN]
+        // prep_thread.join();
+        // if (prep_exc) std::rethrow_exception(prep_exc);
 
         bool did_validate = false;
         float val_loss = 0.0f, top1 = 0.0f, top5 = 0.0f;
@@ -783,6 +790,20 @@ TrainingResult DeepLearningTask::run_gpu() {
 #endif
 }
 
+// ========== [DRY-RUN: 第一步专用, 测试后立即删除] ==========
+#define DRY_RUN_CUDA_GRAPH
+#ifdef DRY_RUN_CUDA_GRAPH
+#include <iostream>
+#define L_OR_P(g, s, label)                  do { if (g) { std::cout << "[DRY] r" << rank << " b" << batch << " " << label << " s=" << (s==s_c1?"C1":s==s_c2?"C2":s==s_up?"UP":"TR") << std::endl; } } while(0)
+#define LX_OR_P(g, s, label)                 do { if (g) { std::cout << "[DRY] r" << rank << " b" << batch << " " << label << " s=TR" << std::endl; } } while(0)
+#define LS_OR_P(g, s, label)                 do { if (g) { std::cout << "[DRY] r" << rank << " " << label << " s=" << (s==s_c1?"C1":s==s_c2?"C2":s==s_up?"UP":"TR") << std::endl; } } while(0)
+#else
+#define L_OR_P(g, s, label)  do { if (g) cudaGraphLaunch(g, s); } while(0)
+#define LX_OR_P(g, s, label) L_OR_P(g, s, label)
+#define LS_OR_P(g, s, label) L_OR_P(g, s, label)
+#endif
+// ========== [DRY-RUN END] ==========
+
 #ifdef TR_USE_CUDA
 void DeepLearningTask::run_train_epoch_gpu() {
     auto& prep = Preprocessor::instance();
@@ -840,9 +861,16 @@ void DeepLearningTask::run_train_epoch_gpu() {
                 bool frozen = is_first_layer_frozen();
 
                 // ========== Batch 0 预传输 ==========
+                // [DRY-RUN] 手动标记 buffer
+                ts->set_buffer_readable(0, true);
+                ts->set_buffer_readable(1, true);
+                ts->set_buffer_writeable(0, false);
+                ts->set_buffer_writeable(1, false);
                 while (!ts->buffer_is_readable(0))
                     std::this_thread::sleep_for(std::chrono::microseconds(100));
-                cudaGraphLaunch(g_xfer_a, s_trans);
+                if (g_xfer_a) {
+                    std::cout << "[DRY] r" << rank << " b0 XFER_A(pre) s=TR" << std::endl;
+                }
                 sync_tr();
                 if (rank == 0) {
                     ts->set_buffer_readable(0, false);
@@ -851,20 +879,20 @@ void DeepLearningTask::run_train_epoch_gpu() {
 
                 // ========== 单 batch 边界 ==========
                 if (batches == 1) {
-                    if (g_zg) cudaGraphLaunch(g_zg, s_up);
-                    if (g_fwd_a) cudaGraphLaunch(g_fwd_a, s_c1);
+                    LS_OR_P(g_zg, s_up, "ZERO_GRAD");
+                    LS_OR_P(g_fwd_a, s_c1, "FIRST_FWD");
                     sync_comp(); sync_up();
 
-                    cudaGraphLaunch(g_deep_a, s_c1);
+                    LS_OR_P(g_deep_a, s_c1, "DEEP_FWD_BWD");
                     sync_comp();
 
                     if (!frozen) {
-                        if (g_first) cudaGraphLaunch(g_first, s_c1);
+                        LS_OR_P(g_first, s_c1, "FIRST_BWD");
                     }
-                    if (g_dar) cudaGraphLaunch(g_dar, s_up);
+                    LS_OR_P(g_dar, s_up, "DEEP_ALLREDUCE");
                     sync_comp(); sync_up();
 
-                    if (using_amp && g_gc) { cudaGraphLaunch(g_gc, s_up); sync_up(); }
+                    if (using_amp && g_gc) { LS_OR_P(g_gc, s_up, "CAST_AND_CHECK"); sync_up(); }
 
                     {
                         lr = fetch_lr_for_batch(0);
@@ -872,8 +900,8 @@ void DeepLearningTask::run_train_epoch_gpu() {
                         cudaMemcpyAsync(lr_dev_ptr, lr_pinned_[rank], sizeof(float),
                                         cudaMemcpyHostToDevice, s_up);
                     }
-                    if (g_far) cudaGraphLaunch(g_far, s_up);
-                    if (g_wu) cudaGraphLaunch(g_wu, s_up);
+                    LS_OR_P(g_far, s_up, "FIRST_ALLREDUCE");
+                    LS_OR_P(g_wu, s_up, "WEIGHT_UPDATE");
                     sync_up();
                     return;
                 }
@@ -887,17 +915,20 @@ void DeepLearningTask::run_train_epoch_gpu() {
                     auto g_xfer_n = from_a ? g_xfer_b : g_xfer_a;
 
                     // Phase 1: ZERO_GRAD ‖ FIRST_FWD
-                    if (g_zg) cudaGraphLaunch(g_zg, s_up);
-                    if (g_fwd) cudaGraphLaunch(g_fwd, s_c1);
+                    L_OR_P(g_zg, s_up, "ZERO_GRAD");
+                    L_OR_P(g_fwd, s_c1, "FIRST_FWD");
                     sync_comp(); sync_up();
 
                     // Wait next buffer
+                    // [DRY-RUN] 手动标记
+                    ts->set_buffer_readable(0, true);
+                    ts->set_buffer_readable(1, true);
                     while (!ts->buffer_is_readable(next_buf))
                         std::this_thread::sleep_for(std::chrono::microseconds(100));
 
                     // Phase 2: DEEP_FWD_BWD ‖ XFER(next)
-                    cudaGraphLaunch(g_deep, s_c1);
-                    cudaGraphLaunch(g_xfer_n, s_trans);
+                    L_OR_P(g_deep, s_c1, "DEEP_FWD_BWD");
+                    LX_OR_P(g_xfer_n, s_trans, "XFER");
                     sync_comp(); sync_tr();
                     if (rank == 0) {
                         ts->set_buffer_readable(next_buf, false);
@@ -906,13 +937,13 @@ void DeepLearningTask::run_train_epoch_gpu() {
 
                     // Phase 3: FIRST_BWD ‖ DEEP_ALLREDUCE
                     if (!frozen) {
-                        if (g_first) cudaGraphLaunch(g_first, s_c1);
+                        L_OR_P(g_first, s_c1, "FIRST_BWD");
                     }
-                    if (g_dar) cudaGraphLaunch(g_dar, s_up);
+                    L_OR_P(g_dar, s_up, "DEEP_ALLREDUCE");
                     sync_comp(); sync_up();
 
                     // AMP
-                    if (using_amp && g_gc) { cudaGraphLaunch(g_gc, s_up); sync_up(); }
+                    if (using_amp && g_gc) { L_OR_P(g_gc, s_up, "CAST_AND_CHECK"); sync_up(); }
 
                     // Phase 4: LR H2D → FIRST_ALLREDUCE → WEIGHT_UPDATE
                     {
@@ -921,8 +952,8 @@ void DeepLearningTask::run_train_epoch_gpu() {
                         cudaMemcpyAsync(lr_dev_ptr, lr_pinned_[rank], sizeof(float),
                                         cudaMemcpyHostToDevice, s_up);
                     }
-                    if (g_far) cudaGraphLaunch(g_far, s_up);
-                    if (g_wu) cudaGraphLaunch(g_wu, s_up);
+                    L_OR_P(g_far, s_up, "FIRST_ALLREDUCE");
+                    L_OR_P(g_wu, s_up, "WEIGHT_UPDATE");
                     sync_up();
                 }
 
@@ -932,20 +963,20 @@ void DeepLearningTask::run_train_epoch_gpu() {
                     auto g_fwd_l = last_a ? g_fwd_a : g_fwd_b;
                     auto g_deep_l = last_a ? g_deep_a : g_deep_b;
 
-                    if (g_zg) cudaGraphLaunch(g_zg, s_up);
-                    if (g_fwd_l) cudaGraphLaunch(g_fwd_l, s_c1);
+                    LS_OR_P(g_zg, s_up, "ZERO_GRAD");
+                    LS_OR_P(g_fwd_l, s_c1, "FIRST_FWD");
                     sync_comp(); sync_up();
 
-                    cudaGraphLaunch(g_deep_l, s_c1);
+                    LS_OR_P(g_deep_l, s_c1, "DEEP_FWD_BWD");
                     sync_comp();
 
                     if (!frozen) {
-                        if (g_first) cudaGraphLaunch(g_first, s_c1);
+                        LS_OR_P(g_first, s_c1, "FIRST_BWD");
                     }
-                    if (g_dar) cudaGraphLaunch(g_dar, s_up);
+                    LS_OR_P(g_dar, s_up, "DEEP_ALLREDUCE");
                     sync_comp(); sync_up();
 
-                    if (using_amp && g_gc) { cudaGraphLaunch(g_gc, s_up); sync_up(); }
+                    if (using_amp && g_gc) { LS_OR_P(g_gc, s_up, "CAST_AND_CHECK"); sync_up(); }
 
                     {
                         lr = fetch_lr_for_batch(batches - 1);
@@ -953,8 +984,8 @@ void DeepLearningTask::run_train_epoch_gpu() {
                         cudaMemcpyAsync(lr_dev_ptr, lr_pinned_[rank], sizeof(float),
                                         cudaMemcpyHostToDevice, s_up);
                     }
-                    if (g_far) cudaGraphLaunch(g_far, s_up);
-                    if (g_wu) cudaGraphLaunch(g_wu, s_up);
+                    LS_OR_P(g_far, s_up, "FIRST_ALLREDUCE");
+                    LS_OR_P(g_wu, s_up, "WEIGHT_UPDATE");
                     sync_up();
                 }
 

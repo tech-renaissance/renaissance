@@ -314,3 +314,35 @@ else()
     target_compile_options(perf_h2d_copy_a PRIVATE -Wall -Wextra -Wpedantic -Wno-unused-function)
 endif()
 message(STATUS "  - perf_h2d_copy_a: RANGE_H2D_COPY_A performance test")
+
+# ============================================================================
+# DeepLearningTask GPU 测试
+# ============================================================================
+
+function(setup_dl_test name)
+    target_link_libraries(${name} PRIVATE renaissance)
+    target_compile_definitions(${name} PRIVATE TR_LOG_LEVEL=1)
+    if(TR_USE_CUDA)
+        setup_gpu_runtime_env(${name})
+    endif()
+    set_target_properties(${name} PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/correction
+        WIN32_EXECUTABLE FALSE)
+    if(MSVC)
+        target_compile_options(${name} PRIVATE /W4 /utf-8 /wd4244 /wd4505 /wd4458 /wd4127)
+    else()
+        target_compile_options(${name} PRIVATE -Wall -Wextra -Wpedantic -Wno-unused-function)
+    endif()
+endfunction()
+
+add_executable(test_dl_dry test_dl_dry.cpp)
+setup_dl_test(test_dl_dry)
+message(STATUS "  - test_dl_dry: DeepLearningTask DRY-RUN test")
+
+add_executable(perf_dl_xfer_ab perf_dl_xfer_ab.cpp)
+setup_dl_test(perf_dl_xfer_ab)
+message(STATUS "  - perf_dl_xfer_ab: AB transfer bandwidth test")
+
+add_executable(test_dl_full test_dl_full.cpp)
+setup_dl_test(test_dl_full)
+message(STATUS "  - test_dl_full: DeepLearningTask full GPU training test")

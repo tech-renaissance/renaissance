@@ -353,8 +353,8 @@ SubgraphPattern build_relu_inference(const OpParams&, const std::vector<TensorDe
     SubgraphPattern p;
     if (descs.size() < 2) return p;
     SubgraphPattern::Node n;
-    n.op = GlobalRegistry::instance().using_amp() ? ComputeOp::RELU_AMP_FWD : ComputeOp::RELU_FP32_FWD;
-    n.output_indices = {0};
+    n.op = GlobalRegistry::instance().using_amp() ? ComputeOp::RELU_AMP_INF : ComputeOp::RELU_FP32_INF;
+    n.output_indices = {0, 1};  // output + mask (mask pointer required even in inference, but not written)
     p.nodes.push_back(n);
     return p;
 }
@@ -532,7 +532,7 @@ SubgraphPattern build_softmaxce_backward(const OpParams&, const std::vector<Tens
     SubgraphPattern::Node n;
     n.op = GlobalRegistry::instance().using_amp() ? ComputeOp::SOFTMAX_CE_AMP_BWD
                                                    : ComputeOp::SOFTMAX_CE_FP32_BWD;
-    n.input_indices  = {1, 3};      // softmax_probs + inv_scaling_factor
+    n.input_indices  = {0, 1, 3};   // d_logits(占位) + softmax_probs + inv_scaling_factor
     n.output_indices = {0};         // dL/d(logits) in-place覆盖ce_output
     p.nodes.push_back(n);
     return p;
@@ -543,7 +543,7 @@ SubgraphPattern build_softmaxce_inference(const OpParams&, const std::vector<Ten
     if (descs.size() < 4) return p;
     SubgraphPattern::Node n;
     n.op = ComputeOp::SOFTMAX_CE_FP32_FWD;
-    n.output_indices = {2, 1};
+    n.output_indices = {3, 2, 1};
     p.nodes.push_back(n);
     return p;
 }
