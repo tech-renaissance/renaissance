@@ -8,8 +8,8 @@
  */
 
 #include "renaissance/data/fast_random_resized_crop.h"
-#include "renaissance/base/tr_exception.h"
-#include "renaissance/base/logger.h"
+#include "renaissance/core/tr_exception.h"
+#include "renaissance/core/logger.h"
 #include <cmath>
 #include <cstring>
 #include <algorithm>
@@ -49,10 +49,23 @@ FastRandomResizedCrop::FastRandomResizedCrop(
              "ratio_min must be in (0, ratio_max], got: " << ratio_min_ << ", " << ratio_max_);
     TR_CHECK(output_size_ > 0, ValueError, "output_size must be positive, got: " << output_size_);
 
+    // 计算三次方根（原始版本确实在构造函数中初始化这些值）
     sqrt3_scale_min_ = std::pow(scale_min_, 1.0f / 3.0f);  // scale_min_的三次方根
     sqrt3_scale_max_ = std::pow(scale_max_, 1.0f / 3.0f);  // scale_max_的三次方根
     crop_power_ = 2.0f;
     sdmp_factor_ = 1;
+}
+
+// 新增构造函数：支持initializer_list的API
+FastRandomResizedCrop::FastRandomResizedCrop(
+    int output_size,
+    std::pair<float, float> scale,
+    std::pair<float, float> ratio,
+    size_t output_alignment
+)
+    : FastRandomResizedCrop(output_size, scale.first, scale.second, ratio.first, ratio.second, output_alignment)
+{
+    // 委托给原构造函数，算法逻辑完全一致
 }
 
 DecodeStrategy FastRandomResizedCrop::get_decode_strategy(
@@ -78,6 +91,7 @@ DecodeStrategy FastRandomResizedCrop::get_decode_strategy(
     else {
         crop_power_ = 1.0f;
     }
+
     DecodeStrategy strategy;
     strategy.need_decode = true;
 

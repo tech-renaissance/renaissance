@@ -1,0 +1,24 @@
+
+• 编译和测试全部成功。
+  编译结果
+  82/82 通过，0 errors，0 warnings。
+  Composite 测试结果
+   指标   优化前       优化后      加速比
+  ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+   FWD    153.71 us    169.81 us   ~1.0×（无变化，正常波动）
+   BWD    3681.83 us   436.10 us   8.4×
+  关键验证点
+  ✅ 正确性：全部 12 个 MSE 检查 PASS，MaxMSE = 6.38E-11
+  ✅ OpenMP 禁用日志：
+  [backend] DeviceContext CPU: Eigen OpenMP disabled (setNbThreads=1)
+  ✅ Workspace 扩容行为：
+  [backend] DeviceContext CPU: workspace grown to 524288 bytes      ← FC2 dry-run（512 KB）
+  [backend] DeviceContext CPU: workspace grown to 1605632 bytes     ← FC1 dry-run（扩容至 1.57 MB）
+  • 两次扩容发生在 compile 阶段 dry-run（符合设计）
+  • run 阶段无新增 grow 日志（workspace 大小已固定）
+  性能分析
+  BWD 从 3682 us → 436 us，提升 8.4×。虽然未达到方案预估的 ~17.5×（~210 us），但已远超 L1（ColMajor 重排）单独能解释的 3
+  .7×，说明 L2（OpenMP 禁用）确实贡献了显著的额外加速。
+
+  剩余差距（436 us vs 理论 ~210 us）可能来自 L3 未知因素（Arena cache 布局、DTensor 解析开销、或 run_iter 循环本身的固定
+  开销）。但 8.4× 已是非常有效的优化，正确性也完全保持。

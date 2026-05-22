@@ -1,0 +1,188 @@
+/**
+ * @file task_base.h
+ * @brief TaskBase 类声明：静态图任务抽象基类，强制三阶段状态机
+ * @version 4.20.1
+ * @date 2026-04-20
+ * @author 技术觉醒团队
+ * @note 依赖项: core/types, tensor/distributed_tensor, tensor/tensor, graph/memory_plan, graph/computation_graph
+ * @note 所属系列: task
+ *
+ * @section rank_gpu_concept Rank 与 GPU ID 的关键区别
+ *
+ * **核心原则：顶层API只使用RANK，不直接使用GPU ID**
+ *
+ * - **Rank（逻辑ID）**：0~num_gpus_-1 的连续整数，用户在Task层面直接指定
+ *   - 例如：8卡训练时，rank = 0,1,2,3,4,5,6,7
+ *   - 用户API：transfer_to_rank(host, dt, 2), fetch_from_rank(dt, 5)
+ *
+ * - **GPU ID（物理ID）**：实际硬件设备的CUDA编号，由GlobalRegistry::use_gpu()指定
+ *   - 例如：use_gpu("2,3,5,7") 时，gpu_ids = [2,3,5,7]
+ *   - 映射关系：rank 0→GPU 2, rank 1→GPU 3, rank 2→GPU 5, rank 3→GPU 7
+ *
+ * **架构设计**：
+ * - 用户层面（TaskBase/SimpleTask/Task）：只处理rank
+ * - Backend内部：通过reg.gpu_ids()[rank]自动映射到物理GPU ID
+ * - 唯一例外：GlobalRegistry::use_gpu("0-7") 指定物理GPU配置
+ *
+ * **示例**：
+ * ```cpp
+ * GlobalRegistry::instance().use_gpu("2,3,5,7");  // 指定物理GPU
+ * task.transfer_to_rank(host_tensor, dtensor, 0); // rank 0 → GPU 2
+ * task.fill(dtensor, 1.0f);                       // 所有rank (0~3) → GPU (2,3,5,7)
+ * Tensor result = task.fetch_from_rank(dtensor, 3); // rank 3 → GPU 7
+ * ```
+ */
+
+#pragma once
+
+#include "renaissance/core/types.h"
+#include "renaissance/tensor/distributed_tensor.h"
+#include "renaissance/tensor/tensor.h"
+#include "renaissance/graph/memory_plan.h"
+#include "renaissance/graph/computation_graph.h"
+
+#include <string>
+#include <unordered_map>
+#include <memory>
+#include <vector>
+
+namespace tr {
+
+// Phase and StreamKind are already defined in core/types.h
+
+/**
+ * @class TaskBase
+ * @brief 静态图任务抽象基类 / 唯一硬件句柄
+ *
+ * 强制状态机：PLANNING -> MEMORY_LOCKED -> COMPILED
+ * compile() 为公共非虚模板方法，固定管线执行。
+ */
+class TaskBase {
+public:
+    virtual ~TaskBase();
+
+    TaskBase(const TaskBase&) = delete;
+    TaskBase& operator=(const TaskBase&) = delete;
+    TaskBase(TaskBase&&) = delete;
+    TaskBase& operator=(TaskBase&&) = delete;
+
+    /**
+     * @brief 编译：公共非虚模板方法，固定管线
+     * @param debug_mode true 时仅完成 IR 规划与打印，不分配硬件、不捕获图
+     */
+    void compile(bool debug_mode = false);
+
+    // ---------------------------------------------------------------------
+    // 运行期数据操作（仅 COMPILED 阶段可用）
+    // ---------------------------------------------------------------------
+    void transfer(const Tensor& host, const DTensor& dtensor);
+    void transfer(const std::vector<Tensor>& hosts, const DTensor& dtensor);
+
+    /**
+     * @brief 仅传输到指定逻辑rank（不广播）
+     * @param host 主机张量
+     * @param dtensor 分布式张量
+     * @param rank 逻辑rank（0 ~ num_gpus-1），会自动映射到物理GPU ID
+     * @note 例如：gpu_ids=[2,3,5,7]，rank=0 → GPU ID 2，rank=1 → GPU ID 3
+     */
+    void transfer_to_rank(const Tensor& host, const DTensor& dtensor, int rank);
+
+    /**
+     * @brief 从逻辑Rank0广播到所有GPU
+     * @param dtensor 分布式张量
+     * @note 从逻辑Rank0（映射到物理GPU ID gpu_ids[0]）广播到所有选用的GPU
+     */
+    void broadcast_from_rank0(const DTensor& dtensor);
+
+    void fill(const DTensor& dtensor, float value);
+    void zero(const DTensor& dtensor);
+    void randn(const DTensor& dtensor, uint64_t seed);
+
+    /**
+     * @brief 从指定逻辑rank取回数据到CPU
+     * @param dtensor 分布式张量
+     * @param rank 源逻辑rank，会自动映射到物理GPU ID
+     * @note 例如：gpu_ids=[2,3,5,7]，rank=0 → 从GPU ID 2取回
+     * @note 使用同步cudaMemcpy进行D2H传输，支持可分页内存
+     */
+    [[nodiscard]] Tensor fetch_from_rank(const DTensor& dtensor, int rank);
+
+    /**
+     * @brief 从逻辑Rank0取回数据到CPU（便捷方法）
+     * @param dtensor 分布式张量
+     * @note 等价于 fetch_from_rank(dtensor, 0)
+     * @note 使用同步cudaMemcpy进行D2H传输，支持可分页内存
+     */
+    [[nodiscard]] Tensor fetch(const DTensor& dtensor);
+
+    // ---------------------------------------------------------------------
+    // 状态查询
+    // ---------------------------------------------------------------------
+    [[nodiscard]] Phase phase() const noexcept { return phase_; }
+    [[nodiscard]] const MemoryPlan& memory_plan() const noexcept { return memory_plan_; }
+    [[nodiscard]] bool debug_mode() const noexcept { return debug_mode_; }
+
+protected:
+    TaskBase();
+
+    // -------- PLANNING 阶段 --------
+    [[nodiscard]] DTensor alloc(const Shape& shape, DType dtype = DType::FP32);
+    [[nodiscard]] DTensor alloc(const Shape& shape, DType dtype, Region region);
+    [[nodiscard]] DTensor alloc(const Shape& shape, DType dtype, Region region, ParamBucket bucket);
+    [[nodiscard]] DTensor alloc_scalar(DType dtype = DType::FP32);
+    void finalize_memory();
+
+    // -------- MEMORY_LOCKED 阶段 --------
+    void add_graph(const std::string& name, ComputationGraph graph,
+                   StreamKind stream = StreamKind::COMP_1);
+
+    // -------- COMPILED 阶段图执行 --------
+    void run(const std::string& name);
+    void run(const std::string& a, const std::string& b);
+
+    // 派生类注入钩子
+    virtual void on_prepare() = 0;
+
+    // compile() 流水线分解（允许派生类自定义GlobalRegistry初始化行为）
+    virtual void compile_freeze_global();
+
+    [[nodiscard]] MemoryPlan& memory_plan_mut() noexcept { return memory_plan_; }
+
+    struct GraphEntry {
+        ComputationGraph graph;
+        StreamKind stream;
+    };
+    [[nodiscard]] const std::unordered_map<std::string, GraphEntry>& graphs() const noexcept { return named_graphs_; }
+
+private:
+    void check_phase(Phase expected, const char* op) const;
+
+    // V4.21新增：布局转换辅助函数
+    void create_temp_buffer_for_layout_conversion(Tensor& output, const Tensor& input, const DTensor& target);
+
+    // compile() 流水线分解
+    void compile_invoke_on_prepare();
+    void compile_verify_memory_locked();
+    void compile_debug_print_and_return();
+    void compile_alloc_hardware();
+    void compile_warmup_master_gpu();
+    void compile_capture_all_graphs();
+    void compile_warmup_graphs();
+    void compile_mark_compiled();
+    void check_run_eligibility(bool dry_run) const;
+
+protected:
+    Phase phase_ = Phase::PLANNING;
+    MemoryPlan memory_plan_;
+    bool debug_mode_ = false;
+    bool debug_compiled_ = false;
+    int num_gpus_ = 1;
+
+    std::unordered_map<std::string, GraphEntry> named_graphs_;
+
+    // PIMPL 彻底隐藏后端
+    struct Backend;
+    std::unique_ptr<Backend> backend_;
+};
+
+} // namespace tr

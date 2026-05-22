@@ -34,6 +34,14 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/config/cmake_paths.cmake)
     include(${CMAKE_CURRENT_SOURCE_DIR}/config/cmake_paths.cmake)
 endif()
 
+# 自动修复 Eigen3 include 路径（处理 Linux vcpkg 的嵌套 include/eigen3 结构）
+if(DEFINED TR_EIGEN_INCLUDE_DIR)
+    if(NOT EXISTS "${TR_EIGEN_INCLUDE_DIR}/Eigen/Core" AND EXISTS "${TR_EIGEN_INCLUDE_DIR}/eigen3/Eigen/Core")
+        set(TR_EIGEN_INCLUDE_DIR "${TR_EIGEN_INCLUDE_DIR}/eigen3")
+        message(STATUS "Auto-corrected Eigen3 include path: ${TR_EIGEN_INCLUDE_DIR}")
+    endif()
+endif()
+
 # 确保workspace目录存在（在项目根目录）
 if(DEFINED TR_WORKSPACE)
     # 使用execute_process创建目录，绕过CMake的源码目录限制
@@ -74,6 +82,17 @@ else()
         message(WARNING "Failed to create workspace directory")
     endif()
     message(STATUS "Default workspace directory created: ${TR_WORKSPACE}")
+endif()
+
+# ============================================================================
+# 运行时库搜索路径 (RPATH) 配置
+# ============================================================================
+
+# 让可执行文件在构建目录中运行时，能自动找到非标准路径下的动态库（如 /opt/xnnpack/lib）
+set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
+if(DEFINED TR_XNNPACK_LIBRARY_DIR)
+    list(APPEND CMAKE_BUILD_RPATH ${TR_XNNPACK_LIBRARY_DIR})
+    message(STATUS "CMAKE_BUILD_RPATH appended: ${TR_XNNPACK_LIBRARY_DIR}")
 endif()
 
 # ============================================================================
@@ -196,6 +215,11 @@ if(TR_USE_LIBARCHIVE)
     message(STATUS "Global macro TR_USE_LIBARCHIVE defined: 1")
 endif()
 
+if(TR_USE_LIBNUMA)
+    add_compile_definitions(TR_USE_LIBNUMA=1)
+    message(STATUS "Global macro TR_USE_LIBNUMA defined: 1")
+endif()
+
 if(TR_USE_MIMALLOC)
     add_compile_definitions(TR_USE_MIMALLOC=1)
     message(STATUS "Global macro TR_USE_MIMALLOC defined: 1")
@@ -209,6 +233,26 @@ endif()
 if(TR_USE_NCCL)
     add_compile_definitions(TR_USE_NCCL=1)
     message(STATUS "Global macro TR_USE_NCCL defined: 1")
+endif()
+
+option(TR_NCCL_SINGLE_GPU "Enable NCCL initialization for single-GPU tasks (default OFF)" OFF)
+if(TR_NCCL_SINGLE_GPU)
+    add_compile_definitions(TR_NCCL_SINGLE_GPU=1)
+    message(STATUS "Global macro TR_NCCL_SINGLE_GPU defined: 1")
+endif()
+
+# ============================================================================
+# GPU特定型号宏定义
+# ============================================================================
+# 定义GPU型号特定的宏，使所有源文件可见
+if(TR_GPU_MODEL_A100)
+    add_compile_definitions(USING_A100=1)
+    message(STATUS "Global macro USING_A100 defined: 1")
+endif()
+
+if(TR_GPU_MODEL_RTX5090)
+    add_compile_definitions(USING_RTX5090=1)
+    message(STATUS "Global macro USING_RTX5090 defined: 1")
 endif()
 
 # ============================================================================
@@ -246,6 +290,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
         # 添加UTF-8编译标志以支持中文注释（避免C4819警告）
         # 使用生成器表达式，只应用于C++，不应用于CUDA
         add_compile_options($<$<COMPILE_LANGUAGE:CXX>:/utf-8>)
+        add_compile_options($<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=/utf-8>)
         set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} /O2 /Ob2 /DNDEBUG /arch:AVX2")
         set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} /INCREMENTAL:NO")
     endif()
@@ -273,6 +318,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
         # 添加UTF-8编译标志以支持中文注释（避免C4819警告）
         # 使用生成器表达式，只应用于C++，不应用于CUDA
         add_compile_options($<$<COMPILE_LANGUAGE:CXX>:/utf-8>)
+        add_compile_options($<$<COMPILE_LANGUAGE:CUDA>:-Xcompiler=/utf-8>)
         # 注意：不使用/RTC1，因为它与OpenMP和mimalloc不兼容
         # MSVC文档明确说明：/RTC（运行时错误检查）不能与/openmp同时使用
         # 添加/arch:AVX2以与Release模式保持一致
@@ -321,8 +367,8 @@ if(TR_USE_CUDA)
             set(CUDA_cublas_LIBRARY ${CUDAToolkit_ROOT}/lib64/libcublas.so)
         endif()
 
-        # 设置CUDA架构（支持RTX 20/30/40系列、A100/H100等）
-        set(CMAKE_CUDA_ARCHITECTURES "75;80;86;89;90" CACHE STRING "CUDA Architecture" FORCE)
+        # 设置CUDA架构（支持RTX 20/30/40/50系列、A100/H100等）
+        set(CMAKE_CUDA_ARCHITECTURES "75;80;86;89;90;100" CACHE STRING "CUDA Architecture" FORCE)
 
         message(STATUS "CUDA support enabled (library-only mode)")
         message(STATUS "CUDA Toolkit: ${CUDAToolkit_ROOT}")
@@ -486,6 +532,11 @@ endif()
 # 框架核心组件配置
 # ============================================================================
 
+# 设置全局输出目录（必须在 add_subdirectory 之前，否则对子目录无效）
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
+
 # 包含src目录（统一的renaissance库在src/CMakeLists.txt中创建）
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/src)
     if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/src/CMakeLists.txt)
@@ -515,13 +566,7 @@ endif()
 # 安装配置
 # ============================================================================
 
-# 设置输出目录 - 确保所有输出都在build目录中
-# 注意：CMAKE_BINARY_DIR在build目录中运行时就是build目录本身
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
-set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
-set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
-
-# 为所有目标设置输出目录
+# 为所有目标设置输出目录（辅助函数）
 function(set_output_directories target)
     set_target_properties(${target} PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin
@@ -566,3 +611,56 @@ if(DEFINED CMAKE_TOOLCHAIN_FILE)
     message(STATUS "vcpkg: Enabled")
 endif()
 message(STATUS "")
+
+# 查找 cuDNN DLL 目录（在生成 setup_cuda_env.bat 之前完成）
+if(WIN32 AND TR_USE_CUDA AND DEFINED TR_CUDNN_PATH)
+    set(_cudnn_dll_dir "")
+    file(GLOB _cudnn_ver_dirs "${TR_CUDNN_PATH}/bin/*")
+    foreach(_ver_dir ${_cudnn_ver_dirs})
+        if(IS_DIRECTORY ${_ver_dir})
+            file(GLOB _cudnn_dlls "${_ver_dir}/cudnn*.dll")
+            if(_cudnn_dlls)
+                set(_cudnn_dll_dir ${_ver_dir})
+                break()
+            endif()
+        endif()
+    endforeach()
+    if(NOT _cudnn_dll_dir)
+        file(GLOB _cudnn_dlls "${TR_CUDNN_PATH}/bin/cudnn*.dll")
+        if(_cudnn_dlls)
+            set(_cudnn_dll_dir "${TR_CUDNN_PATH}/bin")
+        endif()
+    endif()
+    if(_cudnn_dll_dir)
+        set(TR_CUDNN_DLL_DIR "${_cudnn_dll_dir}" CACHE INTERNAL "cuDNN DLL directory")
+    endif()
+endif()
+
+# ============================================================================
+# 生成 CUDA 运行时环境设置脚本（不复制 DLL，通过 PATH 查找）
+# ============================================================================
+# 业界最佳实践：不将 cuDNN/CUDA DLL 复制到 build 目录。
+# 而是在运行时通过 PATH 环境变量查找 DLL。
+# VS IDE 用户无需此脚本（VS_DEBUGGER_ENVIRONMENT 已自动配置）。
+if(WIN32 AND TR_USE_CUDA)
+    set(_env_bat "${CMAKE_SOURCE_DIR}/setup_cuda_env.bat")
+    set(_bat_content "@echo off\r\n")
+    set(_bat_content "${_bat_content}rem ============================================================\r\n")
+    set(_bat_content "${_bat_content}rem TR4 CUDA/cuDNN Runtime Environment Setup\r\n")
+    set(_bat_content "${_bat_content}rem ============================================================\r\n")
+
+    if(DEFINED TR_CUDA_PATH)
+        set(_bat_content "${_bat_content}set \"PATH=${TR_CUDA_PATH}\\bin;%PATH%\"\r\n")
+    endif()
+
+    if(DEFINED TR_CUDNN_DLL_DIR)
+        set(_bat_content "${_bat_content}set \"PATH=${TR_CUDNN_DLL_DIR};%PATH%\"\r\n")
+    endif()
+
+    set(_bat_content "${_bat_content}\r\n")
+    set(_bat_content "${_bat_content}%*\r\n")
+
+    file(WRITE ${_env_bat} "${_bat_content}")
+    message(STATUS "Generated: ${_env_bat}")
+    message(STATUS "  Usage: setup_cuda_env.bat build\\windows-msvc-release\\bin\\tests\\top\\resnet50_c.exe")
+endif()

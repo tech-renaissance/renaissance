@@ -11,9 +11,10 @@
 #pragma once
 
 #include "renaissance/data/preprocess_operation.h"
-#include "renaissance/base/rng.h"
-#include "renaissance/base/philox.h"
+#include "renaissance/core/rng.h"
+#include "renaissance/core/philox.h"
 #include <Simd/SimdLib.h>
+#include <utility>  // for std::pair
 
 namespace tr {
 
@@ -62,6 +63,22 @@ public:
         float scale_max = 1.0f,
         float ratio_min = 3.0f / 4.0f,
         float ratio_max = 4.0f / 3.0f,
+        size_t output_alignment = 0
+    );
+
+    /**
+     * @brief 构造函数（支持initializer_list的API）
+     * @param output_size 输出尺寸
+     * @param scale 范围{min, max}
+     * @param ratio 范围{min, max}
+     * @param output_alignment 输出对齐字节数（默认0=紧凑布局）
+     *
+     * 使用示例：FastRandomResizedCrop(224, {0.08f, 1.0f}, {0.75f, 1.333f})
+     */
+    FastRandomResizedCrop(
+        int output_size,
+        std::pair<float, float> scale,
+        std::pair<float, float> ratio,
         size_t output_alignment = 0
     );
 
@@ -146,8 +163,8 @@ public:
 private:
     float scale_min_;      ///< 最小缩放比例
     float scale_max_;      ///< 最大缩放比例
-    float sqrt3_scale_min_;  // scale_min_的三次方根
-    float sqrt3_scale_max_;  // scale_max_的三次方根
+    mutable float sqrt3_scale_min_;  // 在构造函数中初始化，但在get_decode_strategy中可能重新计算
+    mutable float sqrt3_scale_max_;  // 在构造函数中初始化，但在get_decode_strategy中可能重新计算
     mutable float crop_power_;  // mutable: 在const函数get_decode_strategy中修改
     float ratio_min_;       ///< 最小长宽比
     float ratio_max_;       ///< 最大长宽比

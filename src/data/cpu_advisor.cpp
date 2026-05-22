@@ -12,8 +12,8 @@
 #if defined(TR_SCENE_GPU_CLOUD)
 
 #include "renaissance/data/cpu_advisor.h"
-#include "renaissance/base/logger.h"
-#include "renaissance/base/tr_exception.h"
+#include "renaissance/core/logger.h"
+#include "renaissance/core/tr_exception.h"
 
 namespace tr {
 

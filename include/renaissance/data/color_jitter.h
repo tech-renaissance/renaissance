@@ -11,8 +11,8 @@
 #pragma once
 
 #include "renaissance/data/preprocess_operation.h"
-#include "renaissance/base/rng.h"
-#include "renaissance/base/philox.h"
+#include "renaissance/core/rng.h"
+#include "renaissance/core/philox.h"
 #include <vector>
 
 namespace tr {

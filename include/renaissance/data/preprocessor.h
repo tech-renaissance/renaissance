@@ -1,8 +1,8 @@
 /**
  * @file preprocessor.h
  * @brief 图像预处理器（V4.0 - 姜总工的新设计）
- * @version 4.0.0
- * @date 2026-01-22
+ * @version 4.20.1
+ * @date 2026-04-20
  * @author 技术觉醒团队
  * @note 所属系列: data
  * @note 替代旧的PreprocessorEmulator
@@ -10,17 +10,17 @@
 
 #pragma once
 
-#include "renaissance/base/global_registry.h"
+#include "renaissance/core/global_registry.h"
+#include "renaissance/core/types.h"
 #include "renaissance/data/data_loader.h"
 #include "renaissance/data/preprocess_operation.h"
 #include "renaissance/data/do_nothing.h"
 #include "renaissance/data/random_erasing.h"
+#include "renaissance/data/normalize.h"
+#include "renaissance/data/fused_normalization.h"
 #include "renaissance/data/preprocess_worker_parameter.h"
 #include "renaissance/data/preprocess_worker.h"
 
-#if defined(TR_SCENE_GPU_CLOUD)
-#include "renaissance/data/hardware_topology.h"
-#endif
 
 #include <turbojpeg.h>  // tjhandle类型
 #include <Simd/SimdLib.h>  // Simd库（用于RandomResizedCrop）
@@ -43,11 +43,11 @@ namespace tr {
  *
  * 使用方法：
  * \code
+ * // 在调用 Setup::commit() 之前，先通过 GlobalRegistry 配置设备、batch_size和分辨率
+ * GLOBAL_SETTING.use_gpu("0,1,2,3").local_batch_size(512).train_resolution(224).val_resolution(224);
+ *
  * Preprocessor::setup()
  *     .dataset("imagenet", "/data/imagenet")
- *     .batch_size(512)
- *     .resolution(224)
- *     .device("GPU")
  *     .train_transforms(RandomResizedCrop(224), RandomHorizontalFlip())
  *     .val_transforms(Resize(256), CenterCrop(224))
  *     .commit();
@@ -76,89 +76,20 @@ public:
     /**
      * @brief 配置计算参数（结构体版本）
      */
-    Setup& batch_size(int size);
-    Setup& max_output_resolution(int res);
     Setup& color_channels(int ch);  // 对于内置数据集，会自动设置颜色通道，无需调用，但调用了也无妨
     Setup& load_workers(int num);
+    /**
+     * @brief 配置预处理 worker 总数（跨所有 GPU）
+     * @param num 总预处理线程数
+     *
+     * @note 与 PyTorch DataLoader num_workers 的换算关系：
+     *       preprocess_workers = num_workers × world_size。
+     *       PyTorch 的 num_workers 是"每张 GPU 的线程数"，
+     *       而 TR4 的 preprocess_workers 是"总线程数"。
+     *       经验数据（128 核 CPU + 8×GPU）：
+     *         PyTorch num_workers = 16（每张卡）→ TR4 preprocess_workers = 128。
+     */
     Setup& preprocess_workers(int num);
-
-    /**
-     * @brief 配置 GPU ID 列表
-     * @param ids GPU ID列表（如 {0, 2, 4}）
-     * @return Setup引用，支持链式调用
-     *
-     * \par GPU ID 选择逻辑（优先级从高到低）：
-     * 1. **用户通过Setup指定**（调用此方法）→ 使用用户指定的GPU IDs
-     * 2. **GlobalRegistry已设置** → 从GlobalRegistry下载GPU IDs
-     * 3. **都不指定** → 自动选择所有可见GPU
-     *
-     * \par 与GlobalRegistry的交互：
-     * - 调用此方法会将GPU IDs注册到GlobalRegistry的fixed_gpu_ids_
-     * - 如果GlobalRegistry已设置不同的GPU IDs → 抛出异常（fixed变量不可修改）
-     * - 如果GlobalRegistry已设置相同的GPU IDs → 幂等赋值，正常通过
-     * - 如果GlobalRegistry未设置 → 正常注册
-     *
-     * \par 使用示例：
-     * \code
-     * // 场景1：用户明确指定（优先级最高）
-     * Preprocessor::setup()
-     *     .gpu_ids({0, 2})  // 注册到GlobalRegistry
-     *     .commit();
-     *
-     * // 场景2：从GlobalRegistry下载
-     * GlobalRegistry::instance().set_gpu_ids({1, 3});
-     * Preprocessor::setup()
-     *     // 不调用 .gpu_ids()，自动从GlobalRegistry读取 {1, 3}
-     *     .commit();
-     *
-     * // 场景3：自动选择所有可见GPU
-     * Preprocessor::setup()
-     *     // 既不调用 .gpu_ids()，GlobalRegistry也没设置
-     *     .commit();  // → 自动选择 {0, 1, 2, ..., N-1}
-     * \endcode
-     *
-     * \note 不调用此方法时，会自动从GlobalRegistry下载或自动选择所有可见GPU
-     */
-    Setup& gpu_ids(const std::vector<int>& ids);
-
-    /**
-     * @brief 配置 GPU ID 列表（字符串版本，如 "0,1,2,3"）
-     * @param id_str 逗号分隔的GPU ID字符串
-     * @return Setup引用，支持链式调用
-     *
-     * \par GPU ID 选择逻辑（优先级从高到低）：
-     * 1. **用户通过Setup指定**（调用此方法）→ 使用用户指定的GPU IDs
-     * 2. **GlobalRegistry已设置** → 从GlobalRegistry下载GPU IDs
-     * 3. **都不指定** → 自动选择所有可见GPU
-     *
-     * \par 与GlobalRegistry的交互：
-     * - 调用此方法会将GPU IDs注册到GlobalRegistry的fixed_gpu_ids_
-     * - 如果GlobalRegistry已设置不同的GPU IDs → 抛出异常（fixed变量不可修改）
-     * - 如果GlobalRegistry已设置相同的GPU IDs → 幂等赋值，正常通过
-     * - 如果GlobalRegistry未设置 → 正常注册
-     *
-     * \par 使用示例：
-     * \code
-     * // 场景1：用户明确指定（优先级最高）
-     * Preprocessor::setup()
-     *     .gpu_ids("0,2,4")  // 注册到GlobalRegistry
-     *     .commit();
-     *
-     * // 场景2：从GlobalRegistry下载
-     * GlobalRegistry::instance().set_gpu_ids({1, 3});
-     * Preprocessor::setup()
-     *     // 不调用 .gpu_ids()，自动从GlobalRegistry读取 {1, 3}
-     *     .commit();
-     *
-     * // 场景3：自动选择所有可见GPU
-     * Preprocessor::setup()
-     *     // 既不调用 .gpu_ids()，GlobalRegistry也没设置
-     *     .commit();  // → 自动选择 {0, 1, 2, ..., N-1}
-     * \endcode
-     *
-     * \note 不调用此方法时，会自动从GlobalRegistry下载或自动选择所有可见GPU
-     */
-    Setup& gpu_ids(const std::string& id_str);
 
     /**
      * @brief 配置 DTS 压缩级别（0-3，仅 DTS 格式有效）
@@ -206,28 +137,19 @@ public:
     Setup& drop_last(bool enable = true);
 
     /**
-     * @brief 配置是否使用渐进式分辨率
-     */
-    Setup& using_progressive_resolution(bool enable = true);
-
-    /**
      * @brief 配置是否启用 CPU 绑核
      */
     Setup& cpu_binding(bool enable = true);
 
     /**
-     * @brief 配置归一化参数（RGB图像，3通道）
-     * @param mean_value 3通道均值，如 {0.485f, 0.456f, 0.406f}
-     * @param stddev_value 3通道标准差，如 {0.229f, 0.224f, 0.225f}
+     * @brief 配置归一化模式（NormMode枚举）
+     * @param mode 归一化模式：NormMode::MLPERF/IMAGENET/MNIST/CIFAR
+     * @return Setup引用，支持链式调用
+     *
+     * @note 此方法用于指定预设的归一化模式，框架会自动设置对应的均值和标准差
+     * @note 支持链式调用：PREPROCESSOR_SETTING.normalization(NormMode::MLPERF).dataset(...)
      */
-    Setup& normalize(std::array<float, 3> mean_value, std::array<float, 3> stddev_value);
-
-    /**
-     * @brief 配置归一化参数（灰度图像，1通道）
-     * @param mean_value 1通道均值，如 {0.5f}
-     * @param stddev_value 1通道标准差，如 {0.5f}
-     */
-    Setup& normalize(std::array<float, 1> mean_value, std::array<float, 1> stddev_value);
+    Setup& normalization(NormMode mode);
 
     // =========================================================================
     // Transforms 配置
@@ -277,14 +199,11 @@ private:
         int dts_compression_level = 0;
 
         // 计算配置
-        int batch_size = -1;
-        int max_output_resolution = -1;
         int color_channels = 3;
         int num_load_workers = 1;
         int num_preproc_workers = 1;
 
         // 设备配置
-        std::vector<int> gpu_ids;
         bool cpu_binding = true;
 
         // 高级参数
@@ -296,11 +215,9 @@ private:
         bool pw_test_mode = false;
         int max_intermediate_resolution = -1;
         bool drop_last = false;
-        bool using_progressive_resolution = false;
 
         // 归一化参数
-        std::vector<float> normalize_mean;
-        std::vector<float> normalize_std;
+        NormMode norm_mode = NormMode::NO_NORM;
 
         // Transforms
         std::vector<std::unique_ptr<PreprocessOperation>> train_ops;
@@ -317,6 +234,8 @@ private:
      */
     template<typename... Ops>
     void store_train_ops(Ops&&... ops) {
+        // 检查用户是否试图传递Normalize PO（禁止）
+        check_no_normalize_po(std::forward<Ops>(ops)...);
         (state_->train_ops.push_back(std::forward<Ops>(ops).clone()), ...);
     }
 
@@ -325,7 +244,38 @@ private:
      */
     template<typename... Ops>
     void store_val_ops(Ops&&... ops) {
+        // 检查用户是否试图传递Normalize PO（禁止）
+        check_no_normalize_po(std::forward<Ops>(ops)...);
         (state_->val_ops.push_back(std::forward<Ops>(ops).clone()), ...);
+    }
+
+private:
+    /**
+     * @brief 检查用户是否传递Normalize或FusedNormalization PO（递归模板函数）
+     */
+    template<typename T, typename... Rest>
+    void check_no_normalize_po(T&& op, Rest&&... rest) {
+        // 检查当前op是否为Normalize
+        if (dynamic_cast<Normalize*>(&op)) {
+            TR_TYPE_ERROR("Normalize cannot be explicitly passed to .train_transforms() or .val_transforms(). "
+                         "Please use .normalization(NormMode::IMAGENET/MNIST/CIFAR/MLPERF) instead.\n"
+                         "Example: .normalization(NormMode::IMAGENET).train_transforms(...)");
+        }
+        // 检查当前op是否为FusedNormalization
+        if (dynamic_cast<FusedNormalization*>(&op)) {
+            TR_TYPE_ERROR("FusedNormalization cannot be explicitly passed to .train_transforms() or .val_transforms(). "
+                         "FusedNormalization is a framework-internal class that will be automatically injected.\n"
+                         "Please use .normalization(NormMode::IMAGENET/MNIST/CIFAR/MLPERF) to configure normalization.");
+        }
+        // 递归检查剩余的ops
+        check_no_normalize_po(std::forward<Rest>(rest)...);
+    }
+
+    /**
+     * @brief 递归终止条件
+     */
+    void check_no_normalize_po() {
+        // 空参数包，终止递归
     }
 };
 
@@ -391,18 +341,18 @@ public:
      * @return Setup 对象，支持链式调用
      *
      * @example
+     *   // 在调用 Setup::commit() 之前，先通过 GlobalRegistry 配置设备、batch_size和分辨率
+     *   GLOBAL_SETTING.use_gpu("0,1,2,3").local_batch_size(512).train_resolution(224).val_resolution(224);
+     *
      *   Preprocessor::setup()
      *       .dataset("imagenet", "/data/imagenet")
-     *       .batch_size(512)
-     *       .resolution(224)
-     *       .device(DeviceType::GPU)
      *       .train_transforms(RandomResizedCrop(224), RandomHorizontalFlip())
      *       .val_transforms(Resize(256), CenterCrop(224))
      *       .commit();
      *
      *   // 运行训练
-     *   Preprocessor::instance().run_train();
-     *   Preprocessor::instance().run_val();
+     *   Preprocessor::instance().train();
+     *   Preprocessor::instance().val();
      */
     static Setup setup();  // 实现在 preprocessor.cpp 中
 
@@ -444,7 +394,6 @@ private:
 
     // 步骤1': 配置Deployment模式
     void config_deployment_mode(int batch_size,
-                                int max_resolution,
                                 int num_color_channels);
 
     // 步骤2：配置DataLoader
@@ -456,14 +405,10 @@ private:
                            bool download = true);
 
     // 步骤3：配置Preprocessor
-    void config_preprocessor(int world_size,
-                             int batch_size,
-                             int max_final_resolution,
-                             int num_color_channels,
+    void config_preprocessor(int num_color_channels,
                              int sdmp_factor = 1,
                              bool using_cpvs = false,
                              bool pw_test_mode = false,
-                             bool using_progressive_resolution = false,
                              int max_intermediate_resolution = -1,
                              bool drop_last = false);
 
@@ -483,39 +428,20 @@ private:
     // 设备配置方法（DeviceConfigured状态）
     // =========================================================================
 
-    /**
-     * @brief 配置计算设备（三个重载方法）
-     * @param engine_device "CPU"/"GPU"/"CUDA"/"MUSA"
-     * @param auto_cpu_binding 是否自动CPU绑核（仅TR_SCENE_GPU_CLOUD生效）
-     *
-     * @note CUDA/MUSA会自动转换为GPU
-     * @note 必须在config_preprocessor()之后调用
-     */
-    void config_device(const std::string& engine_device, bool auto_cpu_binding = true);
-
-    /**
-     * @brief 配置计算设备（显式指定GPU列表）
-     * @param engine_device "CPU"或"GPU"
-     * @param gpu_ids GPU ID列表
-     * @param auto_cpu_binding 是否自动CPU绑核
-     */
-    void config_device(const std::string& engine_device,
-                       const std::vector<int>& gpu_ids,
-                       bool auto_cpu_binding = true);
-
-    /**
-     * @brief 配置计算设备（显式指定GPU列表字符串）
-     * @param engine_device "CPU"或"GPU"
-     * @param gpu_id_str GPU ID字符串，如"0,1,2,7"
-     * @param auto_cpu_binding 是否自动CPU绑核
-     */
-    void config_device(const std::string& engine_device,
-                       const std::string& gpu_id_str,
-                       bool auto_cpu_binding = true);
-
     // =========================================================================
     // 高级封装方法
     // =========================================================================
+
+    /**
+     * @brief 启用CPU绑核（GPU模式下的性能优化）
+     * @param enable 是否启用CPU绑核（默认true）
+     * @throws TRException::ConfigError 如果设备配置未完成
+     *
+     * @note 仅在 TR_SCENE_GPU_CLOUD 场景下生效
+     * @note 必须在 Setup::commit() 之后调用
+     * @note 自动从 GlobalRegistry 读取 GPU 配置
+     */
+    void cpu_binding(bool enable = true);
 
     /**
      * @brief 多线程初始化（在train/val前调用一次）
@@ -551,7 +477,7 @@ public:
      * @param enable true=启用测试模式, false=正常模式
      *
      * 测试模式特点：
-     * - PW不需要EngineBuffer
+     * - PW不需要TransferStation
      * - 只执行第一个PO操作
      * - 输出固定到A区
      * - DoNothing可以作为第一个操作（仅测试模式）
@@ -584,6 +510,20 @@ public:
      * @brief 重置状态
      */
     void reset();
+
+    /**
+     * @brief 获取每个epoch的步数
+     * @return 每个epoch的步数
+     * @throws ValueError 如果steps_per_epoch未正确计算（<=0）
+     */
+    int steps_per_epoch() const;
+
+    /**
+     * @brief 计算每个epoch的步数
+     * @details 根据world_size、local_batch_size、训练集样本数等进行计算
+     *          应该在Setup::commit()的最后一步调用
+     */
+    void calculate_steps_per_epoch();
 
     // =========================================================================
     // RandomResizedCrop 相关类型定义
@@ -817,12 +757,15 @@ private:
     // 测试模式标志
     bool pw_test_mode_ = false;
 
+    // 每个epoch的步数（在commit()时计算）
+    int steps_per_epoch_ = -1;
+
     // =========================================================================
-    // EngineBuffer管理相关成员（V3.14.0 - 双缓冲区管理）
+    // TransferStation管理相关成员（V3.14.0 - 双缓冲区管理）
     // =========================================================================
 
-    // EngineBuffer实例（每个Engine一个，multi_thread_init时创建）
-    std::vector<std::unique_ptr<EngineBuffer>> engine_buffer_instances_;
+    // TransferStation实例（每个Engine一个，multi_thread_init时创建）
+    std::vector<std::unique_ptr<TransferStation>> transfer_station_instances_;
 
     // =========================================================================
     // 设备配置相关成员（DeviceConfigured状态）
@@ -834,13 +777,13 @@ private:
     bool auto_cpu_binding_ = true;                      ///< 是否自动CPU绑核
     bool multi_thread_inited_ = false;                  ///< 多线程初始化是否完成
 
-#if defined(TR_SCENE_GPU_CLOUD)
-    std::unique_ptr<HardwareTopology> hardware_topology_; ///< 硬件拓扑（仅绑核时使用）
-#endif
-
     // =========================================================================
     // 辅助方法
     // =========================================================================
+
+#if defined(TR_SCENE_GPU_CLOUD)
+    void bind_worker_to_cpu(int worker_id);  ///< 绑定worker到其分配的CPU核心
+#endif
 
     // 快速运行（不执行预处理，用于test_dataloader和warmup）
     void run_fast_without_processing();
@@ -871,8 +814,8 @@ private:
     // 判断是否是ImageNet数据集
     bool is_imagenet() const;
 
-    // 等待所有EngineBuffer被深度学习引擎消耗完毕（用于phase结束检查）
-    void wait_all_engine_buffers_consumed();
+    // 等待所有TransferStation被深度学习引擎消耗完毕（用于phase结束检查）
+    void wait_all_transfer_stations_consumed();
 
     /**
      * @brief Worker解码缓冲区（V4.1 - 增加RandomResizedCrop支持）
@@ -992,7 +935,7 @@ private:
     std::atomic<bool> stop_flag_{false};         // 停止信号
     std::atomic<int> current_buffer_seq_{0};      // 当前buffer序号
     std::atomic<int> workers_finished_{0};        // 完成计数的原子变量
-    std::atomic<int> engine_reset_barrier_{0};    // EngineBuffer重置同步屏障
+    std::atomic<int> engine_reset_barrier_{0};    // TransferStation重置同步屏障
 
     // 线程持久化辅助方法
     void start_worker_pool(DataLoader& loader);
@@ -1024,15 +967,6 @@ private:
     // =========================================================================
     // 设备配置辅助方法
     // =========================================================================
-
-#if defined(TR_USE_CUDA)
-    /**
-     * @brief 验证GPU ID列表的合法性
-     * @param gpu_ids GPU ID列表
-     * @throws TRException::ValueError 如果验证失败
-     */
-    void validate_gpu_ids(const std::vector<int>& gpu_ids);
-#endif
 
 #if defined(TR_SCENE_GPU_CLOUD)
     /**
@@ -1070,5 +1004,18 @@ private:
 
 // ============================================================================
 };
+
+// =============================================================================
+// 语法糖：简化 Preprocessor::setup 调用
+// =============================================================================
+
+/**
+ * @brief PREPROCESSOR_SETTING 宏
+ * @details 简化 Preprocessor::setup() 调用，提供更直观的链式配置语法
+ * @note 使用示例：
+ *   - PREPROCESSOR_SETTING.dataset("imagenet", "/data/imagenet").train_transforms(...).commit();
+ *   - PREPROCESSOR_SETTING.color_channels(3).load_workers(4).dataset("mnist", "/data/mnist").commit();
+ */
+#define PREPROCESSOR_SETTING (::tr::Preprocessor::setup())
 
 } // namespace tr

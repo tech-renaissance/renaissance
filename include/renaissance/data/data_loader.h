@@ -9,8 +9,8 @@
 
 #pragma once
 
-#include "renaissance/base/global_config.h"
-#include "renaissance/base/tr_exception.h"
+#include "renaissance/core/global_config.h"
+#include "renaissance/core/tr_exception.h"
 #include <string>
 #include <cstdint>
 #include <stdexcept>

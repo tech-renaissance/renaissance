@@ -7,10 +7,10 @@
  */
 
 #include "renaissance/data/imagenet_loader_dts.h"
-#include "renaissance/base/logger.h"
-#include "renaissance/base/tr_exception.h"
-#include "renaissance/base/philox.h"
-#include "renaissance/base/rng.h"
+#include "renaissance/core/logger.h"
+#include "renaissance/core/tr_exception.h"
+#include "renaissance/core/philox.h"
+#include "renaissance/core/rng.h"
 
 #include <iostream>
 #include <fstream>

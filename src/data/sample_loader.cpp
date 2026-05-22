@@ -7,8 +7,8 @@
  */
 
 #include "renaissance/data/sample_loader.h"
-#include "renaissance/base/logger.h"
-#include "renaissance/base/tr_exception.h"
+#include "renaissance/core/logger.h"
+#include "renaissance/core/tr_exception.h"
 
 #include <fstream>
 #include <cstring>

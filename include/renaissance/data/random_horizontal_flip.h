@@ -11,33 +11,26 @@
 #pragma once
 
 #include "renaissance/data/preprocess_operation.h"
-#include "renaissance/base/rng.h"
-#include "renaissance/base/philox.h"
+#include "renaissance/core/rng.h"
+#include "renaissance/core/philox.h"
 #include <algorithm>
 
 namespace tr {
 
 /**
  * @class RandomHorizontalFlip
- * @brief 随机水平翻转
+ * @brief 随机水平翻转（占位记录类）
  *
- * 核心功能：
- * - 以指定概率随机决定是否水平翻转图像
- * - 随机可复现：使用Philox RNG + Generator确保确定性
+ * 设计变更（V4.0 Fusion）：
+ * - 本类已降级为占位记录类，execute() 抛出 NotImplementedError
+ * - 实际的 50% 概率水平翻转逻辑已融合进 FusedNormalization::execute()
+ * - 在 Preprocessor::set_train_transforms() 中，本类会被检测并从 PO 链中移除，
+ *   其 flip_enabled 标志传入 FusedNormalization 构造函数
+ * - should_flip() 方法保留（接口完整性）
  *
  * 随机可复现性说明：
- * - should_flip()每次调用都会消耗1个RNG offset
- * - 在SDMP模式下，对同一原始样本预处理N次，should_flip()会被调用N次
- * - 这是正确设计：每次预处理的翻转决策应独立
- * - PW在execute_po_chain的每次SDMP循环中都会调用should_flip()
- * - 例如：sdmp_factor=3时，同一原始样本会生成3个不同的预处理结果
- *   - 第1次：flip=true  → S1区存储翻转版本
- *   - 第2次：flip=false → S2区存储原版
- *   - 第3次：flip=true  → 输出到EngineBuffer（翻转版本）
- *
- * 性能：
- * - Flip操作：约0.2ms/image（224x224）
- * - 纯像素操作，无需额外内存分配
+ * - FusedNormalization 内部使用 Philox RNG + Generator 确保确定性
+ * - 在 SDMP 模式下，每次预处理的翻转决策独立
  */
 class RandomHorizontalFlip : public PreprocessOperation {
 public:
@@ -50,14 +43,14 @@ public:
         : PreprocessOperation(output_alignment), prob_(prob) {}
 
     /**
-     * @brief 预判是否需要翻转（供PW优化路径使用）
+     * @brief 预判是否需要翻转（保留接口完整性）
      * @param rng 随机数生成器
      * @return true=需要翻转, false=不需要
      *
-     * 关键说明：
-     * - 此方法每次SDMP循环都会调用一次
-     * - 这保证了"多次独立预处理"的随机性
-     * - 调用会消耗1个RNG offset
+     * 设计变更（V4.0 Fusion）：
+     * - PreprocessWorker 中 last_op_is_flip 分支已移除，此方法不再被调用
+     * - 实际翻转由 FusedNormalization::execute() 内部以 50% 固定概率完成
+     * - 保留此接口以保证 API 完整性和向后兼容
      */
     bool should_flip(Generator* rng) override {
         if (!rng) return false;

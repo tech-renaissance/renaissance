@@ -48,7 +48,7 @@ cmake .. \
   -DCMAKE_BUILD_TYPE=Debug \
   -DCMAKE_CXX_FLAGS_DEBUG="-g -O0 -march=x86-64-v3" \
   -DCMAKE_CXX_COMPILER=g++ \
-  -DCMAKE_TOOLCHAIN_FILE="/root/epfs/vcpkg/scripts/buildsystems/vcpkg.cmake" \
+  -DCMAKE_TOOLCHAIN_FILE="/opt/vcpkg/scripts/buildsystems/vcpkg.cmake" \
   -DCMAKE_DISABLE_SOURCE_CHANGES=ON \
   -DCMAKE_EXPORT_NO_PACKAGE_REGISTRY=ON \
   -DCMAKE_FIND_PACKAGE_NO_PACKAGE_REGISTRY=ON \
@@ -99,7 +99,7 @@ cmake .. \
   -DCMAKE_BUILD_TYPE=Release \
   -DCMAKE_CXX_FLAGS_RELEASE="-g -O3" \
   -DCMAKE_CXX_COMPILER=g++ \
-  -DCMAKE_TOOLCHAIN_FILE="/root/epfs/vcpkg/scripts/buildsystems/vcpkg.cmake" \
+  -DCMAKE_TOOLCHAIN_FILE="/opt/vcpkg/scripts/buildsystems/vcpkg.cmake" \
   -DCMAKE_DISABLE_SOURCE_CHANGES=ON \
   -DCMAKE_EXPORT_NO_PACKAGE_REGISTRY=ON \
   -DCMAKE_FIND_PACKAGE_NO_PACKAGE_REGISTRY=ON \

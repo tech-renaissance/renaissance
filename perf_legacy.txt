@@ -1,0 +1,66 @@
+root@2af6a1cc17a3:~/epfs# CUDA_VISIBLE_DEVICES=0 /root/epfs/R/renaissance/build/bin/tests/perf/test_softmax_ce_perf --amp
+===== SOFTMAX_CE 性能测试 =====
+模式: AMP  [FP16]
+配置: Batch=512, NumClasses=1000
+预热: 5次, 计时: 100次
+
+[2026-05-20 18:18:45.811] [INFO ] [TR] GlobalRegistry: fixed_using_gpu set to true
+[2026-05-20 18:18:45.811] [INFO ] [TR] GlobalRegistry: fixed_gpu_ids set to [0]
+Device: GPU [0]
+[2026-05-20 18:18:45.811] [INFO ] [TR] GlobalRegistry: fixed_using_amp set to true
+[2026-05-20 18:18:45.811] [INFO ] [TR] GlobalRegistry: fixed_reproducibility_insurance set to true
+Random Seed: 0x18B13EC0DAA8C22B
+[2026-05-20 18:18:45.960] [INFO ] [backend] DeviceContext 0: created 5 non-blocking streams + per-stream cuDNN + cuBLAS handles
+[2026-05-20 18:18:45.960] [INFO ] [task] Allocated 1 GPU device context(s), 3.91455 MB each
+[2026-05-20 18:18:45.960] [INFO ] [task] [DBG] compile_capture_simple: enter
+[2026-05-20 18:18:45.960] [INFO ] [task] [DBG] compile_capture_simple: start warmup loop, num_gpus=1
+[2026-05-20 18:18:45.960] [INFO ] [task] [DBG] warmup rank 0 begin
+[2026-05-20 18:18:45.960] [INFO ] [task] [DBG] warmup rank 0 gpu_id=0
+[2026-05-20 18:18:45.960] [INFO ] [task] [DBG] warmup op: 87
+[2026-05-20 18:18:45.960] [INFO ] [task] [DBG] warmup op done
+[2026-05-20 18:18:45.960] [INFO ] [task] [DBG] warmup op: 86
+[2026-05-20 18:18:45.960] [INFO ] [task] [DBG] warmup op done
+[2026-05-20 18:18:45.960] [INFO ] [task] [DBG] warmup rank 0 end
+[2026-05-20 18:18:45.960] [INFO ] [task] [DBG] compile_capture_simple: warmup done
+[2026-05-20 18:18:45.960] [INFO ] [task] [DBG] compile_capture_simple: starting capture phase, num_graphs=2 num_gpus=1
+[2026-05-20 18:18:45.960] [INFO ] [task] [DBG] capture graph 'bwd' graph_index=0
+[2026-05-20 18:18:45.960] [INFO ] [task] [DBG] capture rank 0 begin
+[2026-05-20 18:18:45.960] [INFO ] [task] [DBG] calling CapturedGraph::capture...
+[2026-05-20 18:18:45.960] [INFO ] [task] [DBG] CapturedGraph::capture done, is_cuda=1
+[2026-05-20 18:18:45.960] [INFO ] [task] [DBG] set_metadata_from...
+[2026-05-20 18:18:45.960] [INFO ] [task] [DBG] move_cpu_ops_from...
+[2026-05-20 18:18:45.960] [INFO ] [task] [DBG] rank0 metadata done
+[2026-05-20 18:18:45.960] [INFO ] [task] [DBG] check is_cuda=1
+[2026-05-20 18:18:45.960] [INFO ] [task] [DBG] release_rank_exec...
+[2026-05-20 18:18:45.960] [INFO ] [task] [DBG] release_rank_exec done, exec=0x59a26058d1d0
+[2026-05-20 18:18:45.960] [INFO ] [task] [DBG] set_rank_exec done
+[2026-05-20 18:18:45.960] [INFO ] [task] [DBG] capture rank 0 end
+[2026-05-20 18:18:45.960] [INFO ] [task] [DBG] emplace simple_captured_graphs_ ...
+[2026-05-20 18:18:45.960] [INFO ] [task] [DBG] emplace done
+[2026-05-20 18:18:45.960] [INFO ] [task] [DBG] capture graph 'fwd' graph_index=1
+[2026-05-20 18:18:45.960] [INFO ] [task] [DBG] capture rank 0 begin
+[2026-05-20 18:18:45.960] [INFO ] [task] [DBG] calling CapturedGraph::capture...
+[2026-05-20 18:18:45.960] [INFO ] [task] [DBG] CapturedGraph::capture done, is_cuda=1
+[2026-05-20 18:18:45.960] [INFO ] [task] [DBG] set_metadata_from...
+[2026-05-20 18:18:45.960] [INFO ] [task] [DBG] move_cpu_ops_from...
+[2026-05-20 18:18:45.960] [INFO ] [task] [DBG] rank0 metadata done
+[2026-05-20 18:18:45.960] [INFO ] [task] [DBG] check is_cuda=1
+[2026-05-20 18:18:45.960] [INFO ] [task] [DBG] release_rank_exec...
+[2026-05-20 18:18:45.960] [INFO ] [task] [DBG] release_rank_exec done, exec=0x59a260590c70
+[2026-05-20 18:18:45.960] [INFO ] [task] [DBG] set_rank_exec done
+[2026-05-20 18:18:45.960] [INFO ] [task] [DBG] capture rank 0 end
+[2026-05-20 18:18:45.960] [INFO ] [task] [DBG] emplace simple_captured_graphs_ ...
+[2026-05-20 18:18:45.960] [INFO ] [task] [DBG] emplace done
+[2026-05-20 18:18:45.960] [INFO ] [task] [DBG] compile_capture_simple: all done
+[2026-05-20 18:18:45.960] [INFO ] [task] [DBG] compile_impl: calling compile_mark_compiled...
+[2026-05-20 18:18:45.960] [INFO ] [task] [DBG] compile_impl: done
+===== SOFTMAX_CE FWD 性能测试 =====
+FWD 平均耗时: 24.18 us/iter
+
+===== SOFTMAX_CE BWD 性能测试 =====
+BWD 平均耗时: 14.26 us/iter
+
+===== 性能汇总 =====
+  FWD: 24.18 us/iter
+  BWD: 14.26 us/iter
+  总计: 38.44 us/iter

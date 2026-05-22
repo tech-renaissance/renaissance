@@ -9,7 +9,7 @@
 #if defined(TR_SCENE_GPU_CLOUD)
 
 #include "renaissance/data/hardware_topology.h"
-#include "renaissance/base/logger.h"
+#include "renaissance/core/logger.h"
 
 #include <unistd.h>
 #include <sys/types.h>

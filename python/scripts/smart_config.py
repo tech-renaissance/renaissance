@@ -583,7 +583,7 @@ def detect_system() -> Dict:
 
 def detect_gpu() -> Dict:
     """检测GPU信息 - 增强GPU数量和版本检查"""
-    gpu_info = {"type": None, "name": None, "count": 0, "detected": False, "driver_version": None}
+    gpu_info = {"type": None, "name": None, "count": 0, "detected": False, "driver_version": None, "model": None}
 
     # 检测NVIDIA GPU
     success, output = run_cmd(["nvidia-smi", "--query-gpu=name,count,driver_version", "--format=csv,noheader,nounits"])
@@ -597,16 +597,32 @@ def detect_gpu() -> Dict:
             first_line = lines[0]
             parts = [p.strip() for p in first_line.split(',')]
             if len(parts) >= 3:
-                gpu_info["name"] = parts[0]
+                gpu_name = parts[0]
+                gpu_info["name"] = gpu_name
                 gpu_info["driver_version"] = parts[2]
+
+                # 识别GPU型号用于宏定义
+                gpu_name_upper = gpu_name.upper()
+                if "A100" in gpu_name_upper:
+                    gpu_info["model"] = "A100"
+                elif "5090" in gpu_name_upper or "RTX 5090" in gpu_name_upper:
+                    gpu_info["model"] = "RTX5090"
+
                 # 如果有多张相同型号的GPU，显示为"GPU名称 x N"
                 if gpu_info["count"] > 1:
-                    gpu_info["name"] = f"{parts[0]} x {gpu_info['count']}"
+                    gpu_info["name"] = f"{gpu_name} x {gpu_info['count']}"
                 else:
-                    gpu_info["name"] = parts[0]
+                    gpu_info["name"] = gpu_name
             else:
                 # 兼容旧格式
-                gpu_info["name"] = parts[0].split(',')[0].strip()
+                gpu_name = parts[0].split(',')[0].strip()
+                gpu_info["name"] = gpu_name
+                # 识别GPU型号用于宏定义
+                gpu_name_upper = gpu_name.upper()
+                if "A100" in gpu_name_upper:
+                    gpu_info["model"] = "A100"
+                elif "5090" in gpu_name_upper or "RTX 5090" in gpu_name_upper:
+                    gpu_info["model"] = "RTX5090"
 
             gpu_info["detected"] = True
             return gpu_info
@@ -694,11 +710,8 @@ def determine_scene(sys_info: Dict, gpu_info: Dict) -> str:
             if sys_info["is_windows"]:
                 return "pc_cuda"
             else:
-                # Linux下根据GPU数量判断
-                if gpu_info["count"] > 1:
-                    return "gpu_cloud"
-                else:
-                    return "pc_cuda"
+                # Linux下NVIDIA GPU统一使用gpu_cloud场景
+                return "gpu_cloud"
         elif gpu_info["type"] == "mthreads":
             # 摩尔线程GPU只支持Linux
             if not sys_info["is_linux"]:
@@ -1276,29 +1289,6 @@ def search_dependency(name: str, sys_info: Dict, suppress_print: bool = False) -
                     if result["found"]:
                         break
 
-            # 特殊处理：Windows下CUTLASS的搜索（C:/Program Files下）
-            if is_win and name == "cutlass" and not result["found"]:
-                # 直接展开通配符路径并搜索
-                win_paths = config.get("paths_win", [])
-                headers = config["header"] if isinstance(config["header"], list) else [config["header"]]
-
-                for path_pattern in win_paths:
-                    # 展开通配符
-                    import glob
-                    matches = glob.glob(path_pattern)
-                    for match_path in matches:
-                        # 在include子目录中搜索头文件
-                        for header in headers:
-                            header_path = os.path.join(match_path, "include", header)
-                            if os.path.exists(header_path):
-                                result["path"] = match_path
-                                result["found"] = True
-                                break
-                        if result["found"]:
-                            break
-                    if result["found"]:
-                        break
-
             # 如果还没找到，使用常规搜索
             if not result["found"]:
                 headers = config["header"] if isinstance(config["header"], list) else [config["header"]]
@@ -1361,16 +1351,11 @@ def search_dependency(name: str, sys_info: Dict, suppress_print: bool = False) -
                 elif os.path.exists(exe_path + ".exe"):
                     cmd[0] = exe_path + ".exe"
 
-            # 特殊处理：Windows下cuDNN Frontend/CUTLASS的版本检测（无grep命令）
-            if is_win and name in ["cudnn-frontend", "cutlass"] and "version_cmd" in config:
+            # 特殊处理：Windows下cuDNN Frontend的版本检测（无grep命令）
+            if is_win and name == "cudnn-frontend" and "version_cmd" in config:
                 # 直接读取头文件内容解析版本号
                 include_path = os.path.join(result["path"], "include")
-                version_header = None
-
-                if name == "cudnn-frontend":
-                    version_header = os.path.join(include_path, "cudnn_frontend_version.h")
-                elif name == "cutlass":
-                    version_header = os.path.join(include_path, "cutlass", "version.h")
+                version_header = os.path.join(include_path, "cudnn_frontend_version.h")
 
                 if version_header and os.path.exists(version_header):
                     try:
@@ -1666,7 +1651,7 @@ def check_required_deps(scene: str, found_deps: Dict) -> List[str]:
 # 配置文件生成
 # ============================================================================
 
-def generate_cmake_config(scene: str, deps: Dict, sys_info: Dict) -> str:
+def generate_cmake_config(scene: str, deps: Dict, sys_info: Dict, gpu_info: Dict = None) -> str:
     """生成CMake配置文件内容 - 支持新的编译宏系统"""
     lines = [
         "# Auto-generated by configure.py",
@@ -1714,17 +1699,13 @@ def generate_cmake_config(scene: str, deps: Dict, sys_info: Dict) -> str:
 
     # MSVC配置已通过build.bat中的vcvars64.bat处理，无需在cmake_paths.cmake中重复设置
 
-    # 添加GPU数量信息
+    # 添加GPU数量和型号信息
     gpu_count = 0
-    if "cuda" in deps and deps["cuda"]["found"]:
-        # 尝试从GPU检测信息获取GPU数量
-        try:
-            from smart_config import detect_gpu
-            gpu_info = detect_gpu()
-            if gpu_info["detected"] and gpu_info["type"] == "nvidia":
-                gpu_count = gpu_info["count"]
-        except:
-            pass
+    gpu_model = None
+    if "cuda" in deps and deps["cuda"]["found"] and gpu_info:
+        if gpu_info.get("detected") and gpu_info.get("type") == "nvidia":
+            gpu_count = gpu_info.get("count", 0)
+            gpu_model = gpu_info.get("model")
 
     # 基础CMake选项
     lines.append("# Scene-specific options")
@@ -1737,6 +1718,16 @@ def generate_cmake_config(scene: str, deps: Dict, sys_info: Dict) -> str:
         lines.append(f'set(TR_NUM_GPUS {gpu_count})')
     else:
         lines.append('set(TR_NUM_GPUS 0)')
+
+    # 添加GPU特定型号宏
+    lines.append("")
+    lines.append("# GPU-specific model macros")
+    if gpu_model == "A100":
+        lines.append('set(TR_GPU_MODEL_A100 ON)')
+        lines.append('# USING_A100 will be defined as global macro in CMakeLists.txt')
+    elif gpu_model == "RTX5090":
+        lines.append('set(TR_GPU_MODEL_RTX5090 ON)')
+        lines.append('# USING_RTX5090 will be defined as global macro in CMakeLists.txt')
 
     # 添加CPU架构宏
     arch = sys_info["arch"]
@@ -1803,6 +1794,10 @@ def generate_cmake_config(scene: str, deps: Dict, sys_info: Dict) -> str:
             if sys_info["is_windows"]:
                 lines.append(f'set(TR_CUDNN_INCLUDE_DIR "{cudnn_path}/include")')
                 lines.append(f'set(TR_CUDNN_LIBRARY_DIR "{cudnn_path}/lib")')
+                # cuDNN 9.x使用版本化子目录，添加具体版本路径
+                cudnn_versioned_include = f"{cudnn_path}/include/13.1"
+                if os.path.exists(cudnn_versioned_include):
+                    lines.append(f'set(TR_CUDNN_INCLUDE_DIR_VERSIONED "{cudnn_versioned_include}")')
             else:
                 lines.append(f'set(TR_CUDNN_INCLUDE_DIR "{cudnn_path}/include")')
                 lines.append(f'set(TR_CUDNN_LIBRARY_DIR "{cudnn_path}/lib64")')
@@ -1847,17 +1842,22 @@ def generate_cmake_config(scene: str, deps: Dict, sys_info: Dict) -> str:
             lines.append(f'set(TR_NCCL_INCLUDE_DIR "{nccl_path}/include")')
             lines.append(f'set(TR_NCCL_LIBRARY_DIR "{nccl_path}/lib")')
 
+    # libnuma路径（仅Linux GPU_CLOUD场景专用）
+    if "libnuma" in deps and deps["libnuma"]["found"] and scene == "gpu_cloud":
+        if sys_info["is_linux"]:
+            # libnuma通常作为系统包安装在标准位置
+            lines.append('set(TR_NUMA_INCLUDE_DIR "/usr/include")')
+            lines.append('set(TR_NUMA_LIBRARY_DIR "/usr/lib/x86_64-linux-gnu")')
+        else:
+            numa_path = deps["libnuma"]["path"].replace("\\", "/")
+            lines.append(f'set(TR_NUMA_INCLUDE_DIR "{numa_path}/include")')
+            lines.append(f'set(TR_NUMA_LIBRARY_DIR "{numa_path}/lib")')
+
     # cuDNN Frontend路径（仅CUDA场景）
     if "cudnn-frontend" in deps and deps["cudnn-frontend"]["found"]:
         cudnn_frontend_path = deps["cudnn-frontend"]["path"].replace("\\", "/")
         lines.append(f'set(TR_CUDNN_FRONTEND_PATH "{cudnn_frontend_path}")')
         lines.append(f'set(TR_CUDNN_FRONTEND_INCLUDE_DIR "{cudnn_frontend_path}/include")')
-
-    # CUTLASS路径（仅CUDA场景）
-    if "cutlass" in deps and deps["cutlass"]["found"]:
-        cutlass_path = deps["cutlass"]["path"].replace("\\", "/")
-        lines.append(f'set(TR_CUTLASS_PATH "{cutlass_path}")')
-        lines.append(f'set(TR_CUTLASS_INCLUDE_DIR "{cutlass_path}/include")')
 
     # vcpkg安装的依赖项路径 (使用实际的vcpkg包名)
     vcpkg_packages = {
@@ -1883,8 +1883,28 @@ def generate_cmake_config(scene: str, deps: Dict, sys_info: Dict) -> str:
                 if dep_key == "xnnpack" and not deps[dep_key].get("from_vcpkg", False):
                     # 使用本地安装路径，包含include和lib子目录
                     include_dir = f"{dep_path}/include"
-                    lib_dir = f"{dep_path}/lib"
+
+                    # XNNPACK特殊处理：库文件可能在build/windows/x64目录
+                    # 优先检查build目录，其次检查lib目录
+                    build_lib_dir = f"{dep_path}/build/windows/x64"
+                    standard_lib_dir = f"{dep_path}/lib"
+
+                    if os.path.exists(build_lib_dir):
+                        lib_dir = build_lib_dir
+                    elif os.path.exists(standard_lib_dir):
+                        lib_dir = standard_lib_dir
+                    else:
+                        # fallback：尝试在XNNPACK_PATH下搜索任何包含.lib文件的目录
+                        for root, dirs, files in os.walk(dep_path):
+                            if any(f.endswith('.lib') for f in files):
+                                lib_dir = root
+                                break
+
                     lines.append(f'set(TR_{cmake_name.upper()}_TRIPLET "x64-windows")')
+
+                    # 显式设置XNNPACK库目录变量，确保CMakeLists.txt能找到库文件
+                    lines.append(f'set(TR_XNNPACK_INCLUDE_DIR "{include_dir.replace(chr(92), '/')}")')
+                    lines.append(f'set(TR_XNNPACK_LIBRARY_DIR "{lib_dir.replace(chr(92), '/')}")')
                 else:
                     # Windows下使用packages目录，需要映射到实际的vcpkg包名
                     vcpkg_package_name = {
@@ -1905,16 +1925,79 @@ def generate_cmake_config(scene: str, deps: Dict, sys_info: Dict) -> str:
                     lib_dir = f"{VCPKG_ROOT.replace(chr(92), '/')}/packages/{package_name}/lib"
                     lines.append(f'set(TR_{cmake_name.upper()}_TRIPLET "{installed_triplet}")')
             else:
-                # Linux下优先使用installed目录，如果不存在则检查packages目录
-                installed_triplet = get_installed_triplet(dep_key, sys_info)
-                if installed_triplet:
-                    # 先检查installed目录
-                    installed_include = f"{VCPKG_ROOT}/installed/{installed_triplet}/include"
-                    installed_lib = f"{VCPKG_ROOT}/installed/{installed_triplet}/lib"
+                # 特殊处理：Linux + XNNPACK 使用本地安装（/opt/xnnpack）
+                if dep_key == "xnnpack" and not deps[dep_key].get("from_vcpkg", False):
+                    # 使用本地安装路径，包含include和lib子目录
+                    include_dir = f"{dep_path}/include"
 
-                    # 如果installed目录不存在，检查packages目录（某些架构如RISC-V）
-                    if not os.path.exists(installed_include):
-                        # 映射依赖名到vcpkg包名
+                    # XNNPACK特殊处理：库文件可能在build目录
+                    # 优先检查build目录，其次检查lib目录
+                    build_lib_dir = f"{dep_path}/build"
+                    standard_lib_dir = f"{dep_path}/lib"
+
+                    if os.path.exists(build_lib_dir):
+                        lib_dir = build_lib_dir
+                    elif os.path.exists(standard_lib_dir):
+                        lib_dir = standard_lib_dir
+                    else:
+                        # fallback：尝试在XNNPACK_PATH下搜索任何包含libXNNPACK.so的目录
+                        for root, dirs, files in os.walk(dep_path):
+                            if any(f.startswith('libXNNPACK.so') for f in files):
+                                lib_dir = root
+                                break
+                        else:
+                            # 完全找不到，使用build作为默认值
+                            lib_dir = build_lib_dir
+                elif dep_key == "simd" and not deps[dep_key].get("from_vcpkg", False):
+                    # 特殊处理：Linux + Simd 使用本地安装（/opt/simd）
+                    include_dir = f"{dep_path}/src"
+                    lib_dir = "dummy"  # Simd是header-only库，不需要lib目录
+                else:
+                    # Linux下优先使用installed目录，如果不存在则检查packages目录
+                    installed_triplet = get_installed_triplet(dep_key, sys_info)
+                    if installed_triplet:
+                        # 先检查installed目录
+                        installed_include = f"{VCPKG_ROOT}/installed/{installed_triplet}/include"
+                        installed_lib = f"{VCPKG_ROOT}/installed/{installed_triplet}/lib"
+
+                        # 如果installed目录不存在，检查packages目录（某些架构如RISC-V）
+                        if not os.path.exists(installed_include):
+                            # 映射依赖名到vcpkg包名
+                            vcpkg_package_name = {
+                                "libcurl": "curl",
+                                "libarchive": "libarchive",
+                                "libjpeg-turbo": "libjpeg-turbo",
+                                "eigen": "eigen3",
+                                "xnnpack": "xnnpack",
+                                "mimalloc": "mimalloc",
+                                "zlib": "zlib",
+                                "stb": "stb",
+                                "simd": "simd"
+                            }.get(dep_key, dep_key)
+
+                            packages_include = f"{VCPKG_ROOT}/packages/{vcpkg_package_name}_{installed_triplet}/include"
+                            packages_lib = f"{VCPKG_ROOT}/packages/{vcpkg_package_name}_{installed_triplet}/lib"
+
+                            if os.path.exists(packages_include):
+                                include_dir = packages_include
+                                lib_dir = packages_lib
+                            else:
+                                # 回退到installed目录
+                                include_dir = installed_include
+                                lib_dir = installed_lib
+                        else:
+                            # 使用installed目录
+                            include_dir = installed_include
+                            lib_dir = installed_lib
+
+                        lines.append(f'set(TR_{cmake_name.upper()}_TRIPLET "{installed_triplet}")')
+                    else:
+                        # 回退到默认triplet
+                        default_triplet = get_default_triplet(sys_info)
+                        default_include = f"{VCPKG_ROOT}/installed/{default_triplet}/include"
+                        default_lib = f"{VCPKG_ROOT}/installed/{default_triplet}/lib"
+
+                        # 检查packages目录
                         vcpkg_package_name = {
                             "libcurl": "curl",
                             "libarchive": "libarchive",
@@ -1927,52 +2010,34 @@ def generate_cmake_config(scene: str, deps: Dict, sys_info: Dict) -> str:
                             "simd": "simd"
                         }.get(dep_key, dep_key)
 
-                        packages_include = f"{VCPKG_ROOT}/packages/{vcpkg_package_name}_{installed_triplet}/include"
-                        packages_lib = f"{VCPKG_ROOT}/packages/{vcpkg_package_name}_{installed_triplet}/lib"
+                        packages_include = f"{VCPKG_ROOT}/packages/{vcpkg_package_name}_{default_triplet}/include"
+                        packages_lib = f"{VCPKG_ROOT}/packages/{vcpkg_package_name}_{default_triplet}/lib"
 
                         if os.path.exists(packages_include):
                             include_dir = packages_include
                             lib_dir = packages_lib
                         else:
-                            # 回退到installed目录
-                            include_dir = installed_include
-                            lib_dir = installed_lib
-                    else:
-                        include_dir = installed_include
-                        lib_dir = installed_lib
+                            include_dir = default_include
+                            lib_dir = default_lib
 
-                    lines.append(f'set(TR_{cmake_name.upper()}_TRIPLET "{installed_triplet}")')
-                else:
-                    # 回退到默认triplet
-                    default_triplet = get_default_triplet(sys_info)
-                    default_include = f"{VCPKG_ROOT}/installed/{default_triplet}/include"
-                    default_lib = f"{VCPKG_ROOT}/installed/{default_triplet}/lib"
+                        lines.append(f'set(TR_{cmake_name.upper()}_TRIPLET "{default_triplet}")')
 
-                    # 检查packages目录
-                    vcpkg_package_name = {
-                        "libcurl": "curl",
-                        "libarchive": "libarchive",
-                        "libjpeg-turbo": "libjpeg-turbo",
-                        "eigen": "eigen3",
-                        "xnnpack": "xnnpack",
-                        "mimalloc": "mimalloc",
-                        "zlib": "zlib",
-                        "stb": "stb",
-                        "simd": "simd"
-                    }.get(dep_key, dep_key)
+                # EIGEN特殊处理：探测实际头文件位置（Windows vs Linux路径差异）
+                if dep_key == "eigen":
+                    # 尝试可能的头文件路径
+                    possible_paths = [
+                        include_dir,                           # .../include（可能需要加/eigen3）
+                        f"{include_dir}/eigen3",                 # .../include/eigen3（Linux嵌套路径）
+                        f"{include_dir}/Eigen",                   # .../include/Eigen（Windows直接路径）
+                    ]
+                    actual_include_dir = include_dir
+                    for test_path in possible_paths:
+                        if os.path.exists(f"{test_path}/Eigen/Core"):
+                            actual_include_dir = test_path
+                            break
+                    include_dir = actual_include_dir
 
-                    packages_include = f"{VCPKG_ROOT}/packages/{vcpkg_package_name}_{default_triplet}/include"
-                    packages_lib = f"{VCPKG_ROOT}/packages/{vcpkg_package_name}_{default_triplet}/lib"
-
-                    if os.path.exists(packages_include):
-                        include_dir = packages_include
-                        lib_dir = packages_lib
-                    else:
-                        include_dir = default_include
-                        lib_dir = default_lib
-
-                    lines.append(f'set(TR_{cmake_name.upper()}_TRIPLET "{default_triplet}")')
-
+            # 为每个vcpkg依赖库生成INCLUDE_DIR和LIBRARY_DIR
             lines.append(f'set(TR_{cmake_name.upper()}_INCLUDE_DIR "{include_dir}")')
             lines.append(f'set(TR_{cmake_name.upper()}_LIBRARY_DIR "{lib_dir}")')
 
@@ -2147,26 +2212,24 @@ cd ..
 '''
         return "build.sh", script
 
-def generate_config_files(scene: str, found_deps: Dict, sys_info: Dict):
+def generate_config_files(scene: str, found_deps: Dict, sys_info: Dict, gpu_info: Dict = None):
     """生成所有配置文件"""
     # 创建config目录（在根目录下）
     config_dir = Path("config")
     config_dir.mkdir(exist_ok=True)
 
     # 生成cmake_paths.cmake
-    cmake_content = generate_cmake_config(scene, found_deps, sys_info)
+    cmake_content = generate_cmake_config(scene, found_deps, sys_info, gpu_info)
     cmake_path = config_dir / "cmake_paths.cmake"
     cmake_path.write_text(cmake_content)
     print_ok(f"Generated: {cmake_path}")
 
-    # 获取GPU数量信息
+    # 获取GPU信息（使用传入的gpu_info参数）
     gpu_count = 0
-    try:
-        gpu_info = detect_gpu()
-        if gpu_info["detected"]:
-            gpu_count = gpu_info["count"]
-    except:
-        pass
+    gpu_detected = False
+    if gpu_info:
+        gpu_detected = gpu_info.get("detected", False)
+        gpu_count = gpu_info.get("count", 0)
 
     # 生成project_config.json
     json_config = {
@@ -2181,10 +2244,11 @@ def generate_config_files(scene: str, found_deps: Dict, sys_info: Dict):
             "vcpkg_root": VCPKG_ROOT
         },
         "gpu_info": {
-            "detected": gpu_count > 0,
+            "detected": gpu_detected,
             "count": gpu_count,
-            "type": gpu_info.get("type") if gpu_count > 0 else None,
-            "name": gpu_info.get("name") if gpu_count > 0 else None
+            "type": gpu_info.get("type") if gpu_detected else None,
+            "name": gpu_info.get("name") if gpu_detected else None,
+            "model": gpu_info.get("model") if gpu_detected else None
         },
         "dependencies": {k: {
             "found": v["found"],
@@ -2532,7 +2596,7 @@ def run_smart_config():
     print_step(8, total_steps, "Generating configuration files...")
     print_ok(f"Build Directory: {BUILD_DIR}")
 
-    generate_config_files(scene, all_deps, sys_info)
+    generate_config_files(scene, all_deps, sys_info, gpu_info)
 
     # 完成提示
     print_colored("\n==============================================", Colors.BOLD)

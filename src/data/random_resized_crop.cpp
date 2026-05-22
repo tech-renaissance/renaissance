@@ -8,8 +8,8 @@
  */
 
 #include "renaissance/data/random_resized_crop.h"
-#include "renaissance/base/tr_exception.h"
-#include "renaissance/base/logger.h"
+#include "renaissance/core/tr_exception.h"
+#include "renaissance/core/logger.h"
 #include <cmath>
 #include <cstring>
 #include <algorithm>
@@ -50,6 +50,18 @@ RandomResizedCrop::RandomResizedCrop(
     TR_CHECK(ratio_min_ > 0.0f && ratio_min_ <= ratio_max_, ValueError,
              "ratio_min must be in (0, ratio_max], got: " << ratio_min_ << ", " << ratio_max_);
     TR_CHECK(output_size_ > 0, ValueError, "output_size must be positive, got: " << output_size_);
+}
+
+// 新增构造函数：支持initializer_list的API
+RandomResizedCrop::RandomResizedCrop(
+    int output_size,
+    std::pair<float, float> scale,
+    std::pair<float, float> ratio,
+    size_t output_alignment
+)
+    : RandomResizedCrop(output_size, scale.first, scale.second, ratio.first, ratio.second, output_alignment)
+{
+    // 委托给原构造函数，算法逻辑完全一致
 }
 
 // =============================================================================
@@ -107,8 +119,6 @@ void RandomResizedCrop::generate_crop_params(
 ) {
     // 预计算对数空间的参数范围和原图面积（循环外常量）
     const float area = static_cast<float>(image_width * image_height);
-    const float log_scale_min = std::log(scale_min_);
-    const float log_scale_max = std::log(scale_max_);
     const float log_ratio_min = std::log(ratio_min_);
     const float log_ratio_max = std::log(ratio_max_);
 
@@ -117,10 +127,10 @@ void RandomResizedCrop::generate_crop_params(
     bool success = false;
 
     for (int attempt = 0; attempt < MAX_ATTEMPTS && !success; ++attempt) {
-        // ========== 步骤1：生成目标面积（对数空间均匀采样）==========
+        // ========== 步骤1：生成目标面积（线性均匀采样，对齐PyTorch）==========
         uint64_t scale_offset = rng->next_offset(1);
         float scale_rand = detail::philox_uniform_float(rng->seed(), scale_offset);
-        const float target_area = area * std::exp(log_scale_min + scale_rand * (log_scale_max - log_scale_min));
+        const float target_area = area * (scale_min_ + scale_rand * (scale_max_ - scale_min_));
 
         // ========== 步骤2：生成宽高比（对数空间均匀采样）==========
         uint64_t ratio_offset = rng->next_offset(1);
@@ -136,21 +146,9 @@ void RandomResizedCrop::generate_crop_params(
             crop_w_ = crop_w;
             crop_h_ = crop_h;
 
-            // ========== 步骤4：生成随机位置（x和y独立采样）==========
-            int max_offset_x = image_width - crop_w_ + 1;
-            int max_offset_y = image_height - crop_h_ + 1;
-
-            uint64_t x_offset = rng->next_offset(1);
-            float x_rand = detail::philox_uniform_float(rng->seed(), x_offset);
-            crop_x_ = static_cast<int>(x_rand * max_offset_x);
-
-            uint64_t y_offset = rng->next_offset(1);
-            float y_rand = detail::philox_uniform_float(rng->seed(), y_offset);
-            crop_y_ = static_cast<int>(y_rand * max_offset_y);
-
-            // 边界保护（防止浮点误差导致越界）
-            crop_x_ = std::min(crop_x_, image_width - crop_w_);
-            crop_y_ = std::min(crop_y_, image_height - crop_h_);
+            // ========== 步骤4：生成随机位置（整数均匀分布，对齐PyTorch）==========
+            crop_x_ = rng->random_int(0, image_width - crop_w_);
+            crop_y_ = rng->random_int(0, image_height - crop_h_);
 
             success = true;
             LOG_DEBUG << "RandomResizedCrop: attempt=" << attempt + 1

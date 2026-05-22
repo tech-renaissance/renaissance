@@ -9,8 +9,8 @@
 
 #define _USE_MATH_DEFINES  // MSVC: 必须在包含<cmath>之前定义才能使用M_PI
 #include "renaissance/data/color_jitter.h"
-#include "renaissance/base/tr_exception.h"
-#include "renaissance/base/logger.h"
+#include "renaissance/core/tr_exception.h"
+#include "renaissance/core/logger.h"
 #include <cmath>
 #include <algorithm>
 #include <cstring>

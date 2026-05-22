@@ -1,4 +1,4 @@
-﻿/*
+/*
  * @file random_erasing.cpp
  * @brief Random Erasing placeholder operation implementation
  * @version 1.0.0
@@ -8,8 +8,8 @@
  */
 
 #include "renaissance/data/random_erasing.h"
-#include "renaissance/base/tr_exception.h"
-#include "renaissance/base/logger.h"
+#include "renaissance/core/tr_exception.h"
+#include "renaissance/core/logger.h"
 
 namespace tr {
 
@@ -30,6 +30,19 @@ RandomErasing::RandomErasing(
 
     // RandomErasing不设置固定的output_size（保持默认值-1）
     // output_size_保持默认值
+}
+
+RandomErasing::RandomErasing(
+    float p,
+    std::pair<float, float> scale,
+    std::pair<float, float> ratio,
+    size_t output_alignment
+)
+    : RandomErasing(p, output_alignment)
+{
+    scale_min_ = scale.first;
+    scale_max_ = scale.second;
+    (void)ratio;
 }
 
 // =============================================================================

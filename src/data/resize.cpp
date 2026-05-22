@@ -7,7 +7,7 @@
  */
 
 #include "renaissance/data/resize.h"
-#include "renaissance/base/logger.h"
+#include "renaissance/core/logger.h"
 #include <cstring>
 
 #ifdef _WIN32

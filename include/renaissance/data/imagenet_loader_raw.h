@@ -15,7 +15,7 @@
 #include "renaissance/data/data_loader.h"          // LoadMode, verify_dts_crc
 #include "renaissance/data/imagenet_loader_dts.h"   // BufferState (共享枚举)
 #include "renaissance/data/sample_info.h"           // SampleInfo结构体（FULLY模式使用）
-#include "renaissance/base/philox.h"               // Philox RNG
+#include "renaissance/core/philox.h"               // Philox RNG
 #include <cstdint>
 #include <vector>
 #include <atomic>

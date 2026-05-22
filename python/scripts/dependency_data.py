@@ -16,7 +16,7 @@ SCENE_DEPS = {
     "pc_cuda": {
         "name": "PC-CUDA",
         "description": "Windows + NVIDIA GPU + MSVC",
-        "required": ["cmake", "ninja", "msvc", "cuda", "cudnn", "cudnn-frontend", "cutlass", "eigen", "xnnpack", "zlib", "libcurl", "libarchive", "libjpeg-turbo", "mimalloc", "stb", "simd", "python", "numpy"],
+        "required": ["cmake", "ninja", "msvc", "cuda", "cudnn", "cudnn-frontend", "eigen", "xnnpack", "zlib", "libcurl", "libarchive", "libjpeg-turbo", "mimalloc", "stb", "simd", "python", "numpy"],
         "optional": [],
         "cmake_opts": [
             "-DTR_SCENE_PC_CUDA=ON",
@@ -36,7 +36,7 @@ SCENE_DEPS = {
     "gpu_cloud": {
         "name": "GPU_CLOUD",
         "description": "Linux + Multi-NVIDIA GPU + GCC",
-        "required": ["cmake", "ninja", "gcc", "cuda", "cudnn", "nccl", "cudnn-frontend", "cutlass", "eigen", "xnnpack", "zlib", "libcurl", "libarchive", "libjpeg-turbo", "mimalloc", "stb", "simd", "python", "numpy"],
+        "required": ["cmake", "ninja", "gcc", "cuda", "cudnn", "nccl", "cudnn-frontend", "eigen", "xnnpack", "zlib", "libcurl", "libarchive", "libnuma", "libjpeg-turbo", "mimalloc", "stb", "simd", "python", "numpy"],
         "optional": [],
         "cmake_opts": [
             "-DTR_SCENE_GPU_CLOUD=ON",
@@ -51,6 +51,7 @@ SCENE_DEPS = {
             "-DTR_USE_ZLIB=ON",
             "-DTR_USE_LIBCURL=ON",
             "-DTR_USE_LIBARCHIVE=ON",
+            "-DTR_USE_LIBNUMA=ON",
             "-DTR_USE_MIMALLOC=ON",
             "-DTR_USE_SIMD=ON"
         ]
@@ -354,6 +355,18 @@ DEP_CONFIG = {
         "install_hint": "vcpkg install libarchive (Windows) | sudo apt install libarchive-dev (Linux)"
     },
 
+    "libnuma": {
+        "name": "libnuma",
+        "exe": [],  # 不通过可执行文件检测，直接检查头文件
+        "header": "numa.h",
+        "lib_files": ["libnuma.so", "libnuma.a"],
+        "env": [],
+        "paths_linux": ["/usr", "/usr/local"],
+        "version_cmd": ["numactl", "--version"],
+        "version_pattern": r"numactl version (\d+\.\d+\.\d+)",
+        "install_hint": "sudo apt install libnuma-dev"
+    },
+
     "xnnpack": {
         "name": "XNNPACK",
         "exe": [],  # 通过头文件检测
@@ -441,19 +454,6 @@ DEP_CONFIG = {
         "version_pattern": r"#define CUDNN_FRONTEND_MAJOR_VERSION\s+(\d+).*#define CUDNN_FRONTEND_MINOR_VERSION\s+(\d+).*#define CUDNN_FRONTEND_PATCH_VERSION\s+(\d+)",
         "min_version": "1.0",
         "install_hint": "Download from https://github.com/NVIDIA/cudnn-frontend"
-    },
-
-    "cutlass": {
-        "name": "CUTLASS",
-        "exe": [],  # 通过头文件检测
-        "header": ["cutlass/version.h"],
-        "env": ["CUTLASS_ROOT"],
-        "paths_win": ["C:/Program Files/cutlass*"],
-        "paths_linux": ["/opt/cutlass"],
-        "version_cmd": ["grep", "-E", "CUTLASS_MAJOR|CUTLASS_MINOR|CUTLASS_PATCH", "{include}/cutlass/version.h"],
-        "version_pattern": r"#define CUTLASS_MAJOR\s+(\d+).*#define CUTLASS_MINOR\s+(\d+).*#define CUTLASS_PATCH\s+(\d+)",
-        "min_version": "4.0",
-        "install_hint": "Download from https://github.com/NVIDIA/cutlass"
     }
 }
 
@@ -502,6 +502,9 @@ INSTALL_SUGGESTIONS = {
     "libarchive": {
         "windows": "Run: vcpkg install libarchive",
         "linux": "Run: sudo apt install libarchive-dev"
+    },
+    "libnuma": {
+        "linux": "Run: sudo apt install libnuma-dev"
     },
     "musa": {
         "both": "Download from https://www.mthreads.com/download"

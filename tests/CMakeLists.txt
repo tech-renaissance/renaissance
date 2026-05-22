@@ -1,5 +1,5 @@
 # ============================================================================
-# renAIssance Framework Unit Tests CMake Configuration
+# Renaissance Framework Unit Tests CMake Configuration
 # ============================================================================
 
 # 检查是否在父项目中
@@ -34,253 +34,234 @@ endif()
 # 设置单元测试的输出目录
 set(TESTS_OUTPUT_DIR ${CMAKE_BINARY_DIR}/bin/tests)
 
-# 为所有单元测试添加CUDA/MUSA头文件路径（因为renaissance.h可能包含它们）
-if(TR_USE_CUDA)
-    if(DEFINED TR_CUDA_PATH)
-        include_directories(${TR_CUDA_PATH}/include)
-    endif()
-    if(DEFINED TR_CUDNN_INCLUDE_DIR AND NOT TR_CUDNN_INCLUDE_DIR STREQUAL "")
-        include_directories(${TR_CUDNN_INCLUDE_DIR})
-        file(GLOB CUDNN_VERSION_DIRS "${TR_CUDNN_INCLUDE_DIR}/*")
-        foreach(CUDNN_VER_DIR ${CUDNN_VERSION_DIRS})
-            if(IS_DIRECTORY ${CUDNN_VER_DIR})
-                include_directories(${CUDNN_VER_DIR})
-            endif()
-        endforeach()
-    endif()
-endif()
-
-if(TR_USE_MUSA)
-    if(DEFINED TR_MUSA_PATH)
-        include_directories(${TR_MUSA_PATH}/include)
-    endif()
-    if(DEFINED TR_MUDNN_INCLUDE_DIR)
-        include_directories(${TR_MUDNN_INCLUDE_DIR})
-        file(GLOB MUDNN_VERSION_DIRS "${TR_MUDNN_INCLUDE_DIR}/*")
-        foreach(MUDNN_VER_DIR ${MUDNN_VERSION_DIRS})
-            if(IS_DIRECTORY ${MUDNN_VER_DIR})
-                include_directories(${MUDNN_VER_DIR})
-            endif()
-        endforeach()
-    endif()
-endif()
-
-message(STATUS "=== Unit Tests Configuration ===")
-message(STATUS "Unit tests will be built in: ${TESTS_OUTPUT_DIR}")
-
 # ============================================================================
-# Windows DLL 复制函数（必须在 add_subdirectory 之前定义）
+# GPU 运行时环境设置（不使用 DLL 复制，而是配置 PATH）
 # ============================================================================
-
-if(WIN32)
-    # 为所有测试目标复制所需的 DLL 到输出目录
-    function(copy_test_dlls target_name)
-        # 收集需要复制的 DLL
-        set(DLLS_TO_COPY "")
-
-        # 1. cuDNN DLL（如果使用了CUDA）
-        if(TR_USE_CUDA AND DEFINED TR_CUDNN_PATH)
-            # 查找 cuDNN bin 目录（支持 9.x 的版本子目录结构）
-            file(GLOB CUDNN_VERSION_DIRS "${TR_CUDNN_PATH}/bin/*")
-            foreach(CUDNN_VER_DIR ${CUDNN_VERSION_DIRS})
-                if(IS_DIRECTORY ${CUDNN_VER_DIR})
-                    # 查找架构子目录
-                    file(GLOB CUDNN_ARCH_DIRS "${CUDNN_VER_DIR}/*")
-                    foreach(CUDNN_ARCH_DIR ${CUDNN_ARCH_DIRS})
-                        if(IS_DIRECTORY ${CUDNN_ARCH_DIR})
-                            # 找到 cudnn64_9.dll
-                            if(EXISTS "${CUDNN_ARCH_DIR}/cudnn64_9.dll")
-                                list(APPEND DLLS_TO_COPY "${CUDNN_ARCH_DIR}/cudnn64_9.dll")
-                                break()
-                            endif()
-                        endif()
-                    endforeach()
-                    if(DLLS_TO_COPY)
-                        break()
-                    endif()
-                endif()
-            endforeach()
-
-            # 如果没找到，尝试直接在 bin 目录查找
-            if(NOT DLLS_TO_COPY AND EXISTS "${TR_CUDNN_PATH}/bin/cudnn64_9.dll")
-                list(APPEND DLLS_TO_COPY "${TR_CUDNN_PATH}/bin/cudnn64_9.dll")
-            endif()
-        endif()
-
-        # 2. libcurl DLL（如果使用了libcurl）
-        if(TR_USE_LIBCURL AND DEFINED TR_CURL_PATH)
-            # vcpkg 的 libcurl DLL 在 bin 目录
-            if(EXISTS "${TR_CURL_PATH}/bin/libcurl.dll")
-                list(APPEND DLLS_TO_COPY "${TR_CURL_PATH}/bin/libcurl.dll")
-            elseif(EXISTS "${TR_CURL_PATH}/x64/bin/libcurl.dll")
-                # 某些 vcpkg 版本可能使用 x64 子目录
-                list(APPEND DLLS_TO_COPY "${TR_CURL_PATH}/x64/bin/libcurl.dll")
-            endif()
-        endif()
-
-        # 复制所有找到的 DLL
-        if(DLLS_TO_COPY)
-            foreach(dll_path ${DLLS_TO_COPY})
-                add_custom_command(TARGET ${target_name} POST_BUILD
-                    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-                        "${dll_path}"
-                        $<TARGET_FILE_DIR:${target_name}>
-                    COMMENT "Copying ${dll_path} to output directory"
-                )
-            endforeach()
-            message(STATUS "DLLs configured for ${target_name}: ${DLLS_TO_COPY}")
-        endif()
-    endfunction()
-endif()
-
-# ============================================================================
-# 包含dependency子目录（依赖库Hello World测试）
-# ============================================================================
-
-# 注意：dependency测试（hello_cuda, hello_xnnpack等）已被暂时关闭
-# 如果需要重新开启dependency测试，请取消下面第4-6行的注释
 #
-# if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/dependency AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/dependency)
-#     add_subdirectory(dependency)
-#     message(STATUS "Including dependency tests")
+# 设计原则：
+#   业界最佳实践（PyTorch、TensorFlow、CUDA 官方示例等）从不将 cuDNN/CUDA DLL
+#   复制到 build 目录。原因：
+#     1. cuDNN 9.x 的 DLL 集合超过 1GB，多次复制会导致 build 目录急剧膨胀
+#     2. 并行构建时多目标同时复制到同一目录会引发文件占用冲突
+#     3. 复制无法处理 DLL 的间接依赖（如 cudart 还需要 nvrtc 等运行时组件）
+#   正确做法：
+#     - 构建期不复制任何 DLL，让 OS 通过 PATH 环境变量在运行时查找
+#     - VS IDE 调试：设置 VS_DEBUGGER_ENVIRONMENT 自动注入 PATH
+#     - CTest 运行：设置 ENVIRONMENT 测试属性
+#     - 命令行直接运行：执行 setup_cuda_env.bat 或在系统环境变量中配置
+#
+#   关于 vcpkg DLL：
+#     vcpkg 的 applocal.ps1 在链接时自动分析导入表并复制所需的 vcpkg DLL
+#     （mimalloc、turbojpeg、Simd、zlib、libcurl、libarchive 等）到输出目录。
+#     这个机制与本函数互不冲突，无需额外处理。
+#
+
+# 查找 cuDNN DLL 目录（仅执行一次，供所有 GPU 测试目标共用）
+if(WIN32 AND TR_USE_CUDA AND DEFINED TR_CUDNN_PATH)
+    set(_cudnn_dll_dir "")
+    file(GLOB _cudnn_ver_dirs "${TR_CUDNN_PATH}/bin/*")
+    foreach(_ver_dir ${_cudnn_ver_dirs})
+        if(IS_DIRECTORY ${_ver_dir})
+            file(GLOB _cudnn_dlls "${_ver_dir}/cudnn*.dll")
+            if(_cudnn_dlls)
+                set(_cudnn_dll_dir ${_ver_dir})
+                break()
+            endif()
+        endif()
+    endforeach()
+    if(NOT _cudnn_dll_dir)
+        file(GLOB _cudnn_dlls "${TR_CUDNN_PATH}/bin/cudnn*.dll")
+        if(_cudnn_dlls)
+            set(_cudnn_dll_dir "${TR_CUDNN_PATH}/bin")
+        endif()
+    endif()
+    if(_cudnn_dll_dir)
+        set(TR_CUDNN_DLL_DIR "${_cudnn_dll_dir}" CACHE INTERNAL "cuDNN DLL directory")
+        message(STATUS "cuDNN DLL directory: ${TR_CUDNN_DLL_DIR}")
+    endif()
+endif()
+
+# 为 GPU 测试目标设置运行时 PATH 环境
+#   - VS IDE: 通过 VS_DEBUGGER_ENVIRONMENT 自动注入
+#   - 命令行: 运行前先执行 setup_cuda_env.bat
+#   - CTest:  通过 ENVIRONMENT 测试属性（需在 add_test 时调用）
+function(setup_gpu_runtime_env target_name)
+    if(NOT WIN32)
+        return()
+    endif()
+
+    set(_extra_path "")
+
+    # cuDNN DLL 目录
+    if(DEFINED TR_CUDNN_DLL_DIR)
+        if(_extra_path)
+            set(_extra_path "${_extra_path}\;${TR_CUDNN_DLL_DIR}")
+        else()
+            set(_extra_path "${TR_CUDNN_DLL_DIR}")
+        endif()
+    endif()
+
+    # CUDA Toolkit bin 目录（cudart、cublas、nvrtc 等运行时 DLL）
+    if(TR_USE_CUDA AND DEFINED TR_CUDA_PATH)
+        if(_extra_path)
+            set(_extra_path "${_extra_path}\;${TR_CUDA_PATH}/bin")
+        else()
+            set(_extra_path "${TR_CUDA_PATH}/bin")
+        endif()
+    endif()
+
+    if(_extra_path)
+        set_target_properties(${target_name} PROPERTIES
+            VS_DEBUGGER_ENVIRONMENT "PATH=${_extra_path}\;%PATH%"
+        )
+    endif()
+endfunction()
+
+# ============================================================================
+# 包含core子目录（Logger、TRException等核心组件测试）
+# ============================================================================
+
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/core AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/core)
+    add_subdirectory(core)
+    message(STATUS "Including core tests")
+else()
+    message(STATUS "Skipping core tests (directory not found)")
+endif()
+
+# ============================================================================
+# 包含prep子目录（Preprocessor相关测试）
+# ============================================================================
+
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/prep AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/prep)
+    add_subdirectory(prep)
+    message(STATUS "Including prep tests")
+else()
+    message(STATUS "Skipping prep tests (directory not found)")
+endif()
+
+# ============================================================================
+# 包含graph子目录（BluePrint、Compiler、Flow等测试）
+# ============================================================================
+
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/graph AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/graph)
+    add_subdirectory(graph)
+    message(STATUS "Including graph tests")
+else()
+    message(STATUS "Skipping graph tests (directory not found)")
+endif()
+
+# ============================================================================
+# 包含top子目录（ResNet-50等顶级集成测试）
+# ============================================================================
+
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/top AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/top)
+    add_subdirectory(top)
+    message(STATUS "Including top integration tests")
+endif()
+
+# ============================================================================
+# mlp 子目录（MLP原型测试，仅CUDA平台）
+# ============================================================================
+
+# 注意：mlp_test 是原型验证性质的独立实验，不链接 renaissance 库
+# 已通过功能测试，暂时排除在常规编译之外
+# 如需手动编译，请使用：
+#   powershell.exe -Command "& cmd /c '\"C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat\" && cd /d R:\renaissance && cmake -G Ninja -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_COMPILER=cl && cd build && ninja mlp_test'"
+#
+# if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/mlp AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/mlp)
+#     if(TR_USE_CUDA)
+#         add_subdirectory(mlp)
+#         message(STATUS "Including mlp test")
+#     else()
+#         message(STATUS "Skipping mlp test (TR_USE_CUDA is OFF)")
+#     endif()
 # endif()
 
-message(STATUS "Dependency tests are temporarily disabled (see tests/CMakeLists.txt:40-46)")
-
 # ============================================================================
-# 包含base子目录（Logger和TRException测试）
+# fp16 子目录（FP16算子测试，仅CUDA平台）
 # ============================================================================
 
-# 注意：base测试当前已开启。如果需要暂时关闭，请注释掉下面第3-4行
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/base AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/base)
-    add_subdirectory(base)
-    message(STATUS "Including base tests")
-else()
-    message(STATUS "Base tests directory not found")
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/fp16 AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/fp16)
+    if(TR_USE_CUDA)
+        add_subdirectory(fp16)
+        message(STATUS "Including fp16 tests")
+    else()
+        message(STATUS "Skipping fp16 tests (TR_USE_CUDA is OFF)")
+    endif()
 endif()
 
 # ============================================================================
-# 包含data子目录（Shape类测试）
+# 未来添加其他测试板块时的示例：
 # ============================================================================
+# if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/data AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/data)
+#     add_subdirectory(data)
+#     message(STATUS "Including data tests")
+# endif()
+#
+# if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/device AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/device)
+#     add_subdirectory(device)
+#     message(STATUS "Including device tests")
+# endif()
 
-# 注意：data测试当前已开启。如果需要暂时关闭，请注释掉下面第3-4行
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/data AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/data)
-    add_subdirectory(data)
-    message(STATUS "Including data tests")
-else()
-    message(STATUS "Data tests directory not found")
+# ============================================================================
+# 单元测试（V4.20.3 新增）
+# ============================================================================
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit_tests AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/unit_tests)
+    add_subdirectory(unit_tests)
+    message(STATUS "Including unit tests")
 endif()
 
 # ============================================================================
-# 包含pw子目录（PreprocessWorker测试）
+# correction 子目录（算子数学正确性验证）
 # ============================================================================
-
-# 注意：pw测试当前已开启
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/pw AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/pw)
-    add_subdirectory(pw)
-    message(STATUS "Including pw tests")
-else()
-    message(STATUS "PW tests directory not found")
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/correction AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/correction)
+    add_subdirectory(correction)
+    message(STATUS "Including correction tests")
 endif()
 
 # ============================================================================
-# 包含device子目录（Device类测试）
+# perf 子目录（算子性能测试）
 # ============================================================================
-
-# 注意：device测试当前已开启
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/device AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/device)
-    add_subdirectory(device)
-    message(STATUS "Including device tests")
-else()
-    message(STATUS "Device tests directory not found")
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/perf AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/perf)
+    add_subdirectory(perf)
+    message(STATUS "Including perf tests")
 endif()
 
 # ============================================================================
-# 包含utils子目录（PythonSession测试）
+# op 子目录（算子数学正确性验证测试）
 # ============================================================================
-
-# 注意：utils测试当前已开启
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/utils AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/utils)
-    add_subdirectory(utils)
-    message(STATUS "Including utils tests")
-else()
-    message(STATUS "Utils tests directory not found")
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/op AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/op)
+    add_subdirectory(op)
+    message(STATUS "Including operator correctness tests")
 endif()
 
 # ============================================================================
-# 包含integration子目录（集成测试）
+# ref 子目录（MNIST MLP 参考实现）
 # ============================================================================
-
-# 注意：integration测试当前已开启
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/integration AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/integration)
-    add_subdirectory(integration)
-    message(STATUS "Including integration tests")
-else()
-    message(STATUS "Integration tests directory not found")
-endif()
-
-# ============================================================================
-# 包含simd子目录（SIMD性能测试）
-# ============================================================================
-
-# 注意：simd测试当前已开启
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/simd AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/simd)
-    add_subdirectory(simd)
-    message(STATUS "Including simd tests")
-else()
-    message(STATUS "SIMD tests directory not found")
-endif()
-
-# ============================================================================
-# 包含numa子目录（NUMA特性测试）
-# ============================================================================
-
-# 注意：numa测试当前已开启
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/numa AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/numa)
-    add_subdirectory(numa)
-    message(STATUS "Including numa tests")
-else()
-    message(STATUS "NUMA tests directory not found")
-endif()
-
-# ============================================================================
-# 包含loading子目录（快速二进制文件加载性能测试）
-# ============================================================================
-
-# 注意：loading测试当前已开启
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/loading AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/loading)
-    add_subdirectory(loading)
-    message(STATUS "Including loading tests")
-else()
-    message(STATUS "Loading tests directory not found")
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/ref AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/ref)
+    if(TR_USE_CUDA)
+        add_executable(mnist_mlp_3 ref/mnist_mlp_3.cpp)
+        target_compile_definitions(mnist_mlp_3 PRIVATE TR_LOG_LEVEL=1)
+        target_link_libraries(mnist_mlp_3 PRIVATE renaissance)
+        setup_gpu_runtime_env(mnist_mlp_3)
+        set_target_properties(mnist_mlp_3 PROPERTIES
+            RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/ref
+        )
+        if(WIN32)
+            set_target_properties(mnist_mlp_3 PROPERTIES WIN32_EXECUTABLE FALSE)
+            target_compile_options(mnist_mlp_3 PRIVATE /W4 /utf-8
+                /wd4244 /wd4505 /wd4458 /wd4127)
+        else()
+            target_compile_options(mnist_mlp_3 PRIVATE -Wall -Wextra -Wpedantic -Wno-unused-function)
+        endif()
+        message(STATUS "  - mnist_mlp_3: MNIST 3-Layer MLP (784-512-256-10)")
+    endif()
 endif()
 
 # ============================================================================
 # 输出单元测试信息
 # ============================================================================
 
-# ============================================================================
-
-# ============================================================================
-
-# 包含bind子目录（NUMA绑定实验）
-
-# ============================================================================
-
-# 注意：bind测试当前已开启
-
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/bind AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/bind)
-
-    add_subdirectory(bind)
-
-    message(STATUS "Including bind tests")
-
-else()
-
-    message(STATUS "Bind tests directory not found")
-
-endif()
-
-# ============================================================================
-
+message(STATUS "=== Unit Tests Configuration ===")
+message(STATUS "Unit tests will be built in: ${TESTS_OUTPUT_DIR}")
 message(STATUS "=== Unit Tests Configuration Complete ===")

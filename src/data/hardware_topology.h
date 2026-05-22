@@ -22,7 +22,7 @@
 #include <unistd.h>
 #include <sys/types.h>
 #include <dirent.h>
-#include "renaissance/base/logger.h"
+#include "renaissance/core/logger.h"
 
 namespace tr {
 

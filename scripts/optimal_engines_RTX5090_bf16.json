@@ -1,0 +1,524 @@
+{
+  "metadata": {
+    "gpu_name": "RTX5090",
+    "data_type": "bf16",
+    "batch_size": 512,
+    "num_iterations": 16,
+    "total_configurations": 23
+  },
+  "results": [
+    {
+      "signature": "(7, 4, 64, 224, 112, 2, 3)",
+      "count": 1,
+      "layer_numbers": [
+        1
+      ],
+      "parameters": {
+        "kernel_size": 7,
+        "in_channels": 4,
+        "out_channels": 64,
+        "input_size": 224,
+        "output_size": 112,
+        "conv_stride": 2,
+        "padding": 3
+      },
+      "optimal_engine": {
+        "conv_genstats": "eng48_k2=15_k6=0_k13=0_k14=0_k22=0",
+        "dgrad": "eng40_k2=16_k13=0_k14=3",
+        "wgrad": "eng10_k2=7_k12=31_k13=0_k14=4_k15=0_k17=32_k18=1_k23=0"
+      }
+    },
+    {
+      "signature": "(1, 64, 64, 56, 56, 1, 0)",
+      "count": 1,
+      "layer_numbers": [
+        2
+      ],
+      "parameters": {
+        "kernel_size": 1,
+        "in_channels": 64,
+        "out_channels": 64,
+        "input_size": 56,
+        "output_size": 56,
+        "conv_stride": 1,
+        "padding": 0
+      },
+      "optimal_engine": {
+        "conv_genstats": "eng45_k2=1_k5=3_k14=5",
+        "dgrad": "eng57_k2=4_k5=3_k14=3",
+        "wgrad": "eng62_k25=1"
+      }
+    },
+    {
+      "signature": "(3, 64, 64, 56, 56, 1, 1)",
+      "count": 3,
+      "layer_numbers": [
+        3,
+        6,
+        9
+      ],
+      "parameters": {
+        "kernel_size": 3,
+        "in_channels": 64,
+        "out_channels": 64,
+        "input_size": 56,
+        "output_size": 56,
+        "conv_stride": 1,
+        "padding": 1
+      },
+      "optimal_engine": {
+        "conv_genstats": "eng22_k2=4_k13=0_k14=2_k18=0_k23=0",
+        "dgrad": "eng22_k2=4_k13=0_k14=2_k23=2",
+        "wgrad": "eng10_k2=5_k12=58_k13=1_k14=3_k15=1_k17=59_k18=1_k23=0"
+      }
+    },
+    {
+      "signature": "(1, 64, 256, 56, 56, 1, 0)",
+      "count": 4,
+      "layer_numbers": [
+        4,
+        7,
+        10,
+        2
+      ],
+      "parameters": {
+        "kernel_size": 1,
+        "in_channels": 64,
+        "out_channels": 256,
+        "input_size": 56,
+        "output_size": 56,
+        "conv_stride": 1,
+        "padding": 0
+      },
+      "optimal_engine": {
+        "conv_genstats": "eng45_k2=0_k5=3_k14=2",
+        "dgrad": "eng22_k2=16_k13=0_k14=3_k23=0",
+        "wgrad": "eng62_k25=1"
+      }
+    },
+    {
+      "signature": "(1, 256, 64, 56, 56, 1, 0)",
+      "count": 2,
+      "layer_numbers": [
+        5,
+        8
+      ],
+      "parameters": {
+        "kernel_size": 1,
+        "in_channels": 256,
+        "out_channels": 64,
+        "input_size": 56,
+        "output_size": 56,
+        "conv_stride": 1,
+        "padding": 0
+      },
+      "optimal_engine": {
+        "conv_genstats": "eng22_k2=2_k13=0_k14=3_k18=0_k23=1",
+        "dgrad": "eng57_k2=0_k5=3_k14=2",
+        "wgrad": "eng33_k0=30_k2=5_k5=4_k14=4"
+      }
+    },
+    {
+      "signature": "(1, 256, 128, 56, 56, 1, 0)",
+      "count": 1,
+      "layer_numbers": [
+        11
+      ],
+      "parameters": {
+        "kernel_size": 1,
+        "in_channels": 256,
+        "out_channels": 128,
+        "input_size": 56,
+        "output_size": 56,
+        "conv_stride": 1,
+        "padding": 0
+      },
+      "optimal_engine": {
+        "conv_genstats": "eng45_k2=0_k5=3_k14=3",
+        "dgrad": "eng40_k2=3_k13=0_k14=2",
+        "wgrad": "eng62_k25=1"
+      }
+    },
+    {
+      "signature": "(1, 256, 512, 56, 28, 2, 0)",
+      "count": 1,
+      "layer_numbers": [
+        11
+      ],
+      "parameters": {
+        "kernel_size": 1,
+        "in_channels": 256,
+        "out_channels": 512,
+        "input_size": 56,
+        "output_size": 28,
+        "conv_stride": 2,
+        "padding": 0
+      },
+      "optimal_engine": {
+        "conv_genstats": "eng45_k2=0_k5=3_k14=2",
+        "dgrad": "eng64_k2=6_k5=3_k14=2",
+        "wgrad": "eng10_k2=1_k12=9_k13=0_k14=4_k15=1_k17=10_k18=1_k23=0"
+      }
+    },
+    {
+      "signature": "(3, 128, 128, 56, 28, 2, 1)",
+      "count": 1,
+      "layer_numbers": [
+        12
+      ],
+      "parameters": {
+        "kernel_size": 3,
+        "in_channels": 128,
+        "out_channels": 128,
+        "input_size": 56,
+        "output_size": 28,
+        "conv_stride": 2,
+        "padding": 1
+      },
+      "optimal_engine": {
+        "conv_genstats": "eng45_k2=0_k5=3_k14=2",
+        "dgrad": "eng64_k2=0_k5=3_k14=2",
+        "wgrad": "eng10_k2=1_k12=27_k13=0_k14=4_k15=1_k17=28_k18=1_k23=0"
+      }
+    },
+    {
+      "signature": "(1, 128, 512, 28, 28, 1, 0)",
+      "count": 4,
+      "layer_numbers": [
+        13,
+        16,
+        19,
+        22
+      ],
+      "parameters": {
+        "kernel_size": 1,
+        "in_channels": 128,
+        "out_channels": 512,
+        "input_size": 28,
+        "output_size": 28,
+        "conv_stride": 1,
+        "padding": 0
+      },
+      "optimal_engine": {
+        "conv_genstats": "eng58_k25=0",
+        "dgrad": "eng22_k2=0_k13=0_k14=3_k23=0",
+        "wgrad": "eng62_k25=2"
+      }
+    },
+    {
+      "signature": "(1, 512, 128, 28, 28, 1, 0)",
+      "count": 3,
+      "layer_numbers": [
+        14,
+        17,
+        20
+      ],
+      "parameters": {
+        "kernel_size": 1,
+        "in_channels": 512,
+        "out_channels": 128,
+        "input_size": 28,
+        "output_size": 28,
+        "conv_stride": 1,
+        "padding": 0
+      },
+      "optimal_engine": {
+        "conv_genstats": "eng22_k2=7_k13=0_k14=4_k18=0_k23=1",
+        "dgrad": "eng63_k25=0",
+        "wgrad": "eng62_k25=1"
+      }
+    },
+    {
+      "signature": "(3, 128, 128, 28, 28, 1, 1)",
+      "count": 3,
+      "layer_numbers": [
+        15,
+        18,
+        21
+      ],
+      "parameters": {
+        "kernel_size": 3,
+        "in_channels": 128,
+        "out_channels": 128,
+        "input_size": 28,
+        "output_size": 28,
+        "conv_stride": 1,
+        "padding": 1
+      },
+      "optimal_engine": {
+        "conv_genstats": "eng45_k2=0_k5=3_k14=2",
+        "dgrad": "eng57_k2=0_k5=3_k14=2",
+        "wgrad": "eng10_k2=1_k12=-1_k13=0_k14=4_k15=0_k17=28_k18=1_k23=0"
+      }
+    },
+    {
+      "signature": "(1, 512, 256, 28, 28, 1, 0)",
+      "count": 1,
+      "layer_numbers": [
+        23
+      ],
+      "parameters": {
+        "kernel_size": 1,
+        "in_channels": 512,
+        "out_channels": 256,
+        "input_size": 28,
+        "output_size": 28,
+        "conv_stride": 1,
+        "padding": 0
+      },
+      "optimal_engine": {
+        "conv_genstats": "eng45_k2=0_k5=3_k14=2",
+        "dgrad": "eng57_k2=0_k5=3_k14=2",
+        "wgrad": "eng62_k25=2"
+      }
+    },
+    {
+      "signature": "(1, 512, 1024, 28, 14, 2, 0)",
+      "count": 1,
+      "layer_numbers": [
+        23
+      ],
+      "parameters": {
+        "kernel_size": 1,
+        "in_channels": 512,
+        "out_channels": 1024,
+        "input_size": 28,
+        "output_size": 14,
+        "conv_stride": 2,
+        "padding": 0
+      },
+      "optimal_engine": {
+        "conv_genstats": "eng45_k2=0_k5=3_k14=2",
+        "dgrad": "eng46_k2=3_k13=0_k14=2",
+        "wgrad": "eng10_k2=3_k12=9_k13=0_k14=2_k15=1_k17=10_k18=1_k23=0"
+      }
+    },
+    {
+      "signature": "(3, 256, 256, 28, 14, 2, 1)",
+      "count": 1,
+      "layer_numbers": [
+        24
+      ],
+      "parameters": {
+        "kernel_size": 3,
+        "in_channels": 256,
+        "out_channels": 256,
+        "input_size": 28,
+        "output_size": 14,
+        "conv_stride": 2,
+        "padding": 1
+      },
+      "optimal_engine": {
+        "conv_genstats": "eng22_k2=3_k13=0_k14=2_k18=0_k23=0",
+        "dgrad": "eng64_k2=0_k5=3_k14=2",
+        "wgrad": "eng10_k2=3_k12=27_k13=0_k14=2_k15=1_k17=28_k18=1_k23=0"
+      }
+    },
+    {
+      "signature": "(1, 256, 1024, 14, 14, 1, 0)",
+      "count": 6,
+      "layer_numbers": [
+        25,
+        28,
+        31,
+        34,
+        37,
+        40
+      ],
+      "parameters": {
+        "kernel_size": 1,
+        "in_channels": 256,
+        "out_channels": 1024,
+        "input_size": 14,
+        "output_size": 14,
+        "conv_stride": 1,
+        "padding": 0
+      },
+      "optimal_engine": {
+        "conv_genstats": "eng45_k2=0_k5=3_k14=2",
+        "dgrad": "eng57_k2=0_k5=3_k14=2",
+        "wgrad": "eng62_k25=1"
+      }
+    },
+    {
+      "signature": "(1, 1024, 256, 14, 14, 1, 0)",
+      "count": 5,
+      "layer_numbers": [
+        26,
+        29,
+        32,
+        35,
+        38
+      ],
+      "parameters": {
+        "kernel_size": 1,
+        "in_channels": 1024,
+        "out_channels": 256,
+        "input_size": 14,
+        "output_size": 14,
+        "conv_stride": 1,
+        "padding": 0
+      },
+      "optimal_engine": {
+        "conv_genstats": "eng45_k2=0_k5=3_k14=2",
+        "dgrad": "eng57_k2=0_k5=3_k14=2",
+        "wgrad": "eng62_k25=2"
+      }
+    },
+    {
+      "signature": "(3, 256, 256, 14, 14, 1, 1)",
+      "count": 5,
+      "layer_numbers": [
+        27,
+        30,
+        33,
+        36,
+        39
+      ],
+      "parameters": {
+        "kernel_size": 3,
+        "in_channels": 256,
+        "out_channels": 256,
+        "input_size": 14,
+        "output_size": 14,
+        "conv_stride": 1,
+        "padding": 1
+      },
+      "optimal_engine": {
+        "conv_genstats": "eng45_k2=0_k5=3_k14=2",
+        "dgrad": "eng46_k2=3_k13=0_k14=2",
+        "wgrad": "eng10_k2=3_k12=27_k13=0_k14=2_k15=1_k17=28_k18=1_k23=0"
+      }
+    },
+    {
+      "signature": "(1, 1024, 512, 14, 14, 1, 0)",
+      "count": 1,
+      "layer_numbers": [
+        41
+      ],
+      "parameters": {
+        "kernel_size": 1,
+        "in_channels": 1024,
+        "out_channels": 512,
+        "input_size": 14,
+        "output_size": 14,
+        "conv_stride": 1,
+        "padding": 0
+      },
+      "optimal_engine": {
+        "conv_genstats": "eng45_k2=0_k5=3_k14=2",
+        "dgrad": "eng57_k2=0_k5=3_k14=2",
+        "wgrad": "eng62_k25=1"
+      }
+    },
+    {
+      "signature": "(1, 1024, 2048, 14, 7, 2, 0)",
+      "count": 1,
+      "layer_numbers": [
+        41
+      ],
+      "parameters": {
+        "kernel_size": 1,
+        "in_channels": 1024,
+        "out_channels": 2048,
+        "input_size": 14,
+        "output_size": 7,
+        "conv_stride": 2,
+        "padding": 0
+      },
+      "optimal_engine": {
+        "conv_genstats": "eng45_k2=0_k5=3_k14=2",
+        "dgrad": "eng46_k2=3_k13=0_k14=2",
+        "wgrad": "eng10_k2=4_k12=-1_k13=0_k14=2_k15=1_k17=5_k18=1_k23=0"
+      }
+    },
+    {
+      "signature": "(3, 512, 512, 14, 7, 2, 1)",
+      "count": 1,
+      "layer_numbers": [
+        42
+      ],
+      "parameters": {
+        "kernel_size": 3,
+        "in_channels": 512,
+        "out_channels": 512,
+        "input_size": 14,
+        "output_size": 7,
+        "conv_stride": 2,
+        "padding": 1
+      },
+      "optimal_engine": {
+        "conv_genstats": "eng45_k2=0_k5=3_k14=2",
+        "dgrad": "eng64_k2=0_k5=3_k14=2",
+        "wgrad": "eng10_k2=1_k12=-1_k13=0_k14=4_k15=0_k17=4_k18=1_k23=0"
+      }
+    },
+    {
+      "signature": "(1, 512, 2048, 7, 7, 1, 0)",
+      "count": 3,
+      "layer_numbers": [
+        43,
+        46,
+        49
+      ],
+      "parameters": {
+        "kernel_size": 1,
+        "in_channels": 512,
+        "out_channels": 2048,
+        "input_size": 7,
+        "output_size": 7,
+        "conv_stride": 1,
+        "padding": 0
+      },
+      "optimal_engine": {
+        "conv_genstats": "eng45_k2=0_k5=3_k14=2",
+        "dgrad": "eng57_k2=0_k5=3_k14=2",
+        "wgrad": "eng62_k25=2"
+      }
+    },
+    {
+      "signature": "(1, 2048, 512, 7, 7, 1, 0)",
+      "count": 2,
+      "layer_numbers": [
+        44,
+        47
+      ],
+      "parameters": {
+        "kernel_size": 1,
+        "in_channels": 2048,
+        "out_channels": 512,
+        "input_size": 7,
+        "output_size": 7,
+        "conv_stride": 1,
+        "padding": 0
+      },
+      "optimal_engine": {
+        "conv_genstats": "eng45_k2=0_k5=3_k14=2",
+        "dgrad": "eng57_k2=0_k5=3_k14=2",
+        "wgrad": "eng62_k25=1"
+      }
+    },
+    {
+      "signature": "(3, 512, 512, 7, 7, 1, 1)",
+      "count": 2,
+      "layer_numbers": [
+        45,
+        48
+      ],
+      "parameters": {
+        "kernel_size": 3,
+        "in_channels": 512,
+        "out_channels": 512,
+        "input_size": 7,
+        "output_size": 7,
+        "conv_stride": 1,
+        "padding": 1
+      },
+      "optimal_engine": {
+        "conv_genstats": "eng45_k2=0_k5=3_k14=2",
+        "dgrad": "eng46_k2=0_k13=0_k14=3",
+        "wgrad": "eng10_k2=1_k12=-1_k13=0_k14=4_k15=0_k17=4_k18=1_k23=0"
+      }
+    }
+  ]
+}

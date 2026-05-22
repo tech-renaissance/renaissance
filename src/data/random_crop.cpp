@@ -8,9 +8,9 @@
  */
 
 #include "renaissance/data/random_crop.h"
-#include "renaissance/base/tr_exception.h"
-#include "renaissance/base/logger.h"
-#include "renaissance/base/philox.h"
+#include "renaissance/core/tr_exception.h"
+#include "renaissance/core/logger.h"
+#include "renaissance/core/philox.h"
 #include <cstring>
 #include <algorithm>
 

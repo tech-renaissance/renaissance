@@ -12,7 +12,7 @@
 
 #include "renaissance/data/preprocess_operation.h"
 #include "renaissance/data/padding_mode.h"
-#include "renaissance/base/rng.h"
+#include "renaissance/core/rng.h"
 #include <vector>
 
 namespace tr {

@@ -1,0 +1,2860 @@
+/**
+ * @file task_base.cpp
+ * @brief TaskBase 类实现：状态机、编译管线、硬件抽象与图执行
+ * @version 4.20.1
+ * @date 2026-04-20
+ * @author 技术觉醒团队
+ * @note 依赖项: CUDA Runtime (可选), backend/memory_arena, backend/device_context
+ * @note 所属系列: task
+ *
+ * @section rank_gpu_implementation Rank 与 GPU ID 的实现规范
+ *
+ * **核心原则：Backend内部负责rank→GPU ID的映射**
+ *
+ * - **TaskBase层面**：所有公开API只接受rank参数（0~num_gpus_-1）
+ *   - transfer_to_rank(host, dt, rank), fetch_from_rank(dt, rank)
+ *   - fill/zero/randn等方法内部循环：for (int i = 0; i < num_gpus_; ++i)
+ *
+ * - **Backend层面**：所有内部方法接受rank参数，内部转换为物理GPU ID
+ *   - 转换公式：int physical_gpu_id = reg.gpu_ids()[rank];
+ *   - 所有CUDA调用前：cudaSetDevice(physical_gpu_id);
+ *   - 错误信息使用："rank X" 而非 "GPU X"
+ *
+ * **命名规范**：
+ * - 参数名统一使用 `rank` 而非 `gpu_id`（避免歧义）
+ * - 物理GPU ID变量名：`physical_gpu_id` 或 `device_id`
+ * - 用户日志：显示rank，内部实现：映射后调用CUDA API
+ *
+ * **示例代码模式**：
+ * ```cpp
+ * // TaskBase::fill - 用户层面，循环所有rank
+ * for (int rank = 0; rank < num_gpus_; ++rank) {
+ *     backend_->fill(dtensor, value, rank);  // 传递逻辑rank
+ * }
+ *
+ * // Backend::fill - 内部实现，rank转GPU ID
+ * void Backend::fill(const DTensor& dt, float value, int rank) const {
+ *     auto& reg = GlobalRegistry::instance();
+ *     int physical_gpu_id = reg.gpu_ids()[rank];  // 映射
+ *     cudaSetDevice(physical_gpu_id);              // 设置物理设备
+ *     // ... CUDA操作
+ * }
+ * ```
+ */
+
+#include "renaissance/task/task_base.h"
+
+#include "renaissance/core/global_registry.h"
+#include "renaissance/core/logger.h"
+#include "renaissance/core/rng.h"
+#include "renaissance/core/tr_exception.h"
+#include "renaissance/backend/device_context.h"
+#include "renaissance/backend/memory_arena.h"
+#include "renaissance/backend/module.h"
+#include "renaissance/backend/op_registry.h"
+#include "renaissance/backend/cudnn_utils.h"
+
+#include <algorithm>
+#include <chrono>
+#include <cstring>
+#include <exception>
+#include <mutex>
+#include <thread>
+#include <vector>
+#include <functional>
+#include <iomanip>
+#include <iostream>
+#include <random>
+#include <sstream>
+#include <type_traits>
+#include <variant>
+
+#ifdef TR_USE_CUDA
+#include <cuda_runtime.h>
+
+// 声明CUDA kernel启动函数
+extern "C" {
+    // 基础设施kernel（定义在infra_kernels.cu中）
+    cudaError_t launch_tr_fill_fp32_kernel(
+        float* __restrict__ dst, float value, int64_t n, cudaStream_t stream);
+
+    cudaError_t launch_tr_philox_normal_float_kernel(
+        int n, uint64_t seed, uint64_t base_offset,
+        float mean, float std, float* out, cudaStream_t stream);
+}
+
+// 已拆分的算子kernel启动函数（定义在ops/*.cu中，使用C++链接）
+namespace tr {
+    // AXPY
+    cudaError_t launch_tr_axpy_fp32_kernel(
+        const float* __restrict__ a, const float* __restrict__ b, float alpha,
+        float* __restrict__ c, int N, int H, int W, int C,
+        size_t stride_n, size_t stride_h, size_t stride_w, size_t stride_c,
+        cudaStream_t stream);
+
+    // CAST
+    cudaError_t launch_tr_cast_fp16_to_fp32_kernel(
+        const half* __restrict__ src, float* __restrict__ dst, int64_t n, cudaStream_t stream);
+
+    cudaError_t launch_tr_cast_fp32_to_fp16_kernel(
+        const float* __restrict__ src, half* __restrict__ dst, int64_t n, cudaStream_t stream);
+
+    // ReLU
+    cudaError_t launch_tr_relu_fwd_fp32_kernel(
+        const float* __restrict__ x, float* __restrict__ y, int64_t n,
+        int64_t n_stride, int64_t h_stride, int64_t w_stride, int64_t c_stride, cudaStream_t stream);
+
+    cudaError_t launch_tr_relu_fwd_fp32_mask_kernel(
+        const float* __restrict__ x, float* __restrict__ y, int8_t* __restrict__ mask, int64_t n,
+        int64_t n_stride, int64_t h_stride, int64_t w_stride, int64_t c_stride, cudaStream_t stream);
+
+    cudaError_t launch_tr_relu_bwd_fp32_kernel(
+        const float* __restrict__ dY, const int8_t* __restrict__ mask,
+        float* __restrict__ dX, int64_t n,
+        int64_t n_stride, int64_t h_stride, int64_t w_stride, int64_t c_stride, cudaStream_t stream);
+
+    // Flatten
+    cudaError_t launch_tr_flatten_fwd_fp32_kernel(
+        const float* __restrict__ in, float* __restrict__ out,
+        int N, int H, int W, int C,
+        size_t stride_n, size_t stride_h, size_t stride_w, size_t stride_c,
+        size_t out_row_stride, cudaStream_t stream);
+
+    cudaError_t launch_tr_flatten_bwd_fp32_kernel(
+        const float* __restrict__ in, float* __restrict__ out,
+        int N, int H, int W, int C,
+        size_t stride_n, size_t stride_h, size_t stride_w, size_t stride_c,
+        size_t in_row_stride, cudaStream_t stream);
+
+    // FC
+    cudaError_t launch_tr_fc_fwd_fp32_kernel(
+        const float* __restrict__ x, const float* __restrict__ w,
+        const float* __restrict__ b, float* __restrict__ y,
+        int batch, int in_features, int out_features,
+        size_t x_row_stride, size_t w_row_stride, size_t y_row_stride,
+        cudaStream_t stream);
+
+    cudaError_t launch_tr_fc_bwd_fp32_kernel(
+        const float* __restrict__ dy, const float* __restrict__ w,
+        float* __restrict__ dx,
+        int batch, int in_features, int out_features,
+        size_t dy_row_stride, size_t w_row_stride, size_t dx_row_stride,
+        cudaStream_t stream);
+
+    // Optimizer updates
+    cudaError_t launch_tr_lars_update_fp32_kernel(
+        float* __restrict__ weight, const float* __restrict__ grad,
+        float* __restrict__ momentum_buf, float lr, float trust_ratio,
+        float weight_decay, float momentum, bool nesterov, int64_t n, cudaStream_t stream);
+
+    cudaError_t launch_tr_sgd_update_fp32_kernel(
+        float* __restrict__ weight, const float* __restrict__ grad,
+        float lr, float weight_decay, int64_t n, cudaStream_t stream);
+
+    cudaError_t launch_tr_ema_update_fp32_kernel(
+        const float* __restrict__ src, float* __restrict__ dst,
+        float decay, int64_t n, cudaStream_t stream);
+}
+
+#endif
+
+// CPU kernel函数声明（始终可用，即使在CUDA机器上也可以使用）
+namespace tr {
+void launch_tr_axpy_fp32_kernel_cpu(
+    const float* __restrict a,
+    const float* __restrict b,
+    float alpha,
+    float* __restrict c,
+    int N, int H, int W, int C,
+    size_t stride_n, size_t stride_h, size_t stride_w, size_t stride_c);
+
+void launch_tr_relu_fwd_fp32_kernel_cpu(
+    const float* __restrict x,
+    float* __restrict y,
+    int64_t n);
+
+void launch_tr_relu_fwd_fp32_mask_kernel_cpu(
+    const float* __restrict x,
+    float* __restrict y,
+    int8_t* __restrict mask,
+    int64_t n);
+
+void launch_tr_relu_bwd_fp32_kernel_cpu(
+    const float* __restrict dY,
+    const int8_t* __restrict mask,
+    float* __restrict dX,
+    int64_t n);
+
+void launch_tr_fill_fp32_kernel_cpu(
+    float* __restrict dst,
+    float value,
+    int64_t n);
+
+void launch_tr_add_fp32_kernel_cpu(
+    const float* __restrict a,
+    const float* __restrict b,
+    float* __restrict c,
+    int64_t n);
+
+void launch_tr_flatten_fwd_fp32_kernel_cpu(
+    const float* __restrict in, float* __restrict out,
+    int N, int H, int W, int C,
+    size_t stride_n, size_t stride_h, size_t stride_w, size_t stride_c,
+    size_t out_row_stride);
+
+void launch_tr_flatten_bwd_fp32_kernel_cpu(
+    const float* __restrict in, float* __restrict out,
+    int N, int H, int W, int C,
+    size_t stride_n, size_t stride_h, size_t stride_w, size_t stride_c,
+    size_t in_row_stride);
+
+void launch_tr_fc_fwd_fp32_kernel_cpu(
+    const float* __restrict x, const float* __restrict w,
+    const float* __restrict b, float* __restrict y,
+    int batch, int in_features, int out_features,
+    size_t x_row_stride, size_t w_row_stride, size_t y_row_stride);
+
+void launch_tr_fc_bwd_fp32_kernel_cpu(
+    const float* __restrict dy, const float* __restrict w,
+    float* __restrict dx,
+    int batch, int in_features, int out_features,
+    size_t dy_row_stride, size_t w_row_stride, size_t dx_row_stride);
+
+void launch_tr_conv_fwd_fp32_kernel_cpu(
+    const float* __restrict x,
+    const float* __restrict w,
+    const float* __restrict b,
+    float* __restrict y,
+    int N, int H, int W, int C,
+    int K, int R, int S,
+    int pad_h, int pad_w,
+    int stride_h, int stride_w,
+    int dilation_h, int dilation_w,
+    int groups,
+    int out_h, int out_w,
+    size_t x_row_stride,
+    size_t w_row_stride,
+    size_t y_row_stride);
+
+void launch_tr_conv_dgrad_fp32_kernel_cpu(
+    const float* __restrict dy,
+    const float* __restrict w,
+    float* __restrict dx,
+    int N, int H, int W, int C,
+    int K, int R, int S,
+    int pad_h, int pad_w,
+    int stride_h, int stride_w,
+    int dilation_h, int dilation_w,
+    int groups,
+    int out_h, int out_w,
+    size_t dy_row_stride,
+    size_t dx_row_stride);
+
+void launch_tr_conv_wgrad_fp32_kernel_cpu(
+    const float* __restrict dy,
+    const float* __restrict x,
+    float* __restrict dw,
+    int N, int H, int W, int C,
+    int K, int R, int S,
+    int pad_h, int pad_w,
+    int stride_h, int stride_w,
+    int dilation_h, int dilation_w,
+    int groups,
+    int out_h, int out_w,
+    size_t dy_row_stride,
+    size_t x_row_stride);
+}
+
+#ifdef TR_USE_NCCL
+#include <nccl.h>
+#endif
+
+namespace tr {
+
+namespace {
+
+const char* phase_to_string(Phase p) {
+    switch (p) {
+        case Phase::PLANNING:       return "PLANNING";
+        case Phase::MEMORY_LOCKED:  return "MEMORY_LOCKED";
+        case Phase::COMPILED:       return "COMPILED";
+    }
+    return "UNKNOWN";
+}
+
+} // anonymous namespace
+
+// =============================================================================
+// PIMPL Backend 定义（简化版本）
+// =============================================================================
+
+struct TaskBase::Backend {
+    int num_gpus = 0;
+    bool use_gpu = false;
+    TaskBase* owner = nullptr;
+
+    // DeviceContext向量：每GPU一个执行引擎（PIMPL封装）
+    std::vector<std::unique_ptr<DeviceContext>> device_contexts_;
+
+    // CPU模式的任务列表（GPU模式不使用）
+    std::unordered_map<std::string, std::vector<std::function<void()>>> cpu_tasks_;
+
+#ifdef TR_USE_CUDA
+    // CUDA Graph存储（每个命名图在每个rank上都有一个图实例）
+    // 结构：captured_graphs_[graph_name][rank] = cudaGraphExec_t
+    std::unordered_map<std::string, std::vector<cudaGraphExec_t>> captured_graphs_;
+    std::mutex capture_mutex_;  // 保护 captured_graphs_ 的并发写入
+#endif
+
+    // -------------------------------------------------------------------------
+    // 生命周期
+    // -------------------------------------------------------------------------
+    ~Backend() {
+#ifdef TR_USE_CUDA
+        // 清理CUDA Graph资源
+        for (auto& [name, graph_execs] : captured_graphs_) {
+            for (size_t rank = 0; rank < graph_execs.size(); ++rank) {
+                if (graph_execs[rank]) {
+                    cudaError_t err = cudaGraphExecDestroy(graph_execs[rank]);
+                    if (err != cudaSuccess) {
+                        std::cerr << "Warning: cudaGraphExecDestroy failed for graph '"
+                                 << name << "' rank " << rank << ": "
+                                 << cudaGetErrorString(err) << std::endl;
+                    }
+                }
+            }
+        }
+        captured_graphs_.clear();
+#endif
+        // DeviceContext和vector自动析构，释放资源
+    }
+
+    // -------------------------------------------------------------------------
+    // 硬件分配：初始化ArenaKeeper并创建DeviceContext
+    // -------------------------------------------------------------------------
+    void alloc_hardware(size_t total_bytes) {
+        auto& reg = GlobalRegistry::instance();
+        auto& keeper = ArenaKeeper::instance();
+
+        // 1️⃣ 幂等初始化ArenaKeeper（分配显存池/内存池）
+        // 避免compile失败重试时重复调用导致ArenaKeeper::initialize()报错
+        if (!keeper.is_initialized()) {
+            if (use_gpu) {
+                keeper.initialize(
+                    true, reg.gpu_ids(), total_bytes
+                );
+                TR_LOG_INFO("task") << "Backend::alloc_hardware — initialized GPU ArenaKeeper for "
+                                   << num_gpus << " devices, total_bytes=" << total_bytes;
+            } else {
+                // CPU模式：device_ids传{-1}，表示单卡CPU模式
+                keeper.initialize(
+                    false, {-1}, total_bytes
+                );
+                TR_LOG_INFO("task") << "Backend::alloc_hardware — initialized CPU ArenaKeeper, "
+                                   << "total_bytes=" << total_bytes;
+            }
+        } else {
+            TR_LOG_INFO("task") << "Backend::alloc_hardware — ArenaKeeper already initialized, skipping";
+        }
+
+        // 2️⃣ 创建DeviceContext（GPU模式创建多卡，CPU模式创建单卡）
+        device_contexts_.reserve(num_gpus);
+        for (int i = 0; i < num_gpus; ++i) {
+            int device_id = use_gpu ? reg.gpu_ids()[i] : -1;
+            device_contexts_.push_back(
+                std::make_unique<DeviceContext>(device_id)
+            );
+
+            if (use_gpu) {
+                TR_LOG_INFO("task") << "Backend::alloc_hardware — created DeviceContext for "
+                                   << "logical GPU " << i << " (physical GPU " << device_id << ")";
+            } else {
+                TR_LOG_INFO("task") << "Backend::alloc_hardware — created CPU DeviceContext";
+            }
+        }
+
+        // 3️⃣ 各DeviceContext构建ptr_table（编译期一次性调用）
+        // 使用const引用，零拷贝访问缓存
+        const std::vector<DTensor>& dtensors = owner->memory_plan_.dtensors();
+
+        for (int i = 0; i < num_gpus; ++i) {
+            device_contexts_[i]->build_ptr_table(dtensors);
+            TR_LOG_DEBUG("task") << "Backend::alloc_hardware — built ptr_table for "
+                                << "device_contexts_[" << i << "]";
+        }
+
+        // 4️⃣ 初始化NCCL（仅GPU模式且多卡时）
+#ifdef TR_USE_CUDA
+#ifdef TR_USE_NCCL
+        if (use_gpu && num_gpus > 1) {
+            TR_LOG_INFO("task") << "Backend::alloc_hardware — initializing NCCL for " << num_gpus << " GPUs";
+
+            std::vector<ncclComm_t> comms(num_gpus);
+            ncclResult_t result = ncclCommInitAll(
+                comms.data(),
+                num_gpus,
+                reg.gpu_ids().data()  // 物理设备ID列表
+            );
+
+            if (result != ncclSuccess) {
+                TR_DEVICE_ERROR("ncclCommInitAll failed: " << ncclGetErrorString(result));
+            }
+
+            // 将NCCL通信器注入到每个DeviceContext
+            for (int i = 0; i < num_gpus; ++i) {
+                device_contexts_[i]->set_nccl_comm(comms[i]);
+            }
+
+            TR_LOG_INFO("task") << "Backend::alloc_hardware — NCCL initialization completed";
+        }
+#endif
+#endif
+    }
+
+    // -------------------------------------------------------------------------
+    // CUDA Graph捕获辅助方法（执行计算节点）
+    // -------------------------------------------------------------------------
+#ifdef TR_USE_CUDA
+    void execute_compute_node(const ComputationGraph::ComputeNode& node, int rank, StreamKind stream) const {
+        switch (node.kind) {
+            case OpKind::AXPY_FWD: {
+                // 验证输入输出数量
+                // AXPY只需要2个输入张量（a, b），alpha是标量参数不是输入张量
+                TR_CHECK(node.in_ids.size() == 2, ValueError,
+                         "AXPY requires 2 inputs (a, b), got " << node.in_ids.size());
+                TR_CHECK(node.out_ids.size() == 1, ValueError,
+                         "AXPY requires 1 output, got " << node.out_ids.size());
+
+                // 获取alpha参数（从AxpyParams中获取）
+                float alpha = node.params.axpy().alpha;
+
+                const DTensor& dt_c = owner->memory_plan_.dtensor(node.out_ids[0]);
+
+                void* a = resolve_ptr(node.in_ids[0], rank);
+                void* b = resolve_ptr(node.in_ids[1], rank);
+                void* c = resolve_ptr(node.out_ids[0], rank);
+
+                // 使用与捕获时相同的流
+                cudaStream_t exec_stream = device_contexts_[rank]->stream(stream);
+
+                int N = dt_c.shape.n(), H = dt_c.shape.h(), W = dt_c.shape.w(), C = dt_c.shape.c();
+                size_t stride_n = dt_c.n_stride;
+                size_t stride_h = dt_c.h_stride;
+                size_t stride_w = dt_c.w_stride;
+                size_t stride_c = dt_c.c_stride;
+
+                cudaError_t err = launch_tr_axpy_fp32_kernel(
+                    static_cast<const float*>(a),
+                    static_cast<const float*>(b),
+                    alpha,
+                    static_cast<float*>(c),
+                    N, H, W, C, stride_n, stride_h, stride_w, stride_c,
+                    exec_stream
+                );
+                if (err != cudaSuccess) {
+                    TR_DEVICE_ERROR("CUDA AXPY kernel launch failed on rank " << rank << ": " << cudaGetErrorString(err));
+                }
+                break;
+            }
+            case OpKind::RELU_FWD: {
+                // 验证输入输出数量
+                TR_CHECK(node.in_ids.size() == 1, ValueError,
+                         "ReLU requires 1 input, got " << node.in_ids.size());
+                TR_CHECK(node.out_ids.size() == 2, ValueError,
+                         "ReLU requires 2 outputs (Y, mask), got " << node.out_ids.size());
+
+                const DTensor& dt_y = owner->memory_plan_.dtensor(node.out_ids[0]);
+                const DTensor& dt_mask = owner->memory_plan_.dtensor(node.out_ids[1]);
+
+                void* x = resolve_ptr(node.in_ids[0], rank);
+                void* y = resolve_ptr(node.out_ids[0], rank);
+                void* mask = resolve_ptr(node.out_ids[1], rank);
+
+                // 使用与捕获时相同的流
+                cudaStream_t exec_stream = device_contexts_[rank]->stream(stream);
+
+                // 调用ReLU kernel（带mask输出），传递DTensor的stride以支持FEATURE区的C通道padding
+                const DTensor& dt_x = owner->memory_plan_.dtensor(node.in_ids[0]);
+                int64_t total_elements = dt_x.slot_bytes() / sizeof(float);  // 包含padding的总元素数
+                int64_t n_stride = dt_x.n_stride;
+                int64_t h_stride = dt_x.h_stride;
+                int64_t w_stride = dt_x.w_stride;
+                int64_t c_stride = dt_x.c_stride;
+
+                int threads = 256;
+                int max_blocks = 65536;
+                int64_t needed = (total_elements + threads - 1) / threads;
+                int blocks = static_cast<int>(std::min<int64_t>(needed, max_blocks));
+
+                cudaError_t err = launch_tr_relu_fwd_fp32_mask_kernel(
+                    static_cast<const float*>(x),
+                    static_cast<float*>(y),
+                    static_cast<int8_t*>(mask),
+                    total_elements, n_stride, h_stride, w_stride, c_stride, exec_stream
+                );
+                if (err != cudaSuccess) {
+                    TR_DEVICE_ERROR("CUDA ReLU mask kernel launch failed on rank " << rank << ": " << cudaGetErrorString(err));
+                }
+                break;
+            }
+            case OpKind::RELU_BWD: {
+                TR_CHECK(node.in_ids.size() == 2, ValueError,
+                         "RELU_BWD requires 2 inputs (dY, mask), got " << node.in_ids.size());
+                TR_CHECK(node.out_ids.size() == 1, ValueError,
+                         "RELU_BWD requires 1 output (dX), got " << node.out_ids.size());
+
+                const DTensor& dt_dx = owner->memory_plan_.dtensor(node.out_ids[0]);
+
+                void* dY   = resolve_ptr(node.in_ids[0], rank);
+                void* mask = resolve_ptr(node.in_ids[1], rank);
+                void* dX   = resolve_ptr(node.out_ids[0], rank);
+                cudaStream_t exec_stream = device_contexts_[rank]->stream(stream);
+
+                // 传递DTensor的stride以支持FEATURE区的C通道padding
+                int64_t total_elements = dt_dx.slot_bytes() / sizeof(float);  // 包含padding的总元素数
+                int64_t n_stride = dt_dx.n_stride;
+                int64_t h_stride = dt_dx.h_stride;
+                int64_t w_stride = dt_dx.w_stride;
+                int64_t c_stride = dt_dx.c_stride;
+
+                cudaError_t err = launch_tr_relu_bwd_fp32_kernel(
+                    static_cast<const float*>(dY), static_cast<const int8_t*>(mask),
+                    static_cast<float*>(dX), total_elements, n_stride, h_stride, w_stride, c_stride, exec_stream);
+                if (err != cudaSuccess) {
+                    TR_DEVICE_ERROR("CUDA ReLU BWD kernel launch failed on rank " << rank
+                                   << ": " << cudaGetErrorString(err));
+                }
+                break;
+            }
+            case OpKind::FLATTEN_FWD: {
+                TR_CHECK(node.in_ids.size() == 1, ValueError,
+                         "FLATTEN_FWD requires 1 input, got " << node.in_ids.size());
+                TR_CHECK(node.out_ids.size() == 1, ValueError,
+                         "FLATTEN_FWD requires 1 output, got " << node.out_ids.size());
+
+                (void)node.params.flatten();  // validates variant holds FlattenParam
+
+                const DTensor& dt_in = owner->memory_plan_.dtensor(node.in_ids[0]);
+                const DTensor& dt_out = owner->memory_plan_.dtensor(node.out_ids[0]);
+
+                const Shape& in_shape = dt_in.shape;
+                int N = in_shape.n();
+                int H = in_shape.h();
+                int W = in_shape.w();
+                int C = in_shape.c();
+
+                size_t stride_c = 1;
+                size_t stride_w = static_cast<size_t>(C);
+                size_t stride_h = dt_in.row_stride;
+                size_t stride_n = static_cast<size_t>(H) * stride_h;
+                size_t out_row_stride = dt_out.row_stride;
+
+                void* in  = resolve_ptr(node.in_ids[0], rank);
+                void* out = resolve_ptr(node.out_ids[0], rank);
+                cudaStream_t exec_stream = device_contexts_[rank]->stream(stream);
+
+                cudaError_t err = launch_tr_flatten_fwd_fp32_kernel(
+                    static_cast<const float*>(in), static_cast<float*>(out),
+                    N, H, W, C, stride_n, stride_h, stride_w, stride_c,
+                    out_row_stride, exec_stream);
+                if (err != cudaSuccess) {
+                    TR_DEVICE_ERROR("FLATTEN_FWD kernel launch failed on rank " << rank
+                                   << ": " << cudaGetErrorString(err));
+                }
+                break;
+            }
+            case OpKind::FLATTEN_BWD: {
+                TR_CHECK(node.in_ids.size() == 2, ValueError,
+                         "FLATTEN_BWD requires 2 inputs (grad_output, fwd_input), got " << node.in_ids.size());
+                TR_CHECK(node.out_ids.size() == 1, ValueError,
+                         "FLATTEN_BWD requires 1 output (grad_input), got " << node.out_ids.size());
+
+                (void)node.params.flatten();  // validates variant holds FlattenParam
+
+                // in_ids[0] = grad_output (compact: [N, 1, 1, H*W*C])
+                // in_ids[1] = fwd_input (NHWC: [N, H, W, C], 用于获取stride)
+                // out_ids[0] = grad_input (NHWC: [N, H, W, C], 带padding)
+                const DTensor& dt_grad_out = owner->memory_plan_.dtensor(node.in_ids[0]);
+                const DTensor& dt_fwd_in   = owner->memory_plan_.dtensor(node.in_ids[1]);
+
+                const Shape& in_shape = dt_fwd_in.shape;
+                int N = in_shape.n();
+                int H = in_shape.h();
+                int W = in_shape.w();
+                int C = in_shape.c();
+
+                size_t stride_c = 1;
+                size_t stride_w = static_cast<size_t>(C);
+                size_t stride_h = dt_fwd_in.row_stride;
+                size_t stride_n = static_cast<size_t>(H) * stride_h;
+                size_t in_row_stride = dt_grad_out.row_stride;
+
+                void* grad_in  = resolve_ptr(node.in_ids[0], rank);
+                void* grad_out = resolve_ptr(node.out_ids[0], rank);
+                cudaStream_t exec_stream = device_contexts_[rank]->stream(stream);
+
+                cudaError_t err = launch_tr_flatten_bwd_fp32_kernel(
+                    static_cast<const float*>(grad_in), static_cast<float*>(grad_out),
+                    N, H, W, C, stride_n, stride_h, stride_w, stride_c,
+                    in_row_stride, exec_stream);
+                if (err != cudaSuccess) {
+                    TR_DEVICE_ERROR("FLATTEN_BWD kernel launch failed on rank " << rank
+                                   << ": " << cudaGetErrorString(err));
+                }
+                break;
+            }
+            case OpKind::FC_AMP_FWD: {
+                TR_CHECK(node.in_ids.size() >= 2, ValueError,
+                         "FC_AMP_FWD requires at least 2 inputs (X, W), got " << node.in_ids.size());
+                TR_CHECK(node.out_ids.size() == 1, ValueError,
+                         "FC_AMP_FWD requires 1 output, got " << node.out_ids.size());
+
+                const auto* p = std::get_if<FCParams>(&node.params.data);
+                TR_CHECK(p != nullptr, ValueError, "FC_AMP_FWD missing FCParams");
+
+                const DTensor& dt_x = owner->memory_plan_.dtensor(node.in_ids[0]);
+                const DTensor& dt_w = owner->memory_plan_.dtensor(node.in_ids[1]);
+                const DTensor& dt_y = owner->memory_plan_.dtensor(node.out_ids[0]);
+
+                int batch = dt_x.shape.n();
+                int in_features  = dt_x.shape.h() * dt_x.shape.w() * dt_x.shape.c();
+                int out_features = p->out_features;
+
+                // 关键修复：row_stride是字节数，但kernel指针运算需要元素数
+                size_t x_row_stride = dt_x.row_stride / sizeof(float);
+                size_t w_row_stride = dt_w.row_stride / sizeof(float);
+                size_t y_row_stride = dt_y.row_stride / sizeof(float);
+
+                const float* x = static_cast<const float*>(resolve_ptr(node.in_ids[0], rank));
+                const float* w = static_cast<const float*>(resolve_ptr(node.in_ids[1], rank));
+                const float* b = nullptr;
+                if (p->bias && node.in_ids.size() > 2) {
+                    b = static_cast<const float*>(resolve_ptr(node.in_ids[2], rank));
+                }
+                float* y = static_cast<float*>(resolve_ptr(node.out_ids[0], rank));
+                cudaStream_t exec_stream = device_contexts_[rank]->stream(stream);
+
+                cudaError_t err = launch_tr_fc_fwd_fp32_kernel(
+                    x, w, b, y, batch, in_features, out_features,
+                    x_row_stride, w_row_stride, y_row_stride, exec_stream);
+                if (err != cudaSuccess) {
+                    TR_DEVICE_ERROR("FC_AMP_FWD kernel launch failed on rank " << rank
+                                   << ": " << cudaGetErrorString(err));
+                }
+                break;
+            }
+            case OpKind::FC_AMP_BWD: {
+                TR_CHECK(node.in_ids.size() >= 3, ValueError,
+                         "FC_AMP_BWD requires at least 3 inputs (dY, X, W), got " << node.in_ids.size());
+                TR_CHECK(node.out_ids.size() == 1, ValueError,
+                         "FC_AMP_BWD requires 1 output (dX), got " << node.out_ids.size());
+
+                const auto* p = std::get_if<FCParams>(&node.params.data);
+                TR_CHECK(p != nullptr, ValueError, "FC_AMP_BWD missing FCParams");
+
+                const DTensor& dt_dy = owner->memory_plan_.dtensor(node.in_ids[0]);
+                const DTensor& dt_w  = owner->memory_plan_.dtensor(node.in_ids[2]);
+                const DTensor& dt_dx = owner->memory_plan_.dtensor(node.out_ids[0]);
+
+                int batch = dt_dy.shape.n();
+                int out_features = p->out_features;
+                int in_features  = dt_dx.shape.h() * dt_dx.shape.w() * dt_dx.shape.c();
+
+                size_t dy_row_stride = dt_dy.row_stride;
+                size_t w_row_stride  = dt_w.row_stride;
+                size_t dx_row_stride = dt_dx.row_stride;
+
+                const float* dy = static_cast<const float*>(resolve_ptr(node.in_ids[0], rank));
+                const float* w  = static_cast<const float*>(resolve_ptr(node.in_ids[2], rank));
+                float* dx = static_cast<float*>(resolve_ptr(node.out_ids[0], rank));
+                cudaStream_t exec_stream = device_contexts_[rank]->stream(stream);
+
+                cudaError_t err = launch_tr_fc_bwd_fp32_kernel(
+                    dy, w, dx, batch, in_features, out_features,
+                    dy_row_stride, w_row_stride, dx_row_stride, exec_stream);
+                if (err != cudaSuccess) {
+                    TR_DEVICE_ERROR("FC_AMP_BWD kernel launch failed on rank " << rank
+                                   << ": " << cudaGetErrorString(err));
+                }
+                break;
+            }
+            case OpKind::CONV_AMP_FWD: {
+                TR_CHECK(node.in_ids.size() >= 2, ValueError,
+                         "CONV_AMP_FWD requires at least 2 inputs (X, W), got " << node.in_ids.size());
+                TR_CHECK(node.out_ids.size() == 1, ValueError,
+                         "CONV_AMP_FWD requires 1 output, got " << node.out_ids.size());
+
+                const auto* p = std::get_if<ConvParams>(&node.params.data);
+                TR_CHECK(p != nullptr, ValueError, "CONV_AMP_FWD missing ConvParams");
+
+                // 构建 cuDNN Frontend graph
+                std::vector<std::shared_ptr<cudnn_frontend::graph::Tensor_attributes>> inputs;
+                std::vector<Shape> input_shapes;
+                std::vector<DTensor> dtensors;  // V4.21新增：DTensor数组，提供真实stride
+                for (size_t i = 0; i < node.in_ids.size(); ++i) {
+                    const DTensor& dt = owner->memory_plan_.dtensor(node.in_ids[i]);
+                    input_shapes.push_back(dt.shape);
+                    dtensors.push_back(dt);  // V4.21新增：收集DTensor
+                    auto t = std::make_shared<cudnn_frontend::graph::Tensor_attributes>();
+                    t->set_uid(static_cast<int64_t>(100 + i));
+                    inputs.push_back(t);
+                }
+
+                DType dtype = owner->memory_plan_.dtensor(node.out_ids[0]).dtype;
+                std::vector<std::shared_ptr<cudnn_frontend::graph::Tensor_attributes>> outputs;
+                cudnnHandle_t handle = device_contexts_[rank]->cudnn_handle();
+
+                auto cu_graph = Module::build_cudnn_graph(
+                    node.kind, inputs, input_shapes, dtensors, node.params, handle, dtype, outputs);
+
+                // 构建 variant pack：映射 uid → 实际设备指针
+                std::unordered_map<int64_t, void*> vp;
+                for (size_t i = 0; i < node.in_ids.size(); ++i) {
+                    vp[inputs[i]->get_uid()] = const_cast<void*>(resolve_ptr(node.in_ids[i], rank));
+                }
+                for (size_t i = 0; i < outputs.size() && i < node.out_ids.size(); ++i) {
+                    vp[outputs[i]->get_uid()] = resolve_ptr(node.out_ids[i], rank);
+                }
+
+                // 获取 workspace
+                size_t ws_sz = cu_graph->get_workspace_size();
+                device_contexts_[rank]->ensure_workspace(stream, ws_sz);
+                void* workspace = device_contexts_[rank]->workspace(stream);
+
+                // 执行 cuDNN graph
+                cudaStream_t exec_stream = device_contexts_[rank]->stream(stream);
+                cudnnSetStream(handle, exec_stream);
+
+                TR_CUDNN_FE_CHECK(cu_graph->execute(handle, vp, workspace), "CONV_AMP_FWD execute");
+                break;
+            }
+            case OpKind::CONV_AMP_BWD: {
+                TR_CHECK(node.in_ids.size() >= 3, ValueError,
+                         "CONV_AMP_BWD requires at least 3 inputs (dY, X, W), got " << node.in_ids.size());
+                TR_CHECK(node.out_ids.size() == 2, ValueError,
+                         "CONV_AMP_BWD requires 2 outputs (dX, dW), got " << node.out_ids.size());
+
+                const auto* p = std::get_if<ConvParams>(&node.params.data);
+                TR_CHECK(p != nullptr, ValueError, "CONV_AMP_BWD missing ConvParams");
+
+                // 构建 cuDNN Frontend graph
+                std::vector<std::shared_ptr<cudnn_frontend::graph::Tensor_attributes>> inputs;
+                std::vector<Shape> input_shapes;
+                std::vector<DTensor> dtensors;  // V4.21新增：DTensor数组，提供真实stride
+                for (size_t i = 0; i < node.in_ids.size(); ++i) {
+                    const DTensor& dt = owner->memory_plan_.dtensor(node.in_ids[i]);
+                    input_shapes.push_back(dt.shape);
+                    dtensors.push_back(dt);  // V4.21新增：收集DTensor
+                    auto t = std::make_shared<cudnn_frontend::graph::Tensor_attributes>();
+                    t->set_uid(static_cast<int64_t>(100 + i));
+                    inputs.push_back(t);
+                }
+
+                DType dtype = owner->memory_plan_.dtensor(node.out_ids[0]).dtype;
+                std::vector<std::shared_ptr<cudnn_frontend::graph::Tensor_attributes>> outputs;
+                cudnnHandle_t handle = device_contexts_[rank]->cudnn_handle();
+
+                auto cu_graph = Module::build_cudnn_graph(
+                    node.kind, inputs, input_shapes, dtensors, node.params, handle, dtype, outputs);
+
+                // 构建 variant pack：映射 uid → 实际设备指针
+                std::unordered_map<int64_t, void*> vp;
+                for (size_t i = 0; i < node.in_ids.size(); ++i) {
+                    vp[inputs[i]->get_uid()] = const_cast<void*>(resolve_ptr(node.in_ids[i], rank));
+                }
+                for (size_t i = 0; i < outputs.size() && i < node.out_ids.size(); ++i) {
+                    vp[outputs[i]->get_uid()] = resolve_ptr(node.out_ids[i], rank);
+                }
+
+                // 获取 workspace
+                size_t ws_sz = cu_graph->get_workspace_size();
+                device_contexts_[rank]->ensure_workspace(stream, ws_sz);
+                void* workspace = device_contexts_[rank]->workspace(stream);
+
+                // 执行 cuDNN graph
+                cudaStream_t exec_stream = device_contexts_[rank]->stream(stream);
+                cudnnSetStream(handle, exec_stream);
+
+                std::cout << "[DEBUG] CONV_AMP_BWD executing on rank " << rank << std::endl;
+                std::cout << "[DEBUG] Execution variant_pack size: " << vp.size() << std::endl;
+                for (const auto& [uid, ptr] : vp) {
+                    std::cout << "  uid=" << uid << ", ptr=" << ptr << std::endl;
+                }
+                std::cout << "[DEBUG] Workspace ptr: " << workspace << std::endl;
+
+                TR_CUDNN_FE_CHECK(cu_graph->execute(handle, vp, workspace), "CONV_AMP_BWD execute");
+
+                std::cout << "[DEBUG] CONV_AMP_BWD execution completed" << std::endl;
+                break;
+            }
+            default:
+                TR_NOT_IMPLEMENTED("Unsupported OpKind in CUDA Graph capture: " << static_cast<int>(node.kind));
+                break;
+        }
+    }
+#endif
+
+    // -------------------------------------------------------------------------
+    // CPU 算子执行方法（对应 CUDA 的 execute_compute_node）
+    // -------------------------------------------------------------------------
+    void execute_compute_node_cpu(const ComputationGraph::ComputeNode& node, int rank) const {
+        switch (node.kind) {
+            case OpKind::AXPY_FWD: {
+                // 验证输入输出数量
+                TR_CHECK(node.in_ids.size() == 2, ValueError,
+                         "CPU AXPY requires 2 inputs (a, b), got " << node.in_ids.size());
+                TR_CHECK(node.out_ids.size() == 1, ValueError,
+                         "CPU AXPY requires 1 output, got " << node.out_ids.size());
+
+                // 获取alpha参数（从AxpyParams中获取）
+                float alpha = node.params.axpy().alpha;
+
+                const DTensor& dt_c = owner->memory_plan_.dtensor(node.out_ids[0]);
+
+                const float* a = static_cast<const float*>(resolve_ptr(node.in_ids[0], rank));
+                const float* b = static_cast<const float*>(resolve_ptr(node.in_ids[1], rank));
+                float* c = static_cast<float*>(resolve_ptr(node.out_ids[0], rank));
+
+                int N = dt_c.shape.n(), H = dt_c.shape.h(), W = dt_c.shape.w(), C = dt_c.shape.c();
+                size_t stride_n = dt_c.n_stride;
+                size_t stride_h = dt_c.h_stride;
+                size_t stride_w = dt_c.w_stride;
+                size_t stride_c = dt_c.c_stride;
+
+                launch_tr_axpy_fp32_kernel_cpu(a, b, alpha, c, N, H, W, C, stride_n, stride_h, stride_w, stride_c);
+                break;
+            }
+
+            case OpKind::RELU_FWD: {
+                // 验证输入输出数量
+                TR_CHECK(node.in_ids.size() == 1, ValueError,
+                         "CPU RELU requires 1 input, got " << node.in_ids.size());
+                TR_CHECK(node.out_ids.size() == 2, ValueError,
+                         "CPU RELU requires 2 outputs (Y, mask), got " << node.out_ids.size());
+
+                const DTensor& dt_y = owner->memory_plan_.dtensor(node.out_ids[0]);
+
+                const float* x = static_cast<const float*>(resolve_ptr(node.in_ids[0], rank));
+                float* y = static_cast<float*>(resolve_ptr(node.out_ids[0], rank));
+                int8_t* mask = static_cast<int8_t*>(resolve_ptr(node.out_ids[1], rank));
+
+                // 调用CPU ReLU kernel（带mask输出）
+                int64_t n = dt_y.numel();
+                launch_tr_relu_fwd_fp32_mask_kernel_cpu(x, y, mask, n);
+                break;
+            }
+
+            case OpKind::RELU_BWD: {
+                TR_CHECK(node.in_ids.size() == 2, ValueError,
+                         "CPU RELU_BWD requires 2 inputs (dY, mask), got " << node.in_ids.size());
+                TR_CHECK(node.out_ids.size() == 1, ValueError,
+                         "CPU RELU_BWD requires 1 output (dX), got " << node.out_ids.size());
+
+                const DTensor& dt_dx = owner->memory_plan_.dtensor(node.out_ids[0]);
+
+                const float* dY   = static_cast<const float*>(resolve_ptr(node.in_ids[0], rank));
+                const int8_t* mask = static_cast<const int8_t*>(resolve_ptr(node.in_ids[1], rank));
+                float* dX = static_cast<float*>(resolve_ptr(node.out_ids[0], rank));
+
+                launch_tr_relu_bwd_fp32_kernel_cpu(dY, mask, dX, dt_dx.numel());
+                break;
+            }
+
+            case OpKind::ADD_FWD: {
+                // 验证输入输出数量
+                TR_CHECK(node.in_ids.size() == 2, ValueError,
+                         "CPU ADD requires 2 inputs, got " << node.in_ids.size());
+                TR_CHECK(node.out_ids.size() == 1, ValueError,
+                         "CPU ADD requires 1 output, got " << node.out_ids.size());
+
+                const DTensor& dt_c = owner->memory_plan_.dtensor(node.out_ids[0]);
+
+                const float* a = static_cast<const float*>(resolve_ptr(node.in_ids[0], rank));
+                const float* b = static_cast<const float*>(resolve_ptr(node.in_ids[1], rank));
+                float* c = static_cast<float*>(resolve_ptr(node.out_ids[0], rank));
+
+                // 调用CPU ADD kernel
+                int64_t n = dt_c.numel();
+                launch_tr_add_fp32_kernel_cpu(a, b, c, n);
+                break;
+            }
+
+            case OpKind::FLATTEN_FWD: {
+                TR_CHECK(node.in_ids.size() == 1, ValueError,
+                         "CPU FLATTEN_FWD requires 1 input, got " << node.in_ids.size());
+                TR_CHECK(node.out_ids.size() == 1, ValueError,
+                         "CPU FLATTEN_FWD requires 1 output, got " << node.out_ids.size());
+
+                (void)node.params.flatten();  // validates variant holds FlattenParam
+
+                const DTensor& dt_in = owner->memory_plan_.dtensor(node.in_ids[0]);
+                const DTensor& dt_out = owner->memory_plan_.dtensor(node.out_ids[0]);
+
+                const Shape& in_shape = dt_in.shape;
+                int N = in_shape.n();
+                int H = in_shape.h();
+                int W = in_shape.w();
+                int C = in_shape.c();
+
+                size_t stride_c = 1;
+                size_t stride_w = static_cast<size_t>(C);
+                size_t stride_h = dt_in.row_stride;
+                size_t stride_n = static_cast<size_t>(H) * stride_h;
+                size_t out_row_stride = dt_out.row_stride;
+
+                const float* in  = static_cast<const float*>(resolve_ptr(node.in_ids[0], rank));
+                float* out = static_cast<float*>(resolve_ptr(node.out_ids[0], rank));
+
+                launch_tr_flatten_fwd_fp32_kernel_cpu(
+                    in, out, N, H, W, C, stride_n, stride_h, stride_w, stride_c, out_row_stride);
+                break;
+            }
+
+            case OpKind::FLATTEN_BWD: {
+                TR_CHECK(node.in_ids.size() == 2, ValueError,
+                         "CPU FLATTEN_BWD requires 2 inputs, got " << node.in_ids.size());
+                TR_CHECK(node.out_ids.size() == 1, ValueError,
+                         "CPU FLATTEN_BWD requires 1 output, got " << node.out_ids.size());
+
+                (void)node.params.flatten();  // validates variant holds FlattenParam
+
+                const DTensor& dt_grad_out = owner->memory_plan_.dtensor(node.in_ids[0]);
+                const DTensor& dt_fwd_in   = owner->memory_plan_.dtensor(node.in_ids[1]);
+
+                const Shape& in_shape = dt_fwd_in.shape;
+                int N = in_shape.n();
+                int H = in_shape.h();
+                int W = in_shape.w();
+                int C = in_shape.c();
+
+                size_t stride_c = 1;
+                size_t stride_w = static_cast<size_t>(C);
+                size_t stride_h = dt_fwd_in.row_stride;
+                size_t stride_n = static_cast<size_t>(H) * stride_h;
+                size_t in_row_stride = dt_grad_out.row_stride;
+
+                const float* grad_in  = static_cast<const float*>(resolve_ptr(node.in_ids[0], rank));
+                float* grad_out = static_cast<float*>(resolve_ptr(node.out_ids[0], rank));
+
+                launch_tr_flatten_bwd_fp32_kernel_cpu(
+                    grad_in, grad_out, N, H, W, C, stride_n, stride_h, stride_w, stride_c, in_row_stride);
+                break;
+            }
+
+            case OpKind::FC_AMP_FWD: {
+                TR_CHECK(node.in_ids.size() >= 2, ValueError,
+                         "CPU FC_AMP_FWD requires at least 2 inputs (X, W), got " << node.in_ids.size());
+                TR_CHECK(node.out_ids.size() == 1, ValueError,
+                         "CPU FC_AMP_FWD requires 1 output, got " << node.out_ids.size());
+
+                const auto* p = std::get_if<FCParams>(&node.params.data);
+                TR_CHECK(p != nullptr, ValueError, "CPU FC_AMP_FWD missing FCParams");
+
+                const DTensor& dt_x = owner->memory_plan_.dtensor(node.in_ids[0]);
+                const DTensor& dt_w = owner->memory_plan_.dtensor(node.in_ids[1]);
+                const DTensor& dt_y = owner->memory_plan_.dtensor(node.out_ids[0]);
+
+                int batch = dt_x.shape.n();
+                int in_features  = dt_x.shape.h() * dt_x.shape.w() * dt_x.shape.c();
+                int out_features = p->out_features;
+
+                // 关键修复：row_stride是字节数，但kernel指针运算需要元素数
+                size_t x_row_stride = dt_x.row_stride / sizeof(float);
+                size_t w_row_stride = dt_w.row_stride / sizeof(float);
+                size_t y_row_stride = dt_y.row_stride / sizeof(float);
+
+                const float* x = static_cast<const float*>(resolve_ptr(node.in_ids[0], rank));
+                const float* w = static_cast<const float*>(resolve_ptr(node.in_ids[1], rank));
+                const float* b_ptr = nullptr;
+                if (p->bias && node.in_ids.size() > 2) {
+                    b_ptr = static_cast<const float*>(resolve_ptr(node.in_ids[2], rank));
+                }
+                float* y = static_cast<float*>(resolve_ptr(node.out_ids[0], rank));
+
+                launch_tr_fc_fwd_fp32_kernel_cpu(
+                    x, w, b_ptr, y, batch, in_features, out_features,
+                    x_row_stride, w_row_stride, y_row_stride);
+                break;
+            }
+
+            case OpKind::CONV_AMP_FWD: {
+                TR_CHECK(node.in_ids.size() >= 2, ValueError,
+                         "CPU CONV_AMP_FWD requires at least 2 inputs (X, W), got " << node.in_ids.size());
+                TR_CHECK(node.out_ids.size() == 1, ValueError,
+                         "CPU CONV_AMP_FWD requires 1 output, got " << node.out_ids.size());
+
+                const auto* p = std::get_if<ConvParams>(&node.params.data);
+                TR_CHECK(p != nullptr, ValueError, "CPU CONV_AMP_FWD missing ConvParams");
+
+                const DTensor& dt_x = owner->memory_plan_.dtensor(node.in_ids[0]);
+                const DTensor& dt_w = owner->memory_plan_.dtensor(node.in_ids[1]);
+                const DTensor& dt_y = owner->memory_plan_.dtensor(node.out_ids[0]);
+
+                int N = dt_x.shape.n();
+                int H = dt_x.shape.h();
+                int W = dt_x.shape.w();
+                int C = dt_x.shape.c();
+                int K = p->out_channels;
+                int R = p->kernel_h, S = p->kernel_w;
+                int out_h = dt_y.shape.h();
+                int out_w = dt_y.shape.w();
+
+                size_t x_row_stride = static_cast<size_t>(dt_x.h_stride) * sizeof(float);
+                size_t w_row_stride = static_cast<size_t>(dt_w.h_stride) * sizeof(float);
+                size_t y_row_stride = static_cast<size_t>(dt_y.h_stride) * sizeof(float);
+
+                const float* x = static_cast<const float*>(resolve_ptr(node.in_ids[0], rank));
+                const float* w = static_cast<const float*>(resolve_ptr(node.in_ids[1], rank));
+                const float* b_ptr = nullptr;
+                if (node.in_ids.size() > 2) {
+                    b_ptr = static_cast<const float*>(resolve_ptr(node.in_ids[2], rank));
+                }
+                float* y = static_cast<float*>(resolve_ptr(node.out_ids[0], rank));
+
+                launch_tr_conv_fwd_fp32_kernel_cpu(
+                    x, w, b_ptr, y, N, H, W, C, K, R, S,
+                    p->pad_h, p->pad_w, p->stride_h, p->stride_w,
+                    p->dilation_h, p->dilation_w, p->groups,
+                    out_h, out_w, x_row_stride, w_row_stride, y_row_stride);
+                break;
+            }
+
+            case OpKind::FC_AMP_BWD: {
+                TR_CHECK(node.in_ids.size() >= 3, ValueError,
+                         "CPU FC_AMP_BWD requires at least 3 inputs (dY, X, W), got " << node.in_ids.size());
+                TR_CHECK(node.out_ids.size() == 1, ValueError,
+                         "CPU FC_AMP_BWD requires 1 output (dX), got " << node.out_ids.size());
+
+                const auto* p = std::get_if<FCParams>(&node.params.data);
+                TR_CHECK(p != nullptr, ValueError, "CPU FC_AMP_BWD missing FCParams");
+
+                const DTensor& dt_dy = owner->memory_plan_.dtensor(node.in_ids[0]);
+                const DTensor& dt_w  = owner->memory_plan_.dtensor(node.in_ids[2]);
+                const DTensor& dt_dx = owner->memory_plan_.dtensor(node.out_ids[0]);
+
+                int batch = dt_dy.shape.n();
+                int out_features = p->out_features;
+                int in_features  = dt_dx.shape.h() * dt_dx.shape.w() * dt_dx.shape.c();
+
+                size_t dy_row_stride = dt_dy.row_stride;
+                size_t w_row_stride  = dt_w.row_stride;
+                size_t dx_row_stride = dt_dx.row_stride;
+
+                const float* dy = static_cast<const float*>(resolve_ptr(node.in_ids[0], rank));
+                const float* w  = static_cast<const float*>(resolve_ptr(node.in_ids[2], rank));
+                float* dx = static_cast<float*>(resolve_ptr(node.out_ids[0], rank));
+
+                launch_tr_fc_bwd_fp32_kernel_cpu(
+                    dy, w, dx, batch, in_features, out_features,
+                    dy_row_stride, w_row_stride, dx_row_stride);
+                break;
+            }
+
+            case OpKind::CONV_AMP_BWD: {
+                TR_CHECK(node.in_ids.size() >= 3, ValueError,
+                         "CPU CONV_AMP_BWD requires at least 3 inputs (dY, X, W), got " << node.in_ids.size());
+                TR_CHECK(node.out_ids.size() == 2, ValueError,
+                         "CPU CONV_AMP_BWD requires 2 outputs (dX, dW), got " << node.out_ids.size());
+
+                const auto* p = std::get_if<ConvParams>(&node.params.data);
+                TR_CHECK(p != nullptr, ValueError, "CPU CONV_AMP_BWD missing ConvParams");
+
+                const DTensor& dt_dy = owner->memory_plan_.dtensor(node.in_ids[0]);
+                const DTensor& dt_x  = owner->memory_plan_.dtensor(node.in_ids[1]);
+                const DTensor& dt_dx = owner->memory_plan_.dtensor(node.out_ids[0]);
+                const DTensor& dt_dw = owner->memory_plan_.dtensor(node.out_ids[1]);
+
+                int N = dt_x.shape.n();
+                int H = dt_x.shape.h();
+                int W = dt_x.shape.w();
+                int C = dt_x.shape.c();
+                int K = p->out_channels;
+                int R = p->kernel_h, S = p->kernel_w;
+                int out_h = dt_dy.shape.h();
+                int out_w = dt_dy.shape.w();
+
+                size_t dy_row_stride = dt_dy.row_stride;
+                size_t dx_row_stride = dt_dx.row_stride;
+                size_t x_row_stride  = dt_x.row_stride;
+
+                const float* dy = static_cast<const float*>(resolve_ptr(node.in_ids[0], rank));
+                const float* x  = static_cast<const float*>(resolve_ptr(node.in_ids[1], rank));
+                const float* w  = static_cast<const float*>(resolve_ptr(node.in_ids[2], rank));
+                float* dx = static_cast<float*>(resolve_ptr(node.out_ids[0], rank));
+                float* dw = static_cast<float*>(resolve_ptr(node.out_ids[1], rank));
+
+                launch_tr_conv_dgrad_fp32_kernel_cpu(
+                    dy, w, dx, N, H, W, C, K, R, S,
+                    p->pad_h, p->pad_w, p->stride_h, p->stride_w,
+                    p->dilation_h, p->dilation_w, p->groups,
+                    out_h, out_w, dy_row_stride, dx_row_stride);
+
+                launch_tr_conv_wgrad_fp32_kernel_cpu(
+                    dy, x, dw, N, H, W, C, K, R, S,
+                    p->pad_h, p->pad_w, p->stride_h, p->stride_w,
+                    p->dilation_h, p->dilation_w, p->groups,
+                    out_h, out_w, dy_row_stride, x_row_stride);
+                break;
+            }
+
+            default:
+                TR_NOT_IMPLEMENTED("CPU operation not implemented: " << static_cast<int>(node.kind));
+                break;
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // 指针解析（通过DeviceContext）
+    // -------------------------------------------------------------------------
+    void* resolve_ptr(int32_t id, int rank) const {
+        return device_contexts_[rank]->ptr_at(id);
+    }
+
+    // -------------------------------------------------------------------------
+    // 图捕获（GPU模式通过DeviceContext，CPU模式使用任务列表）
+    // -------------------------------------------------------------------------
+    void capture_all_graphs(int rank) {
+#ifdef TR_USE_CUDA
+        // 关键：新线程必须绑定设备，否则CUDA API会在默认设备（通常是0号卡）上执行
+        if (use_gpu) {
+            auto& reg = GlobalRegistry::instance();
+            int physical_gpu_id = reg.gpu_ids()[rank];
+            cudaError_t err = cudaSetDevice(physical_gpu_id);
+            if (err != cudaSuccess) {
+                TR_DEVICE_ERROR("cudaSetDevice failed for rank=" << rank
+                               << " (physical GPU " << physical_gpu_id << "): "
+                               << cudaGetErrorString(err));
+            }
+            std::cout << "[CAPTURE] capture_all_graphs: rank=" << rank
+                      << " bound to physical GPU " << physical_gpu_id << std::endl;
+        }
+#endif
+        int graph_count = 0;
+        for (const auto& kv : owner->named_graphs_) {
+            capture_graph(kv.first, kv.second.graph, kv.second.stream, rank);
+            ++graph_count;
+        }
+        std::cout << "[CAPTURE] capture_all_graphs: rank=" << rank
+                  << " captured " << graph_count << " graph(s)" << std::endl;
+    }
+
+    void capture_graph(const std::string& name, const ComputationGraph& graph,
+                       StreamKind stream, int rank) {
+        if (use_gpu) {
+#ifdef TR_USE_CUDA
+            auto& reg = GlobalRegistry::instance();
+            int physical_gpu_id = reg.gpu_ids()[rank];
+            cudaError_t err = cudaSetDevice(physical_gpu_id);
+            if (err != cudaSuccess) {
+                TR_DEVICE_ERROR("cudaSetDevice failed for rank=" << rank
+                               << " (physical GPU " << physical_gpu_id << "): "
+                               << cudaGetErrorString(err));
+            }
+
+            cudaStream_t capture_stream = device_contexts_[rank]->stream(stream);
+
+            std::cout << "[CAPTURE] capture_graph: rank=" << rank
+                      << " physical_gpu=" << physical_gpu_id
+                      << " graph='" << name << "' BEGIN" << std::endl;
+
+            // RAII Guard：确保任意异常路径都能强制结束 CUDA Graph 捕获
+            struct CudaGraphCaptureGuard {
+                cudaStream_t stream = nullptr;
+                bool committed = false;
+                ~CudaGraphCaptureGuard() {
+                    if (!committed && stream) {
+                        cudaGraph_t dummy = nullptr;
+                        cudaStreamEndCapture(stream, &dummy);
+                        if (dummy) cudaGraphDestroy(dummy);
+                    }
+                }
+            };
+            CudaGraphCaptureGuard guard{capture_stream, false};
+
+            // 多卡并行捕获调试信息：显示每张卡的捕获开始
+            std::cout << "[CAPTURE] capture_graph: rank=" << rank
+                      << " graph='" << name << "' cudaStreamBeginCapture" << std::endl;
+
+            // 开始CUDA Graph捕获
+            err = cudaStreamBeginCapture(capture_stream, cudaStreamCaptureModeThreadLocal);
+            if (err != cudaSuccess) {
+                TR_DEVICE_ERROR("cudaStreamBeginCapture failed for graph '" << name
+                               << "' on rank=" << rank << ": " << cudaGetErrorString(err));
+            }
+
+            // 执行计算图中的所有操作（在捕获模式下）
+            for (const auto& node : graph.nodes()) {
+                std::visit([&](auto&& arg) {
+                    using T = std::decay_t<decltype(arg)>;
+                    if constexpr (std::is_same_v<T, ComputationGraph::ComputeNode>) {
+                        execute_compute_node(arg, rank, stream);
+                    } else if constexpr (std::is_same_v<T, ComputationGraph::TransferNode>) {
+                        const auto& tn = arg;
+                        void* dst_ptr = resolve_ptr(tn.dst_id, rank);
+                        const void* src_ptr = nullptr;
+                        size_t num_bytes = 0;
+
+                        // 优先检查借用式路径（Task 图内异步传输，裸指针来自 TransferStation）
+                        if (tn.uses_borrowed()) {
+                            if (tn.host_ptrs.size() == 1) {
+                                src_ptr = tn.host_ptrs[0];
+                                num_bytes = tn.host_num_bytes[0];
+                            } else {
+                                TR_CHECK(rank < static_cast<int>(tn.host_ptrs.size()), IndexError,
+                                         "TransferNode(bare): rank " << rank
+                                         << " exceeds host_ptrs.size() " << tn.host_ptrs.size());
+                                src_ptr = tn.host_ptrs[rank];
+                                num_bytes = tn.host_num_bytes[rank];
+                            }
+                        } else if (tn.host_tensors.size() == 1) {
+                            src_ptr = tn.host_tensors[0].template data<void>();
+                            num_bytes = tn.host_tensors[0].nbytes();
+                        } else {
+                            if (rank < static_cast<int>(tn.host_tensors.size())) {
+                                src_ptr = tn.host_tensors[rank].template data<void>();
+                                num_bytes = tn.host_tensors[rank].nbytes();
+                            } else {
+                                TR_VALUE_ERROR("TransferNode: rank " << rank << " exceeds host_tensors.size() " << tn.host_tensors.size());
+                                return;
+                            }
+                        }
+
+                        TR_LOG_DEBUG("task") << "Backend::capture_graph — capturing H2D transfer on rank " << rank
+                                          << ": " << num_bytes << " bytes";
+                        cudaMemcpyAsync(dst_ptr, src_ptr, num_bytes,
+                                        cudaMemcpyHostToDevice, capture_stream);
+                    }
+                }, node);
+            }
+
+            // 结束CUDA Graph捕获
+            cudaGraph_t graph_obj = nullptr;
+            err = cudaStreamEndCapture(capture_stream, &graph_obj);
+            guard.committed = true;  // 正常结束捕获，RAII 析构不再重试
+
+            std::cout << "[CAPTURE] capture_graph: rank=" << rank
+                      << " graph='" << name << "' cudaStreamEndCapture done" << std::endl;
+
+            if (err != cudaSuccess) {
+                if (graph_obj) cudaGraphDestroy(graph_obj);
+                TR_DEVICE_ERROR("cudaStreamEndCapture failed for graph '" << name
+                               << "' on rank=" << rank << ": " << cudaGetErrorString(err));
+            }
+
+            // 实例化可执行的CUDA Graph
+            cudaGraphNode_t error_node;
+            char error_log[2048];
+            cudaGraphExec_t graph_exec = nullptr;
+            err = cudaGraphInstantiate(&graph_exec, graph_obj, &error_node, error_log, sizeof(error_log));
+            if (err != cudaSuccess) {
+                // 实例化失败，必须释放 graph_obj 和 graph_exec（如果已部分生成）
+                if (graph_obj) {
+                    cudaGraphDestroy(graph_obj);
+                    graph_obj = nullptr;
+                }
+                if (graph_exec) {
+                    cudaGraphExecDestroy(graph_exec);
+                }
+                TR_DEVICE_ERROR("cudaGraphInstantiate failed for graph '" << name
+                               << "' on rank=" << rank << ": " << cudaGetErrorString(err)
+                               << ", error log: " << error_log);
+            }
+
+            // 线程安全地存储捕获的图
+            {
+                std::lock_guard<std::mutex> lock(capture_mutex_);
+                if (captured_graphs_.find(name) == captured_graphs_.end()) {
+                    captured_graphs_[name] = std::vector<cudaGraphExec_t>(num_gpus);
+                }
+                captured_graphs_[name][rank] = graph_exec;
+            }
+
+            std::cout << "[CAPTURE] capture_graph: rank=" << rank
+                      << " physical_gpu=" << physical_gpu_id
+                      << " graph='" << name << "' SUCCESS (instantiated)" << std::endl;
+
+            // 清理临时图对象
+            err = cudaGraphDestroy(graph_obj);
+            if (err != cudaSuccess) {
+                TR_LOG_WARN("task") << "cudaGraphDestroy failed for graph '" << name
+                                   << "' on rank=" << rank << ": " << cudaGetErrorString(err);
+            }
+#else
+            (void)name; (void)graph; (void)stream; (void)rank;
+            TR_LOG_DEBUG("task") << "Backend::capture_graph — CUDA not supported, skipping graph capture";
+#endif
+        } else {
+            capture_graph_cpu(name, graph, stream, rank);
+        }
+    }
+
+    void capture_graph_cpu(const std::string& name, const ComputationGraph& graph,
+                           StreamKind /*stream*/, int rank) {
+        auto& tasks = cpu_tasks_[name];
+        tasks.clear();
+        tasks.reserve(graph.nodes().size()); // 预分配避免重分配
+
+        for (const auto& node : graph.nodes()) {
+            std::visit([&](auto&& arg) {
+                using T = std::decay_t<decltype(arg)>;
+                if constexpr (std::is_same_v<T, ComputationGraph::ComputeNode>) {
+                    // CPU 算子实现 - 调用 execute_compute_node_cpu 方法
+                    tasks.emplace_back([node = arg, this, rank]() {
+                        execute_compute_node_cpu(node, rank);
+                    });
+                } else if constexpr (std::is_same_v<T, ComputationGraph::TransferNode>) {
+                    // 传输节点处理 - CPU 模式下实际上是内存拷贝
+                    // 注意：使用引用捕获因为TransferNode包含不可复制的Tensor成员
+                    // 安全保证：tasks.reserve()确保vector不会重分配
+                    tasks.emplace_back([&node = arg, this, rank]() {
+                        void* dst_ptr = resolve_ptr(node.dst_id, rank);
+                        const void* src_ptr = nullptr;
+                        size_t num_bytes = 0;
+
+                        // 优先检查借用式路径（与 GPU 模式对称）
+                        if (node.uses_borrowed()) {
+                            if (node.host_ptrs.size() == 1) {
+                                src_ptr = node.host_ptrs[0];
+                                num_bytes = node.host_num_bytes[0];
+                            } else {
+                                TR_CHECK(rank < static_cast<int>(node.host_ptrs.size()), IndexError,
+                                         "TransferNode(bare): rank " << rank
+                                         << " exceeds host_ptrs.size() " << node.host_ptrs.size());
+                                src_ptr = node.host_ptrs[rank];
+                                num_bytes = node.host_num_bytes[rank];
+                            }
+                        } else if (node.host_tensors.size() == 1) {
+                            // 单个host tensor，广播到所有rank
+                            src_ptr = node.host_tensors[0].data();
+                            num_bytes = node.host_tensors[0].nbytes();
+                        } else {
+                            // 多个host tensor，每个rank接收不同的数据
+                            if (rank < static_cast<int>(node.host_tensors.size())) {
+                                src_ptr = node.host_tensors[rank].data();
+                                num_bytes = node.host_tensors[rank].nbytes();
+                            } else {
+                                TR_VALUE_ERROR("TransferNode: rank " << rank << " exceeds host_tensors.size() " << node.host_tensors.size());
+                                return;
+                            }
+                        }
+
+                        // CPU模式：直接memcpy进行内存拷贝
+                        std::memcpy(dst_ptr, src_ptr, num_bytes);
+                    });
+                }
+            }, node);
+        }
+
+        TR_LOG_DEBUG("task") << "Backend::capture_graph_cpu — captured " << tasks.size()
+                            << " tasks for graph '" << name << "'";
+    }
+
+    // -------------------------------------------------------------------------
+    // 图执行（GPU模式通过DeviceContext，CPU模式使用任务列表）
+    // -------------------------------------------------------------------------
+    void run_graph(const std::string& name, int rank, StreamKind stream) const {
+        if (use_gpu) {
+#ifdef TR_USE_CUDA
+            // 查找捕获的图
+            auto graph_it = captured_graphs_.find(name);
+            if (graph_it == captured_graphs_.end()) {
+                TR_VALUE_ERROR("Graph '" << name << "' not found in captured graphs");
+            }
+
+            const auto& graph_execs = graph_it->second;
+            if (rank >= static_cast<int>(graph_execs.size())) {
+                TR_INDEX_ERROR("Rank " << rank << " out of range for graph '" << name << "'");
+            }
+
+            cudaGraphExec_t graph_exec = graph_execs[rank];
+            if (!graph_exec) {
+                TR_VALUE_ERROR("Graph '" << name << "' execution handle is null for rank " << rank);
+            }
+
+            auto& reg = GlobalRegistry::instance();
+            int physical_gpu_id = reg.gpu_ids()[rank];
+            cudaError_t err = cudaSetDevice(physical_gpu_id);
+            if (err != cudaSuccess) {
+                TR_DEVICE_ERROR("cudaSetDevice failed for rank=" << rank
+                               << " (physical GPU " << physical_gpu_id << "): "
+                               << cudaGetErrorString(err));
+            }
+
+            // 使用与捕获时相同的流（通过参数传递）
+            cudaStream_t exec_stream = device_contexts_[rank]->stream(stream);
+
+            // 启动CUDA Graph（参照gap_fc.cpp的execute_forward/execute_backward）
+            err = cudaGraphLaunch(graph_exec, exec_stream);
+            if (err != cudaSuccess) {
+                TR_DEVICE_ERROR("cudaGraphLaunch failed for graph '" << name
+                               << "' on rank=" << rank << ": " << cudaGetErrorString(err));
+            }
+
+            TR_LOG_DEBUG("task") << "Backend::run_graph — launched graph '" << name
+                              << "' on rank=" << rank << " (physical GPU " << physical_gpu_id << ")";
+#else
+            // 无CUDA支持时的错误处理
+            (void)name; (void)rank; (void)stream;
+            TR_NOT_IMPLEMENTED("GPU execution requires CUDA support");
+#endif
+        } else {
+            // CPU模式：执行任务列表
+            auto it = cpu_tasks_.find(name);
+            if (it == cpu_tasks_.end()) {
+                TR_VALUE_ERROR("CPU task list '" << name << "' not found");
+            }
+            for (const auto& task : it->second) {
+                task();
+            }
+        }
+    }
+
+    void sync_all() const {
+        if (use_gpu) {
+#ifdef TR_USE_CUDA
+            // 通过DeviceContext同步所有GPU
+            for (const auto& ctx : device_contexts_) {
+                ctx->synchronize_all();
+            }
+#endif
+        }
+        // CPU 模式串行执行，无需额外同步
+    }
+
+    // -------------------------------------------------------------------------
+    // NCCL广播：将Rank0的数据广播到所有其他卡（使用UPDATE流）
+    // -------------------------------------------------------------------------
+    void broadcast_from_rank0(const DTensor& dt) const {
+#ifdef TR_USE_CUDA
+#ifdef TR_USE_NCCL
+        if (!use_gpu || num_gpus <= 1) {
+            return; // 单卡模式无需广播
+        }
+
+        TR_LOG_DEBUG("task") << "Backend::broadcast_from_rank0 — broadcasting DTensor id="
+                            << dt.id << " to " << num_gpus << " GPUs";
+
+        // 确定NCCL数据类型
+        ncclDataType_t nccl_type;
+        switch (dt.dtype) {
+            case DType::FP32: nccl_type = ncclFloat32; break;
+            case DType::FP16: nccl_type = ncclFloat16; break;
+            case DType::INT32: nccl_type = ncclInt32; break;
+            case DType::INT8:  nccl_type = ncclInt8; break;
+            default:
+                TR_TYPE_ERROR("broadcast_from_rank0 unsupported dtype: "
+                             << static_cast<int>(dt.dtype));
+        }
+
+        auto& reg = GlobalRegistry::instance();
+
+        // 关键：使用ncclGroupStart/ncclGroupEnd确保并发调用
+        // 保证异常安全：所有ncclBroadcast调用都在group内完成，不在group内抛异常
+        ncclResult_t group_result = ncclGroupStart();
+        if (group_result != ncclSuccess) {
+            TR_DEVICE_ERROR("ncclGroupStart failed: " << ncclGetErrorString(group_result));
+        }
+
+        for (int i = 0; i < num_gpus; ++i) {
+            // 每个GPU必须先设置设备
+            cudaError_t err = cudaSetDevice(reg.gpu_ids()[i]);
+            if (err != cudaSuccess) {
+                // 设备设置失败，需要先结束group再报错
+                ncclGroupEnd();
+                TR_DEVICE_ERROR("cudaSetDevice failed for rank " << i
+                                << ": " << cudaGetErrorString(err));
+            }
+
+            void* ptr = resolve_ptr(dt.id, i);
+            cudaStream_t update_stream = device_contexts_[i]->stream(StreamKind::UPDATE);
+
+            // 关键：根据DTensor布局模式决定广播字节数
+            // - 紧凑布局：只需广播逻辑数据（不含padding和XNN_EXTRA_BYTES）
+            // - 非紧凑布局：必须广播完整槽位（含C通道padding和XNN_EXTRA_BYTES）
+            size_t bytes_to_broadcast;
+            if (dt.is_compact()) {
+                // 紧凑DTensor：只广播逻辑数据
+                bytes_to_broadcast = dt.logical_bytes();
+            } else {
+                // 非紧凑DTensor：广播完整槽位（包含padding）
+                bytes_to_broadcast = dt.nbytes;
+            }
+
+            // 转换为元素数量
+            size_t nccl_count = bytes_to_broadcast;
+            switch (dt.dtype) {
+                case DType::FP32:  nccl_count /= 4; break;
+                case DType::FP16:  nccl_count /= 2; break;
+                case DType::INT32: nccl_count /= 4; break;
+                case DType::INT8:  nccl_count /= 1; break;
+                default: break;
+            }
+
+            // 在group内调用ncclBroadcast，不在group内检查错误
+            ncclBroadcast(
+                ptr,                                // buffer：在每个GPU上都是相同的地址
+                ptr,                                // buffer：就地广播
+                nccl_count,                         // 总元素数（含padding行）
+                nccl_type,                          // 数据类型
+                0,                                  // root：Rank0作为广播源
+                device_contexts_[i]->nccl_comm(),  // NCCL通信器
+                update_stream                       // 使用UPDATE流
+            );
+        }
+
+        // 检查ncclGroupEnd的返回值（会返回group中第一个失败的错误）
+        group_result = ncclGroupEnd();
+        if (group_result != ncclSuccess) {
+            TR_DEVICE_ERROR("ncclGroupEnd failed: " << ncclGetErrorString(group_result));
+        }
+
+        // 统一同步所有UPDATE流
+        // 注意：DeviceContext::synchronize_stream内部已处理cudaSetDevice
+        for (int i = 0; i < num_gpus; ++i) {
+            device_contexts_[i]->synchronize_stream(StreamKind::UPDATE);
+        }
+
+        TR_LOG_DEBUG("task") << "Backend::broadcast_from_rank0 — completed";
+#else
+        TR_NOT_IMPLEMENTED("NCCL broadcast requested but TR_USE_NCCL is not defined");
+#endif
+#else
+        (void)dt; // 抑制未使用警告
+#endif
+    }
+
+    // -------------------------------------------------------------------------
+    // 运行期数据操作（纯per-GPU搬运，不涉及集合通信）
+    // -------------------------------------------------------------------------
+    void transfer(const Tensor& host, const DTensor& dt, int rank) const {
+        // P0-2修复：参数验证
+        // 1. 数据类型必须一致
+        TR_CHECK(host.dtype() == dt.dtype, ValueError,
+                 "DType mismatch: host vs dtensor");
+        // 2. host的元素数量必须 >= DTensor的逻辑元素数量（允许临时缓冲区更大）
+        TR_CHECK(host.numel() >= dt.shape.numel(), ValueError,
+                 "Host tensor too small: host.numel()=" << host.numel()
+                 << ", dtensor.numel()=" << dt.shape.numel());
+
+        // 3. host的字节数检查与布局转换
+        Tensor transfer_source;
+        const Tensor* actual_source = &host;
+
+        if (dt.is_compact()) {
+            // 紧凑DTensor：Tensor字节数必须 >= 逻辑字节数
+            TR_CHECK(host.nbytes() >= dt.logical_bytes(), ValueError,
+                     "Host tensor too small (compact DTensor): host.nbytes()=" << host.nbytes()
+                     << ", dtensor.logical_bytes()=" << dt.logical_bytes());
+        } else {
+            // 非紧凑DTensor：需要检查并可能进行布局转换
+            if (host.nbytes() >= dt.slot_bytes()) {
+                // Tensor已经包含足够空间（已经是非紧凑布局或更大）
+                actual_source = &host;
+            } else {
+                // Tensor是紧凑的，需要创建临时缓冲区进行紧凑→非紧凑转换
+                TR_CHECK(host.nbytes() >= dt.logical_bytes(), ValueError,
+                         "Host tensor too small for layout conversion: host.nbytes()=" << host.nbytes()
+                         << ", dtensor.logical_bytes()=" << dt.logical_bytes());
+
+                // 创建非紧凑的临时缓冲区（包含XNN_EXTRA_BYTES）
+                const int64_t C_aligned = dt.w_stride;  // C对齐后的值
+                Shape temp_shape(dt.shape.n(), dt.shape.h(), dt.shape.w(), C_aligned);
+                transfer_source = Tensor(temp_shape, dt.dtype);
+
+                // 执行紧凑→非紧凑转换（通过owner调用TaskBase的成员函数）
+                owner->create_temp_buffer_for_layout_conversion(transfer_source, host, dt);
+
+                // 验证转换后的字节数是否包含XNN_EXTRA_BYTES
+                // 临时Tensor是紧凑的，不包含XNN_EXTRA_BYTES，所以传输时只传输逻辑部分
+                // DTensor的XNN_EXTRA_BYTES在GPU端由MemoryPlan预留，不需要传输
+                actual_source = &transfer_source;
+            }
+        }
+
+        // 计算实际传输字节数
+        uint64_t transfer_bytes;
+        if (dt.is_compact()) {
+            // 紧凑DTensor：只传输逻辑数据（不含XNN_EXTRA_BYTES）
+            transfer_bytes = dt.logical_bytes();
+        } else {
+            // 非紧凑DTensor：传输包含C通道padding的数据，但不含XNN_EXTRA_BYTES
+            // slot_bytes = padded_bytes + 16，所以传输slot_bytes - 16
+            transfer_bytes = dt.slot_bytes() - 16;
+        }
+
+        // 执行数据传输
+        transfer_data(actual_source->data<void>(), transfer_bytes, dt, rank);
+    }
+
+    /**
+     * @brief 裸指针传输（用于非紧凑布局转换后的临时缓冲区）
+     */
+    void transfer_data(const void* host_ptr, uint64_t host_nbytes, const DTensor& dt, int rank) const {
+        void* dst = resolve_ptr(dt.id, rank);
+
+        if (use_gpu) {
+#ifdef TR_USE_CUDA
+            // 多卡操作前必须设置设备（参考sync.md）
+            auto& reg = GlobalRegistry::instance();
+            cudaError_t err = cudaSetDevice(reg.gpu_ids()[rank]);
+            if (err != cudaSuccess) {
+                TR_DEVICE_ERROR("cudaSetDevice failed for rank " << rank
+                                << ": " << cudaGetErrorString(err));
+            }
+
+            // 同步H2D传输（支持可分页内存）
+            // 按用户要求使用同步传输，而非异步传输
+            // 参考transfer.md：可分页内存应使用cudaMemcpy而非cudaMemcpyAsync
+            err = cudaMemcpy(
+                dst,                        // 目标：指定GPU的显存
+                host_ptr,                   // 源：CPU内存
+                host_nbytes,                // 字节数
+                cudaMemcpyHostToDevice      // H2D方向
+            );
+            if (err != cudaSuccess) {
+                TR_DEVICE_ERROR("cudaMemcpy H2D to rank " << rank
+                                << " (physical GPU " << reg.gpu_ids()[rank] << ")"
+                                << " failed: " << cudaGetErrorString(err)
+                                << ", nbytes=" << host_nbytes);
+            }
+            TR_LOG_DEBUG("task") << "Backend::transfer_data — H2D to rank " << rank
+                                << " (physical GPU " << reg.gpu_ids()[rank] << ")"
+                                << " completed, nbytes=" << host_nbytes;
+#else
+            (void)dst; // 抑制未使用警告
+            TR_DEVICE_ERROR("GPU mode requested but TR_USE_CUDA is not defined");
+#endif
+        } else {
+            // CPU模式：直接memcpy
+            std::memcpy(dst, host_ptr, host_nbytes);
+        }
+    }
+
+    void fill(const DTensor& dt, float value, int rank) const {
+        void* dst = resolve_ptr(dt.id, rank);
+        if (dt.dtype != DType::FP32) {
+            TR_NOT_IMPLEMENTED("TaskBase::fill currently only supports FP32");
+        }
+
+        if (use_gpu) {
+#ifdef TR_USE_CUDA
+            // 多卡操作前必须设置设备（参考sync.md）
+            auto& reg = GlobalRegistry::instance();
+            cudaError_t err = cudaSetDevice(reg.gpu_ids()[rank]);
+            if (err != cudaSuccess) {
+                TR_DEVICE_ERROR("cudaSetDevice failed for rank " << rank
+                                << ": " << cudaGetErrorString(err));
+            }
+
+            // 使用fill kernel进行GPU填充
+
+            // 防御性编程：处理空tensor的情况
+            if (dt.numel() == 0) {
+                TR_LOG_DEBUG("task") << "Backend::fill — skipping empty tensor (numel=0)";
+                return;
+            }
+
+            // 使用COMP_1流（TR4设计原则：不使用默认流）
+            cudaStream_t comp_stream = device_contexts_[rank]->stream(StreamKind::COMP_1);
+
+            int threads = 256;
+            int max_blocks = 65536;
+            int64_t needed = (dt.numel() + threads - 1) / threads;
+            int blocks = static_cast<int>(std::min<int64_t>(needed, max_blocks));
+
+            int64_t n = dt.numel();
+            err = launch_tr_fill_fp32_kernel(static_cast<float*>(dst), value, n, comp_stream);
+            if (err != cudaSuccess) {
+                TR_DEVICE_ERROR("cudaLaunchKernel failed for fill on rank " << rank
+                                << ": " << cudaGetErrorString(err));
+            }
+
+            // 同步确保fill完成（使用流同步而非设备同步）
+            err = cudaStreamSynchronize(comp_stream);
+            if (err != cudaSuccess) {
+                TR_DEVICE_ERROR("cudaStreamSynchronize failed after fill on rank " << rank
+                                << ": " << cudaGetErrorString(err));
+            }
+#else
+            (void)dst; (void)value;
+            TR_DEVICE_ERROR("GPU mode requested but TR_USE_CUDA is not defined");
+#endif
+        } else {
+            // CPU模式：调用优化的CPU kernel
+            launch_tr_fill_fp32_kernel_cpu(static_cast<float*>(dst), value, dt.numel());
+        }
+    }
+
+    void zero(const DTensor& dt, int rank) const {
+        void* dst = resolve_ptr(dt.id, rank);
+        if (use_gpu) {
+#ifdef TR_USE_CUDA
+            // 多卡操作前必须设置设备（参考sync.md）
+            auto& reg = GlobalRegistry::instance();
+            cudaError_t err = cudaSetDevice(reg.gpu_ids()[rank]);
+            if (err != cudaSuccess) {
+                TR_DEVICE_ERROR("cudaSetDevice failed for rank " << rank
+                                << ": " << cudaGetErrorString(err));
+            }
+
+            // 使用cudaMemsetAsync进行GPU清零（参考TR3的zeros_inplace实现）
+            // 空张量静默返回
+            if (dt.numel() == 0) {
+                TR_LOG_DEBUG("task") << "Backend::zero — skipping empty tensor (numel=0)";
+                return;
+            }
+
+            // 使用COMP_1流（TR4设计原则：不使用默认流）
+            cudaStream_t comp_stream = device_contexts_[rank]->stream(StreamKind::COMP_1);
+
+            err = cudaMemsetAsync(dst, 0, dt.nbytes, comp_stream);
+            if (err != cudaSuccess) {
+                TR_DEVICE_ERROR("cudaMemsetAsync failed for zero on rank " << rank
+                                << ": " << cudaGetErrorString(err)
+                                << ", nbytes=" << dt.nbytes);
+            }
+
+            // 同步确保清零完成（使用流同步而非设备同步）
+            err = cudaStreamSynchronize(comp_stream);
+            if (err != cudaSuccess) {
+                TR_DEVICE_ERROR("cudaStreamSynchronize failed after zero on rank " << rank
+                                << ": " << cudaGetErrorString(err));
+            }
+#else
+            (void)dst;
+            TR_DEVICE_ERROR("GPU mode requested but TR_USE_CUDA is not defined");
+#endif
+        } else {
+            std::memset(dst, 0, dt.nbytes);
+        }
+    }
+
+    void randn(const DTensor& dt, int rank, Generator& gen) const {
+        if (dt.dtype != DType::FP32) {
+            TR_NOT_IMPLEMENTED("TaskBase::randn currently only supports FP32");
+        }
+
+        void* dst = resolve_ptr(dt.id, rank);
+
+        // 防御性编程：处理空tensor的情况
+        if (dt.numel() == 0) {
+            TR_LOG_DEBUG("task") << "Backend::randn — skipping empty tensor (numel=0)";
+            return;
+        }
+
+        if (use_gpu) {
+#ifdef TR_USE_CUDA
+            // 多卡操作前必须设置设备（参考sync.md）
+            auto& reg = GlobalRegistry::instance();
+            cudaError_t err = cudaSetDevice(reg.gpu_ids()[rank]);
+            if (err != cudaSuccess) {
+                TR_DEVICE_ERROR("cudaSetDevice failed for rank " << rank
+                                << ": " << cudaGetErrorString(err));
+            }
+
+            // 防御性编程：处理空tensor的情况
+            if (dt.numel() == 0) {
+                TR_LOG_DEBUG("task") << "Backend::randn — skipping empty tensor (numel=0)";
+                return;
+            }
+
+            // 使用COMP_1流（TR4设计原则：不使用默认流）
+            cudaStream_t comp_stream = device_contexts_[rank]->stream(StreamKind::COMP_1);
+
+            // 核心：原子预留offset + GPU直接生成（参考TR3的CudaDevice::rand_normal_float）
+            // Box-Muller消耗的offset：(count + 1) / 2
+            uint64_t pairs_needed = (dt.numel() + 1) / 2;
+            uint64_t base_offset = gen.next_offset(pairs_needed);
+            uint64_t global_seed = gen.seed();
+
+            // 调用TR4的Philox kernel wrapper
+
+            err = launch_tr_philox_normal_float_kernel(
+                static_cast<int>(dt.numel()), global_seed, base_offset, 0.0f, 1.0f,
+                static_cast<float*>(dst), comp_stream
+            );
+
+            if (err != cudaSuccess) {
+                TR_DEVICE_ERROR("CUDA rand_normal_float kernel failed on rank " << rank
+                                << ": " << cudaGetErrorString(err)
+                                << ", numel=" << dt.numel());
+            }
+
+            // 同步确保随机数生成完成（使用流同步而非设备同步）
+            err = cudaStreamSynchronize(comp_stream);
+            if (err != cudaSuccess) {
+                TR_DEVICE_ERROR("cudaStreamSynchronize failed after randn on rank " << rank
+                                << ": " << cudaGetErrorString(err));
+            }
+#else
+            (void)dst; (void)rank; (void)gen;
+            TR_DEVICE_ERROR("GPU mode requested but TR_USE_CUDA is not defined");
+#endif
+        } else {
+            // CPU模式：使用cpu_rand_normal_float
+            cpu_rand_normal_float(static_cast<float*>(dst), static_cast<size_t>(dt.numel()), 0.0f, 1.0f, gen);
+        }
+    }
+
+    [[nodiscard]] Tensor fetch(const DTensor& dt, int rank) const {
+        // 创建临时Tensor用于接收数据
+        Tensor temp;
+        if (dt.is_compact()) {
+            temp = Tensor(dt.shape, dt.dtype);
+        } else {
+            // 非紧凑DTensor：创建包含C通道padding的临时Tensor
+            const int64_t C_aligned = dt.w_stride;  // C对齐后的值
+            Shape temp_shape(dt.shape.n(), dt.shape.h(), dt.shape.w(), C_aligned);
+            temp = Tensor(temp_shape, dt.dtype);
+        }
+
+        void* src = resolve_ptr(dt.id, rank);
+
+        // 计算实际传输字节数（紧凑DTensor不包含XNN_EXTRA_BYTES）
+        uint64_t transfer_bytes;
+        if (dt.is_compact()) {
+            transfer_bytes = dt.logical_bytes();
+        } else {
+            // 非紧凑DTensor：传输包含C通道padding的数据，但不含XNN_EXTRA_BYTES
+            transfer_bytes = dt.slot_bytes() - 16;
+        }
+
+        if (use_gpu) {
+#ifdef TR_USE_CUDA
+            // 多卡操作前必须设置设备（参考sync.md）
+            auto& reg = GlobalRegistry::instance();
+            cudaError_t err = cudaSetDevice(reg.gpu_ids()[rank]);
+            if (err != cudaSuccess) {
+                TR_DEVICE_ERROR("cudaSetDevice failed for rank " << rank
+                                << ": " << cudaGetErrorString(err));
+            }
+
+            // 同步D2H传输（支持可分页内存）
+            // 按用户要求使用同步传输，而非异步传输
+            // 参考transfer.md：可分页内存应使用cudaMemcpy而非cudaMemcpyAsync
+            err = cudaMemcpy(
+                temp.data<void>(),          // 目标：CPU内存
+                src,                        // 源：指定GPU的显存
+                transfer_bytes,             // 字节数（紧凑DTensor使用logical_bytes，非紧凑使用slot_bytes）
+                cudaMemcpyDeviceToHost      // D2H方向
+            );
+            if (err != cudaSuccess) {
+                TR_DEVICE_ERROR("cudaMemcpy D2H from rank " << rank
+                                << " failed: " << cudaGetErrorString(err)
+                                << ", nbytes=" << transfer_bytes);
+            }
+#else
+            (void)src; // 抑制未使用警告
+            TR_DEVICE_ERROR("GPU mode requested but TR_USE_CUDA is not defined");
+#endif
+        } else {
+            // CPU模式：直接memcpy
+            std::memcpy(temp.data<void>(), src, transfer_bytes);
+        }
+
+        // 如果是非紧凑DTensor，执行非紧凑→紧凑转换
+        if (!dt.is_compact()) {
+            Tensor result(dt.shape, dt.dtype);
+
+            // 执行非紧凑→紧凑转换
+            // 从包含padding的temp中提取有效数据到紧凑的result
+            auto get_elem_size = [](DType dtype) -> size_t {
+                switch (dtype) {
+                    case DType::INT8:  return 1;
+                    case DType::FP16:  return 2;
+                    case DType::FP32: return 4;
+                    case DType::INT32: return 4;
+                    default:
+                        TR_TYPE_ERROR("Unsupported DType: " << static_cast<int>(dtype));
+                }
+                return 0;
+            };
+
+            const size_t elem_size = get_elem_size(dt.dtype);
+            const int64_t N = dt.shape.n(), H = dt.shape.h(), W = dt.shape.w(), C = dt.shape.c();
+
+            // 根据数据类型进行转换
+            switch (dt.dtype) {
+                case DType::FP32: {
+                    const float* in_data = static_cast<const float*>(temp.data<void>());
+                    float* out_data = static_cast<float*>(result.data<void>());
+
+                    for (int64_t n = 0; n < N; ++n) {
+                        for (int64_t h = 0; h < H; ++h) {
+                            for (int64_t w = 0; w < W; ++w) {
+                                for (int64_t c = 0; c < C; ++c) {
+                                    // 输入是非紧凑布局（包含padding）
+                                    int64_t in_idx = n * dt.n_stride + h * dt.h_stride + w * dt.w_stride + c * dt.c_stride;
+                                    // 输出是紧凑的NHWC布局
+                                    int64_t out_idx = ((n * H + h) * W + w) * C + c;
+                                    out_data[out_idx] = in_data[in_idx];
+                                }
+                            }
+                        }
+                    }
+                    break;
+                }
+                case DType::FP16: {
+                    const uint16_t* in_data = static_cast<const uint16_t*>(temp.data<void>());
+                    uint16_t* out_data = static_cast<uint16_t*>(result.data<void>());
+
+                    for (int64_t n = 0; n < N; ++n) {
+                        for (int64_t h = 0; h < H; ++h) {
+                            for (int64_t w = 0; w < W; ++w) {
+                                for (int64_t c = 0; c < C; ++c) {
+                                    int64_t in_idx = n * dt.n_stride + h * dt.h_stride + w * dt.w_stride + c * dt.c_stride;
+                                    int64_t out_idx = ((n * H + h) * W + w) * C + c;
+                                    out_data[out_idx] = in_data[in_idx];
+                                }
+                            }
+                        }
+                    }
+                    break;
+                }
+                default:
+                    TR_TYPE_ERROR("Unsupported dtype for layout conversion: " << static_cast<int>(dt.dtype));
+            }
+
+            return result;
+        }
+
+        return temp;
+    }
+};
+
+// =============================================================================
+// TaskBase 方法实现
+// =============================================================================
+
+TaskBase::TaskBase() = default;
+TaskBase::~TaskBase() = default;
+
+// -----------------------------------------------------------------------------
+// 状态机与编译
+// -----------------------------------------------------------------------------
+
+void TaskBase::check_phase(Phase expected, const char* op) const {
+    if (phase_ != expected) {
+        TR_VALUE_ERROR("Operation '" << op << "' requires phase " << phase_to_string(expected)
+                       << ", but current phase is " << phase_to_string(phase_));
+    }
+}
+
+// -----------------------------------------------------------------------------
+// V4.21新增：布局转换辅助函数
+// -----------------------------------------------------------------------------
+
+void TaskBase::create_temp_buffer_for_layout_conversion(Tensor& output, const Tensor& input, const DTensor& target) {
+    // 辅助函数：获取元素字节数
+    auto get_elem_size = [](DType dt) -> size_t {
+        switch (dt) {
+            case DType::INT8:  return 1;
+            case DType::FP16:  return 2;
+            case DType::FP32: return 4;
+            case DType::INT32: return 4;
+            default:
+                TR_TYPE_ERROR("Unsupported DType: " << static_cast<int>(dt));
+        }
+        return 0;
+    };
+
+    const size_t elem_size = get_elem_size(input.dtype());
+    const int64_t N = input.shape().n(), H = input.shape().h(), W = input.shape().w(), C = input.shape().c();
+
+    // P0-1修复：创建临时Tensor，大小与DTensor的nbytes一致（包含padding）
+    // DTensor可能使用C_aligned，需要计算实际需要的元素数
+    // NHWC布局中：w_stride = C_aligned（W维度的步幅）
+    const int64_t C_aligned = target.w_stride;  // C对齐后的值
+    Shape temp_shape(N, H, W, C_aligned);
+    output = Tensor(temp_shape, input.dtype());
+
+    // 获取输入输出指针
+    const void* input_ptr = input.data();
+    void* output_ptr = output.data();
+
+    // 按照DTensor的stride信息进行布局转换
+    // Tensor是紧凑的(NHWC)，DTensor可能是带padding的
+    const int64_t& n_stride = target.n_stride;
+    const int64_t& h_stride = target.h_stride;
+    const int64_t& w_stride = target.w_stride;
+    const int64_t& c_stride = target.c_stride;
+
+    // 根据数据类型进行转换
+    switch (input.dtype()) {
+        case DType::FP32: {
+            const float* in_data = static_cast<const float*>(input_ptr);
+            float* out_data = static_cast<float*>(output_ptr);
+
+            for (int64_t n = 0; n < N; ++n) {
+                for (int64_t h = 0; h < H; ++h) {
+                    for (int64_t w = 0; w < W; ++w) {
+                        for (int64_t c = 0; c < C; ++c) {
+                            // 输入是紧凑的NHWC布局
+                            int64_t in_idx = ((n * H + h) * W + w) * C + c;
+                            // 输出按照DTensor的stride布局
+                            int64_t out_idx = n * n_stride + h * h_stride + w * w_stride + c * c_stride;
+                            out_data[out_idx] = in_data[in_idx];
+                        }
+                    }
+                }
+            }
+            break;
+        }
+        case DType::FP16: {
+            const uint16_t* in_data = static_cast<const uint16_t*>(input_ptr);
+            uint16_t* out_data = static_cast<uint16_t*>(output_ptr);
+
+            for (int64_t n = 0; n < N; ++n) {
+                for (int64_t h = 0; h < H; ++h) {
+                    for (int64_t w = 0; w < W; ++w) {
+                        for (int64_t c = 0; c < C; ++c) {
+                            int64_t in_idx = ((n * H + h) * W + w) * C + c;
+                            int64_t out_idx = n * n_stride + h * h_stride + w * w_stride + c * c_stride;
+                            out_data[out_idx] = in_data[in_idx];
+                        }
+                    }
+                }
+            }
+            break;
+        }
+        case DType::INT32: {
+            const int32_t* in_data = static_cast<const int32_t*>(input_ptr);
+            int32_t* out_data = static_cast<int32_t*>(output_ptr);
+
+            for (int64_t n = 0; n < N; ++n) {
+                for (int64_t h = 0; h < H; ++h) {
+                    for (int64_t w = 0; w < W; ++w) {
+                        for (int64_t c = 0; c < C; ++c) {
+                            int64_t in_idx = ((n * H + h) * W + w) * C + c;
+                            int64_t out_idx = n * n_stride + h * h_stride + w * w_stride + c * c_stride;
+                            out_data[out_idx] = in_data[in_idx];
+                        }
+                    }
+                }
+            }
+            break;
+        }
+        case DType::INT8: {
+            const int8_t* in_data = static_cast<const int8_t*>(input_ptr);
+            int8_t* out_data = static_cast<int8_t*>(output_ptr);
+
+            for (int64_t n = 0; n < N; ++n) {
+                for (int64_t h = 0; h < H; ++h) {
+                    for (int64_t w = 0; w < W; ++w) {
+                        for (int64_t c = 0; c < C; ++c) {
+                            int64_t in_idx = ((n * H + h) * W + w) * C + c;
+                            int64_t out_idx = n * n_stride + h * h_stride + w * w_stride + c * c_stride;
+                            out_data[out_idx] = in_data[in_idx];
+                        }
+                    }
+                }
+            }
+            break;
+        }
+        default:
+            TR_TYPE_ERROR("Unsupported DType in layout conversion: " << static_cast<int>(input.dtype()));
+    }
+
+    TR_LOG_DEBUG("task") << "Layout conversion completed: " << input.shape() << " -> stride["
+                         << n_stride << "," << h_stride << "," << w_stride << "," << c_stride << "]";
+}
+
+void TaskBase::compile(bool debug_mode) {
+    TR_CHECK(phase_ == Phase::PLANNING || phase_ == Phase::MEMORY_LOCKED, ValueError,
+             "compile() must be called from PLANNING or MEMORY_LOCKED phase, current phase is "
+             << phase_to_string(phase_));
+
+    debug_mode_ = debug_mode;
+    compile_freeze_global();
+    compile_invoke_on_prepare();
+    compile_verify_memory_locked();
+
+    if (debug_mode_) {
+        compile_debug_print_and_return();
+        return;
+    }
+
+    compile_alloc_hardware();
+    compile_warmup_master_gpu();
+    compile_capture_all_graphs();
+    compile_warmup_graphs();
+    compile_mark_compiled();
+}
+
+void TaskBase::compile_freeze_global() {
+    auto& reg = GlobalRegistry::instance();
+    if (!reg.is_initialized()) {
+        reg.initialize();
+    }
+
+    if (reg.using_gpu()) {
+        num_gpus_ = static_cast<int>(reg.gpu_ids().size());
+        TR_CHECK(num_gpus_ > 0 && num_gpus_ <= 8, ValueError,
+                 "Invalid GPU count: " << num_gpus_ << ", must be in [1, 8]");
+    } else {
+        num_gpus_ = 1;
+    }
+
+    LOG_INFO << "TaskBase::compile_freeze_global — num_gpus=" << num_gpus_
+             << ", gpu_mode=" << reg.using_gpu();
+}
+
+void TaskBase::compile_invoke_on_prepare() {
+    LOG_INFO << "TaskBase::compile — invoking on_prepare()";
+    on_prepare();
+    LOG_INFO << "TaskBase::compile — on_prepare() completed";
+}
+
+void TaskBase::compile_verify_memory_locked() {
+    if (phase_ == Phase::MEMORY_LOCKED) {
+        return;
+    }
+    if (phase_ == Phase::PLANNING) {
+        if (!memory_plan_.is_finalized()) {
+            finalize_memory();
+        } else {
+            phase_ = Phase::MEMORY_LOCKED;
+        }
+        return;
+    }
+    TR_VALUE_ERROR("compile_verify_memory_locked: unexpected phase " << phase_to_string(phase_));
+}
+
+void TaskBase::compile_debug_print_and_return() {
+    // [FIX] 专家意见B3-12: debug_mode应调用validate()，debug的价值不只是"看"，更是"查"
+    memory_plan_.validate();
+
+    std::cout << std::endl
+              << "==================================================" << std::endl
+              << "DEBUG MODE: Memory Plan Layout" << std::endl
+              << "--------------------------------------------------" << std::endl
+              << memory_plan_.dump_layout()
+              << "==================================================" << std::endl;
+
+    std::cout << std::endl
+              << "==================================================" << std::endl
+              << "DEBUG MODE: Computation Graphs" << std::endl
+              << "--------------------------------------------------" << std::endl
+              << "Total Graphs: " << named_graphs_.size() << std::endl
+              << "==================================================" << std::endl;
+
+    // 按字母顺序排序图名称，确保跨平台输出一致性
+    std::vector<std::string> graph_names;
+    graph_names.reserve(named_graphs_.size());
+    for (const auto& kv : named_graphs_) {
+        graph_names.push_back(kv.first);
+    }
+    std::sort(graph_names.begin(), graph_names.end());
+
+    for (const auto& name : graph_names) {
+        const auto& entry = named_graphs_.at(name);
+        // 直接调用to_string获取格式化输出，然后打印
+        std::cout << entry.graph.to_string(name);
+    }
+
+    std::cout << std::endl
+              << "==================================================" << std::endl
+              << "DEBUG MODE: Compilation Complete (Hardware Skipped)" << std::endl
+              << "==================================================" << std::endl
+              << std::endl;
+
+    // ID交叉验证：遍历所有图节点，检查引用的DTensor ID是否在MemoryPlan中有效存在
+    // 仅在debug模式执行，Release模式下TR_DEBUG_CHECK完全消失，零开销
+    for (const auto& kv : named_graphs_) {
+        const std::string& gname = kv.first;
+        const auto& graph = kv.second.graph;
+        for (size_t ni = 0; ni < graph.nodes().size(); ++ni) {
+            const auto& node = graph.nodes()[ni];
+            if (const auto* cn = std::get_if<ComputationGraph::ComputeNode>(&node)) {
+                for (int32_t id : cn->in_ids) {
+                    TR_DEBUG_CHECK(memory_plan_.has_tensor(id), ValueError,
+                                   "Graph '" << gname << "', node " << ni
+                                   << ": input DTensor id " << id
+                                   << " not found in MemoryPlan");
+                }
+                for (int32_t id : cn->out_ids) {
+                    TR_DEBUG_CHECK(memory_plan_.has_tensor(id), ValueError,
+                                   "Graph '" << gname << "', node " << ni
+                                   << ": output DTensor id " << id
+                                   << " not found in MemoryPlan");
+                }
+            } else if (const auto* tn = std::get_if<ComputationGraph::TransferNode>(&node)) {
+                TR_DEBUG_CHECK(memory_plan_.has_tensor(tn->dst_id), ValueError,
+                               "Graph '" << gname << "', node " << ni
+                               << ": transfer destination DTensor id " << tn->dst_id
+                               << " not found in MemoryPlan");
+            }
+        }
+    }
+
+    debug_compiled_ = true;
+    phase_ = Phase::COMPILED;
+}
+
+void TaskBase::compile_alloc_hardware() {
+    LOG_INFO << "TaskBase::compile — allocating hardware resources";
+
+    // 确保MemoryPlan已finalize，以便获取准确的total_bytes
+    if (!memory_plan_.is_finalized()) {
+        TR_VALUE_ERROR("MemoryPlan not finalized before compile_alloc_hardware()");
+    }
+
+    backend_ = std::make_unique<Backend>();
+    backend_->owner = this;
+    backend_->num_gpus = num_gpus_;
+    backend_->use_gpu = GlobalRegistry::instance().using_gpu();
+
+    size_t total_bytes = memory_plan_.total_bytes();
+    TR_CHECK(total_bytes > 0, ValueError, "MemoryPlan total_bytes is zero");
+
+    backend_->alloc_hardware(total_bytes);
+
+    // Workspace 预分配：在 compile 阶段一次性分配，杜绝运行时 cudaFree/cudaMalloc
+    // 防止训练期的显存碎片化和隐式同步（冲击世界纪录的关键保障）
+    if (backend_->use_gpu) {
+#ifdef TR_USE_CUDA
+        constexpr size_t kDefaultWorkspaceBudget = 256 * 1024 * 1024;  // 256MB per stream
+        for (auto& ctx : backend_->device_contexts_) {
+            for (int k = 0; k < 5; ++k) {
+                StreamKind kind = static_cast<StreamKind>(k);
+                ctx->pre_allocate_workspace(kind, kDefaultWorkspaceBudget);
+            }
+        }
+        LOG_INFO << "TaskBase::compile — workspace pre-allocated for all streams ("
+                 << (kDefaultWorkspaceBudget / (1024 * 1024)) << " MB each)";
+#endif
+    }
+
+    LOG_INFO << "TaskBase::compile — hardware allocation completed";
+}
+
+void TaskBase::compile_warmup_master_gpu() {
+    if (!GlobalRegistry::instance().using_gpu()) {
+        LOG_INFO << "TaskBase::compile — skipping master GPU warmup (CPU mode)";
+        return;
+    }
+#ifdef TR_USE_CUDA
+    using namespace cudnn_frontend;
+    using namespace cudnn_frontend::graph;
+
+    int master_gpu = GlobalRegistry::instance().gpu_ids()[0];
+    cudaError_t err = cudaSetDevice(master_gpu);
+    if (err != cudaSuccess) {
+        TR_DEVICE_ERROR("compile_warmup_master_gpu: cudaSetDevice(" << master_gpu
+                       << ") failed: " << cudaGetErrorString(err));
+    }
+
+    // 在 GPU 0 上单线程预热所有 cuDNN 算子
+    // 原理：cuDNN 的 build_plans(HEURISTICS_CHOICE) 首次调用时触发引擎搜索并缓存结果；
+    // 若 8 线程并发触发搜索，会因 cuDNN 内部全局锁严重串行化。
+    // 此处单线程逐一预热后，后续 compile_capture_all_graphs() 的并行捕获将全部命中缓存。
+    int warmed = 0;
+    for (const auto& kv : named_graphs_) {
+        const auto& graph = kv.second.graph;
+        for (size_t ni = 0; ni < graph.nodes().size(); ++ni) {
+            const auto* cn = std::get_if<ComputationGraph::ComputeNode>(&graph.nodes()[ni]);
+            if (!cn) continue;
+            if (!OpRegistry::has(cn->kind)) continue;
+            if (!Module::is_cudnn_op(cn->kind)) continue;
+
+            const auto& desc = OpRegistry::get(cn->kind);
+            if (!desc.build_graph) continue;  // 跳过未实现 cuDNN graph builder 的算子
+
+            // 构造最小虚拟输入 Tensor_attributes（带 uid）
+            std::vector<std::shared_ptr<Tensor_attributes>> inputs;
+            std::vector<Shape> input_shapes;
+            std::vector<DTensor> dtensors;  // V4.21新增：DTensor数组，提供真实stride
+            for (size_t i = 0; i < cn->in_ids.size(); ++i) {
+                const DTensor& dt = memory_plan_.dtensor(cn->in_ids[i]);
+                input_shapes.push_back(dt.shape);
+                dtensors.push_back(dt);  // V4.21新增：收集DTensor
+                auto t = std::make_shared<Tensor_attributes>();
+                t->set_uid(static_cast<int64_t>(100 + i));
+                inputs.push_back(t);
+            }
+
+            // 调用算子级 build_graph → validate → create_execution_plans → build_plans
+            DType dtype = memory_plan_.dtensor(cn->out_ids[0]).dtype;
+            std::vector<std::shared_ptr<Tensor_attributes>> outputs;
+            cudnnHandle_t handle = backend_->device_contexts_[0]->cudnn_handle();
+
+            auto cu_graph = Module::build_cudnn_graph(
+                cn->kind, inputs, input_shapes, dtensors, cn->params, handle, dtype, outputs);
+
+            // 构建 variant pack：映射 uid → 实际设备指针
+            std::unordered_map<int64_t, void*> vp;
+            for (size_t i = 0; i < cn->in_ids.size(); ++i) {
+                vp[inputs[i]->get_uid()] = backend_->device_contexts_[0]->ptr_at(cn->in_ids[i]);
+            }
+            for (size_t i = 0; i < outputs.size() && i < cn->out_ids.size(); ++i) {
+                vp[outputs[i]->get_uid()] = backend_->device_contexts_[0]->ptr_at(cn->out_ids[i]);
+            }
+
+            // 临时 workspace
+            size_t ws_sz = cu_graph->get_workspace_size();
+            void* temp_ws = nullptr;
+            if (ws_sz > 0) {
+                cudaMalloc(&temp_ws, ws_sz);
+            }
+
+            cudaStream_t comp_stream = backend_->device_contexts_[0]->stream(StreamKind::COMP_1);
+            cudnnSetStream(handle, comp_stream);
+
+            // 调试：输出variant_pack信息
+            std::cout << "[DEBUG] Warmup variant_pack size: " << vp.size() << std::endl;
+            for (const auto& [uid, ptr] : vp) {
+                std::cout << "  uid=" << uid << ", ptr=" << ptr << std::endl;
+            }
+            std::cout << "[DEBUG] Workspace size: " << ws_sz << " bytes, ptr=" << temp_ws << std::endl;
+
+            TR_CUDNN_FE_CHECK(cu_graph->execute(handle, vp, temp_ws), "warmup execute");
+
+            if (temp_ws) cudaFree(temp_ws);
+            ++warmed;
+        }
+    }
+
+    // 修复：检查warmup阶段的同步错误，避免延迟到后续阶段才暴露
+    cudaError_t sync_err = cudaDeviceSynchronize();
+    if (sync_err != cudaSuccess) {
+        TR_DEVICE_ERROR("compile_warmup_master_gpu: cudaDeviceSynchronize failed on GPU "
+                         << master_gpu << ": " << cudaGetErrorString(sync_err));
+    }
+    LOG_INFO << "TaskBase::compile — master GPU warmup completed: "
+             << warmed << " cuDNN operator(s) preheated on GPU " << master_gpu;
+#else
+    LOG_INFO << "TaskBase::compile — skipping master GPU warmup (CUDA not available)";
+#endif
+}
+
+void TaskBase::compile_capture_all_graphs() {
+    LOG_INFO << "TaskBase::compile — capturing graphs on " << num_gpus_ << " GPUs";
+
+    // =========================================================================
+    // 捕获策略：GPU 0 串行，GPU 1-7 并行
+    // =========================================================================
+    // 背景：
+    //   compile_warmup_master_gpu() 已在主线程中使用 GPU 0 的 cudnnHandle_t
+    //   执行了 cuDNN build_plans() + execute() 预热。cuDNN 的 engine plan cache
+    //   并非 per-handle 完全隔离，底层存在进程级全局数据结构。
+    //
+    // 问题：
+    //   若 GPU 0 的捕获线程与 GPU 1-7 的捕获线程并发调用 build_plans()，
+    //   多个线程同时对全局 cache 进行读-写竞争，可能导致 GPU 0 读取到部分
+    //   初始化的损坏 cache 条目。该损坏的 engine 在 cudaStreamBeginCapture
+    //   模式下被记录进 CUDA Graph，而 cudaStreamEndCapture / cudaGraphInstantiate
+    //   不会检查 kernel 执行结果。错误被延迟到后续 cudaGraphLaunch + sync 时才
+    //   以 "illegal memory access" 暴露。
+    //
+    // 验证：
+    //   - 单 GPU（CUDA_VISIBLE_DEVICES=0）：始终通过
+    //   - CPU 模式（--cpu）：始终通过
+    //   - 8 GPU 全并行捕获：间歇性失败（竞争概率触发）
+    //
+    // 修复：
+    //   Step 1: GPU 0 在主线程串行捕获。此时 GPU 0 的 handle 独占全局 cache，
+    //           无任何并发竞争，确保捕获的图绝对干净。
+    //   Step 2: GPU 1-7 并行捕获。它们使用各自独立的 handle，且 GPU 0 的
+    //           cache 预热已完成，后续并发主要发生在不同 handle 之间，
+    //           竞争窗口大幅缩小，实践中不再触发问题。
+    // =========================================================================
+
+    std::vector<std::exception_ptr> exc(num_gpus_);
+
+    // Step 1: 串行捕获 master GPU（rank 0）
+    {
+        std::cout << "[CAPTURE] Rank 0 serial capture STARTED" << std::endl;
+        try {
+            backend_->capture_all_graphs(0);
+            std::cout << "[CAPTURE] Rank 0 serial capture FINISHED" << std::endl;
+        } catch (...) {
+            std::cout << "[CAPTURE] Rank 0 serial capture FAILED" << std::endl;
+            exc[0] = std::current_exception();
+        }
+    }
+
+    // Step 2: 并行捕获剩余 GPU（rank 1..N-1）
+    std::vector<std::thread> threads;
+    for (int i = 1; i < num_gpus_; ++i) {
+        threads.emplace_back([&, i]() {
+            std::cout << "[CAPTURE] Thread for rank=" << i << " STARTED" << std::endl;
+            try {
+                backend_->capture_all_graphs(i);
+                std::cout << "[CAPTURE] Thread for rank=" << i << " FINISHED" << std::endl;
+            } catch (...) {
+                std::cout << "[CAPTURE] Thread for rank=" << i << " FAILED" << std::endl;
+                exc[i] = std::current_exception();
+            }
+        });
+    }
+    for (auto& t : threads) t.join();
+
+    // 统一检查所有异常（串行 + 并行）
+    for (int i = 0; i < num_gpus_; ++i) {
+        if (exc[i]) std::rethrow_exception(exc[i]);
+    }
+
+    LOG_INFO << "TaskBase::compile — graph capture completed";
+}
+
+void TaskBase::compile_warmup_graphs() {
+    auto& reg = GlobalRegistry::instance();
+    if (!reg.using_gpu()) {
+        LOG_INFO << "TaskBase::compile — skipping graph warmup (CPU mode)";
+        return;
+    }
+
+#ifdef TR_USE_CUDA
+    LOG_INFO << "TaskBase::compile — warming up captured CUDA Graphs";
+
+    int master_rank = 0;
+    int master_gpu  = reg.gpu_ids()[master_rank];
+    cudaError_t err = cudaSetDevice(master_gpu);
+    if (err != cudaSuccess) {
+        TR_DEVICE_ERROR("compile_warmup_graphs: cudaSetDevice(" << master_gpu
+                       << ") failed: " << cudaGetErrorString(err));
+    }
+
+    // 打印每个 Graph 的节点信息并执行一次 warmup launch
+    for (const auto& [name, entry] : named_graphs_) {
+        const auto& graph = entry.graph;
+        const StreamKind stream = entry.stream;
+
+        size_t total_nodes = 0;
+        size_t compute_nodes = 0;
+        size_t transfer_nodes = 0;
+        std::map<std::string, int> opkind_counts;
+
+        for (const auto& node : graph.nodes()) {
+            ++total_nodes;
+            std::visit([&](auto&& arg) {
+                using T = std::decay_t<decltype(arg)>;
+                if constexpr (std::is_same_v<T, ComputationGraph::ComputeNode>) {
+                    ++compute_nodes;
+                    opkind_counts[op_kind_to_string(arg.kind)]++;
+                } else if constexpr (std::is_same_v<T, ComputationGraph::TransferNode>) {
+                    ++transfer_nodes;
+                }
+            }, node);
+        }
+
+        LOG_INFO << "  Graph '" << name << "' (stream=" << static_cast<int>(stream) << "):"
+                 << " total=" << total_nodes
+                 << " compute=" << compute_nodes
+                 << " transfer=" << transfer_nodes;
+
+        for (const auto& [op_name, count] : opkind_counts) {
+            LOG_INFO << "    - " << op_name << ": " << count;
+        }
+
+        // Warmup launch on master GPU
+        LOG_INFO << "    Warmup launching on GPU " << master_gpu << "...";
+        backend_->run_graph(name, master_rank, stream);
+    }
+
+    // 仅同步 master GPU（warmup 只在此 GPU 上执行），避免触发其他 GPU 上捕获流残余状态
+    backend_->device_contexts_[0]->synchronize_all();
+
+    LOG_INFO << "TaskBase::compile — graph warmup completed on GPU " << master_gpu;
+#else
+    LOG_INFO << "TaskBase::compile — skipping graph warmup (CUDA not available)";
+#endif
+}
+
+void TaskBase::compile_mark_compiled() {
+    phase_ = Phase::COMPILED;
+    LOG_INFO << "TaskBase::compile — compilation completed, phase=COMPILED";
+}
+
+void TaskBase::check_run_eligibility(bool dry_run) const {
+    (void)dry_run;
+    check_phase(Phase::COMPILED, "run");
+    if (debug_compiled_) {
+        TR_VALUE_ERROR("TaskBase is in debug compile mode. Hardware execution is disabled. "
+                      "Use compile(false) for full compilation.");
+    }
+    if (!backend_) {
+        TR_VALUE_ERROR("Backend not initialized. Ensure compile(false) was called successfully.");
+    }
+}
+
+// -----------------------------------------------------------------------------
+// PLANNING 阶段：内存分配
+// -----------------------------------------------------------------------------
+
+DTensor TaskBase::alloc(const Shape& shape, DType dtype) {
+    return alloc(shape, dtype, Region::DEFAULT);
+}
+
+DTensor TaskBase::alloc(const Shape& shape, DType dtype, Region region) {
+    check_phase(Phase::PLANNING, "alloc");
+
+    if (region == Region::SCALAR) {
+        return memory_plan_.alloc_scalar(dtype);
+    }
+    if (region == Region::INPUT_BUF_A) {
+        return memory_plan_.alloc_input_buf(shape, dtype, true);
+    }
+    if (region == Region::INPUT_BUF_B) {
+        return memory_plan_.alloc_input_buf(shape, dtype, false);
+    }
+    if (region == Region::EMA_FP32_W || region == Region::EMA_FP16_W) {
+        // EMA权重：SimpleTask手动绘制模式回退路径
+        // Task自动模式通过on_prepare()独立处理，从TensorDesc.bucket推导正确分桶
+        return memory_plan_.alloc_ema_weight(shape, dtype, false, false);
+    }
+    if (region == Region::PARAM_FP32_W || region == Region::PARAM_FP16_W ||
+        region == Region::PARAM_FP32_G || region == Region::PARAM_FP16_G) {
+        return alloc(shape, dtype, region, ParamBucket::DEEP_PLAIN);
+    }
+    if (region == Region::FEATURE) {
+        return memory_plan_.alloc_feature(shape, dtype);
+    }
+    if (region == Region::DEFAULT) {
+        return memory_plan_.alloc_default(shape, dtype);
+    }
+    if (region == Region::MASK) {
+        return memory_plan_.alloc_mask(shape, dtype);
+    }
+    if (region == Region::BN_STATS) {
+        return memory_plan_.alloc_bn_stats(shape, dtype);
+    }
+    if (region == Region::GRAD_SLOT) {
+        // GRAD_SLOT需要指定slot_idx,这里默认使用0
+        // 如需其他slot,请直接调用memory_plan_.alloc_grad_slot()
+        return memory_plan_.alloc_grad_slot(shape, dtype, 0);
+    }
+
+    // 默认回退
+    return memory_plan_.alloc_feature(shape, dtype);
+}
+
+DTensor TaskBase::alloc(const Shape& shape, DType dtype, Region region, ParamBucket bucket) {
+    check_phase(Phase::PLANNING, "alloc");
+
+    bool is_first = (bucket == ParamBucket::FIRST_BN || bucket == ParamBucket::FIRST_PLAIN);
+    bool is_bn    = (bucket == ParamBucket::FIRST_BN || bucket == ParamBucket::DEEP_BN);
+
+    if (region == Region::PARAM_FP32_W || region == Region::PARAM_FP16_W) {
+        return memory_plan_.alloc_weight(shape, dtype, is_first, is_bn);
+    }
+    if (region == Region::PARAM_FP32_G || region == Region::PARAM_FP16_G) {
+        return memory_plan_.alloc_weight_grad(shape, dtype, is_first, is_bn);
+    }
+
+    // 其他带 bucket 的 region 回退到无 bucket 版本
+    return alloc(shape, dtype, region);
+}
+
+DTensor TaskBase::alloc_scalar(DType dtype) {
+    check_phase(Phase::PLANNING, "alloc_scalar");
+    return memory_plan_.alloc_scalar(dtype);
+}
+
+void TaskBase::finalize_memory() {
+    if (phase_ == Phase::MEMORY_LOCKED) return;
+    check_phase(Phase::PLANNING, "finalize_memory");
+
+    memory_plan_.finalize();
+    phase_ = Phase::MEMORY_LOCKED;
+    LOG_INFO << "TaskBase::finalize_memory — total_bytes=" << memory_plan_.total_bytes();
+}
+
+// -----------------------------------------------------------------------------
+// MEMORY_LOCKED 阶段：图注册
+// -----------------------------------------------------------------------------
+
+void TaskBase::add_graph(const std::string& name, ComputationGraph graph, StreamKind stream) {
+    check_phase(Phase::MEMORY_LOCKED, "add_graph");
+    TR_CHECK(!name.empty(), ValueError, "Graph name cannot be empty");
+
+    auto it = named_graphs_.find(name);
+    TR_CHECK(it == named_graphs_.end(), ValueError,
+             "Graph already registered: " << name);
+
+    named_graphs_.emplace(name, GraphEntry{std::move(graph), stream});
+    LOG_INFO << "TaskBase::add_graph — registered '" << name << "' on stream "
+             << static_cast<int>(stream);
+}
+
+// -----------------------------------------------------------------------------
+// COMPILED 阶段：图执行
+// -----------------------------------------------------------------------------
+
+void TaskBase::run(const std::string& name) {
+    check_phase(Phase::COMPILED, "run");
+
+    // debug模式下直接返回，不执行硬件操作
+    if (debug_mode_) {
+        LOG_INFO << "TaskBase::run() — DEBUG MODE: skipping hardware execution of graph '" << name << "'";
+        return;
+    }
+
+    check_run_eligibility(false);
+
+    auto it = named_graphs_.find(name);
+    TR_CHECK(it != named_graphs_.end(), ValueError, "Graph not found: " << name);
+
+    const auto& entry = it->second;
+    StreamKind stream = entry.stream;
+
+    LOG_INFO << "TaskBase::run — launching graph '" << name << "' on " << num_gpus_ << " device(s) in parallel";
+
+#ifdef TR_USE_CUDA
+    // 参照gap_fc.cpp的多线程并行CUDA Graph执行模式
+    // 使用多线程并行地在所有GPU上启动CUDA Graph
+    std::vector<std::thread> threads;
+    std::vector<std::exception_ptr> exc(num_gpus_);
+
+    for (int i = 0; i < num_gpus_; ++i) {
+        threads.emplace_back([&, i]() {
+            try {
+                backend_->run_graph(name, i, stream);
+            } catch (...) {
+                exc[i] = std::current_exception();
+            }
+        });
+    }
+
+    // 等待所有线程完成
+    for (auto& t : threads) {
+        t.join();
+    }
+
+    // 检查异常
+    for (int i = 0; i < num_gpus_; ++i) {
+        if (exc[i]) {
+            std::rethrow_exception(exc[i]);
+        }
+    }
+#else
+    // CPU模式：串行执行
+    for (int i = 0; i < num_gpus_; ++i) {
+        backend_->run_graph(name, i, stream);
+    }
+#endif
+
+    backend_->sync_all();
+}
+
+void TaskBase::run(const std::string& a, const std::string& b) {
+    check_phase(Phase::COMPILED, "run");
+
+    // debug模式下直接返回，不执行硬件操作
+    if (debug_mode_) {
+        LOG_INFO << "TaskBase::run() — DEBUG MODE: skipping hardware execution of dual graphs '" << a << "' + '" << b << "'";
+        return;
+    }
+
+    check_run_eligibility(false);
+
+    auto it_a = named_graphs_.find(a);
+    auto it_b = named_graphs_.find(b);
+    TR_CHECK(it_a != named_graphs_.end(), ValueError, "Graph not found: " << a);
+    TR_CHECK(it_b != named_graphs_.end(), ValueError, "Graph not found: " << b);
+
+    const auto& entry_a = it_a->second;
+    const auto& entry_b = it_b->second;
+    StreamKind stream_a = entry_a.stream;
+    StreamKind stream_b = entry_b.stream;
+
+    LOG_INFO << "TaskBase::run — launching dual graphs '" << a << "' + '" << b << "' on " << num_gpus_ << " device(s) in parallel";
+
+#ifdef TR_USE_CUDA
+    // 参照gap_fc.cpp的多线程并行CUDA Graph执行模式
+    // 双图并行：每个线程先启动图a，再启动图b，然后所有线程同步
+    std::vector<std::thread> threads;
+    std::vector<std::exception_ptr> exc(num_gpus_);
+
+    for (int i = 0; i < num_gpus_; ++i) {
+        threads.emplace_back([&, i]() {
+            try {
+                // 先启动图a（例如：传输流）
+                backend_->run_graph(a, i, stream_a);
+                // 再启动图b（例如：计算流）
+                backend_->run_graph(b, i, stream_b);
+            } catch (...) {
+                exc[i] = std::current_exception();
+            }
+        });
+    }
+
+    // 等待所有线程完成
+    for (auto& t : threads) {
+        t.join();
+    }
+
+    // 检查异常
+    for (int i = 0; i < num_gpus_; ++i) {
+        if (exc[i]) {
+            std::rethrow_exception(exc[i]);
+        }
+    }
+#else
+    // CPU模式：串行执行
+    for (int i = 0; i < num_gpus_; ++i) {
+        backend_->run_graph(a, i, stream_a);
+        backend_->run_graph(b, i, stream_b);
+    }
+#endif
+
+    backend_->sync_all();
+}
+
+// -----------------------------------------------------------------------------
+// 运行期数据操作
+// -----------------------------------------------------------------------------
+
+void TaskBase::transfer(const Tensor& host, const DTensor& dtensor) {
+    check_phase(Phase::COMPILED, "transfer");
+    TR_CHECK(host.valid(), ValueError, "Host tensor is invalid");
+    TR_CHECK(dtensor.valid(), ValueError, "DTensor is invalid");
+
+    if (debug_mode_) {
+        LOG_INFO << "TaskBase::transfer — DEBUG MODE: skipping H2D transfer (hardware not initialized)";
+        return;
+    }
+
+    // 参数验证
+    TR_CHECK(host.shape() == dtensor.shape, ValueError,
+             "Shape mismatch: host vs dtensor");
+    TR_CHECK(host.dtype() == dtensor.dtype, ValueError,
+             "DType mismatch: host vs dtensor");
+
+    // V4.21：Backend::transfer 已内置处理非紧凑DTensor的布局转换
+#ifdef TR_USE_CUDA
+    if (GlobalRegistry::instance().using_gpu() && num_gpus_ > 1) {
+        TR_LOG_DEBUG("task") << "TaskBase::transfer — broadcasting to " << num_gpus_ << " GPUs";
+        backend_->transfer(host, dtensor, 0);
+        backend_->broadcast_from_rank0(dtensor);
+    } else {
+        backend_->transfer(host, dtensor, 0);
+    }
+#else
+    backend_->transfer(host, dtensor, 0);
+#endif
+}
+
+void TaskBase::transfer(const std::vector<Tensor>& hosts, const DTensor& dtensor) {
+    check_phase(Phase::COMPILED, "transfer");
+    TR_CHECK(static_cast<int>(hosts.size()) == num_gpus_, ValueError,
+             "Host tensor count (" << hosts.size() << ") must match GPU count (" << num_gpus_ << ")");
+
+    if (debug_mode_) {
+        LOG_INFO << "TaskBase::transfer — DEBUG MODE: skipping multi-GPU H2D transfer (hardware not initialized)";
+        return;
+    }
+
+    // V4.21：Backend::transfer 已内置处理非紧凑DTensor的布局转换
+    for (int i = 0; i < num_gpus_; ++i) {
+        backend_->transfer(hosts[i], dtensor, i);
+    }
+
+    // 每个transfer内部已同步，所有传输已完成，无需额外同步
+}
+
+void TaskBase::transfer_to_rank(const Tensor& host, const DTensor& dtensor, int rank) {
+    check_phase(Phase::COMPILED, "transfer_to_rank");
+    TR_CHECK(host.valid(), ValueError, "Host tensor is invalid");
+    TR_CHECK(dtensor.valid(), ValueError, "DTensor is invalid");
+    TR_CHECK(rank >= 0 && rank < num_gpus_, IndexError,
+             "Rank " << rank << " out of range [0, " << num_gpus_ << ")");
+
+    if (debug_mode_) {
+        LOG_INFO << "TaskBase::transfer_to_rank — DEBUG MODE: skipping H2D transfer (hardware not initialized)";
+        return;
+    }
+
+    // V4.21：Backend::transfer 已内置处理非紧凑DTensor的布局转换
+    backend_->transfer(host, dtensor, rank);
+}
+
+void TaskBase::broadcast_from_rank0(const DTensor& dtensor) {
+    check_phase(Phase::COMPILED, "broadcast_from_rank0");
+    TR_CHECK(dtensor.valid(), ValueError, "DTensor is invalid");
+
+    if (debug_mode_) {
+        LOG_INFO << "TaskBase::broadcast_from_rank0 — DEBUG MODE: skipping NCCL broadcast (hardware not initialized)";
+        return;
+    }
+
+    // 单卡或CPU模式无需广播
+    if (num_gpus_ <= 1) {
+        TR_LOG_DEBUG("task") << "TaskBase::broadcast_from_rank0 — single GPU/CPU mode, skipping broadcast";
+        return;
+    }
+
+    // 调用Backend的broadcast_from_rank0方法
+    backend_->broadcast_from_rank0(dtensor);
+}
+
+void TaskBase::fill(const DTensor& dtensor, float value) {
+    check_phase(Phase::COMPILED, "fill");
+    TR_CHECK(dtensor.valid(), ValueError, "DTensor is invalid");
+
+    if (debug_mode_) {
+        LOG_INFO << "TaskBase::fill — DEBUG MODE: skipping fill operation (hardware not initialized)";
+        return;
+    }
+
+    for (int i = 0; i < num_gpus_; ++i) {
+        backend_->fill(dtensor, value, i);
+    }
+}
+
+void TaskBase::zero(const DTensor& dtensor) {
+    check_phase(Phase::COMPILED, "zero");
+    TR_CHECK(dtensor.valid(), ValueError, "DTensor is invalid");
+
+    if (debug_mode_) {
+        LOG_INFO << "TaskBase::zero — DEBUG MODE: skipping zero operation (hardware not initialized)";
+        return;
+    }
+
+    for (int i = 0; i < num_gpus_; ++i) {
+        backend_->zero(dtensor, i);
+    }
+}
+
+void TaskBase::randn(const DTensor& dtensor, uint64_t seed) {
+    check_phase(Phase::COMPILED, "randn");
+    TR_CHECK(dtensor.valid(), ValueError, "DTensor is invalid");
+
+    if (debug_mode_) {
+        LOG_INFO << "TaskBase::randn — DEBUG MODE: skipping random initialization (hardware not initialized)";
+        return;
+    }
+
+    // 核心：使用全局Generator，确保可复现性（参考random.md + TR3 CudaDevice::rand_normal_float）
+    Generator& gen = get_default_generator();
+    gen.set_seed(seed);  // 设置全局种子
+
+    // 多GPU：每个GPU调用一次randn，内部通过gen.next_offset()原子预留offset
+    for (int i = 0; i < num_gpus_; ++i) {
+        backend_->randn(dtensor, i, gen);
+    }
+}
+
+Tensor TaskBase::fetch_from_rank(const DTensor& dtensor, int rank) {
+    check_phase(Phase::COMPILED, "fetch_from_rank");
+    TR_CHECK(dtensor.valid(), ValueError, "DTensor is invalid");
+    TR_CHECK(rank >= 0 && rank < num_gpus_, IndexError,
+             "Rank " << rank << " out of range [0, " << num_gpus_ << ")");
+
+    if (debug_mode_) {
+        LOG_INFO << "TaskBase::fetch_from_rank — DEBUG MODE: skipping D2H fetch (hardware not initialized), returning zero tensor";
+        // 返回一个填充零的tensor，避免空指针
+        Tensor result(dtensor.shape, dtensor.dtype);
+        std::memset(result.data<void>(), 0, result.nbytes());
+        return result;
+    }
+
+    return backend_->fetch(dtensor, rank);
+}
+
+Tensor TaskBase::fetch(const DTensor& dtensor) {
+    // 便捷方法：默认从Rank0取回数据
+    return fetch_from_rank(dtensor, 0);
+}
+
+} // namespace tr

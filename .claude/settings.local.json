@@ -1,18 +1,7 @@
 {
   "permissions": {
     "allow": [
-      "Bash(cmake:*)",
-      "Bash(ninja test_pw_ultimate:*)",
-      "Bash(/root/epfs/R/renaissance/build/bin/tests/integration/test_pw_ultimate:*)",
-      "Bash(powershell.exe:*)",
-      "Bash(build/windows-msvc-release/bin/tests/pw/test_po.exe:*)",
-      "Read(//r/**)",
-      "Bash(cmd.exe:*)",
-      "Bash(./build/windows-msvc-release/bin/tests/integration/test_engine_crc.exe:*)",
-      "Bash(for:*)",
-      "Bash(do echo:*)",
-      "Bash(done:*)",
-      "Bash(./build/windows-msvc-release/bin/tests/pw/test_two_po:*)"
+      "Bash(ninja test_norm_fp32:*)"
     ]
   }
 }

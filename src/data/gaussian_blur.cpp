@@ -8,9 +8,9 @@
  */
 
 #include "renaissance/data/gaussian_blur.h"
-#include "renaissance/base/tr_exception.h"
-#include "renaissance/base/logger.h"
-#include "renaissance/base/philox.h"
+#include "renaissance/core/tr_exception.h"
+#include "renaissance/core/logger.h"
+#include "renaissance/core/philox.h"
 #include <Simd/SimdLib.h>  // Simd库的高斯模糊API
 #include <algorithm>
 

@@ -1,0 +1,609 @@
+/**
+ * @file tanh_op.cpp
+ * @brief TANH 算子的 CPU 实现 + cuDNN Frontend CUDA 分发函数
+ * @version 1.1.0
+ * @date 2026-05-17
+ * @author 技术觉醒团队
+ * @note 数学公式：FWD: y = tanh(x), BWD: dx = dy * (1 - y^2)
+ * @note BWD 需要 dy 和 y（正向输出）作为输入
+ */
+
+#include "renaissance/backend/op_registry.h"
+#include "renaissance/backend/device_context.h"
+#include "renaissance/graph/capture_multi_stream.h"
+#include "renaissance/graph/memory_plan.h"
+#include "renaissance/graph/computation_graph.h"
+#include "renaissance/tensor/distributed_tensor.h"
+#include "renaissance/core/logger.h"
+#include "renaissance/core/tr_exception.h"
+#include <cmath>
+
+#ifdef TR_USE_CUDA
+#include <cuda_fp16.h>
+#include <cudnn_frontend.h>
+#include <cudnn_frontend/graph_interface.h>
+#include <memory>
+#include <unordered_map>
+#include "renaissance/backend/cudnn_utils.h"
+#endif
+
+#ifdef TR_USE_EIGEN
+#include <Eigen/Core>
+#endif
+
+namespace tr {
+
+// ===== FP32 CPU 实现 =====
+static void launch_tanh_fp32_fwd_cpu(CpuOpContext* op_ctx) {
+    TR_CHECK(op_ctx->num_inputs >= 1 && op_ctx->num_outputs >= 1, ShapeError,
+             "TANH_FP32_FWD CPU requires 1 input, 1 output");
+
+    const float* x = static_cast<const float*>(const_cast<DeviceContext*>(op_ctx->ctx)
+                                                ->ptr_at(op_ctx->input_ids[0]));
+    float* y = static_cast<float*>(const_cast<DeviceContext*>(op_ctx->ctx)
+                                   ->ptr_at(op_ctx->output_ids[0]));
+    int64_t n = op_ctx->total_elements;
+
+    for (int64_t i = 0; i < n; ++i) {
+        y[i] = std::tanh(x[i]);
+    }
+}
+
+static void launch_tanh_fp32_bwd_cpu(CpuOpContext* op_ctx) {
+    TR_CHECK(op_ctx->num_inputs >= 2 && op_ctx->num_outputs >= 1, ShapeError,
+             "TANH_FP32_BWD CPU requires 2 inputs (dy, y), 1 output");
+
+    const float* dy = static_cast<const float*>(const_cast<DeviceContext*>(op_ctx->ctx)
+                                                 ->ptr_at(op_ctx->input_ids[0]));
+    const float* y = static_cast<const float*>(const_cast<DeviceContext*>(op_ctx->ctx)
+                                                ->ptr_at(op_ctx->input_ids[1]));
+    float* dx = static_cast<float*>(const_cast<DeviceContext*>(op_ctx->ctx)
+                                    ->ptr_at(op_ctx->output_ids[0]));
+    int64_t n = op_ctx->total_elements;
+
+    for (int64_t i = 0; i < n; ++i) {
+        float yi = y[i];
+        dx[i] = dy[i] * (1.0f - yi * yi);
+    }
+}
+
+// ===== AMP CPU 不支持 =====
+static void launch_tanh_amp_cpu_not_supported(CpuOpContext* op_ctx) {
+    (void)op_ctx;
+    TR_THROW(TypeError, "TANH_AMP_FWD/BWD not supported on CPU (use GPU)");
+}
+
+#ifdef TR_USE_CUDA
+namespace feg = cudnn_frontend::graph;
+
+// ===== cuDNN Frontend Graph 缓存结构 =====
+struct TanhFp32FwdCache {
+    cudnnHandle_t handle = nullptr;
+    int64_t N = -1, H = -1, W = -1, C = -1;
+    int64_t n_stride = -1, h_stride = -1, w_stride = -1;
+    std::shared_ptr<feg::Graph> graph;
+    std::shared_ptr<feg::Tensor_attributes> x_attr, y_attr;
+};
+
+struct TanhFp32BwdCache {
+    cudnnHandle_t handle = nullptr;
+    int64_t N = -1, H = -1, W = -1, C = -1;
+    int64_t n_stride = -1, h_stride = -1, w_stride = -1;
+    std::shared_ptr<feg::Graph> graph;
+    std::shared_ptr<feg::Tensor_attributes> dy_attr, y_attr, dx_attr;
+};
+
+struct TanhAmpFwdCache {
+    cudnnHandle_t handle = nullptr;
+    int64_t N = -1, H = -1, W = -1, C = -1;
+    int64_t n_stride = -1, h_stride = -1, w_stride = -1;
+    std::shared_ptr<feg::Graph> graph;
+    std::shared_ptr<feg::Tensor_attributes> x_attr, y_attr;
+};
+
+struct TanhAmpBwdCache {
+    cudnnHandle_t handle = nullptr;
+    int64_t N = -1, H = -1, W = -1, C = -1;
+    int64_t n_stride = -1, h_stride = -1, w_stride = -1;
+    std::shared_ptr<feg::Graph> graph;
+    std::shared_ptr<feg::Tensor_attributes> dy_attr, y_attr, dx_attr;
+};
+
+static std::unordered_map<cudnnHandle_t, std::unique_ptr<TanhFp32FwdCache>> s_tanh_fp32_fwd_caches;
+static std::unordered_map<cudnnHandle_t, std::unique_ptr<TanhFp32BwdCache>> s_tanh_fp32_bwd_caches;
+static std::unordered_map<cudnnHandle_t, std::unique_ptr<TanhAmpFwdCache>> s_tanh_amp_fwd_caches;
+static std::unordered_map<cudnnHandle_t, std::unique_ptr<TanhAmpBwdCache>> s_tanh_amp_bwd_caches;
+
+// ===== FP32 FWD Graph 构建 =====
+static std::shared_ptr<feg::Graph> build_tanh_fp32_fwd_graph(
+    cudnnHandle_t handle,
+    int64_t N, int64_t H, int64_t W, int64_t C,
+    int64_t n_stride, int64_t h_stride, int64_t w_stride,
+    std::shared_ptr<feg::Tensor_attributes>& out_x,
+    std::shared_ptr<feg::Tensor_attributes>& out_y)
+{
+    auto g = std::make_shared<feg::Graph>();
+    g->set_io_data_type(fe::DataType_t::FLOAT)
+     .set_compute_data_type(fe::DataType_t::FLOAT);
+
+    std::vector<int64_t> dim = {N, C, H, W};
+    std::vector<int64_t> stride = {n_stride, 1, h_stride, w_stride};
+
+    out_x = g->tensor(feg::Tensor_attributes()
+        .set_name("x")
+        .set_dim(dim).set_stride(stride)
+        .set_data_type(fe::DataType_t::FLOAT));
+
+    auto tanh_out = g->pointwise(out_x, feg::Pointwise_attributes()
+        .set_mode(fe::PointwiseMode_t::TANH_FWD)
+        .set_compute_data_type(fe::DataType_t::FLOAT));
+    out_y = tanh_out;
+    out_y->set_output(true).set_data_type(fe::DataType_t::FLOAT);
+
+    TR_CUDNN_FE_CHECK(g->validate(), "validate TANH FP32 FWD graph");
+    TR_CUDNN_FE_CHECK(g->build_operation_graph(handle), "build TANH FP32 FWD op graph");
+    TR_CUDNN_FE_CHECK(g->create_execution_plans({fe::HeurMode_t::B}), "create TANH FP32 FWD plans");
+    TR_CUDNN_FE_CHECK(g->check_support(handle), "check TANH FP32 FWD support");
+    TR_CUDNN_FE_CHECK(g->build_plans(fe::BuildPlanPolicy_t::HEURISTICS_CHOICE), "build TANH FP32 FWD plans");
+
+    return g;
+}
+
+// ===== FP32 BWD Graph 构建 =====
+static std::shared_ptr<feg::Graph> build_tanh_fp32_bwd_graph(
+    cudnnHandle_t handle,
+    int64_t N, int64_t H, int64_t W, int64_t C,
+    int64_t n_stride, int64_t h_stride, int64_t w_stride,
+    std::shared_ptr<feg::Tensor_attributes>& out_dy,
+    std::shared_ptr<feg::Tensor_attributes>& out_y,
+    std::shared_ptr<feg::Tensor_attributes>& out_dx)
+{
+    auto g = std::make_shared<feg::Graph>();
+    g->set_io_data_type(fe::DataType_t::FLOAT)
+     .set_compute_data_type(fe::DataType_t::FLOAT);
+
+    std::vector<int64_t> dim = {N, C, H, W};
+    std::vector<int64_t> stride = {n_stride, 1, h_stride, w_stride};
+
+    out_dy = g->tensor(feg::Tensor_attributes()
+        .set_name("dy")
+        .set_dim(dim).set_stride(stride)
+        .set_data_type(fe::DataType_t::FLOAT));
+
+    out_y = g->tensor(feg::Tensor_attributes()
+        .set_name("y")
+        .set_dim(dim).set_stride(stride)
+        .set_data_type(fe::DataType_t::FLOAT));
+
+    auto dx_out = g->pointwise(out_dy, out_y, feg::Pointwise_attributes()
+        .set_mode(fe::PointwiseMode_t::TANH_BWD)
+        .set_compute_data_type(fe::DataType_t::FLOAT));
+    out_dx = dx_out;
+    out_dx->set_output(true).set_data_type(fe::DataType_t::FLOAT);
+
+    TR_CUDNN_FE_CHECK(g->validate(), "validate TANH FP32 BWD graph");
+    TR_CUDNN_FE_CHECK(g->build_operation_graph(handle), "build TANH FP32 BWD op graph");
+    TR_CUDNN_FE_CHECK(g->create_execution_plans({fe::HeurMode_t::B}), "create TANH FP32 BWD plans");
+    TR_CUDNN_FE_CHECK(g->check_support(handle), "check TANH FP32 BWD support");
+    TR_CUDNN_FE_CHECK(g->build_plans(fe::BuildPlanPolicy_t::HEURISTICS_CHOICE), "build TANH FP32 BWD plans");
+
+    return g;
+}
+
+// ===== AMP FWD Graph 构建 =====
+static std::shared_ptr<feg::Graph> build_tanh_amp_fwd_graph(
+    cudnnHandle_t handle,
+    int64_t N, int64_t H, int64_t W, int64_t C,
+    int64_t n_stride, int64_t h_stride, int64_t w_stride,
+    std::shared_ptr<feg::Tensor_attributes>& out_x,
+    std::shared_ptr<feg::Tensor_attributes>& out_y)
+{
+    auto g = std::make_shared<feg::Graph>();
+    g->set_io_data_type(fe::DataType_t::HALF)
+     .set_intermediate_data_type(fe::DataType_t::FLOAT)
+     .set_compute_data_type(fe::DataType_t::FLOAT);
+
+    std::vector<int64_t> dim = {N, C, H, W};
+    std::vector<int64_t> stride = {n_stride, 1, h_stride, w_stride};
+
+    out_x = g->tensor(feg::Tensor_attributes()
+        .set_name("x")
+        .set_dim(dim).set_stride(stride)
+        .set_data_type(fe::DataType_t::HALF));
+
+    auto tanh_out = g->pointwise(out_x, feg::Pointwise_attributes()
+        .set_mode(fe::PointwiseMode_t::TANH_FWD)
+        .set_compute_data_type(fe::DataType_t::FLOAT));
+    out_y = tanh_out;
+    out_y->set_output(true).set_data_type(fe::DataType_t::HALF);
+
+    TR_CUDNN_FE_CHECK(g->validate(), "validate TANH AMP FWD graph");
+    TR_CUDNN_FE_CHECK(g->build_operation_graph(handle), "build TANH AMP FWD op graph");
+    TR_CUDNN_FE_CHECK(g->create_execution_plans({fe::HeurMode_t::B}), "create TANH AMP FWD plans");
+    TR_CUDNN_FE_CHECK(g->check_support(handle), "check TANH AMP FWD support");
+    TR_CUDNN_FE_CHECK(g->build_plans(fe::BuildPlanPolicy_t::HEURISTICS_CHOICE), "build TANH AMP FWD plans");
+
+    return g;
+}
+
+// ===== AMP BWD Graph 构建 =====
+// 手动实现 dx = dy * (1 - y^2) = dy - dy*y^2
+// 使用 MUL + MUL + SUB，避免 TANH_BWD mode 对 HALF 的不支持
+static std::shared_ptr<feg::Graph> build_tanh_amp_bwd_graph(
+    cudnnHandle_t handle,
+    int64_t N, int64_t H, int64_t W, int64_t C,
+    int64_t n_stride, int64_t h_stride, int64_t w_stride,
+    std::shared_ptr<feg::Tensor_attributes>& out_dy,
+    std::shared_ptr<feg::Tensor_attributes>& out_y,
+    std::shared_ptr<feg::Tensor_attributes>& out_dx)
+{
+    auto g = std::make_shared<feg::Graph>();
+    g->set_io_data_type(fe::DataType_t::HALF)
+     .set_intermediate_data_type(fe::DataType_t::FLOAT)
+     .set_compute_data_type(fe::DataType_t::FLOAT);
+
+    std::vector<int64_t> dim = {N, C, H, W};
+    std::vector<int64_t> stride = {n_stride, 1, h_stride, w_stride};
+
+    out_dy = g->tensor(feg::Tensor_attributes()
+        .set_name("dy")
+        .set_dim(dim).set_stride(stride)
+        .set_data_type(fe::DataType_t::HALF));
+
+    out_y = g->tensor(feg::Tensor_attributes()
+        .set_name("y")
+        .set_dim(dim).set_stride(stride)
+        .set_data_type(fe::DataType_t::HALF));
+
+    // y_sq = y * y
+    auto y_sq = g->pointwise(out_y, out_y, feg::Pointwise_attributes()
+        .set_mode(fe::PointwiseMode_t::MUL)
+        .set_compute_data_type(fe::DataType_t::FLOAT));
+    y_sq->set_data_type(fe::DataType_t::FLOAT);
+
+    // dy_y_sq = dy * y_sq
+    auto dy_y_sq = g->pointwise(out_dy, y_sq, feg::Pointwise_attributes()
+        .set_mode(fe::PointwiseMode_t::MUL)
+        .set_compute_data_type(fe::DataType_t::FLOAT));
+    dy_y_sq->set_data_type(fe::DataType_t::FLOAT);
+
+    // dx = dy - dy_y_sq  (= dy * (1 - y^2))
+    auto dx_out = g->pointwise(out_dy, dy_y_sq, feg::Pointwise_attributes()
+        .set_mode(fe::PointwiseMode_t::SUB)
+        .set_compute_data_type(fe::DataType_t::FLOAT));
+    out_dx = dx_out;
+    out_dx->set_output(true).set_data_type(fe::DataType_t::HALF);
+
+    TR_CUDNN_FE_CHECK(g->validate(), "validate TANH AMP BWD graph");
+    TR_CUDNN_FE_CHECK(g->build_operation_graph(handle), "build TANH AMP BWD op graph");
+    TR_CUDNN_FE_CHECK(g->create_execution_plans({fe::HeurMode_t::B}), "create TANH AMP BWD plans");
+    TR_CUDNN_FE_CHECK(g->check_support(handle), "check TANH AMP BWD support");
+    TR_CUDNN_FE_CHECK(g->build_plans(fe::BuildPlanPolicy_t::HEURISTICS_CHOICE), "build TANH AMP BWD plans");
+
+    return g;
+}
+
+// ===== FP32 FWD CUDA 分发 =====
+static void launch_tanh_fp32_fwd_cuda(
+    const GraphNode& node,
+    const MemoryPlan& mp,
+    const DeviceContext& ctx,
+    MultiStreamCaptureState& state)
+{
+    (void)node;
+    TR_CHECK(node.input_ids.size() >= 1 && node.output_ids.size() >= 1, ShapeError,
+             "TANH_FP32_FWD requires 1 input, 1 output");
+
+    const DTensor& dt_x = mp.get_dtensor(node.input_ids[0]);
+    float* x = static_cast<float*>(ctx.ptr_at(node.input_ids[0]));
+    float* y = static_cast<float*>(ctx.ptr_at(node.output_ids[0]));
+
+    cudaStream_t s = static_cast<cudaStream_t>(ctx.stream(StreamKind::COMP_1));
+    int si = state.get_or_register(s);
+    state.output_stream_idx = si;
+    state.streams[si].has_pending_work = true;
+
+    cudnnHandle_t handle = static_cast<cudnnHandle_t>(
+        ctx.cudnn_handle(StreamKind::COMP_1));
+
+    int64_t N = dt_x.n(), H = dt_x.h(), W = dt_x.w(), C = dt_x.padded_c();
+    int64_t n_s = dt_x.n_stride_cuda(), h_s = dt_x.h_stride_cuda(), w_s = dt_x.w_stride_cuda();
+
+    auto it = s_tanh_fp32_fwd_caches.find(handle);
+    bool rebuild = (it == s_tanh_fp32_fwd_caches.end())
+        || it->second->N != N || it->second->H != H
+        || it->second->W != W || it->second->C != C
+        || it->second->n_stride != n_s
+        || it->second->h_stride != h_s
+        || it->second->w_stride != w_s;
+
+    TR_LOG_DEBUG("tanh") << "[AMP FWD] rebuild=" << rebuild;
+    if (rebuild) {
+#ifndef NDEBUG
+        {
+            cudaStreamCaptureStatus cap_status;
+            cudaError_t cap_err = cudaStreamIsCapturing(s, &cap_status);
+            if (cap_err == cudaSuccess && cap_status != cudaStreamCaptureStatusNone) {
+                TR_LOG_ERROR("tanh") << "[FP32 FWD] Rebuilding cuDNN FE graph inside CUDA Graph capture! "
+                                     << "handle=" << handle
+                                     << " All ranks MUST be warmed before capture.";
+            }
+        }
+#endif
+        auto cache = std::make_unique<TanhFp32FwdCache>();
+        cache->handle = handle;
+        cache->N = N; cache->H = H; cache->W = W; cache->C = C;
+        cache->n_stride = n_s; cache->h_stride = h_s; cache->w_stride = w_s;
+        cache->graph = build_tanh_fp32_fwd_graph(
+            handle, N, H, W, C, n_s, h_s, w_s,
+            cache->x_attr, cache->y_attr);
+        s_tanh_fp32_fwd_caches[handle] = std::move(cache);
+    }
+
+    auto& cache = *s_tanh_fp32_fwd_caches[handle];
+    std::unordered_map<std::shared_ptr<feg::Tensor_attributes>, void*> vp = {
+        {cache.x_attr, static_cast<void*>(x)},
+        {cache.y_attr, static_cast<void*>(y)}
+    };
+
+    TR_CUDNN_FE_CHECK(cache.graph->execute(handle, vp, nullptr), "execute TANH FP32 FWD");
+    cudaEventRecord(state.streams[si].last_done_event, s);
+}
+
+// ===== FP32 BWD CUDA 分发 =====
+static void launch_tanh_fp32_bwd_cuda(
+    const GraphNode& node,
+    const MemoryPlan& mp,
+    const DeviceContext& ctx,
+    MultiStreamCaptureState& state)
+{
+    (void)node;
+    TR_CHECK(node.input_ids.size() >= 2 && node.output_ids.size() >= 1, ShapeError,
+             "TANH_FP32_BWD requires 2 inputs (dy, y), 1 output");
+
+    const DTensor& dt_dy = mp.get_dtensor(node.input_ids[0]);
+    float* dy = static_cast<float*>(ctx.ptr_at(node.input_ids[0]));
+    float* y = static_cast<float*>(ctx.ptr_at(node.input_ids[1]));
+    float* dx = static_cast<float*>(ctx.ptr_at(node.output_ids[0]));
+
+    cudaStream_t s = static_cast<cudaStream_t>(ctx.stream(StreamKind::COMP_1));
+    int si = state.get_or_register(s);
+    state.output_stream_idx = si;
+    state.streams[si].has_pending_work = true;
+
+    cudnnHandle_t handle = static_cast<cudnnHandle_t>(
+        ctx.cudnn_handle(StreamKind::COMP_1));
+
+    int64_t N = dt_dy.n(), H = dt_dy.h(), W = dt_dy.w(), C = dt_dy.padded_c();
+    int64_t n_s = dt_dy.n_stride_cuda(), h_s = dt_dy.h_stride_cuda(), w_s = dt_dy.w_stride_cuda();
+
+    auto it = s_tanh_fp32_bwd_caches.find(handle);
+    bool rebuild = (it == s_tanh_fp32_bwd_caches.end())
+        || it->second->N != N || it->second->H != H
+        || it->second->W != W || it->second->C != C
+        || it->second->n_stride != n_s
+        || it->second->h_stride != h_s
+        || it->second->w_stride != w_s;
+
+    if (rebuild) {
+#ifndef NDEBUG
+        {
+            cudaStreamCaptureStatus cap_status;
+            cudaError_t cap_err = cudaStreamIsCapturing(s, &cap_status);
+            if (cap_err == cudaSuccess && cap_status != cudaStreamCaptureStatusNone) {
+                TR_LOG_ERROR("tanh") << "[FP32 BWD] Rebuilding cuDNN FE graph inside CUDA Graph capture! "
+                                     << "handle=" << handle
+                                     << " All ranks MUST be warmed before capture.";
+            }
+        }
+#endif
+        auto cache = std::make_unique<TanhFp32BwdCache>();
+        cache->handle = handle;
+        cache->N = N; cache->H = H; cache->W = W; cache->C = C;
+        cache->n_stride = n_s; cache->h_stride = h_s; cache->w_stride = w_s;
+        cache->graph = build_tanh_fp32_bwd_graph(
+            handle, N, H, W, C, n_s, h_s, w_s,
+            cache->dy_attr, cache->y_attr, cache->dx_attr);
+        s_tanh_fp32_bwd_caches[handle] = std::move(cache);
+    }
+
+    auto& cache = *s_tanh_fp32_bwd_caches[handle];
+    std::unordered_map<std::shared_ptr<feg::Tensor_attributes>, void*> vp = {
+        {cache.dy_attr, static_cast<void*>(dy)},
+        {cache.y_attr,  static_cast<void*>(y)},
+        {cache.dx_attr, static_cast<void*>(dx)}
+    };
+
+    TR_CUDNN_FE_CHECK(cache.graph->execute(handle, vp, nullptr), "execute TANH FP32 BWD");
+    cudaEventRecord(state.streams[si].last_done_event, s);
+}
+
+// ===== AMP FWD CUDA 分发 =====
+static void launch_tanh_amp_fwd_cuda(
+    const GraphNode& node,
+    const MemoryPlan& mp,
+    const DeviceContext& ctx,
+    MultiStreamCaptureState& state)
+{
+    TR_CHECK(node.input_ids.size() >= 1 && node.output_ids.size() >= 1, ShapeError,
+             "TANH_AMP_FWD requires 1 input, 1 output");
+
+    TR_LOG_DEBUG("tanh") << "[AMP FWD] enter";
+    const DTensor& dt_x = mp.get_dtensor(node.input_ids[0]);
+    __half* x = static_cast<__half*>(ctx.ptr_at(node.input_ids[0]));
+    __half* y = static_cast<__half*>(ctx.ptr_at(node.output_ids[0]));
+    TR_LOG_DEBUG("tanh") << "[AMP FWD] ptrs acquired";
+
+    cudaStream_t s = static_cast<cudaStream_t>(ctx.stream(StreamKind::COMP_1));
+    int si = state.get_or_register(s);
+    state.output_stream_idx = si;
+    state.streams[si].has_pending_work = true;
+
+    cudnnHandle_t handle = static_cast<cudnnHandle_t>(
+        ctx.cudnn_handle(StreamKind::COMP_1));
+
+    int64_t N = dt_x.n(), H = dt_x.h(), W = dt_x.w(), C = dt_x.padded_c();
+    int64_t n_s = dt_x.n_stride_cuda(), h_s = dt_x.h_stride_cuda(), w_s = dt_x.w_stride_cuda();
+
+    auto it = s_tanh_amp_fwd_caches.find(handle);
+    bool rebuild = (it == s_tanh_amp_fwd_caches.end())
+        || it->second->N != N || it->second->H != H
+        || it->second->W != W || it->second->C != C
+        || it->second->n_stride != n_s
+        || it->second->h_stride != h_s
+        || it->second->w_stride != w_s;
+
+    if (rebuild) {
+#ifndef NDEBUG
+        {
+            cudaStreamCaptureStatus cap_status;
+            cudaError_t cap_err = cudaStreamIsCapturing(s, &cap_status);
+            if (cap_err == cudaSuccess && cap_status != cudaStreamCaptureStatusNone) {
+                TR_LOG_ERROR("tanh") << "[AMP FWD] Rebuilding cuDNN FE graph inside CUDA Graph capture! "
+                                     << "handle=" << handle
+                                     << " All ranks MUST be warmed before capture.";
+            }
+        }
+#endif
+        auto cache = std::make_unique<TanhAmpFwdCache>();
+        cache->handle = handle;
+        cache->N = N; cache->H = H; cache->W = W; cache->C = C;
+        cache->n_stride = n_s; cache->h_stride = h_s; cache->w_stride = w_s;
+        cache->graph = build_tanh_amp_fwd_graph(
+            handle, N, H, W, C, n_s, h_s, w_s,
+            cache->x_attr, cache->y_attr);
+        s_tanh_amp_fwd_caches[handle] = std::move(cache);
+    }
+
+    auto& cache = *s_tanh_amp_fwd_caches[handle];
+    TR_LOG_DEBUG("tanh") << "[AMP FWD] cache acquired";
+    std::unordered_map<std::shared_ptr<feg::Tensor_attributes>, void*> vp = {
+        {cache.x_attr, static_cast<void*>(x)},
+        {cache.y_attr, static_cast<void*>(y)}
+    };
+
+    TR_LOG_DEBUG("tanh") << "[AMP FWD] executing...";
+    TR_CUDNN_FE_CHECK(cache.graph->execute(handle, vp, nullptr), "execute TANH AMP FWD");
+    TR_LOG_DEBUG("tanh") << "[AMP FWD] execute done";
+    cudaEventRecord(state.streams[si].last_done_event, s);
+}
+
+// ===== AMP BWD CUDA 分发 =====
+static void launch_tanh_amp_bwd_cuda(
+    const GraphNode& node,
+    const MemoryPlan& mp,
+    const DeviceContext& ctx,
+    MultiStreamCaptureState& state)
+{
+    TR_CHECK(node.input_ids.size() >= 2 && node.output_ids.size() >= 1, ShapeError,
+             "TANH_AMP_BWD requires 2 inputs (dy, y), 1 output");
+
+    const DTensor& dt_dy = mp.get_dtensor(node.input_ids[0]);
+    __half* dy = static_cast<__half*>(ctx.ptr_at(node.input_ids[0]));
+    __half* y = static_cast<__half*>(ctx.ptr_at(node.input_ids[1]));
+    __half* dx = static_cast<__half*>(ctx.ptr_at(node.output_ids[0]));
+
+    cudaStream_t s = static_cast<cudaStream_t>(ctx.stream(StreamKind::COMP_1));
+    int si = state.get_or_register(s);
+    state.output_stream_idx = si;
+    state.streams[si].has_pending_work = true;
+
+    cudnnHandle_t handle = static_cast<cudnnHandle_t>(
+        ctx.cudnn_handle(StreamKind::COMP_1));
+
+    int64_t N = dt_dy.n(), H = dt_dy.h(), W = dt_dy.w(), C = dt_dy.padded_c();
+    int64_t n_s = dt_dy.n_stride_cuda(), h_s = dt_dy.h_stride_cuda(), w_s = dt_dy.w_stride_cuda();
+
+    auto it = s_tanh_amp_bwd_caches.find(handle);
+    bool rebuild = (it == s_tanh_amp_bwd_caches.end())
+        || it->second->N != N || it->second->H != H
+        || it->second->W != W || it->second->C != C
+        || it->second->n_stride != n_s
+        || it->second->h_stride != h_s
+        || it->second->w_stride != w_s;
+
+    if (rebuild) {
+#ifndef NDEBUG
+        {
+            cudaStreamCaptureStatus cap_status;
+            cudaError_t cap_err = cudaStreamIsCapturing(s, &cap_status);
+            if (cap_err == cudaSuccess && cap_status != cudaStreamCaptureStatusNone) {
+                TR_LOG_ERROR("tanh") << "[AMP BWD] Rebuilding cuDNN FE graph inside CUDA Graph capture! "
+                                     << "handle=" << handle
+                                     << " All ranks MUST be warmed before capture.";
+            }
+        }
+#endif
+        auto cache = std::make_unique<TanhAmpBwdCache>();
+        cache->handle = handle;
+        cache->N = N; cache->H = H; cache->W = W; cache->C = C;
+        cache->n_stride = n_s; cache->h_stride = h_s; cache->w_stride = w_s;
+        cache->graph = build_tanh_amp_bwd_graph(
+            handle, N, H, W, C, n_s, h_s, w_s,
+            cache->dy_attr, cache->y_attr, cache->dx_attr);
+        s_tanh_amp_bwd_caches[handle] = std::move(cache);
+    }
+
+    auto& cache = *s_tanh_amp_bwd_caches[handle];
+    std::unordered_map<std::shared_ptr<feg::Tensor_attributes>, void*> vp = {
+        {cache.dy_attr, static_cast<void*>(dy)},
+        {cache.y_attr,  static_cast<void*>(y)},
+        {cache.dx_attr, static_cast<void*>(dx)}
+    };
+
+    TR_CUDNN_FE_CHECK(cache.graph->execute(handle, vp, nullptr), "execute TANH AMP BWD");
+    cudaEventRecord(state.streams[si].last_done_event, s);
+}
+
+#endif // TR_USE_CUDA
+
+// ===== 注册 TANH 算子 =====
+void register_op_tanh() {
+    auto& table = g_compute_op_table;
+
+    {
+        auto& e = table[static_cast<size_t>(ComputeOp::TANH_FP32_FWD)];
+        e.op = ComputeOp::TANH_FP32_FWD;
+#ifdef TR_USE_EIGEN
+        e.launch_cpu = launch_tanh_fp32_fwd_cpu;
+#endif
+#ifdef TR_USE_CUDA
+        e.launch_cuda = launch_tanh_fp32_fwd_cuda;
+#endif
+        TR_LOG_DEBUG("graph") << "Registered TANH_FP32_FWD (CPU/CUDA)";
+    }
+
+    {
+        auto& e = table[static_cast<size_t>(ComputeOp::TANH_FP32_BWD)];
+        e.op = ComputeOp::TANH_FP32_BWD;
+#ifdef TR_USE_EIGEN
+        e.launch_cpu = launch_tanh_fp32_bwd_cpu;
+#endif
+#ifdef TR_USE_CUDA
+        e.launch_cuda = launch_tanh_fp32_bwd_cuda;
+#endif
+        TR_LOG_DEBUG("graph") << "Registered TANH_FP32_BWD (CPU/CUDA)";
+    }
+
+    {
+        auto& e = table[static_cast<size_t>(ComputeOp::TANH_AMP_FWD)];
+        e.op = ComputeOp::TANH_AMP_FWD;
+        e.launch_cpu = launch_tanh_amp_cpu_not_supported;
+#ifdef TR_USE_CUDA
+        e.launch_cuda = launch_tanh_amp_fwd_cuda;
+#endif
+        TR_LOG_DEBUG("graph") << "Registered TANH_AMP_FWD (CUDA only)";
+    }
+
+    {
+        auto& e = table[static_cast<size_t>(ComputeOp::TANH_AMP_BWD)];
+        e.op = ComputeOp::TANH_AMP_BWD;
+        e.launch_cpu = launch_tanh_amp_cpu_not_supported;
+#ifdef TR_USE_CUDA
+        e.launch_cuda = launch_tanh_amp_bwd_cuda;
+#endif
+        TR_LOG_DEBUG("graph") << "Registered TANH_AMP_BWD (CUDA only)";
+    }
+}
+
+} // namespace tr

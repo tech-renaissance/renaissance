@@ -10,8 +10,8 @@
 #pragma once
 
 #include "renaissance/data/decode_strategy.h"
-#include "renaissance/base/rng.h"
-#include "renaissance/base/tr_exception.h"
+#include "renaissance/core/rng.h"
+#include "renaissance/core/tr_exception.h"
 #include <cstdint>
 #include <string>
 #include <memory>
@@ -175,6 +175,14 @@ public:
      *
      * @note 如果output_alignment为0，则使用紧凑布局作为默认
      * @note 如果output_alignment非0，则使用指定对齐字节数
+     *
+     * @note 关于 rng 参数的架构契约说明：
+     *   execute() 接口中 Generator* rng = nullptr 的默认参数仅为接口兼容性设计。
+     *   框架实际运行时，PreprocessWorker 持有成员 Generator rng_ 并通过 &rng_ 调用
+     *   execute()，确保 rng 永不为 nullptr。所有引入随机性的 PO 子类（如
+     *   RandomResizedCrop、RandomHorizontalFlip 等）均依赖此契约，内部直接解引用
+     *   rng 而不做空指针检查。这种"架构契约"模式避免了在热路径上重复防御性检查，
+     *   与 std::vector::operator[] 不做边界检查的范式一致。
      */
     explicit PreprocessOperation(size_t output_alignment = 0)
         : use_compact_output_as_default_(output_alignment == 0)

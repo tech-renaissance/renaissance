@@ -1,0 +1,98 @@
+/**
+ * @file capture_multi_stream.cpp
+ * @brief 多流捕获状态管理实现
+ * @version 4.21.0
+ * @date 2026-05-16
+ * @author 技术觉醒团队
+ * @note 依赖项: capture_multi_stream.h, device_context.h, computation_graph.h
+ * @note 所属系列: graph
+ */
+
+#ifdef TR_USE_CUDA
+
+#include "renaissance/graph/capture_multi_stream.h"
+#include "renaissance/graph/computation_graph.h"
+#include "renaissance/backend/device_context.h"
+#include "renaissance/backend/graph_executor.h"
+#include "renaissance/backend/op_stream_policy.h"
+#include "renaissance/core/logger.h"
+
+namespace tr {
+
+int MultiStreamCaptureState::get_or_register(cudaStream_t s) {
+    int idx = find_stream_index(s);
+    if (idx >= 0) return idx;
+
+    TR_CHECK(num_active < kMaxActiveStreams, DeviceError,
+             "Too many active streams in capture: " << (num_active + 1));
+
+    idx = num_active++;
+    streams[idx].stream = s;
+    streams[idx].has_pending_work = false;
+
+    cudaEventCreateWithFlags(&streams[idx].last_done_event,
+                              cudaEventDisableTiming);
+    return idx;
+}
+
+int MultiStreamCaptureState::find_stream_index(cudaStream_t s) const noexcept {
+    for (int i = 0; i < num_active; ++i) {
+        if (streams[i].stream == s) return i;
+    }
+    return -1;
+}
+
+cudaEvent_t MultiStreamCaptureState::alloc_temp_event() {
+    cudaEvent_t ev = nullptr;
+    cudaEventCreateWithFlags(&ev, cudaEventDisableTiming);
+    temp_events.push_back(ev);
+    return ev;
+}
+
+void MultiStreamCaptureState::cleanup_all_events() {
+    for (auto ev : temp_events) {
+        if (ev) cudaEventDestroy(ev);
+    }
+    temp_events.clear();
+    for (int i = 0; i < num_active; ++i) {
+        if (streams[i].last_done_event) {
+            cudaEventDestroy(streams[i].last_done_event);
+            streams[i].last_done_event = nullptr;
+        }
+    }
+}
+
+cudaStream_t select_primary_capture_stream(StreamKind kind, const DeviceContext& ctx) {
+    return static_cast<cudaStream_t>(ctx.stream(kind));
+}
+
+void insert_cross_op_barrier(const GraphNode& /*prev_node*/,
+                              const GraphNode& next_node,
+                              MultiStreamCaptureState& state,
+                              const DeviceContext& ctx) {
+    int out_idx = state.output_stream_idx;
+    if (out_idx < 0) return;
+
+    if (next_node.kind == GraphNode::Kind::COMPUTE) {
+        StreamKind target_sk = get_op_default_stream(next_node.compute_op);
+        cudaStream_t target_s = static_cast<cudaStream_t>(ctx.stream(target_sk));
+        int target_idx = state.find_stream_index(target_s);
+        if (target_idx >= 0 && target_idx != out_idx) {
+            cudaStreamWaitEvent(target_s,
+                state.streams[out_idx].last_done_event, 0);
+        }
+    }
+}
+
+void finalize_cross_stream_barrier(MultiStreamCaptureState& state) {
+    for (int i = 0; i < state.num_active; ++i) {
+        if (state.streams[i].stream == state.primary_stream) continue;
+        if (!state.streams[i].has_pending_work) continue;
+        cudaStreamWaitEvent(state.primary_stream,
+                           state.streams[i].last_done_event, 0);
+    }
+}
+
+} // namespace tr
+
+#endif // TR_USE_CUDA

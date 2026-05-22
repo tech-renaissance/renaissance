@@ -24,13 +24,16 @@
 #include "renaissance/data/gaussian_blur.h"
 #include "renaissance/data/random_grayscale.h"
 #include "renaissance/data/random_erasing.h"
-#include "renaissance/data/engine_buffer.h"
-#include "renaissance/base/logger.h"
-#include "renaissance/base/tr_exception.h"
-#include "renaissance/base/global_registry.h"
-#include "renaissance/base/rng.h"
+#include "renaissance/data/normalize.h"
+#include "renaissance/data/fused_normalization.h"
+#include "renaissance/data/transfer_station.h"
+#include "renaissance/core/logger.h"
+#include "renaissance/core/tr_exception.h"
+#include "renaissance/core/global_registry.h"
+#include "renaissance/core/types.h"
+#include "renaissance/core/rng.h"
 
-// CUDA头文件（config_device需要）
+// CUDA头文件
 #if defined(TR_USE_CUDA)
     #include <cuda_runtime.h>
 #endif
@@ -60,6 +63,14 @@
 #include <errno.h>
 #include <set>
 
+#if defined(TR_SCENE_GPU_CLOUD)
+#include <unistd.h>
+#endif
+
+#if defined(TR_SCENE_GPU_CLOUD) && defined(TR_USE_LIBNUMA)
+#include <numa.h>
+#endif
+
 namespace tr {
 
 // =============================================================================
@@ -81,7 +92,7 @@ Preprocessor::Preprocessor()
     , num_preproc_workers_(0)
     , world_size_(-1)
     , batch_size_(32)
-    , max_resolution_(224)
+    , max_resolution_(-1)
     , num_color_channels_(3)
     , sdmp_factor_(1)
     , using_cpvs_(false)
@@ -106,31 +117,11 @@ Preprocessor::Preprocessor()
     , workshop_size_calculated_(false)
     , global_initial_seed_(0)
 {
-    // 检查用户是否已调用 Initializer::init()
-    TR_CHECK(GlobalRegistry::instance().initializer_inited(),
-             ValueError,
-             "Preprocessor constructor called before framework initialization\n"
-             "  You must call INIT_FRAMEWORK() at the beginning of main() before using any framework components\n"
-             "  Example:\n"
-             "    int main() {\n"
-             "        INIT_FRAMEWORK();  // Must be first!\n"
-             "        // ... rest of your code ...\n"
-             "        return 0;\n"
-             "    }");
-
     LOG_DEBUG << "Preprocessor constructed";
 }
 
 Preprocessor::~Preprocessor() {
-    // 清理GlobalRegistry中的所有EngineBuffer指针（16个元素全部设为nullptr）
-    auto& registry = GlobalRegistry::instance();
-    for (size_t i = 0; i < 16; ++i) {
-        registry.set_engine_buffer_ptr(i, nullptr);
-    }
-    LOG_DEBUG << "All EngineBuffer pointers cleared from GlobalRegistry";
-
-    // engine_buffer_instances_会自动析构，触发EngineBuffer析构
-    LOG_INFO << "Preprocessor destructor completed";
+    // transfer_station_instances_ 自动析构；alterable_transfer_station_ptrs_ 由 GlobalRegistry 管理
 }
 
 // =============================================================================
@@ -179,22 +170,22 @@ void Preprocessor::configure(const Config& config) {
 #endif  // #ifdef TEST_WITHOUT_PW
 }
 
-void Preprocessor::set_train_transforms(const std::vector<std::unique_ptr<PreprocessOperation>>& train_transforms) {
+void Preprocessor::set_train_transforms([[maybe_unused]] const std::vector<std::unique_ptr<PreprocessOperation>>& train_transforms) {
 #ifndef TEST_WITHOUT_PW
 // 测试模式不需要transform，跳过
 
-    // 检查状态：必须是DeviceConfigured状态
-    if (config_state_ != ConfigState::DeviceConfigured) {
+    // 检查状态：必须是PreprocessorConfigured状态
+    if (config_state_ != ConfigState::PreprocessorConfigured) {
         TR_THROW(ValueError,
                  "set_train_transforms failed: invalid state machine state.\n"
                  "  Current state: " << state_name(config_state_) << "\n"
-                 "  Expected state: DeviceConfigured\n"
+                 "  Expected state: PreprocessorConfigured\n"
                  "  Solution:\n"
                  "    Please complete the following steps in order:\n"
                  "      1. config_dataset()\n"
                  "      2. config_dataloader()\n"
                  "      3. config_preprocessor()\n"
-                 "      4. config_device()");
+                 "      4. commit()");
     }
 
     // 清空旧的transform模板
@@ -224,48 +215,44 @@ void Preprocessor::set_train_transforms(const std::vector<std::unique_ptr<Prepro
     }
 
     // =========================================================================
-    // 处理RandomErasing（在排序之前）
+    // PO链自动融合：提取三个记录类参数，过滤出真实PO
     // =========================================================================
-    // RandomErasing是占位操作，需要从PO链中移除，将p注册到GlobalRegistry
-    float random_erasing_p = 0.0f;  // 默认值：没有RandomErasing时p=0
-    std::vector<std::unique_ptr<PreprocessOperation>> filtered_ops;
+    // RandomHorizontalFlip、RandomErasing、Normalize 都是占位记录类，
+    // 此处统一提取参数，不加入 filtered_ops（即从PO链中移除）
+    bool flip_enabled = false;
+    bool erase_enabled = false;
+    float erase_p = 0.0f;
+    float erase_scale_min = 0.02f;
+    float erase_scale_max = 0.33f;
+    NormMode norm_mode = NormMode::NO_NORM;  // 默认值
 
+    std::vector<std::unique_ptr<PreprocessOperation>> filtered_ops;
     for (auto& op : temp_ops) {
         if (auto* re = dynamic_cast<RandomErasing*>(op.get())) {
-            // 找到RandomErasing，提取p值
-            random_erasing_p = re->get_p();
-            // 不添加到filtered_ops（即从PO链中移除）
+            erase_enabled = true;
+            erase_p = re->get_p();
+            erase_scale_min = re->scale_min();
+            erase_scale_max = re->scale_max();
+        } else if (auto* rhf = dynamic_cast<RandomHorizontalFlip*>(op.get())) {
+            flip_enabled = true;
+        } else if (auto* norm = dynamic_cast<Normalize*>(op.get())) {
+            // 提取 Normalize 的 norm_mode（由 Setup::commit() 自动注入）
+            norm_mode = norm->mode();
         } else {
-            // 保留其他PO
             filtered_ops.push_back(std::move(op));
         }
     }
 
-    // 注册p到GlobalRegistry
-    GlobalRegistry::instance().set_random_erasing_p(random_erasing_p);
+    GlobalRegistry::instance().set_random_erasing_p(erase_p);
 
-    // 验证和重排序transform
-    // 规则1: RandomHorizontalFlip必须移到最后
-    // 规则2: ImageNet的第一个PO必须是Crop/Resize（除非测试模式且是DoNothing）
-
-    std::vector<std::unique_ptr<PreprocessOperation>> non_flip_ops;
-    std::vector<std::unique_ptr<PreprocessOperation>> flip_ops;
-
-    for (auto& op : filtered_ops) {
-        if (Preprocessor::is_random_horizontal_flip(op.get())) {
-            flip_ops.push_back(std::move(op));
-        } else {
-            non_flip_ops.push_back(std::move(op));
-        }
-    }
+    // 如果用户不提供Normalize，norm_mode默认为NO_NORM，FusedNormalization将使用NO_NORM preset
 
     // 验证第一个PO（对于ImageNet）
-    if (!non_flip_ops.empty() && is_imagenet()) {
-        const auto* first_op = non_flip_ops[0].get();
+    if (!filtered_ops.empty() && is_imagenet()) {
+        const auto* first_op = filtered_ops[0].get();
         bool is_do_nothing_op = Preprocessor::is_do_nothing(first_op);
 
         if (pw_test_mode_) {
-            // 测试模式：允许DoNothing作为第一个PO
             if (is_do_nothing_op) {
             } else if (!Preprocessor::is_crop_or_resize_op(first_op)) {
                 TR_THROW(ValueError,
@@ -273,7 +260,6 @@ void Preprocessor::set_train_transforms(const std::vector<std::unique_ptr<Prepro
                          << " Got: " << typeid(*first_op).name());
             }
         } else {
-            // 正常模式：第一个PO必须是Crop/Resize
             if (!Preprocessor::is_crop_or_resize_op(first_op)) {
                 TR_THROW(ValueError,
                          "For ImageNet, first transform must be CenterCrop or Resize. "
@@ -282,18 +268,45 @@ void Preprocessor::set_train_transforms(const std::vector<std::unique_ptr<Prepro
         }
     }
 
-    // 合并：非flip操作在前，flip操作在后
+    // 组装真实PO链（不含记录类）
     train_ops_template_.clear();
-    for (auto& op : non_flip_ops) {
-        train_ops_template_.push_back(std::move(op));
-    }
-    for (auto& op : flip_ops) {
+    for (auto& op : filtered_ops) {
         train_ops_template_.push_back(std::move(op));
     }
 
-    // 设定颜色通道数、输出尺寸和输出stride
+    // =========================================================================
+    // 构造并注入 FusedNormalization 到PO链末尾
+    // =========================================================================
+    NormalizePreset preset = NormalizePreset::NO_NORM;
+    switch (norm_mode) {
+        case NormMode::NO_NORM:  preset = NormalizePreset::NO_NORM;  break;
+        case NormMode::MNIST:    preset = NormalizePreset::MNIST;    break;
+        case NormMode::CIFAR:    preset = NormalizePreset::CIFAR;    break;
+        case NormMode::IMAGENET: preset = NormalizePreset::IMAGENET; break;
+        case NormMode::MLPERF:   preset = NormalizePreset::MLPERF;   break;
+    }
+
+    bool use_amp = false;
+    try {
+        use_amp = GlobalRegistry::instance().using_amp();
+    } catch (const TRException&) {
+    }
+
+    auto fused_norm = std::make_unique<FusedNormalization>(
+        preset,
+        use_amp,
+        flip_enabled,
+        erase_enabled,
+        erase_p,
+        erase_scale_min,
+        erase_scale_max,
+        0
+    );
+    train_ops_template_.push_back(std::move(fused_norm));
+
+    // 设定颜色通道数、输出尺寸和输出stride（包含FusedNormalization）
     int output_size_temp = default_input_width_;
-    int max_intermediate_res_train = 0;  // 注意，这个值与max_resolution不同，是指中间的最大分辨率
+    int max_intermediate_res_train = 0;
     for (auto& op : train_ops_template_) {
         op->set_num_channels(num_color_channels_);
         if (op->is_resize() || op->is_crop()) {
@@ -303,31 +316,39 @@ void Preprocessor::set_train_transforms(const std::vector<std::unique_ptr<Prepro
             output_size_temp = op->inference_output_size(output_size_temp);
             op->set_output_size(output_size_temp);
         }
-        max_intermediate_res_train = std::max(max_intermediate_res_train, output_size_temp);
+
+        // 计算AB区大小时排除FusedNormalization
+        // FusedNormalization的输出是FP32/FP16，存储在S区/C区/TransformStation，不在AB区
+        // AB区只存储中间PO（FusedNormalization之前）的uint8_t输出
+        auto* fused_norm = dynamic_cast<FusedNormalization*>(op.get());
+        if (fused_norm == nullptr) {
+            max_intermediate_res_train = std::max(max_intermediate_res_train, output_size_temp);
+        }
+
         op->calculate_stride();
     }
     int final_train_output_size = output_size_temp;
 
-    // ==================== 验证最终输出尺寸 ====================
+    // 验证最终输出尺寸（仍需检查max_resolution_约束，但FusedNormalization输出不在AB区）
+    // FusedNormalization的输出存储在S区/C区/TransformStation，不影响AB区大小
+    // 此检查确保用户设定的分辨率不超过系统的安全限制
     TR_CHECK(final_train_output_size <= max_resolution_, ValueError,
              "Train transforms final output size (" << final_train_output_size
              << ") exceeds max_resolution (" << max_resolution_ << ").\n"
-             "  This would cause AB region overflow.\n"
+             "  Note: FusedNormalization output is stored in S/C/TransformStation, not AB region.\n"
+             "  However, max_resolution_ is a system-wide safety limit.\n"
              "  Solutions:\n"
              "    1. Increase max_resolution in config_preprocessor()\n"
              "    2. Reduce the output size of your transform operations\n"
              "    3. Check if Pad operation is unexpectedly enlarging the output");
 
     // 更新全局最大中间分辨率
-    int old_max_intermediate = max_intermediate_resolution_;
     max_intermediate_resolution_ = std::max(max_intermediate_res_train, max_intermediate_resolution_);
 
-	train_ops_template_[0]->set_as_first();  // 标记首个PO
+    train_ops_template_[0]->set_as_first();
 
-    // ==================== 检测是否包含RandomHorizontalFlip（复用排序时的检测结果）====================
-    bool train_with_rhf = !flip_ops.empty();  // 排序时已经检测过
-
-    GlobalRegistry::instance().set_train_with_rhf(train_with_rhf);
+    // 设置 train_with_rhf（基于融合后的 flip_enabled，而非 flip_ops 是否为空）
+    GlobalRegistry::instance().set_train_with_rhf(flip_enabled);
 
     // 标记train transforms已设置
     train_transforms_set_ = true;
@@ -343,24 +364,24 @@ void Preprocessor::set_train_transforms(const std::vector<std::unique_ptr<Prepro
 #endif  // #ifndef TEST_WITHOUT_PW
 }
 
-void Preprocessor::set_val_transforms(const std::vector<std::unique_ptr<PreprocessOperation>>& val_transforms) {
+void Preprocessor::set_val_transforms([[maybe_unused]] const std::vector<std::unique_ptr<PreprocessOperation>>& val_transforms) {
 #ifndef TEST_WITHOUT_PW
 // 测试模式不需要transform，跳过
 
-    // 检查状态：必须是DeviceConfigured或TransformsSet状态
+    // 检查状态：必须是PreprocessorConfigured或TransformsSet状态
     // （因为set_train_transforms可能已经调用过了）
-    if (config_state_ != ConfigState::DeviceConfigured &&
+    if (config_state_ != ConfigState::PreprocessorConfigured &&
         config_state_ != ConfigState::TransformsSet) {
         TR_THROW(ValueError,
                  "set_val_transforms failed: invalid state machine state.\n"
                  "  Current state: " << state_name(config_state_) << "\n"
-                 "  Expected state: DeviceConfigured or TransformsSet\n"
+                 "  Expected state: PreprocessorConfigured or TransformsSet\n"
                  "  Solution:\n"
                  "    Please complete the following steps in order:\n"
                  "      1. config_dataset()\n"
                  "      2. config_dataloader()\n"
                  "      3. config_preprocessor()\n"
-                 "      4. config_device()");
+                 "      4. commit()");
     }
 
     // 清空旧的transform模板
@@ -390,10 +411,15 @@ void Preprocessor::set_val_transforms(const std::vector<std::unique_ptr<Preproce
     }
 
     // =========================================================================
-    // 检查RandomErasing（验证集不允许）
+    // PO链自动融合：提取记录类参数，验证集强制禁用RandomErasing
     // =========================================================================
-    // RandomErasing是训练专用占位操作，验证集不允许使用
-    for (const auto& op : temp_ops) {
+    // RandomHorizontalFlip、Normalize 是占位记录类（参数会被提取）
+    // RandomErasing 在验证集中明确禁止
+    bool val_flip_enabled = false;
+    NormMode val_norm_mode = NormMode::NO_NORM;
+
+    std::vector<std::unique_ptr<PreprocessOperation>> filtered_ops;
+    for (auto& op : temp_ops) {
         if (auto* re = dynamic_cast<RandomErasing*>(op.get())) {
             TR_THROW(ValueError,
                      "RandomErasing is NOT allowed in validation transforms.\n"
@@ -402,28 +428,22 @@ void Preprocessor::set_val_transforms(const std::vector<std::unique_ptr<Preproce
                      "Solution:\n"
                      "  Remove RandomErasing from validation transforms.\n"
                      "  RandomErasing should only be used in set_train_transforms().");
-        }
-    }
-
-    // 验证和重排序transform（规则同训练集）
-    std::vector<std::unique_ptr<PreprocessOperation>> non_flip_ops;
-    std::vector<std::unique_ptr<PreprocessOperation>> flip_ops;
-
-    for (auto& op : temp_ops) {
-        if (Preprocessor::is_random_horizontal_flip(op.get())) {
-            flip_ops.push_back(std::move(op));
+        } else if (auto* rhf = dynamic_cast<RandomHorizontalFlip*>(op.get())) {
+            val_flip_enabled = true;
+        } else if (auto* norm = dynamic_cast<Normalize*>(op.get())) {
+            // 提取 Normalize 的 norm_mode（由 Setup::commit() 自动注入）
+            val_norm_mode = norm->mode();
         } else {
-            non_flip_ops.push_back(std::move(op));
+            filtered_ops.push_back(std::move(op));
         }
     }
 
     // 验证第一个PO（对于ImageNet）
-    if (!non_flip_ops.empty() && is_imagenet()) {
-        const auto* first_op = non_flip_ops[0].get();
+    if (!filtered_ops.empty() && is_imagenet()) {
+        const auto* first_op = filtered_ops[0].get();
         bool is_do_nothing_op = Preprocessor::is_do_nothing(first_op);
 
         if (pw_test_mode_) {
-            // 测试模式：允许DoNothing作为第一个PO
             if (is_do_nothing_op) {
             } else if (!Preprocessor::is_crop_or_resize_op(first_op)) {
                 TR_THROW(ValueError,
@@ -431,7 +451,6 @@ void Preprocessor::set_val_transforms(const std::vector<std::unique_ptr<Preproce
                          << "Got: " << typeid(*first_op).name());
             }
         } else {
-            // 正常模式：验证集通常需要CenterCrop或Resize
             if (!Preprocessor::is_crop_or_resize_op(first_op)) {
                 TR_THROW(ValueError,
                          "For ImageNet validation, first transform must be CenterCrop or Resize. "
@@ -440,18 +459,45 @@ void Preprocessor::set_val_transforms(const std::vector<std::unique_ptr<Preproce
         }
     }
 
-    // 合并：非flip操作在前，flip操作在后
+    // 组装真实PO链（不含记录类）
     val_ops_template_.clear();
-    for (auto& op : non_flip_ops) {
-        val_ops_template_.push_back(std::move(op));
-    }
-    for (auto& op : flip_ops) {
+    for (auto& op : filtered_ops) {
         val_ops_template_.push_back(std::move(op));
     }
 
-    // 设定颜色通道数、输出尺寸和输出stride
+    // =========================================================================
+    // 构造并注入 FusedNormalization 到验证集PO链末尾
+    // =========================================================================
+    NormalizePreset val_preset = NormalizePreset::NO_NORM;
+    switch (val_norm_mode) {
+        case NormMode::NO_NORM:  val_preset = NormalizePreset::NO_NORM;  break;
+        case NormMode::MNIST:    val_preset = NormalizePreset::MNIST;    break;
+        case NormMode::CIFAR:    val_preset = NormalizePreset::CIFAR;    break;
+        case NormMode::IMAGENET: val_preset = NormalizePreset::IMAGENET; break;
+        case NormMode::MLPERF:   val_preset = NormalizePreset::MLPERF;   break;
+    }
+
+    bool val_use_amp = false;
+    try {
+        val_use_amp = GlobalRegistry::instance().using_amp();
+    } catch (const TRException&) {
+    }
+
+    auto val_fused_norm = std::make_unique<FusedNormalization>(
+        val_preset,
+        val_use_amp,
+        val_flip_enabled,
+        false,  // 验证集不启用擦除
+        0.0f,   // 擦除概率无效
+        0.02f,  // 擦除比例无效
+        0.33f,  // 擦除比例无效
+        0
+    );
+    val_ops_template_.push_back(std::move(val_fused_norm));
+
+    // 设定颜色通道数、输出尺寸和输出stride（包含FusedNormalization）
     int output_size_temp = default_input_width_;
-    int max_intermediate_res_val = 0;  // 注意，这个值与max_resolution不同，是指中间的最大分辨率
+    int max_intermediate_res_val = 0;
     for (auto& op : val_ops_template_) {
         op->set_num_channels(num_color_channels_);
         if (op->is_resize() || op->is_crop()) {
@@ -461,32 +507,39 @@ void Preprocessor::set_val_transforms(const std::vector<std::unique_ptr<Preproce
             output_size_temp = op->inference_output_size(output_size_temp);
             op->set_output_size(output_size_temp);
         }
-        max_intermediate_res_val = std::max(max_intermediate_res_val, output_size_temp);
+
+        // 计算AB区大小时排除FusedNormalization
+        // FusedNormalization的输出是FP32/FP16，存储在S区/C区/TransformStation，不在AB区
+        // AB区只存储中间PO（FusedNormalization之前）的uint8_t输出
+        auto* fused_norm = dynamic_cast<FusedNormalization*>(op.get());
+        if (fused_norm == nullptr) {
+            max_intermediate_res_val = std::max(max_intermediate_res_val, output_size_temp);
+        }
+
         op->calculate_stride();
     }
     int final_val_output_size = output_size_temp;
 
-    // ==================== 验证最终输出尺寸 ====================
+    // 验证最终输出尺寸（仍需检查max_resolution_约束，但FusedNormalization输出不在AB区）
+    // FusedNormalization的输出存储在S区/C区/TransformStation，不影响AB区大小
+    // 此检查确保用户设定的分辨率不超过系统的安全限制
     TR_CHECK(final_val_output_size <= max_resolution_, ValueError,
              "Validation transforms final output size (" << final_val_output_size
              << ") exceeds max_resolution (" << max_resolution_ << ").\n"
-             "  This would cause AB region overflow.\n"
+             "  Note: FusedNormalization output is stored in S/C/TransformStation, not AB region.\n"
+             "  However, max_resolution_ is a system-wide safety limit.\n"
              "  Solutions:\n"
              "    1. Increase max_resolution in config_preprocessor()\n"
              "    2. Reduce the output size of your transform operations\n"
              "    3. Check if Pad operation is unexpectedly enlarging the output");
 
     // 更新全局最大中间分辨率
-    int old_max_intermediate = max_intermediate_resolution_;
     max_intermediate_resolution_ = std::max(max_intermediate_res_val, max_intermediate_resolution_);
 
-	val_ops_template_[0]->set_as_first();  // 标记首个PO
+    val_ops_template_[0]->set_as_first();
 
-    // ==================== 检测是否包含RandomHorizontalFlip（复用排序时的检测结果）====================
-    bool val_with_rhf = !flip_ops.empty();  // 排序时已经检测过
-    if (val_with_rhf) {
-    }
-    GlobalRegistry::instance().set_val_with_rhf(val_with_rhf);
+    // 设置 val_with_rhf（基于融合后的 val_flip_enabled）
+    GlobalRegistry::instance().set_val_with_rhf(val_flip_enabled);
 
     // ==================== CPVS互斥检查 ====================
     if (using_cpvs_) {
@@ -549,14 +602,14 @@ void Preprocessor::run(DataLoader& loader) {
     buffer_count_ = 0;
 
 #ifndef TEST_WITHOUT_PW
-// 测试模式没有PW和EngineBuffer，不需要同步
+// 测试模式没有PW和TransferStation，不需要同步
 
     // 【方案A 关键修复1】重置所有同步状态
     workers_finished_.store(0, std::memory_order_seq_cst);
     current_buffer_seq_.store(0, std::memory_order_seq_cst);
     stop_flag_.store(false, std::memory_order_seq_cst);
 
-    // 【Core Dump修复】重置EngineBuffer同步屏障
+    // 【Core Dump修复】重置TransferStation同步屏障
     engine_reset_barrier_.store(0, std::memory_order_seq_cst);
 
     // 【方案A 关键修复2】添加内存屏障，确保所有线程看到一致的状态
@@ -797,7 +850,7 @@ void Preprocessor::apply_random_resized_crop(int worker_id,
     // ==================== Step 1: 计算裁剪参数 ====================
     const float area = static_cast<float>(width * height);
 
-    int crop_x, crop_y, crop_w, crop_h;
+    int crop_x = 0, crop_y = 0, crop_w = 0, crop_h = 0;  // 初始化为默认值
     bool success = false;
 
     for (int attempt = 0; attempt < MAX_ATTEMPTS; ++attempt) {
@@ -884,6 +937,40 @@ void Preprocessor::reset() {
     LOG_DEBUG << "Preprocessor stats and state machine reset";
 }
 
+int Preprocessor::steps_per_epoch() const {
+    TR_CHECK(steps_per_epoch_ > 0, ValueError,
+             "steps_per_epoch has not been calculated or is invalid. "
+             "Make sure Setup::commit() has been called and completed successfully.");
+    return steps_per_epoch_;
+}
+
+void Preprocessor::calculate_steps_per_epoch() {
+    const auto& reg = GlobalRegistry::instance();
+
+    // 从DataLoader获取训练集样本总数
+    TR_CHECK(current_dataloader_ != nullptr, ValueError,
+             "DataLoader not initialized. Cannot calculate steps_per_epoch.");
+
+    const size_t total_train_samples = current_dataloader_->num_train_samples();
+    TR_CHECK(total_train_samples > 0, ValueError,
+             "Training set has zero samples. Cannot calculate steps_per_epoch.");
+
+    // 计算全局batch size和每个epoch的步数
+    const int world_size = reg.world_size();
+    const int local_batch_size = reg.get_local_batch_size();
+    const int global_batch_size = world_size * local_batch_size;
+
+    TR_CHECK(global_batch_size > 0, ValueError,
+             "Global batch size must be positive. Got: " << global_batch_size);
+
+    // 计算每个epoch的步数（向上取整）
+    steps_per_epoch_ = static_cast<int>((total_train_samples + global_batch_size - 1) / global_batch_size);
+
+    LOG_INFO << "Calculated steps_per_epoch: " << steps_per_epoch_
+             << " (total_samples: " << total_train_samples
+             << ", global_batch_size: " << global_batch_size << ")";
+}
+
 // =============================================================================
 // Step 1.2：线程持久化实现
 // =============================================================================
@@ -944,7 +1031,7 @@ void Preprocessor::wait_workers_complete_buffer(bool wait_forever) {
     // 等待所有worker完成当前buffer
     int expected = config_.num_workers;
     auto start = std::chrono::steady_clock::now();
-    const auto TIMEOUT = std::chrono::seconds(20);  // 20秒超时
+    const auto TIMEOUT = std::chrono::seconds(36000);  // 36000秒超时
 
     LOG_DEBUG << "[PREPROC] wait_workers_complete_buffer(): START, expected=" << expected
              << ", wait_forever=" << wait_forever;
@@ -1029,28 +1116,12 @@ static bool decode_jpeg_with_stb(
 void Preprocessor::worker_func_persistent(int worker_id, DataLoader& loader) {
 
 #ifndef TEST_WITHOUT_PW
-// 注意：如果是正常运作，那就需要绑核和PW和EngineBuffer，但如果是无PW的测试，以下就应该跳过
+// 注意：如果是正常运作，那就需要绑核和PW和TransferStation，但如果是无PW的测试，以下就应该跳过
 
     // ==================== Step 0: CPU绑核（GPU_CLOUD + auto_binding）====================
 #if defined(TR_SCENE_GPU_CLOUD)
     if (auto_cpu_binding_ && !selected_gpu_ids_.empty()) {
-        const auto& binding_map = GlobalRegistry::instance().cpu_binding_map();
-
-        TR_CHECK(worker_id >= 0 && worker_id < static_cast<int>(binding_map.size()),
-                 ValueError, "worker_id out of range: " << worker_id);
-
-        int target_cpu = binding_map[worker_id];
-
-        cpu_set_t cpuset;
-        CPU_ZERO(&cpuset);
-        CPU_SET(target_cpu, &cpuset);
-
-        int ret = pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
-        TR_CHECK(ret == 0, DeviceError,
-                 "pthread_setaffinity_np failed for worker " << worker_id
-                 << " -> CPU " << target_cpu << ": " << strerror(errno));
-
-        LOG_DEBUG << "PW[" << worker_id << "] -> CPU[" << target_cpu << "]";
+        bind_worker_to_cpu(worker_id);
     }
 #endif
 
@@ -1110,14 +1181,14 @@ void Preprocessor::worker_func_persistent(int worker_id, DataLoader& loader) {
             pw_config.max_s_samples = max_s_samples_;
             pw_config.max_c_samples = max_c_samples_;
 
-            // EngineBuffer指针（V3.14.0 - 跨步分配：worker_id % world_size）
-            // 对应关系：PW ID % world_size = EngineBuffer ID
-            if (!engine_buffer_instances_.empty() && pw_config.engine_id < static_cast<int>(engine_buffer_instances_.size())) {
-                pw_config.engine_buffer = engine_buffer_instances_[pw_config.engine_id].get();
-                LOG_DEBUG << "[Worker " << worker_id << "] Assigned to EngineBuffer " << pw_config.engine_id;
+            // TransferStation指针（V3.14.0 - 跨步分配：worker_id % world_size）
+            // 对应关系：PW ID % world_size = TransferStation ID
+            if (!transfer_station_instances_.empty() && pw_config.engine_id < static_cast<int>(transfer_station_instances_.size())) {
+                pw_config.transfer_station = transfer_station_instances_[pw_config.engine_id].get();
+                LOG_DEBUG << "[Worker " << worker_id << "] Assigned to TransferStation " << pw_config.engine_id;
             } else {
-                pw_config.engine_buffer = nullptr;
-                LOG_WARN << "[Worker " << worker_id << "] EngineBuffer not available, set to NULL";
+                pw_config.transfer_station = nullptr;
+                LOG_WARN << "[Worker " << worker_id << "] TransferStation not available, set to NULL";
             }
 
             LOG_DEBUG << "[Worker " << worker_id << "] pw_config.test_mode = "
@@ -1134,6 +1205,20 @@ void Preprocessor::worker_func_persistent(int worker_id, DataLoader& loader) {
             );
 
             LOG_DEBUG << "[Worker " << worker_id << "] PW instance created successfully";
+#if defined(TR_SCENE_GPU_CLOUD)
+            if (auto_cpu_binding_ && !selected_gpu_ids_.empty()) {
+                int rank = worker_id % world_size_;
+                int numa_node = GlobalRegistry::instance().staging_memory_numa_node(rank);
+                int target_cpu = GlobalRegistry::instance().cpu_binding_map()[worker_id];
+                auto tid = std::this_thread::get_id();
+                std::cout << "[StagingDebug] PW created: "
+                               << "worker_id=" << worker_id << ", "
+                               << "tid=" << tid << ", "
+                               << "RANK=" << rank << ", "
+                               << "NUMA=" << numa_node << ", "
+                               << "CPU=" << target_cpu << "\n";
+            }
+#endif
         }
     }
 
@@ -1144,12 +1229,12 @@ void Preprocessor::worker_func_persistent(int worker_id, DataLoader& loader) {
 		}
 	}
 
-    // ==================== EngineBuffer更新 ====================
-    // 只有每个Engine的第一个PW（worker_id < world_size_）负责更新对应的EngineBuffer
+    // ==================== TransferStation更新 ====================
+    // 只有每个Engine的第一个PW（worker_id < world_size_）负责更新对应的TransferStation
     if (worker_id < world_size_) {
         int engine_id = worker_id % world_size_;  // engine_id = worker_id % world_size_
-        if (engine_buffer_instances_[engine_id]) {
-            engine_buffer_instances_[engine_id]->reset_and_update();
+        if (transfer_station_instances_[engine_id]) {
+            transfer_station_instances_[engine_id]->reset_and_update();
         }
         // 【Core Dump修复1】Leader完成重置后签到
         engine_reset_barrier_.fetch_add(1, std::memory_order_acq_rel);
@@ -1218,7 +1303,7 @@ void Preprocessor::worker_func_persistent(int worker_id, DataLoader& loader) {
         if (stop_flag_.load(std::memory_order_acquire)) {  // 得到最终退出信号
 #ifndef TEST_WITHOUT_PW
 			if (pw_instances_[worker_id]) {
-				// 让PW向对应的EngineBuffer表明已无更多样本
+				// 让PW向对应的TransferStation表明已无更多样本
 				pw_instances_[worker_id]->no_more_samples();
 			}
 #endif  // #ifndef TEST_WITHOUT_PW
@@ -1323,13 +1408,13 @@ void Preprocessor::worker_func_persistent(int worker_id, DataLoader& loader) {
 								// STB解码成功
 								width = stb_width;
 								height = stb_height;
-								int pitch = ((width * 3 + 63) / 64) * 64;  // 64字节对齐
+								int stb_pitch = ((width * 3 + 63) / 64) * 64;  // 64字节对齐
 								first_byte = static_cast<int>(stb_decode_buffer[0]);
 
 								// ✅ RandomResizedCrop（如果启用）
 								if (config_.apply_crop) {
 									apply_random_resized_crop(worker_id, stb_decode_buffer,
-															 width, height, pitch);
+															 width, height, stb_pitch);
 								}
 							} else {
 								// STB备用解码也失败
@@ -1350,13 +1435,13 @@ void Preprocessor::worker_func_persistent(int worker_id, DataLoader& loader) {
 												   stb_decode_buffer, stb_buffer_size,
 												   stb_width, stb_height)) {
 							// STB解码成功
-							int pitch = ((stb_width * 3 + 63) / 64) * 64;  // 64字节对齐
+							int stb_pitch2 = ((stb_width * 3 + 63) / 64) * 64;  // 64字节对齐
 							first_byte = static_cast<int>(stb_decode_buffer[0]);
 
 							// ✅ RandomResizedCrop（如果启用）
 							if (config_.apply_crop) {
 								apply_random_resized_crop(worker_id, stb_decode_buffer,
-														 stb_width, stb_height, pitch);
+														 stb_width, stb_height, stb_pitch2);
 							}
 						} else {
 							// STB备用解码也失败
@@ -1454,7 +1539,7 @@ namespace {
     }
 
     // 辅助函数：判断是否使用DTS格式
-    bool is_dts_format(DatasetType type, bool dts_format) {
+    bool is_dts_format([[maybe_unused]] DatasetType type, bool dts_format) {
         // ImageNet支持DTS和RAW
         // MNIST/CIFAR支持DTS和RAW
         return dts_format;
@@ -1599,29 +1684,29 @@ bool Preprocessor::is_imagenet() const {
     return dataset_type_ == DatasetType::imagenet;
 }
 
-void Preprocessor::wait_all_engine_buffers_consumed() {
+void Preprocessor::wait_all_transfer_stations_consumed() {
 #ifndef TEST_WITHOUT_PW
-// 测试的情况下没有PW和EngineBuffer，因此此方法应该跳过
+// 测试的情况下没有PW和TransferStation，因此此方法应该跳过
 
-    // 等待所有EngineBuffer的两个buffer都可写（深度学习引擎读取完毕）
+    // 等待所有TransferStation的两个buffer都可写（深度学习引擎读取完毕）
     // 永久等待，直到深度学习引擎消费完所有数据
     // 检查间隔1ms，在快速机器上分秒必争
-    LOG_DEBUG << "Waiting for all EngineBuffers to be consumed by deep learning engine...";
+    LOG_DEBUG << "Waiting for all TransferStations to be consumed by deep learning engine...";
 
     const auto CHECK_INTERVAL = std::chrono::milliseconds(1);  // 1ms检查间隔
 
     while (true) {
-        // 检查所有EngineBuffer的两个buffer是否都可写
+        // 检查所有TransferStation的两个buffer是否都可写
         bool all_consumed = true;
-        for (size_t i = 0; i < engine_buffer_instances_.size(); ++i) {
-            if (!engine_buffer_instances_[i]->both_buffers_writeable()) {
+        for (size_t i = 0; i < transfer_station_instances_.size(); ++i) {
+            if (!transfer_station_instances_[i]->both_buffers_writeable()) {
                 all_consumed = false;
                 break;
             }
         }
 
         if (all_consumed) {
-            LOG_DEBUG << "All EngineBuffers consumed, ready to end phase";
+            LOG_DEBUG << "All TransferStations consumed, ready to end phase";
             return;
         }
 
@@ -1782,18 +1867,22 @@ void Preprocessor::config_dataloader(const std::string& dataset_path,
 // 新配置方法：config_preprocessor
 // =============================================================================
 
-void Preprocessor::config_preprocessor(int world_size,
-                                       int batch_size,
-                                       int max_final_resolution,
-                                       int num_color_channels,
+void Preprocessor::config_preprocessor(int num_color_channels,
                                        int sdmp_factor,
                                        bool using_cpvs,
                                        bool pw_test_mode,
-                                       bool using_progressive_resolution,
                                        int max_intermediate_resolution,
                                        bool drop_last) {
     // 检查状态
     check_state(ConfigState::DataLoaderConfigured, "config_preprocessor");
+
+    // 从 GlobalRegistry 读取 batch_size 和 max_resolution
+    int batch_size = GlobalRegistry::instance().get_local_batch_size();
+    int max_final_resolution = GlobalRegistry::instance().max_sample_resolution();
+    bool using_progressive_resolution = GlobalRegistry::instance().using_progressive_resolution();
+
+    // 从 GlobalRegistry 读取 world_size（由 use_gpu()/use_cpu() 自动设置）
+    world_size_ = GlobalRegistry::instance().world_size();
 
     // ==================== 内存使用警告 ====================
     // 经验公式：sdmp_factor应该小于计算机内存除以187GB
@@ -1805,10 +1894,9 @@ void Preprocessor::config_preprocessor(int world_size,
     //
     global_initial_seed_ = get_default_generator().seed();
     // 保存配置
-    world_size_ = world_size;
     batch_size_ = batch_size;
     max_resolution_ = max_final_resolution;
-    bool user_specified_max_intermediate = (max_intermediate_resolution > 0);
+    [[maybe_unused]] bool user_specified_max_intermediate = (max_intermediate_resolution > 0);
     max_intermediate_resolution_ = (max_intermediate_resolution > 0 ? max_intermediate_resolution : max_final_resolution);
 
     if (dataset_type_ == DatasetType::mnist) {
@@ -1829,9 +1917,11 @@ void Preprocessor::config_preprocessor(int world_size,
     pw_test_mode_ = pw_test_mode;
 
     // 注册到全局注册表（fixed变量，但不包括world_size）
-    // world_size 将在 config_device 中验证后注册
-    GlobalRegistry::instance().set_batch_size(batch_size);
-    GlobalRegistry::instance().set_max_resolution(max_final_resolution);
+    // world_size 已在 commit() 中验证并注册
+    // 注意：batch_size 和 max_resolution 不应该在这里设置
+    // - batch_size 应由用户通过 GLOBAL_SETTING.local_batch_size() 设置
+    // - max_resolution 应由用户通过 GLOBAL_SETTING.train_resolution()/val_resolution() 设置
+    // 这里只从 GlobalRegistry 读取，不再写回
     GlobalRegistry::instance().set_train_crop_output(max_final_resolution);
     GlobalRegistry::instance().set_train_resize_output(max_final_resolution);
     GlobalRegistry::instance().set_val_crop_output(max_final_resolution);
@@ -1841,13 +1931,18 @@ void Preprocessor::config_preprocessor(int world_size,
     GlobalRegistry::instance().set_num_color_channels(num_color_channels_);  // 使用修正后的值
     GlobalRegistry::instance().set_sdmp_factor(sdmp_factor);
     GlobalRegistry::instance().set_using_cpvs(using_cpvs);
-    GlobalRegistry::instance().set_using_progressive_resolution(using_progressive_resolution);
     GlobalRegistry::instance().set_using_drop_last(drop_last);
 
-    // 计算单个样本大小（使用 size_t 避免溢出）
+    // 计算单个样本大小（FusedNormalization输出的FP32/FP16字节数）
     size_t max_res = static_cast<size_t>(max_final_resolution);
-    size_t num_ch = static_cast<size_t>(num_color_channels);
-    sample_size_bytes_ = max_res * max_res * num_ch;
+    size_t num_ch = static_cast<size_t>(num_color_channels_);  // 使用修正后的成员变量
+    bool using_amp = false;
+    try { using_amp = GlobalRegistry::instance().using_amp(); } catch (const TRException&) {}
+    if (using_amp) {
+        sample_size_bytes_ = max_res * max_res * 4 * sizeof(uint16_t);
+    } else {
+        sample_size_bytes_ = max_res * max_res * num_ch * sizeof(float);
+    }
 
     // 计算单个缓冲区大小
     buffer_size_bytes_ = batch_size * sample_size_bytes_;
@@ -1934,8 +2029,10 @@ void Preprocessor::set_deployment_transforms() {
 // =============================================================================
 
 void Preprocessor::config_deployment_mode(int batch_size,
-                                         int max_resolution,
                                          int num_color_channels) {
+    // 从 GlobalRegistry 读取 max_resolution
+    int max_resolution = GlobalRegistry::instance().max_sample_resolution();
+
     // 检查状态
     check_state(ConfigState::Unconfigured, "config_deployment_mode");
 
@@ -1953,11 +2050,19 @@ void Preprocessor::config_deployment_mode(int batch_size,
     sample_loader.configure_memory_pool(256);  // 默认256MB
 
     // 配置Preprocessor（Deployment模式强制参数）
-    world_size_ = 1;
+    // 从 GlobalRegistry 读取 world_size（Deployment模式应该已通过use_cpu()设置为1）
+    world_size_ = GlobalRegistry::instance().world_size();
     batch_size_ = batch_size;
     max_resolution_ = max_resolution;
     num_color_channels_ = num_color_channels;
-    sample_size_bytes_ = max_resolution * max_resolution * num_color_channels;
+    size_t max_res = static_cast<size_t>(max_resolution);
+    bool using_amp = false;
+    try { using_amp = GlobalRegistry::instance().using_amp(); } catch (const TRException&) {}
+    if (using_amp) {
+        sample_size_bytes_ = max_res * max_res * 4 * sizeof(uint16_t);
+    } else {
+        sample_size_bytes_ = max_res * max_res * num_color_channels * sizeof(float);
+    }
     buffer_size_bytes_ = batch_size * sample_size_bytes_;
 
     // Deployment模式：单线程、单worker
@@ -1982,75 +2087,59 @@ void Preprocessor::config_deployment_mode(int batch_size,
 
 void Preprocessor::multi_thread_init() {
 #ifndef TEST_WITHOUT_PW
-// 测试模式不需要PW和EngineBuffer，因此此方法应该跳过
+// 测试模式不需要PW和TransferStation，因此此方法应该跳过
 
     // 创建临时线程池（用于绑核等初始化操作）
     std::vector<std::thread> init_threads;
     init_threads.reserve(num_preproc_workers_);
 
-    // EngineBuffer创建的互斥锁
+    // TransferStation创建的互斥锁
     static std::mutex eb_create_mutex;
 
     // 展开所有worker线程
     for (int i = 0; i < num_preproc_workers_; ++i) {
         init_threads.emplace_back([this, i]() {
-
             // ==================== CPU绑核（GPU_CLOUD + auto_binding）====================
 #if defined(TR_SCENE_GPU_CLOUD)
             if (auto_cpu_binding_ && !selected_gpu_ids_.empty()) {
-                const auto& binding_map = GlobalRegistry::instance().cpu_binding_map();
-
-                TR_CHECK(i >= 0 && i < static_cast<int>(binding_map.size()),
-                         ValueError, "worker_id out of range: " << i);
-
-                int target_cpu = binding_map[i];
-
-                cpu_set_t cpuset;
-                CPU_ZERO(&cpuset);
-                CPU_SET(target_cpu, &cpuset);
-
-                int ret = pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
-                TR_CHECK(ret == 0, DeviceError,
-                         "pthread_setaffinity_np failed for worker " << i
-                         << " -> CPU " << target_cpu << ": " << strerror(errno));
-
-                LOG_DEBUG << "PW[" << i << "] -> CPU[" << target_cpu << "] (init)";
+                bind_worker_to_cpu(i);
             }
 #endif
 
-            // ==================== EngineBuffer创建（仅线程0~world_size-1）====================
+            // ==================== TransferStation创建（仅线程0~world_size-1）====================
             if (i < world_size_) {
                 std::lock_guard<std::mutex> lock(eb_create_mutex);
 
-                // 确保engine_buffer_instances_有足够空间
-                if (engine_buffer_instances_.size() < static_cast<size_t>(world_size_)) {
-                    engine_buffer_instances_.resize(world_size_);
+                // 确保transfer_station_instances_有足够空间
+                if (transfer_station_instances_.size() < static_cast<size_t>(world_size_)) {
+                    transfer_station_instances_.resize(world_size_);
                 }
 
-                // 如果当前EngineBuffer还没创建，就创建它
-                if (!engine_buffer_instances_[i]) {
+                // 如果当前TransferStation还没创建，就创建它
+                if (!transfer_station_instances_[i]) {
 
                     // 计算每个Engine的worker数
                     int num_workers_per_engine = num_preproc_workers_ / world_size_;
 
-                    // 创建EngineBuffer实例（仅正常模式）
-                    engine_buffer_instances_[i] = std::unique_ptr<EngineBuffer>(
-                        new EngineBuffer()  // 构造函数无参数，始终为正常模式
+                    // 创建TransferStation实例（仅正常模式）
+                    transfer_station_instances_[i] = std::unique_ptr<TransferStation>(
+                        new TransferStation()  // 构造函数无参数，始终为正常模式
                     );
 
-                    // 检查sample_size_bytes_是否在合理范围内（224*224*3 = 150528字节）
-                    TR_CHECK(sample_size_bytes_ > 0 && sample_size_bytes_ < 100ULL * 1024ULL * 1024ULL, ValueError,
+                    // 检查sample_size_bytes_是否在合理范围内
+                    // FP32: 224*224*3*4 = 602112字节, FP16: 224*224*4*2 = 401408字节
+                    TR_CHECK(sample_size_bytes_ > 0 && sample_size_bytes_ < 200ULL * 1024ULL * 1024ULL, ValueError,
                              "sample_size_bytes_ is invalid: " << sample_size_bytes_
-                             << " (expected ~150KB for 224x224x3)");
+                             << " (expected ~600KB for FP32 or ~400KB for FP16 224x224x3)");
 
                     // ✅ 注册到GlobalRegistry（在锁保护下，确保第i号EB注册到第i号位置）
                     {
                         auto& registry = GlobalRegistry::instance();
-                        registry.set_engine_buffer_ptr(i, engine_buffer_instances_[i].get());
-                        LOG_DEBUG << "EngineBuffer[" << i << "] registered to GlobalRegistry at index " << i;
+                        registry.set_transfer_station_ptr(i, transfer_station_instances_[i].get());
+                        LOG_DEBUG << "TransferStation[" << i << "] registered to GlobalRegistry at index " << i;
                     }
 
-                    engine_buffer_instances_[i]->configure(
+                    transfer_station_instances_[i]->configure(
                         batch_size_,                      // local_batch_size
                         sample_size_bytes_,               // max_train_sample_bytes
                         sample_size_bytes_,               // max_val_sample_bytes
@@ -2059,13 +2148,14 @@ void Preprocessor::multi_thread_init() {
                     );
 
                     // 更新phase（从GlobalRegistry自动获取配置）
-                    engine_buffer_instances_[i]->reset_and_update();
+                    transfer_station_instances_[i]->reset_and_update();
                 }
             }
 
             LOG_DEBUG << "Initialization thread " << i << " completed";
         });
-    }
+
+        }
 
     // Join所有线程（必须！确保NUMA架构下的正确初始化）
     for (auto& t : init_threads) {
@@ -2074,7 +2164,7 @@ void Preprocessor::multi_thread_init() {
         }
     }
 
-    // 重置EngineBuffer同步屏障（multi_thread_init中的reset_and_update不计入barrier）
+    // 重置TransferStation同步屏障（multi_thread_init中的reset_and_update不计入barrier）
     engine_reset_barrier_.store(0, std::memory_order_release);
 
 #endif  // #ifndef TEST_WITHOUT_PW
@@ -2128,8 +2218,8 @@ void Preprocessor::train() {
         this->run(*current_dataloader_);  // 原有run方法，包含完整预处理
         current_dataloader_->end_epoch();
 
-        // 等待深度学习引擎读取完毕所有EngineBuffer的数据
-        wait_all_engine_buffers_consumed();
+        // 等待深度学习引擎读取完毕所有TransferStation的数据
+        wait_all_transfer_stations_consumed();
 
         // 结束训练阶段
         gr_instance.end_train();
@@ -2159,11 +2249,11 @@ void Preprocessor::train() {
         // ==================== 展开Lazy Train Phase ====================
         // 参照worker_func_persistent的结构，但不涉及DataLoader
 
-        // 【修复竞态条件】步骤1：先完成所有EngineBuffer的reset_and_update()
+        // 【修复竞态条件】步骤1：先完成所有TransferStation的reset_and_update()
         for (int i = 0; i < world_size_; ++i) {
             int engine_id = i;
-            if (engine_buffer_instances_[engine_id]) {
-                engine_buffer_instances_[engine_id]->reset_and_update();
+            if (transfer_station_instances_[engine_id]) {
+                transfer_station_instances_[engine_id]->reset_and_update();
             }
         }
 
@@ -2174,23 +2264,7 @@ void Preprocessor::train() {
                 // ==================== Step 1: CPU绑核（GPU_CLOUD + auto_binding）====================
 #if defined(TR_SCENE_GPU_CLOUD)
                 if (auto_cpu_binding_ && !selected_gpu_ids_.empty()) {
-                    const auto& binding_map = GlobalRegistry::instance().cpu_binding_map();
-
-                    TR_CHECK(i >= 0 && i < static_cast<int>(binding_map.size()),
-                             ValueError, "worker_id out of range: " << i);
-
-                    int target_cpu = binding_map[i];
-
-                    cpu_set_t cpuset;
-                    CPU_ZERO(&cpuset);
-                    CPU_SET(target_cpu, &cpuset);
-
-                    int ret = pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
-                    TR_CHECK(ret == 0, DeviceError,
-                             "pthread_setaffinity_np failed for worker " << i
-                             << " -> CPU " << target_cpu << ": " << strerror(errno));
-
-                    LOG_DEBUG << "[Lazy Train PW[" << i << "] -> CPU[" << target_cpu << "]";
+                    bind_worker_to_cpu(i);
                 }
 #endif
 
@@ -2200,7 +2274,7 @@ void Preprocessor::train() {
                 }
 
                 // ==================== Step 3: 调用PW的work_lazy() ====================
-                // 注意：EngineBuffer已经在所有worker线程启动前完成reset_and_update()
+                // 注意：TransferStation已经在所有worker线程启动前完成reset_and_update()
                 if (pw_instances_[i]) {
                     pw_instances_[i]->work_lazy();
                 }
@@ -2221,8 +2295,8 @@ void Preprocessor::train() {
         // 所以需要手动设置为训练集样本总数
         total_samples_.store(current_dataloader_->num_train_samples(), std::memory_order_relaxed);
 
-        // 等待深度学习引擎读取完毕所有EngineBuffer的数据
-        wait_all_engine_buffers_consumed();
+        // 等待深度学习引擎读取完毕所有TransferStation的数据
+        wait_all_transfer_stations_consumed();
 
         // 结束训练阶段
         gr_instance.end_train();
@@ -2266,8 +2340,8 @@ void Preprocessor::val() {
             current_dataloader_->end_epoch();
         }
 
-        // 等待深度学习引擎读取完毕所有EngineBuffer的数据
-        wait_all_engine_buffers_consumed();
+        // 等待深度学习引擎读取完毕所有TransferStation的数据
+        wait_all_transfer_stations_consumed();
 
         // 结束验证阶段
         gr_instance.end_val();
@@ -2300,11 +2374,11 @@ void Preprocessor::val() {
         // ==================== 展开Lazy Val Phase ====================
         // 参照worker_func_persistent的结构，但不涉及DataLoader
 
-        // 【修复竞态条件】步骤1：先完成所有EngineBuffer的reset_and_update()
+        // 【修复竞态条件】步骤1：先完成所有TransferStation的reset_and_update()
         for (int i = 0; i < world_size_; ++i) {
             int engine_id = i;
-            if (engine_buffer_instances_[engine_id]) {
-                engine_buffer_instances_[engine_id]->reset_and_update();
+            if (transfer_station_instances_[engine_id]) {
+                transfer_station_instances_[engine_id]->reset_and_update();
             }
         }
 
@@ -2315,23 +2389,7 @@ void Preprocessor::val() {
                 // ==================== Step 1: CPU绑核（GPU_CLOUD + auto_binding）====================
 #if defined(TR_SCENE_GPU_CLOUD)
                 if (auto_cpu_binding_ && !selected_gpu_ids_.empty()) {
-                    const auto& binding_map = GlobalRegistry::instance().cpu_binding_map();
-
-                    TR_CHECK(i >= 0 && i < static_cast<int>(binding_map.size()),
-                             ValueError, "worker_id out of range: " << i);
-
-                    int target_cpu = binding_map[i];
-
-                    cpu_set_t cpuset;
-                    CPU_ZERO(&cpuset);
-                    CPU_SET(target_cpu, &cpuset);
-
-                    int ret = pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
-                    TR_CHECK(ret == 0, DeviceError,
-                             "pthread_setaffinity_np failed for worker " << i
-                             << " -> CPU " << target_cpu << ": " << strerror(errno));
-
-                    LOG_DEBUG << "[Lazy Val PW[" << i << "] -> CPU[" << target_cpu << "]";
+                    bind_worker_to_cpu(i);
                 }
 #endif
 
@@ -2341,7 +2399,7 @@ void Preprocessor::val() {
                 }
 
                 // ==================== Step 3: 调用PW的work_lazy() ====================
-                // 注意：EngineBuffer已经在所有worker线程启动前完成reset_and_update()
+                // 注意：TransferStation已经在所有worker线程启动前完成reset_and_update()
                 if (pw_instances_[i]) {
                     pw_instances_[i]->work_lazy();
                 }
@@ -2362,8 +2420,8 @@ void Preprocessor::val() {
         // 所以需要手动设置为验证集样本总数
         total_samples_.store(current_dataloader_->num_val_samples(), std::memory_order_relaxed);
 
-        // 等待深度学习引擎读取完毕所有EngineBuffer的数据
-        wait_all_engine_buffers_consumed();
+        // 等待深度学习引擎读取完毕所有TransferStation的数据
+        wait_all_transfer_stations_consumed();
 
         // 结束验证阶段
         gr_instance.end_val();
@@ -2610,7 +2668,7 @@ void Preprocessor::run_fast_without_processing() {
 // Workshop大小计算（按照PW2.md规范）
 // =============================================================================
 
-void Preprocessor::calculate_workshop_sizes(int ref_resolution_for_ab) {
+void Preprocessor::calculate_workshop_sizes([[maybe_unused]] int ref_resolution_for_ab) {
 #ifndef TEST_WITHOUT_PW
 // 测试模式不需要进行workshop大小计算，因为没有PW
 
@@ -2665,12 +2723,19 @@ void Preprocessor::calculate_workshop_sizes(int ref_resolution_for_ab) {
 
     // ==================== 2. 计算AB区大小 ====================
     // AB区大小需要对齐到4KB页边界（NUMA优化）
+    //
+    // 关键设计说明：
+    // 1. AB区只存储中间PO（FusedNormalization之前）的uint8_t输出
+    // 2. FusedNormalization必定是PO链的最后一个操作
+    // 3. FusedNormalization的输出是FP32/FP16，存储在S区/C区/TransformStation，不在AB区
+    // 4. 因此ref_resolution_for_ab = max_intermediate_resolution_不包含FusedNormalization的输出尺寸
+    // 5. max_intermediate_resolution_在set_train_transforms/set_val_transforms中计算时已排除FusedNormalization
+    //
     // 按照EXP2.md第326-327行的公式
     // 注意：使用static_cast<size_t>确保乘法不会产生符号扩展问题
-    size_t max_res = static_cast<size_t>(max_resolution_);
     size_t num_ch = static_cast<size_t>(num_color_channels_);
-    size_t max_train_output = max_res * max_res * num_ch;
-    size_t max_val_output = max_res * max_res * num_ch;
+    size_t max_train_output = static_cast<size_t>(ref_resolution_for_ab) * ref_resolution_for_ab * num_ch;
+    size_t max_val_output = max_train_output;
     size_t stride = ((ref_resolution_for_ab * num_ch + 63) / 64) * 64;  // 64字节对齐
     size_t ab_size = stride * ref_resolution_for_ab;
     workshop_region_ab_size_ = align_4k(ab_size);  // 对齐到4KB页边界
@@ -2681,12 +2746,44 @@ void Preprocessor::calculate_workshop_sizes(int ref_resolution_for_ab) {
               << ", ab_size=" << ab_size
               << ", workshop_region_ab_size_=" << workshop_region_ab_size_;
 
-    // ==================== 计算S区和C区共用对齐后大小（64字节对齐）====================
+    // ==================== 计算S区和C区共用大小（与FusedNormalization输出完全一致）====================
     // 这个值用于S区和C区，train和val共享
-    size_t aligned_max_output = align_64(max_train_output);  // max_train_output == max_val_output
-    GlobalRegistry::instance().set_aligned_max_output_size(aligned_max_output);
+    //
+    // 关键设计说明：
+    // 1. 使用GlobalRegistry::max_sample_resolution()而非max_resolution_
+    //    - max_resolution_是AB区的uint8_t数据大小（已废弃）
+    //    - max_sample_resolution()是FusedNormalization输出的真正最终分辨率
+    //    - 它会自动对比train_sample_resolution和val_sample_resolution并返回最大值
+    //    - S区/C区存储的是FusedNormalization的输出，必须使用最终的分辨率
+    //
+    // 2. 考虑FusedNormalization的数据类型膨胀和通道填充
+    //    - FP32模式：max_res × max_res × num_channels × sizeof(float)
+    //    - FP16/AMP模式：max_res × max_res × 4 × sizeof(uint16_t)（固定4通道padding）
+    //    - 这与FusedNormalization::calculate_stride()的计算完全一致
+    //
+    // 3. 紧凑布局，无需per-sample padding
+    //    - FusedNormalization的calculate_stride()已保证紧凑布局
+    //    - output_stride_ == compact_output_stride_，不存在SIMD对齐需求
+    //    - FP32/FP16的stride在常见尺寸下天然64字节对齐（如224×12=2688=64×42）
+    //    - 额外的对齐操作会造成S区/C区容量计算与实际输出大小不匹配
 
-    LOG_DEBUG << "Registered aligned_max_output_size to GlobalRegistry: " << aligned_max_output << " bytes";
+    auto& registry = GlobalRegistry::instance();
+    int max_res = registry.max_sample_resolution();  // 自动对比train和val分辨率的最大值
+    bool using_amp = registry.using_amp();
+
+    size_t max_output_per_sample;
+    if (using_amp) {
+        // FP16 AMP模式：固定4通道，每个元素2字节
+        max_output_per_sample = static_cast<size_t>(max_res) * max_res * 4 * sizeof(uint16_t);
+    } else {
+        // FP32模式：原始通道数，每个元素4字节（复用前面定义的num_ch）
+        max_output_per_sample = static_cast<size_t>(max_res) * max_res * num_ch * sizeof(float);
+    }
+
+    registry.set_aligned_max_output_size(max_output_per_sample);
+
+    LOG_DEBUG << "Registered aligned_max_output_size to GlobalRegistry: " << max_output_per_sample << " bytes"
+              << " (max_res=" << max_res << ", channels=" << num_ch << ", AMP=" << using_amp << ")";
 
     // ==================== 3. 计算T区大小 ====================
     // T区默认为0，需要根据PO的require_temp()决定
@@ -2720,16 +2817,15 @@ void Preprocessor::calculate_workshop_sizes(int ref_resolution_for_ab) {
 
     // 只有启用SDMP时才分配S区内存
     if (sdmp_factor_ > 1) {
-        // S区大小计算：使用已注册的aligned_max_output（64字节对齐）
-        // 按照EXP2.md第364-368行的公式
-        workshop_region_s_size_ = max_s_samples_ * aligned_max_output;
+        // S区大小计算：使用FusedNormalization输出的紧凑字节数（无per-sample padding）
+        workshop_region_s_size_ = max_s_samples_ * max_output_per_sample;
         workshop_region_s_size_ = align_4k(workshop_region_s_size_);  // 4KB页对齐
         workshop_num_region_s_ = sdmp_factor_ - 1;  // S区个数 = sdmp_factor - 1
 
         LOG_DEBUG << "S区计算: num_train=" << num_train
                   << ", per_engine=" << num_train_per_engine
                   << ", max_s_samples=" << max_s_samples_
-                  << ", aligned_max_output=" << aligned_max_output << " bytes"
+                  << ", sample_bytes=" << max_output_per_sample << " bytes"
                   << ", s_size=" << (workshop_region_s_size_ / (1024.0*1024.0)) << " MB";
     } else {
         workshop_region_s_size_ = 0;
@@ -2738,7 +2834,7 @@ void Preprocessor::calculate_workshop_sizes(int ref_resolution_for_ab) {
 
     // ==================== 5. 计算C区容量和大小 ====================
     // 按照EXP2.md第395-396行的公式
-    // C区需要对单个样本进行64字节对齐，然后对整个C区进行4KB页对齐
+    // C区使用FusedNormalization输出的紧凑字节数（无per-sample padding），然后对整个C区进行4KB页对齐
 
     // 始终计算max_c_samples_（不管是否启用CPVS）
     size_t num_val = current_dataloader_->num_val_samples();
@@ -2747,15 +2843,15 @@ void Preprocessor::calculate_workshop_sizes(int ref_resolution_for_ab) {
 
     // 只有启用CPVS时才分配C区内存
     if (using_cpvs_) {
-        // C区大小计算：使用已注册的aligned_max_output（64字节对齐）
-        // 64字节对齐确保单个样本的访问效率，4KB页对齐确保NUMA性能
-        workshop_region_c_size_ = max_c_samples_ * aligned_max_output;
+        // C区大小计算：使用FusedNormalization输出的紧凑字节数（无per-sample padding）
+        // 4KB页对齐确保NUMA性能
+        workshop_region_c_size_ = max_c_samples_ * max_output_per_sample;
         workshop_region_c_size_ = align_4k(workshop_region_c_size_);  // 4KB页对齐
 
         LOG_DEBUG << "C区计算: num_val=" << num_val
                   << ", per_engine=" << num_val_per_engine
                   << ", max_c_samples=" << max_c_samples_
-                  << ", aligned_max_output=" << aligned_max_output << " bytes"
+                  << ", sample_bytes=" << max_output_per_sample << " bytes"
                   << ", c_size=" << (workshop_region_c_size_ / (1024.0*1024.0)) << " MB";
     } else {
         workshop_region_c_size_ = 0;
@@ -2767,7 +2863,7 @@ void Preprocessor::calculate_workshop_sizes(int ref_resolution_for_ab) {
 // PW管理方法（V4.1）
 // =============================================================================
 
-void Preprocessor::create_pw_instances(bool is_train) {
+void Preprocessor::create_pw_instances([[maybe_unused]] bool is_train) {
 #ifndef TEST_WITHOUT_PW
 // 测试模式跳过此方法，因为不需要PW
 
@@ -2826,12 +2922,12 @@ void Preprocessor::create_pw_instances(bool is_train) {
         pw_config.max_s_samples = max_s_samples_;
         pw_config.max_c_samples = max_c_samples_;
 
-        // EngineBuffer指针（V3.14.0 - 跨步分配：worker_id % world_size）
-        // 对应关系：PW ID % world_size = EngineBuffer ID
-        if (!engine_buffer_instances_.empty() && pw_config.engine_id < static_cast<int>(engine_buffer_instances_.size())) {
-            pw_config.engine_buffer = engine_buffer_instances_[pw_config.engine_id].get();
+        // TransferStation指针（V3.14.0 - 跨步分配：worker_id % world_size）
+        // 对应关系：PW ID % world_size = TransferStation ID
+        if (!transfer_station_instances_.empty() && pw_config.engine_id < static_cast<int>(transfer_station_instances_.size())) {
+            pw_config.transfer_station = transfer_station_instances_[pw_config.engine_id].get();
         } else {
-            pw_config.engine_buffer = nullptr;
+            pw_config.transfer_station = nullptr;
         }
 
         // 创建PW实例（同时传入train_ops和val_ops）
@@ -2862,94 +2958,31 @@ void Preprocessor::destroy_pw_instances() {
 }
 
 // =============================================================================
-// 设备配置方法：config_device()
+// 设备配置方法：cpu_binding()
 // =============================================================================
 
-void Preprocessor::config_device(const std::string& engine_device, bool auto_cpu_binding) {
+void Preprocessor::cpu_binding(bool enable) {
     // 步骤1：检查状态机（必须在PreprocessorConfigured状态）
-    check_state(ConfigState::PreprocessorConfigured, "config_device");
+    check_state(ConfigState::PreprocessorConfigured, "cpu_binding");
 
-    // 步骤2：参数转换和验证
-    std::string device_upper = engine_device;
-    // 转换为大写
-    std::transform(device_upper.begin(), device_upper.end(), device_upper.begin(),
-                   [](unsigned char c) { return std::toupper(c); });
+    // 步骤2：从GlobalRegistry读取GPU配置
+    auto& registry = GlobalRegistry::instance();
+    bool using_gpu = registry.using_gpu();
 
-    // CUDA/MUSA自动转换为GPU
-    if (device_upper == "CUDA" || device_upper == "MUSA") {
-        device_upper = "GPU";
-    }
-
-    TR_CHECK(device_upper == "CPU" || device_upper == "GPU", ValueError,
-             "Invalid engine_device: " << engine_device << ". Expected: CPU, GPU, CUDA, or MUSA");
-
-    engine_device_ = device_upper;
-    auto_cpu_binding_ = auto_cpu_binding;
-
-    // 步骤3：根据编译场景确定行为
-#if !defined(TR_USE_CUDA) && !defined(TR_USE_MUSA)
-    // 场景1：无CUDA/MUSA支持 → 强制CPU
-    if (device_upper == "GPU") {
-        LOG_WARN << "CUDA/MUDA not supported, falling back to CPU (user requested GPU)";
-    }
-    engine_device_ = "CPU";
-    selected_gpu_ids_.clear();
-    auto_cpu_binding_ = false;
-
-#elif defined(TR_USE_MUSA) && !defined(TR_USE_CUDA)
-    // 场景2：仅MUSA支持 → 强定GPU 0
-    if (device_upper == "CPU") {
-        LOG_WARN << "MUSA supported, forcing GPU 0 (user requested CPU)";
-    }
-    engine_device_ = "GPU";
-    selected_gpu_ids_ = {0};
-    auto_cpu_binding_ = false;
-
-#else
-    // 场景3：CUDA支持 → 正常流程
-    if (device_upper == "GPU") {
-        // 探测可见GPU总数
-        int visible_gpu_count = 0;
-        cudaError_t err = cudaGetDeviceCount(&visible_gpu_count);
-        TR_CHECK(err == cudaSuccess, DeviceError,
-                 "cudaGetDeviceCount failed: " << cudaGetErrorString(err));
-
-        if (visible_gpu_count == 0) {
-            LOG_WARN << "No visible GPU detected, falling back to CPU";
-            engine_device_ = "CPU";
-            selected_gpu_ids_.clear();
-            auto_cpu_binding_ = false;
-        } else {
-            // 自动选择所有可见GPU
-            for (int i = 0; i < visible_gpu_count; ++i) {
-                selected_gpu_ids_.push_back(i);
-            }
-        }
+    if (using_gpu) {
+        engine_device_ = "GPU";
+        selected_gpu_ids_ = registry.gpu_ids();
     } else {
-        // CPU模式
+        engine_device_ = "CPU";
         selected_gpu_ids_.clear();
-        auto_cpu_binding_ = false;
-    }
-#endif
-
-    // 步骤4：验证GPU数量与world_size一致
-    int actual_gpu_count = (engine_device_ == "GPU") ? selected_gpu_ids_.size() : 0;
-    if (world_size_ == -1) {
-        // world_size未设置，自动设置为实际GPU数量（CPU模式下默认为1）
-        world_size_ = (actual_gpu_count > 0) ? actual_gpu_count : 1;
-    } else if (world_size_ != actual_gpu_count && actual_gpu_count > 0) {
-        // world_size已设置但不匹配，报错（仅在GPU模式下检查）
-        TR_CHECK(actual_gpu_count == world_size_, ValueError,
-                 "GPU count mismatch: selected " << actual_gpu_count
-                 << " GPUs, but world_size=" << world_size_
-                 << ". Please set world_size=" << actual_gpu_count << " in config_preprocessor(), "
-                 << "or select " << world_size_ << " GPU(s) in config_device()");
     }
 
-    // 步骤5：注册world_size到GlobalRegistry
-    GlobalRegistry::instance().set_world_size(world_size_);
+    auto_cpu_binding_ = enable;
 
-    // 步骤6：如果是GPU模式且auto_cpu_binding，计算绑核策略
+    // 步骤3：从 GlobalRegistry 读取 world_size（由 use_gpu()/use_cpu() 自动设置）
+    world_size_ = GlobalRegistry::instance().world_size();
+
+    // 步骤4：如果是GPU模式且auto_cpu_binding，计算绑核策略
 #if defined(TR_SCENE_GPU_CLOUD)
     if (engine_device_ == "GPU" && auto_cpu_binding_) {
         calculate_cpu_binding_strategy();
@@ -2972,229 +3005,127 @@ void Preprocessor::config_device(const std::string& engine_device, bool auto_cpu
     std::cout << std::endl;
 
     // 步骤8：更新状态机
-    config_state_ = ConfigState::DeviceConfigured;
+    config_state_ = ConfigState::PreprocessorConfigured;
     device_configured_ = true;
-}
-
-void Preprocessor::config_device(const std::string& engine_device,
-                                   const std::vector<int>& gpu_ids,
-                                   bool auto_cpu_binding) {
-    // 步骤1：检查状态机
-    check_state(ConfigState::PreprocessorConfigured, "config_device");
-
-    // 步骤2：参数转换和验证
-    std::string device_upper = engine_device;
-    std::transform(device_upper.begin(), device_upper.end(), device_upper.begin(),
-                   [](unsigned char c) { return std::toupper(c); });
-
-    if (device_upper == "CUDA" || device_upper == "MUSA") {
-        device_upper = "GPU";
-    }
-
-    TR_CHECK(device_upper == "CPU" || device_upper == "GPU", ValueError,
-             "Invalid engine_device: " << engine_device);
-
-    engine_device_ = device_upper;
-    auto_cpu_binding_ = auto_cpu_binding;
-
-#if !defined(TR_USE_CUDA) && !defined(TR_USE_MUSA)
-    // 场景1：无CUDA/MUSA支持 → 强制CPU
-    if (device_upper == "GPU") {
-        LOG_WARN << "CUDA/MUSA not supported, falling back to CPU";
-    }
-    engine_device_ = "CPU";
-    selected_gpu_ids_.clear();
-    auto_cpu_binding_ = false;
-
-#elif defined(TR_USE_MUSA) && !defined(TR_USE_CUDA)
-    // 场景2：仅MUSA支持 → 强定GPU 0
-    if (device_upper == "CPU") {
-        LOG_WARN << "MUSA supported, forcing GPU 0";
-    }
-    engine_device_ = "GPU";
-    selected_gpu_ids_ = {0};
-    auto_cpu_binding_ = false;
-
-#else
-    // 场景3：CUDA支持
-    if (device_upper == "GPU") {
-        // 验证GPU ID列表
-        validate_gpu_ids(gpu_ids);
-        selected_gpu_ids_ = gpu_ids;
-    } else {
-        selected_gpu_ids_.clear();
-        auto_cpu_binding_ = false;
-    }
-#endif
-
-    // 验证GPU数量与world_size一致
-    int actual_gpu_count = (engine_device_ == "GPU") ? selected_gpu_ids_.size() : 0;
-    if (world_size_ == -1) {
-        // world_size未设置，自动设置为实际GPU数量
-        world_size_ = actual_gpu_count;
-    } else if (world_size_ != actual_gpu_count) {
-        // world_size已设置但不匹配，报错
-        TR_CHECK(actual_gpu_count == world_size_, ValueError,
-                 "GPU count mismatch: selected " << actual_gpu_count
-                 << " GPUs, but world_size=" << world_size_);
-    }
-
-    // 注册world_size到GlobalRegistry
-    GlobalRegistry::instance().set_world_size(world_size_);
-
-#if defined(TR_SCENE_GPU_CLOUD)
-    if (engine_device_ == "GPU" && auto_cpu_binding_) {
-        calculate_cpu_binding_strategy();
-    } else {
-        auto_cpu_binding_ = false;
-    }
-#else
-    auto_cpu_binding_ = false;
-#endif
-
-    register_device_config();
-
-    // 打印设备配置信息
-    std::cout << "Device configured: " << engine_device_
-              << ", GPUs=" << (selected_gpu_ids_.empty() ? 0 : selected_gpu_ids_.size());
-#if defined(TR_SCENE_GPU_CLOUD)
-    std::cout << ", Auto CPU Binding: " << (auto_cpu_binding_ ? "True" : "False");
-#endif
-    std::cout << std::endl;
-
-    config_state_ = ConfigState::DeviceConfigured;
-    device_configured_ = true;
-}
-
-void Preprocessor::config_device(const std::string& engine_device,
-                                   const std::string& gpu_id_str,
-                                   bool auto_cpu_binding) {
-    // 步骤1：检查状态机
-    check_state(ConfigState::PreprocessorConfigured, "config_device");
-
-    // 步骤2：解析GPU ID字符串
-    std::vector<int> gpu_ids;
-    if (!gpu_id_str.empty()) {
-        std::stringstream ss(gpu_id_str);
-        std::string segment;
-        std::set<int> unique_ids;
-
-        while (std::getline(ss, segment, ',')) {
-            // 去除空格
-            segment.erase(std::remove_if(segment.begin(), segment.end(), ::isspace),
-                         segment.end());
-
-            if (!segment.empty()) {
-                try {
-                    int id = std::stoi(segment);
-                    if (id >= 0) {
-                        unique_ids.insert(id);
-                    }
-                } catch (...) {
-                    TR_THROW(ValueError, "Invalid GPU ID string: " << gpu_id_str);
-                }
-            }
-        }
-
-        gpu_ids.assign(unique_ids.begin(), unique_ids.end());
-        std::sort(gpu_ids.begin(), gpu_ids.end());
-    }
-
-    // 步骤3：调用vector版本的重载方法
-    config_device(engine_device, gpu_ids, auto_cpu_binding);
 }
 
 // =============================================================================
 // 设备配置辅助方法
 // =============================================================================
 
-#if defined(TR_USE_CUDA)
+// 计算 Staging Buffer Pool 每个block的大小
+// 公式：2 × (align_up(data_raw + 16, 256) + align_up(label_raw + 16, 256))
+// +16 为 XNNPACK SIMD 越界保护，与 MemoryPlan::compute_tensor_layout 一致
+// 注意：此函数在所有 GPU 场景（GPU_CLOUD / PC_CUDA / 嵌入式）下都需要
+static size_t calculate_staging_buffer_size(GlobalRegistry& registry) {
+    int res   = registry.max_sample_resolution();
+    int ch    = registry.num_color_channels();
+    int batch = registry.get_local_batch_size();
+    bool amp  = registry.using_amp();
 
-void Preprocessor::validate_gpu_ids(const std::vector<int>& gpu_ids) {
-    // 探测可见GPU总数
-    int visible_gpu_count = 0;
-    cudaError_t err = cudaGetDeviceCount(&visible_gpu_count);
-    TR_CHECK(err == cudaSuccess, DeviceError,
-             "cudaGetDeviceCount failed: " << cudaGetErrorString(err));
+    size_t channel_bytes = amp ? 8ULL : static_cast<size_t>(ch) * 4ULL;
+    size_t data_raw  = channel_bytes * static_cast<size_t>(res) * res * batch;
+    size_t label_raw = 4ULL * static_cast<size_t>(batch);
 
-    // 验证去重
-    std::set<int> unique_ids(gpu_ids.begin(), gpu_ids.end());
-    TR_CHECK(unique_ids.size() == gpu_ids.size(), ValueError,
-             "Duplicate GPU IDs detected");
+    size_t data_aligned  = utils::align_up_256(data_raw + 16);
+    size_t label_aligned = utils::align_up_256(label_raw + 16);
 
-    // 验证范围
-    for (int gpu_id : gpu_ids) {
-        TR_CHECK(gpu_id >= 0 && gpu_id < visible_gpu_count, ValueError,
-                 "GPU ID out of range: " << gpu_id
-                 << " (visible GPUs: 0-" << (visible_gpu_count - 1) << ")");
-    }
+    size_t total = 2ULL * (data_aligned + label_aligned);
 
-    // 验证2的幂
-    int n_gpus = gpu_ids.size();
-    TR_CHECK(n_gpus > 0 && n_gpus < 16 && ((n_gpus & (n_gpus - 1)) == 0), ValueError,
-             "GPU count must be a power of 2 and < 16, got: " << n_gpus);
-
-    // 验证与world_size一致（如果world_size已设置）
-    if (world_size_ != -1) {
-        TR_CHECK(n_gpus == world_size_, ValueError,
-                 "GPU count (" << n_gpus << ") != world_size (" << world_size_ << ")");
-    }
+    LOG_INFO << "Setup: staging buffer = "
+             << (total / (1024 * 1024)) << " MB per GPU"
+             << " (" << res << "x" << res << "x" << ch
+             << ", batch=" << batch
+             << ", " << (amp ? "AMP" : "FP32") << ")";
+    return total;
 }
-
-#endif  // TR_USE_CUDA
 
 #if defined(TR_SCENE_GPU_CLOUD)
 
-void Preprocessor::calculate_cpu_binding_strategy() {
-    // 创建硬件拓扑探测器
-    hardware_topology_ = std::make_unique<HardwareTopology>();
-
-    int total_workers = num_preproc_workers_;
-    int n_gpus = selected_gpu_ids_.size();
-
-    // 创建CPU绑定规划器
-    CpuBindingPlanner planner(*hardware_topology_);
-
-    // GPU ID → NUMA Node 映射
-    std::map<int, int> gpu_to_node;
-    for (const auto& gpu : hardware_topology_->get_gpus()) {
-        gpu_to_node[gpu.id] = gpu.numa_node;
+// 辅助：通过 libnuma 获取指定 NUMA 节点的所有逻辑 CPU（升序排列）
+static std::vector<int> get_cpus_for_numa_node(int node) {
+#if defined(TR_USE_LIBNUMA)
+    if (numa_available() < 0) {
+        return {};
     }
+    struct bitmask* mask = numa_allocate_cpumask();
+    if (!mask) {
+        return {};
+    }
+    if (numa_node_to_cpus(node, mask) < 0) {
+        numa_free_cpumask(mask);
+        return {};
+    }
+    std::vector<int> cpus;
+    for (unsigned int i = 0; i < mask->size; ++i) {
+        if (numa_bitmask_isbitset(mask, i)) {
+            cpus.push_back(static_cast<int>(i));
+        }
+    }
+    numa_free_cpumask(mask);
+    return cpus;
+#else
+    (void)node;
+    return {};
+#endif
+}
 
-    // 为每个worker计算绑定的CPU核心
+void Preprocessor::calculate_cpu_binding_strategy() {
+    int total_workers = num_preproc_workers_;
+
+    auto& registry = GlobalRegistry::instance();
+    TR_CHECK(registry.has_staging_memory(), RuntimeError,
+             "calculate_cpu_binding_strategy: staging memory not allocated, "
+             "call allocate_staging_memory() first");
+
+    // 获取系统在线 CPU 核心总数
+    long ncpus = sysconf(_SC_NPROCESSORS_ONLN);
+    TR_CHECK(ncpus > 0, RuntimeError,
+             "Failed to detect online CPUs. sysconf returned: " << ncpus);
+
     std::vector<int> binding_map(total_workers);
 
-    // 打印绑核策略表头
-    LOG_DEBUG << "CPU Binding Strategy:";
-    LOG_DEBUG << std::string(75, '-');
+    LOG_DEBUG << "CPU Binding Strategy (simple round-robin across all CPUs):";
+    LOG_DEBUG << std::string(80, '-');
     LOG_DEBUG << std::left << std::setw(10) << "WorkerID"
-              << std::setw(10) << "RealGPU"
-              << std::setw(10) << "NUMA"
               << std::setw(12) << "BindCore"
               << "Note";
 
     for (int w = 0; w < total_workers; ++w) {
-        // 跨步分配GPU
-        int virt_idx = w % n_gpus;
-        int real_gpu = selected_gpu_ids_[virt_idx];
-
-        // 获取GPU的NUMA节点
-        int target_node = gpu_to_node[real_gpu];
-
-        // 分配最佳CPU核心
-        int assigned_core = planner.pick_best_core(target_node);
-        binding_map[w] = assigned_core;
+        int target_cpu = w % static_cast<int>(ncpus);
+        binding_map[w] = target_cpu;
 
         LOG_DEBUG << std::left << std::setw(10) << w
-                  << std::setw(10) << real_gpu
-                  << std::setw(10) << target_node
-                  << std::setw(12) << assigned_core
-                  << "  (GPU " << real_gpu << " Local)";
+                  << std::setw(12) << target_cpu
+                  << "  (CPU " << target_cpu << "/" << ncpus << ")";
     }
-    LOG_DEBUG << std::string(75, '-');
+    LOG_DEBUG << std::string(80, '-');
 
-    // 注册到GlobalRegistry（供worker线程使用）
-    GlobalRegistry::instance().set_cpu_binding_map(binding_map);
+    registry.set_cpu_binding_map(binding_map);
+}
+
+void Preprocessor::bind_worker_to_cpu(int worker_id) {
+    const auto& binding_map = GlobalRegistry::instance().cpu_binding_map();
+
+    TR_CHECK(worker_id >= 0 && worker_id < static_cast<int>(binding_map.size()),
+             ValueError, "worker_id out of range: " << worker_id);
+
+    int target_cpu = binding_map[worker_id];
+    // === 安全守卫：防止无效CPU号 ===
+    TR_CHECK(target_cpu >= 0, RuntimeError,
+             "bind_worker_to_cpu: invalid CPU " << target_cpu
+             << " for worker " << worker_id);
+
+    cpu_set_t cpuset;
+    CPU_ZERO(&cpuset);
+    CPU_SET(target_cpu, &cpuset);
+
+    int ret = pthread_setaffinity_np(pthread_self(), sizeof(cpu_set_t), &cpuset);
+    TR_CHECK(ret == 0, DeviceError,
+             "pthread_setaffinity_np failed for worker " << worker_id
+             << " -> CPU " << target_cpu << ": " << strerror(errno));
+
+    LOG_DEBUG << "PW[" << worker_id << "] -> CPU[" << target_cpu << "]";
 }
 
 #endif  // TR_SCENE_GPU_CLOUD
@@ -3202,9 +3133,7 @@ void Preprocessor::calculate_cpu_binding_strategy() {
 void Preprocessor::register_device_config() {
     auto& registry = GlobalRegistry::instance();
 
-    // 注册基本配置
-    registry.set_using_gpu(engine_device_ == "GPU");
-    registry.set_gpu_ids(selected_gpu_ids_);
+    // 注册CPU绑定配置（GPU配置已在测试代码中通过 GlobalRegistry::use_gpu() 设置）
     registry.set_cpu_binding_enabled(auto_cpu_binding_);
 
     // 注意：CPU绑定映射已在 calculate_cpu_binding_strategy() 中注册
@@ -3252,16 +3181,6 @@ Setup& Setup::dataset(const std::string& name, const std::string& path) {
     return *this;
 }
 
-Setup& Setup::batch_size(int size) {
-    state_->batch_size = size;
-    return *this;
-}
-
-Setup& Setup::max_output_resolution(int res) {
-    state_->max_output_resolution = res;
-    return *this;
-}
-
 Setup& Setup::color_channels(int ch) {
     state_->color_channels = ch;
     return *this;
@@ -3274,28 +3193,6 @@ Setup& Setup::load_workers(int num) {
 
 Setup& Setup::preprocess_workers(int num) {
     state_->num_preproc_workers = num;
-    return *this;
-}
-
-Setup& Setup::gpu_ids(const std::vector<int>& ids) {
-    state_->gpu_ids = ids;
-    return *this;
-}
-
-Setup& Setup::gpu_ids(const std::string& id_str) {
-    state_->gpu_ids.clear();
-
-    std::istringstream iss(id_str);
-    std::string token;
-    while (std::getline(iss, token, ',')) {
-        try {
-            int id = std::stoi(token);
-            state_->gpu_ids.push_back(id);
-        } catch (...) {
-            TR_VALUE_ERROR("Invalid GPU ID string: '" << id_str << "'");
-        }
-    }
-
     return *this;
 }
 
@@ -3346,27 +3243,14 @@ Setup& Setup::drop_last(bool enable) {
     return *this;
 }
 
-Setup& Setup::using_progressive_resolution(bool enable) {
-    state_->using_progressive_resolution = enable;
-    return *this;
-}
-
 Setup& Setup::cpu_binding(bool enable) {
     state_->cpu_binding = enable;
     return *this;
 }
 
-Setup& Setup::normalize(std::array<float, 3> mean_value, std::array<float, 3> stddev_value) {
-    // 将std::array转换为std::vector并存储到State中
-    state_->normalize_mean.assign(mean_value.begin(), mean_value.end());
-    state_->normalize_std.assign(stddev_value.begin(), stddev_value.end());
-    return *this;
-}
-
-Setup& Setup::normalize(std::array<float, 1> mean_value, std::array<float, 1> stddev_value) {
-    // 将std::array转换为std::vector并存储到State中
-    state_->normalize_mean.assign(mean_value.begin(), mean_value.end());
-    state_->normalize_std.assign(stddev_value.begin(), stddev_value.end());
+Setup& Setup::normalization(NormMode mode) {
+    // 保存归一化模式到State中
+    state_->norm_mode = mode;
     return *this;
 }
 
@@ -3388,16 +3272,6 @@ void Setup::commit() {
                        "Please call .dataset() with a valid path.");
     }
 
-    if (state_->batch_size <= 0) {
-        TR_VALUE_ERROR("Invalid batch_size: " << state_->batch_size
-                       << ". Please call .batch_size() with a positive value.");
-    }
-
-    if (state_->max_output_resolution <= 0) {
-        TR_VALUE_ERROR("Invalid max output resolution: " << state_->max_output_resolution
-                       << ". Please call .max_output_resolution() with a positive value.");
-    }
-
     if (state_->color_channels != 1 && state_->color_channels != 3) {
         TR_VALUE_ERROR("Invalid color channels: " << state_->color_channels
                        << ". Please call .color_channels() with 1 or 3.");
@@ -3413,14 +3287,34 @@ void Setup::commit() {
                        << ". Please call .num_preproc_workers() with a positive value.");
     }
 
-    // 从 GlobalRegistry 读取 device 配置（INIT_FRAMEWORK 已设置）
+    // 从 GlobalRegistry 读取 device 配置
     auto& registry = GlobalRegistry::instance();
-    std::string device_type = registry.using_gpu() ? "GPU" : "CPU";
 
-    // 按 Preprocessor 状态机顺序应用配置
+    // 尝试读取设备类型，如果 fixed_using_gpu 尚未设置，则设置默认值（CPU模式）
+    // 这样可以支持不需要显式调用 GLOBAL_SETTING.use_gpu()/use_cpu() 的场景
+    bool is_gpu_mode = false;
+    try {
+        is_gpu_mode = registry.using_gpu();
+    } catch (const TRException&) {
+        // fixed_using_gpu 尚未设置，设置为 CPU 模式（默认值）
+        registry.use_cpu();
+        is_gpu_mode = false;
+    }
+
+    std::string device_type = is_gpu_mode ? "GPU" : "CPU";
+
+    // 检查 preprocess_workers 是否为 world_size 的整数倍
+    int ws = registry.world_size();
+    if (ws > 0 && state_->num_preproc_workers % ws != 0) {
+        TR_VALUE_ERROR("Number of preprocess workers (" << state_->num_preproc_workers
+                       << ") must be a multiple of world_size (" << ws << "). "
+                       << "Got: " << state_->num_preproc_workers % ws << " remainder. "
+                       << "Please adjust .preprocess_workers() to be divisible by the number of GPUs.");
+    }
+
     auto& prep = Preprocessor::instance();
 
-    // Step 1: Dataset - 直接传递字符串
+    // Step 1: Dataset
     prep.config_dataset(state_->dataset_name, state_->using_dts_format, state_->dts_compression_level);
 
     // Step 2: DataLoader
@@ -3438,14 +3332,10 @@ void Setup::commit() {
     // Step 3: Preprocessor
     {
         prep.config_preprocessor(
-            -1,
-            state_->batch_size,
-            state_->max_output_resolution,
             state_->color_channels,
             state_->sdmp_factor,
             state_->using_cpvs,
             false,
-            state_->using_progressive_resolution,
             state_->max_intermediate_resolution,
             state_->drop_last
         );
@@ -3453,50 +3343,87 @@ void Setup::commit() {
 
     // Step 4: Device
     {
-        auto& registry = GlobalRegistry::instance();
-
-        if (state_->gpu_ids.empty()) {
-            // 用户没有通过Setup指定gpu_ids
-            // 检查GlobalRegistry是否已经设置了gpu_ids
-            const std::vector<int>& registry_gpu_ids = registry.gpu_ids();
-
-            if (registry_gpu_ids.empty()) {
-                // GlobalRegistry也没有设置，使用不指定gpu_ids的版本
-                prep.config_device(device_type, state_->cpu_binding);
-            } else {
-                // GlobalRegistry已设置gpu_ids，从那里下载
-                prep.config_device(device_type, registry_gpu_ids, state_->cpu_binding);
-            }
-        } else {
-            // 用户通过Setup指定了gpu_ids，使用用户指定的
-            prep.config_device(device_type, state_->gpu_ids, state_->cpu_binding);
+        // 从 GlobalRegistry 读取 GPU 配置
+        bool using_gpu = false;
+        try {
+            using_gpu = registry.using_gpu();
+        } catch (const TRException&) {
+            // fixed_using_gpu 尚未设置，使用前面设置的默认值（CPU模式）
+            using_gpu = false;
         }
+
+        if (using_gpu) {
+            prep.engine_device_ = "GPU";
+            prep.selected_gpu_ids_ = registry.gpu_ids();
+        } else {
+            prep.engine_device_ = "CPU";
+            prep.selected_gpu_ids_.clear();
+        }
+        prep.auto_cpu_binding_ = state_->cpu_binding;
+
+        // 从 GlobalRegistry 读取 world_size（由 use_gpu()/use_cpu() 自动设置）
+        prep.world_size_ = registry.world_size();
+
+        // 分配 staging memory（所有场景：GPU / CPU / 嵌入式。GPU场景用 cudaHostAlloc，CPU场景用 malloc）
+        {
+            size_t bytes_per_gpu = calculate_staging_buffer_size(registry);
+            registry.allocate_staging_memory(bytes_per_gpu);
+        }
+
+        // 绑核策略仅 GPU_CLOUD（依赖 libnuma）
+#if defined(TR_SCENE_GPU_CLOUD)
+        if (prep.auto_cpu_binding_) {
+            prep.calculate_cpu_binding_strategy();
+        }
+#else
+        prep.auto_cpu_binding_ = false;
+#endif
+
+        // 注册到GlobalRegistry
+        prep.register_device_config();
     }
 
     // Step 5: Transforms
     {
+        // 检查是否需要自动注入Normalize PO
+        bool need_inject_train_norm = (state_->norm_mode != NormMode::NO_NORM);
+        bool need_inject_val_norm = (state_->norm_mode != NormMode::NO_NORM);
+
+        // 检查PO链中是否已经包含Normalize
+        auto has_normalize_in_chain = [](const std::vector<std::unique_ptr<PreprocessOperation>>& ops) {
+            for (const auto& op : ops) {
+                if (dynamic_cast<Normalize*>(op.get())) {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        bool train_has_normalize = has_normalize_in_chain(state_->train_ops);
+        bool val_has_normalize = has_normalize_in_chain(state_->val_ops);
+
+        // 如果用户通过.normalization()指定了NormMode，但PO链中没有Normalize PO，自动注入
+        if (need_inject_train_norm && !train_has_normalize) {
+            auto norm_po = std::make_unique<Normalize>(state_->norm_mode);
+            state_->train_ops.push_back(std::move(norm_po));
+        }
+
+        if (need_inject_val_norm && !val_has_normalize) {
+            auto norm_po = std::make_unique<Normalize>(state_->norm_mode);
+            state_->val_ops.push_back(std::move(norm_po));
+        }
+
         prep.set_train_transforms(state_->train_ops);
         prep.set_val_transforms(state_->val_ops);
     }
 
-    // Step 6: 归一化参数（注册到GlobalRegistry）
+    // Step 7: 计算每个epoch的步数（必须在所有配置完成后）
     {
-        auto& registry = GlobalRegistry::instance();
-
-        // 判断是否需要归一化（如果用户调用了normalize方法，vector就不为空）
-        bool need_normalization = !state_->normalize_mean.empty() && !state_->normalize_std.empty();
-
-        // 注册归一化标志
-        registry.set_require_normalization(need_normalization);
-
-        // 如果需要归一化，则注册mean和std
-        if (need_normalization) {
-            registry.set_normalize_mean(state_->normalize_mean);
-            registry.set_normalize_std(state_->normalize_std);
-        }
+        prep.calculate_steps_per_epoch();
     }
 
     prep.ensure_inited();
+
     state_->committed = true;
 }
 

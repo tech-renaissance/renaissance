@@ -1,0 +1,315 @@
+/**
+ * @file cpu_kernels.cpp
+ * @brief CPU 算子实现（对应 cuda_kernels.cu 的 CPU 版本，使用 Eigen3 优化）
+ * @version 4.20.1
+ * @date 2026-04-20
+ * @author 技术觉醒团队
+ * @note 依赖项: Eigen3 (高性能向量化计算), algorithm (for std::max)
+ * @note 内存对齐: 输入指针已通过 MemoryArena 保证 256 字节对齐
+ */
+
+#include "renaissance/core/tr_exception.h"
+
+#ifdef TR_USE_EIGEN
+// 跨平台Eigen3头文件路径：Windows下直接用<Eigen/Core>，Linux下用<eigen3/Eigen/Core>
+#if __has_include(<Eigen/Core>)
+#include <Eigen/Core>
+#elif __has_include(<eigen3/Eigen/Core>)
+#include <eigen3/Eigen/Core>
+#else
+#error "TR_USE_EIGEN is defined but Eigen3 headers not found"
+#endif
+#endif
+
+#include <algorithm>
+#include <cmath>
+
+namespace tr {
+
+// ============================================================================
+// 基础算子实现（Eigen3 优化版本）
+// ============================================================================
+
+/**
+ * @brief CPU AXPY 算子: c = alpha * a + b
+ * @param a 输入数组 A（扁平化内存，已对齐）
+ * @param b 输入数组 B（扁平化内存，已对齐）
+ * @param alpha 缩放因子
+ * @param c 输出数组 C（扁平化内存，已对齐）
+ * @param n 元素数量
+ *
+ * @note 输入指针已通过 MemoryArena 保证 256 字节对齐
+ *       Eigen::Map 可以正确处理对齐的内存，提供 SIMD 加速
+ *       对于 NHWC 布局的张量，这里处理的是扁平化后的连续内存
+ */
+void launch_tr_axpy_fp32_kernel_cpu(
+    const float* __restrict a,
+    const float* __restrict b,
+    float alpha,
+    float* __restrict c,
+    int64_t n) {
+
+    TR_CHECK(a != nullptr, ValueError, "launch_tr_axpy_fp32_kernel_cpu: input array 'a' is null");
+    TR_CHECK(b != nullptr, ValueError, "launch_tr_axpy_fp32_kernel_cpu: input array 'b' is null");
+    TR_CHECK(c != nullptr, ValueError, "launch_tr_axpy_fp32_kernel_cpu: output array 'c' is null");
+    TR_CHECK(n > 0, ValueError, "launch_tr_axpy_fp32_kernel_cpu: invalid element count " << n);
+
+#ifdef TR_USE_EIGEN
+    // Eigen3 向量化实现（自动使用 SIMD 指令：AVX2/AVX-512/NEON）
+    // 使用 Eigen::Map 包装现有内存，零拷贝，充分利用 256 字节对齐
+    Eigen::Map<const Eigen::VectorXf> a_vec(a, n);
+    Eigen::Map<const Eigen::VectorXf> b_vec(b, n);
+    Eigen::Map<Eigen::VectorXf> c_vec(c, n);
+
+    // Eigen 会自动使用 SIMD 指令优化这个表达式
+    // 对于现代 CPU，这通常能获得 8-16x 的加速比
+    c_vec = alpha * a_vec + b_vec;
+#else
+    // 回退到简单循环实现（无 Eigen3 时的后备方案）
+    for (int64_t i = 0; i < n; ++i) {
+        c[i] = alpha * a[i] + b[i];
+    }
+#endif
+}
+
+/**
+ * @brief CPU ReLU 前向算子: y = max(0, x)
+ * @param x 输入数组（扁平化内存，已对齐）
+ * @param y 输出数组（扁平化内存，已对齐）
+ * @param n 元素数量
+ */
+void launch_tr_relu_fwd_fp32_kernel_cpu(
+    const float* __restrict x,
+    float* __restrict y,
+    int64_t n) {
+
+    TR_CHECK(x != nullptr, ValueError, "launch_tr_relu_fwd_fp32_kernel_cpu: input array 'x' is null");
+    TR_CHECK(y != nullptr, ValueError, "launch_tr_relu_fwd_fp32_kernel_cpu: input array 'y' is null");
+    TR_CHECK(n > 0, ValueError, "launch_tr_relu_fwd_fp32_kernel_cpu: invalid element count " << n);
+
+#ifdef TR_USE_EIGEN
+    // Eigen3 向量化实现
+    Eigen::Map<const Eigen::VectorXf> x_vec(x, n);
+    Eigen::Map<Eigen::VectorXf> y_vec(y, n);
+
+    // Eigen 会使用 SIMD 优化 max 操作
+    y_vec = x_vec.cwiseMax(0.0f);
+#else
+    // 回退到简单循环
+    for (int64_t i = 0; i < n; ++i) {
+        y[i] = std::max(0.0f, x[i]);
+    }
+#endif
+}
+
+/**
+ * @brief CPU ReLU 前向算子（带mask）: y = max(0, x), mask = (x > 0) ? 1 : 0
+ * @param x 输入数组（扁平化内存，已对齐）
+ * @param y 输出数组（扁平化内存，已对齐）
+ * @param mask 掩码数组（INT8，扁平化内存，已对齐）
+ * @param n 元素数量
+ */
+void launch_tr_relu_fwd_fp32_mask_kernel_cpu(
+    const float* __restrict x,
+    float* __restrict y,
+    int8_t* __restrict mask,
+    int64_t n) {
+
+    TR_CHECK(x != nullptr, ValueError, "launch_tr_relu_fwd_fp32_mask_kernel_cpu: input array 'x' is null");
+    TR_CHECK(y != nullptr, ValueError, "launch_tr_relu_fwd_fp32_mask_kernel_cpu: output array 'y' is null");
+    TR_CHECK(mask != nullptr, ValueError, "launch_tr_relu_fwd_fp32_mask_kernel_cpu: mask array is null");
+    TR_CHECK(n > 0, ValueError, "launch_tr_relu_fwd_fp32_mask_kernel_cpu: invalid element count " << n);
+
+#ifdef TR_USE_EIGEN
+    // Eigen3 向量化实现（y使用SIMD，mask回退到循环）
+    Eigen::Map<const Eigen::VectorXf> x_vec(x, n);
+    Eigen::Map<Eigen::VectorXf> y_vec(y, n);
+    y_vec = x_vec.cwiseMax(0.0f);
+
+    for (int64_t i = 0; i < n; ++i) {
+        mask[i] = (x[i] > 0.0f) ? static_cast<int8_t>(1) : static_cast<int8_t>(0);
+    }
+#else
+    // 回退到简单循环
+    for (int64_t i = 0; i < n; ++i) {
+        float v = x[i];
+        y[i] = std::max(0.0f, v);
+        mask[i] = (v > 0.0f) ? static_cast<int8_t>(1) : static_cast<int8_t>(0);
+    }
+#endif
+}
+
+/**
+ * @brief CPU 填充算子: dst = value
+ * @param dst 目标数组（扁平化内存，已对齐）
+ * @param value 填充值
+ * @param n 元素数量
+ */
+void launch_tr_fill_fp32_kernel_cpu(
+    float* __restrict dst,
+    float value,
+    int64_t n) {
+
+    TR_CHECK(dst != nullptr, ValueError, "launch_tr_fill_fp32_kernel_cpu: destination array is null");
+    TR_CHECK(n > 0, ValueError, "launch_tr_fill_fp32_kernel_cpu: invalid element count " << n);
+
+#ifdef TR_USE_EIGEN
+    // Eigen3 向量化填充
+    Eigen::Map<Eigen::VectorXf> dst_vec(dst, n);
+    dst_vec.setConstant(value);
+#else
+    // 回退到简单循环
+    for (int64_t i = 0; i < n; ++i) {
+        dst[i] = value;
+    }
+#endif
+}
+
+/**
+ * @brief CPU 加法算子: c = a + b
+ * @param a 输入数组 A（扁平化内存，已对齐）
+ * @param b 输入数组 B（扁平化内存，已对齐）
+ * @param c 输出数组 C（扁平化内存，已对齐）
+ * @param n 元素数量
+ */
+void launch_tr_add_fp32_kernel_cpu(
+    const float* __restrict a,
+    const float* __restrict b,
+    float* __restrict c,
+    int64_t n) {
+
+    TR_CHECK(a != nullptr, ValueError, "launch_tr_add_fp32_kernel_cpu: input array 'a' is null");
+    TR_CHECK(b != nullptr, ValueError, "launch_tr_add_fp32_kernel_cpu: input array 'b' is null");
+    TR_CHECK(c != nullptr, ValueError, "launch_tr_add_fp32_kernel_cpu: output array 'c' is null");
+    TR_CHECK(n > 0, ValueError, "launch_tr_add_fp32_kernel_cpu: invalid element count " << n);
+
+#ifdef TR_USE_EIGEN
+    // Eigen3 向量化加法
+    Eigen::Map<const Eigen::VectorXf> a_vec(a, n);
+    Eigen::Map<const Eigen::VectorXf> b_vec(b, n);
+    Eigen::Map<Eigen::VectorXf> c_vec(c, n);
+
+    // Eigen 会自动使用 SIMD 优化加法
+    c_vec = a_vec + b_vec;
+#else
+    // 回退到简单循环
+    for (int64_t i = 0; i < n; ++i) {
+        c[i] = a[i] + b[i];
+    }
+#endif
+}
+
+// ============================================================================
+// ReLU Backward Kernel CPU
+// ============================================================================
+
+void launch_tr_relu_bwd_fp32_kernel_cpu(
+    const float* __restrict dY, const int8_t* __restrict mask,
+    float* __restrict dX, int64_t n) {
+
+    for (int64_t i = 0; i < n; ++i) {
+        dX[i] = mask[i] ? dY[i] : 0.0f;
+    }
+}
+
+// ============================================================================
+// Flatten 算子 CPU 实现
+// ============================================================================
+
+void launch_tr_flatten_fwd_fp32_kernel_cpu(
+    const float* __restrict in, float* __restrict out,
+    int N, int H, int W, int C,
+    size_t stride_n, size_t stride_h, size_t stride_w, size_t stride_c,
+    size_t out_row_stride)
+{
+    for (int n = 0; n < N; ++n) {
+        for (int h = 0; h < H; ++h) {
+            for (int w = 0; w < W; ++w) {
+                for (int c = 0; c < C; ++c) {
+                    size_t in_off  = n * stride_n + h * stride_h + w * stride_w + c * stride_c;
+                    int feature = h * W * C + w * C + c;
+                    out[n * out_row_stride + feature] = in[in_off];
+                }
+            }
+        }
+    }
+}
+
+void launch_tr_flatten_bwd_fp32_kernel_cpu(
+    const float* __restrict in, float* __restrict out,
+    int N, int H, int W, int C,
+    size_t stride_n, size_t stride_h, size_t stride_w, size_t stride_c,
+    size_t in_row_stride)
+{
+    for (int n = 0; n < N; ++n) {
+        for (int h = 0; h < H; ++h) {
+            for (int w = 0; w < W; ++w) {
+                for (int c = 0; c < C; ++c) {
+                    int feature = h * W * C + w * C + c;
+                    size_t in_off  = n * in_row_stride + feature;
+                    size_t out_off = n * stride_n + h * stride_h + w * stride_w + c * stride_c;
+                    out[out_off] = in[in_off];
+                }
+            }
+        }
+    }
+}
+
+// ============================================================================
+// FC Forward CPU Kernel
+// ============================================================================
+
+void launch_tr_fc_fwd_fp32_kernel_cpu(
+    const float* __restrict x,
+    const float* __restrict w,
+    const float* __restrict b,
+    float* __restrict y,
+    int batch, int in_features, int out_features,
+    size_t x_row_stride, size_t w_row_stride, size_t y_row_stride)
+{
+    for (int b_idx = 0; b_idx < batch; ++b_idx) {
+        for (int o = 0; o < out_features; ++o) {
+            const float* x_row = x + b_idx * x_row_stride;
+            const float* w_row = w + o * w_row_stride;
+
+            float sum = 0.0f;
+            for (int i = 0; i < in_features; ++i) {
+                sum += x_row[i] * w_row[i];
+            }
+
+            if (b != nullptr) {
+                sum += b[o];
+            }
+
+            y[b_idx * y_row_stride + o] = sum;
+        }
+    }
+}
+
+// ============================================================================
+// FC Backward CPU Kernel
+// ============================================================================
+
+void launch_tr_fc_bwd_fp32_kernel_cpu(
+    const float* __restrict dy,
+    const float* __restrict w,
+    float* __restrict dx,
+    int batch, int in_features, int out_features,
+    size_t dy_row_stride, size_t w_row_stride, size_t dx_row_stride)
+{
+    for (int b_idx = 0; b_idx < batch; ++b_idx) {
+        for (int i = 0; i < in_features; ++i) {
+            const float* dy_row = dy + b_idx * dy_row_stride;
+
+            float sum = 0.0f;
+            for (int o = 0; o < out_features; ++o) {
+                const float* w_row = w + o * w_row_stride;
+                sum += dy_row[o] * w_row[i];
+            }
+
+            dx[b_idx * dx_row_stride + i] = sum;
+        }
+    }
+}
+
+} // namespace tr

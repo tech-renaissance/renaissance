@@ -8,8 +8,8 @@
  */
 
 #include "renaissance/data/random_grayscale.h"
-#include "renaissance/base/tr_exception.h"
-#include "renaissance/base/logger.h"
+#include "renaissance/core/tr_exception.h"
+#include "renaissance/core/logger.h"
 #include <cmath>
 #include <algorithm>
 #include <cstring>

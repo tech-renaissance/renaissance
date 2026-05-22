@@ -9,7 +9,7 @@
 #pragma once
 
 #include "renaissance/data/preprocess_operation.h"
-#include "renaissance/base/tr_exception.h"
+#include "renaissance/core/tr_exception.h"
 #include <Simd/SimdLib.h>
 
 namespace tr {

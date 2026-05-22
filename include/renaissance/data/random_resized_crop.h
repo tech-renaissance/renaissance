@@ -11,9 +11,10 @@
 #pragma once
 
 #include "renaissance/data/preprocess_operation.h"
-#include "renaissance/base/rng.h"
-#include "renaissance/base/philox.h"
+#include "renaissance/core/rng.h"
+#include "renaissance/core/philox.h"
 #include <Simd/SimdLib.h>
+#include <utility>  // for std::pair
 
 namespace tr {
 
@@ -46,7 +47,7 @@ namespace tr {
 class RandomResizedCrop : public PreprocessOperation {
 public:
     /**
-     * @brief 构造函数
+     * @brief 构造函数（支持分开参数的API）
      * @param output_size 输出尺寸（默认224，通常为224x224）
      * @param scale_min 最小缩放比例（默认0.08，即8%）
      * @param scale_max 最大缩放比例（默认1.0，即100%）
@@ -55,6 +56,13 @@ public:
      * @param output_alignment 输出对齐字节数（默认0=紧凑布局）
      *
      * PyTorch兼容参数：scale=[0.08, 1.0], ratio=[3.0/4.0, 4.0/3.0]
+     *
+     * @note 关于 rng 的架构契约：
+     *   generate_crop_params() 内部直接解引用 rng（调用 next_offset() 和
+     *   random_int()），不做空指针检查。PreprocessWorker 保证实际运行时传入的
+     *   rng 为 &rng_（成员变量，生命周期与 PW 绑定，永不为空）。这是框架层面的
+     *   "架构契约"，调用方（如 test_two_po 等独立测试）若直接构造此对象，必须
+     *   自行保证传入非 nullptr 的 Generator，否则将导致未定义行为（segfault）。
      */
     explicit RandomResizedCrop(
         int output_size = 224,
@@ -62,6 +70,22 @@ public:
         float scale_max = 1.0f,
         float ratio_min = 3.0f / 4.0f,
         float ratio_max = 4.0f / 3.0f,
+        size_t output_alignment = 0
+    );
+
+    /**
+     * @brief 构造函数（支持initializer_list的API）
+     * @param output_size 输出尺寸
+     * @param scale 范围{min, max}
+     * @param ratio 范围{min, max}
+     * @param output_alignment 输出对齐字节数（默认0=紧凑布局）
+     *
+     * 使用示例：RandomResizedCrop(224, {0.08f, 1.0f}, {0.75f, 1.333f})
+     */
+    RandomResizedCrop(
+        int output_size,
+        std::pair<float, float> scale,
+        std::pair<float, float> ratio,
         size_t output_alignment = 0
     );
 
