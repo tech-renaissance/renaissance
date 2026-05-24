@@ -2201,6 +2201,12 @@ H2DTestResult DeepLearningTask::run_h2d_only() {
                 cudaStream_t s_trans = static_cast<cudaStream_t>(
                     context(rank).stream(StreamKind::TRANS));
 
+                const auto& bl = active_memory_plan_->baseline();
+                auto label_ptr_a = context(rank).ptr_at(bl.label_a);
+                auto label_ptr_b = context(rank).ptr_at(bl.label_b);
+                auto label_smce_ptr = context(rank).ptr_at(bl.label_smce);
+                size_t label_nbytes = static_cast<size_t>(active_memory_plan_->get_dtensor(bl.label_a).slot_bytes());
+
                 for (int batch = 0; batch < batches; ++batch) {
                     int buf_id = batch % 2;
                     auto g_xfer = (buf_id == 0) ? g_xfer_a : g_xfer_b;
@@ -2214,17 +2220,9 @@ H2DTestResult DeepLearningTask::run_h2d_only() {
                     ts->set_buffer_readable(buf_id, false);
                     ts->set_buffer_writeable(buf_id, true);
 
-                    {
-                        const auto& bl = active_memory_plan_->baseline();
-                        int label_src_id = (buf_id == 0) ? bl.label_a : bl.label_b;
-                        const DTensor& label_dt = active_memory_plan_->get_dtensor(label_src_id);
-                        size_t nbytes = static_cast<size_t>(label_dt.slot_bytes());
-                        cudaMemcpyAsync(
-                            context(rank).ptr_at(bl.label_smce),
-                            context(rank).ptr_at(label_src_id),
-                            nbytes, cudaMemcpyDeviceToDevice, s_trans);
-                        cudaStreamSynchronize(s_trans);
-                    }
+                    // 用传输流把标签复制到SoftmaxCE的专用标签区域
+                    cudaMemcpyAsync(label_smce_ptr, ((buf_id == 0) ? label_ptr_a : label_ptr_b), label_nbytes, cudaMemcpyDeviceToDevice, s_trans);
+                    cudaStreamSynchronize(s_trans);
                 }
             } catch (...) {
                 rank_exc[rank] = std::current_exception();
