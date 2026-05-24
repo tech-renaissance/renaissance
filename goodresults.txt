@@ -1,0 +1,446 @@
+root@2af6a1cc17a3:~/epfs# /root/epfs/R/renaissance/build/bin/tests/correction/test_h2d_only_epoch --dataset imagenet --path /root/epfs/dataset/imagenet --format raw --lv 0 --mode partial --batch-size 512 --resolution 224 --loaders 16 --preproc 128 --device GPU --gpu-ids "0,1,2,3,4,5,6,7" --po-train1 FastRandomResizedCrop --po-train2 RandomHorizontalFlip --po-val1 Resize --po-val2 CenterCrop --seed 42 --sdmp 1 --cpvs true --reproducible --cpu-bind --amp
+
+=== H2D-Only Epoch Test ===
+Dataset:      imagenet
+Path:         /root/epfs/dataset/imagenet
+Batch size:   512
+Resolution:   224
+Max res:      224
+AMP:          on
+Device:       GPU
+GPU IDs:      0,1,2,3,4,5,6,7
+[2026-05-24 18:20:26.765] [INFO ] [TR] GlobalRegistry: fixed_reproducibility_insurance set to true
+[2026-05-24 18:20:26.765] [INFO ] [TR] GlobalRegistry: fixed_batch_size set to 512
+Random Seed: 0x000000000000002A
+[2026-05-24 18:20:26.765] [INFO ] [TR] GlobalRegistry: fixed_using_amp set to true
+[2026-05-24 18:20:28.350] [INFO ] [TR] GlobalRegistry: fixed_using_gpu set to true
+[2026-05-24 18:20:28.350] [INFO ] [TR] GlobalRegistry: fixed_gpu_ids set to [0, 1, 2, 3, 4, 5, 6, 7]
+Device: GPU [0, 1, 2, 3, 4, 5, 6, 7]
+[2026-05-24 18:20:28.350] [INFO ] [TR] GlobalRegistry: fixed_max_sample_resolution_ updated to 224
+[2026-05-24 18:20:28.350] [INFO ] [TR] GlobalRegistry: fixed_train_sample_resolution_begin_ and end_ set to 224
+[2026-05-24 18:20:28.350] [INFO ] [TR] GlobalRegistry: fixed_using_progressive_resolution set to false
+[2026-05-24 18:20:28.350] [INFO ] [TR] GlobalRegistry: fixed_val_sample_resolution_ set to 224
+[2026-05-24 18:20:28.350] [INFO ] [TR] GlobalRegistry: fixed_dataset_type set to 1
+[2026-05-24 18:20:28.350] [INFO ] [TR] GlobalRegistry: fixed_num_classes automatically set to 1000 based on dataset type 1
+[2026-05-24 18:20:28.351] [INFO ] [TR] GlobalRegistry: fixed_num_load_workers set to 16
+[2026-05-24 18:20:28.351] [INFO ] [TR] GlobalRegistry: fixed_num_preproc_workers set to 128
+[2026-05-24 18:20:28.351] [INFO ] [TR] GlobalRegistry: fixed_shuffle_train set to false
+[2026-05-24 18:20:28.351] [INFO ] [TR] GlobalRegistry: alterable_train_crop_output_ set to 224
+[2026-05-24 18:20:28.351] [INFO ] [TR] GlobalRegistry: alterable_train_resize_output_ set to 224
+[2026-05-24 18:20:28.351] [INFO ] [TR] GlobalRegistry: alterable_val_crop_output_ set to 224
+[2026-05-24 18:20:28.351] [INFO ] [TR] GlobalRegistry: alterable_val_resize_output_ set to 224
+[2026-05-24 18:20:28.351] [INFO ] [TR] GlobalRegistry: alterable_current_resolution_train_ set to 224
+[2026-05-24 18:20:28.351] [INFO ] [TR] GlobalRegistry: alterable_current_resolution_val_ set to 224
+[2026-05-24 18:20:28.351] [INFO ] [TR] GlobalRegistry: fixed_num_color_channels set to 3
+[2026-05-24 18:20:28.351] [INFO ] [TR] GlobalRegistry: fixed_sdmp_factor set to 1
+[2026-05-24 18:20:28.351] [INFO ] [TR] GlobalRegistry: fixed_using_cpvs set to true
+[2026-05-24 18:20:28.351] [INFO ] [TR] GlobalRegistry: fixed_using_drop_last set to false
+[2026-05-24 18:20:28.351] [INFO ] [TR] Setup: staging buffer = 392 MB per GPU (224x224x3, batch=512, AMP)
+[2026-05-24 18:20:31.690] [INFO ] [TR] StagingBufferPool: allocated 8 blocks of 392 MB each
+[StagingDebug] StagingBufferPool created: blocks=8, per_block=392MB, type=pinned (cudaHostAlloc)
+[StagingDebug]   RANK[0]: GPU=0, NUMA=6, base=0x715c1c000000, size=411047424B
+[StagingDebug]   RANK[1]: GPU=1, NUMA=6, base=0x715be4000000, size=411047424B
+[StagingDebug]   RANK[2]: GPU=2, NUMA=2, base=0x715bc8000000, size=411047424B
+[StagingDebug]   RANK[3]: GPU=3, NUMA=2, base=0x715c00000000, size=411047424B
+[StagingDebug]   RANK[4]: GPU=4, NUMA=20, base=0x715ca0000000, size=411047424B
+[StagingDebug]   RANK[5]: GPU=5, NUMA=20, base=0x715c54000000, size=411047424B
+[StagingDebug]   RANK[6]: GPU=6, NUMA=16, base=0x715c38000000, size=411047424B
+[StagingDebug]   RANK[7]: GPU=7, NUMA=16, base=0x715bac000000, size=411047424B
+[2026-05-24 18:20:31.690] [INFO ] [TR] GlobalRegistry: Staging buffer pool created with 8 blocks, 392 MB each
+[2026-05-24 18:20:31.690] [INFO ] [TR] GlobalRegistry: fixed_cpu_binding_map set with 128 entries
+[2026-05-24 18:20:31.690] [INFO ] [TR] GlobalRegistry: fixed_cpu_binding_enabled set to true
+[2026-05-24 18:20:31.690] [INFO ] [TR] GlobalRegistry: fixed_random_erasing_p_ set to 0
+[2026-05-24 18:20:31.690] [INFO ] [TR] GlobalRegistry: fixed_train_with_rhf set to true
+[2026-05-24 18:20:31.690] [INFO ] [TR] GlobalRegistry: fixed_val_with_rhf set to false
+[2026-05-24 18:20:31.691] [INFO ] [TR] Calculated steps_per_epoch: 313 (total_samples: 1281167, global_batch_size: 4096)
+[2026-05-24 18:20:31.691] [INFO ] [TR] GlobalRegistry: fixed_s_original_indices_ set with size=10010
+[2026-05-24 18:20:31.691] [INFO ] [TR] [EB#0] Using StagingBufferPool RANK 0: per_zone=205523712, base=0x715c1c000000
+[2026-05-24 18:20:31.691] [INFO ] [TR] [EB#0] Before staging_memory_numa_node call
+[2026-05-24 18:20:31.691] [INFO ] [TR] [EB#0] After staging_memory_numa_node call, numa_node=6
+[StagingDebug] TransferStation configured: engine_id=0, numa_node=6, workers_per_engine=16
+[StagingDebug]   associated_workers=[0, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120]
+[StagingDebug]   Zone A: labels=0x715c1c000000, data=0x715c1c000a00
+[StagingDebug]   Zone B: labels=0x715c28400b00, data=0x715c28401500
+[StagingDebug]   transfer_size=205523712B (labels=2560B, data=205521152B)
+[2026-05-24 18:20:31.691] [INFO ] [TR] [EB#0] reset_and_update(): phase=VAL, current_resolution_=224, num_color_channels_=3, current_sample_bytes_=401408
+[2026-05-24 18:20:31.691] [INFO ] [TR] [EB#1] Using StagingBufferPool RANK 1: per_zone=205523712, base=0x715be4000000
+[2026-05-24 18:20:31.691] [INFO ] [TR] [EB#1] Before staging_memory_numa_node call
+[2026-05-24 18:20:31.691] [INFO ] [TR] [EB#1] After staging_memory_numa_node call, numa_node=6
+[StagingDebug] TransferStation configured: engine_id=1, numa_node=6, workers_per_engine=16
+[StagingDebug]   associated_workers=[1, 9, 17, 25, 33, 41, 49, 57, 65, 73, 81, 89, 97, 105, 113, 121]
+[StagingDebug]   Zone A: labels=0x715be4000000, data=0x715be4000a00
+[StagingDebug]   Zone B: labels=0x715bf0400b00, data=0x715bf0401500
+[StagingDebug]   transfer_size=205523712B (labels=2560B, data=205521152B)
+[2026-05-24 18:20:31.691] [INFO ] [TR] [EB#1] reset_and_update(): phase=VAL, current_resolution_=224, num_color_channels_=3, current_sample_bytes_=401408
+[2026-05-24 18:20:31.691] [INFO ] [TR] [EB#2] Using StagingBufferPool RANK 2: per_zone=205523712, base=0x715bc8000000
+[2026-05-24 18:20:31.691] [INFO ] [TR] [EB#2] Before staging_memory_numa_node call
+[2026-05-24 18:20:31.691] [INFO ] [TR] [EB#2] After staging_memory_numa_node call, numa_node=2
+[StagingDebug] TransferStation configured: engine_id=2, numa_node=2, workers_per_engine=16
+[StagingDebug]   associated_workers=[2, 10, 18, 26, 34, 42, 50, 58, 66, 74, 82, 90, 98, 106, 114, 122]
+[StagingDebug]   Zone A: labels=0x715bc8000000, data=0x715bc8000a00
+[StagingDebug]   Zone B: labels=0x715bd4400b00, data=0x715bd4401500
+[StagingDebug]   transfer_size=205523712B (labels=2560B, data=205521152B)
+[2026-05-24 18:20:31.691] [INFO ] [TR] [EB#2] reset_and_update(): phase=VAL, current_resolution_=224, num_color_channels_=3, current_sample_bytes_=401408
+[2026-05-24 18:20:31.691] [INFO ] [TR] [EB#3] Using StagingBufferPool RANK 3: per_zone=205523712, base=0x715c00000000
+[2026-05-24 18:20:31.691] [INFO ] [TR] [EB#3] Before staging_memory_numa_node call
+[2026-05-24 18:20:31.691] [INFO ] [TR] [EB#3] After staging_memory_numa_node call, numa_node=2
+[StagingDebug] TransferStation configured: engine_id=3, numa_node=2, workers_per_engine=16
+[StagingDebug]   associated_workers=[3, 11, 19, 27, 35, 43, 51, 59, 67, 75, 83, 91, 99, 107, 115, 123]
+[StagingDebug]   Zone A: labels=0x715c00000000, data=0x715c00000a00
+[StagingDebug]   Zone B: labels=0x715c0c400b00, data=0x715c0c401500
+[StagingDebug]   transfer_size=205523712B (labels=2560B, data=205521152B)
+[2026-05-24 18:20:31.691] [INFO ] [TR] [EB#3] reset_and_update(): phase=VAL, current_resolution_=224, num_color_channels_=3, current_sample_bytes_=401408
+[2026-05-24 18:20:31.692] [INFO ] [TR] [EB#4] Using StagingBufferPool RANK 4: per_zone=205523712, base=0x715ca0000000
+[2026-05-24 18:20:31.692] [INFO ] [TR] [EB#4] Before staging_memory_numa_node call
+[2026-05-24 18:20:31.692] [INFO ] [TR] [EB#4] After staging_memory_numa_node call, numa_node=20
+[StagingDebug] TransferStation configured: engine_id=4, numa_node=20, workers_per_engine=16
+[StagingDebug]   associated_workers=[4, 12, 20, 28, 36, 44, 52, 60, 68, 76, 84, 92, 100, 108, 116, 124]
+[StagingDebug]   Zone A: labels=0x715ca0000000, data=0x715ca0000a00
+[StagingDebug]   Zone B: labels=0x715cac400b00, data=0x715cac401500
+[StagingDebug]   transfer_size=205523712B (labels=2560B, data=205521152B)
+[2026-05-24 18:20:31.692] [INFO ] [TR] [EB#4] reset_and_update(): phase=VAL, current_resolution_=224, num_color_channels_=3, current_sample_bytes_=401408
+[2026-05-24 18:20:31.692] [INFO ] [TR] [EB#5] Using StagingBufferPool RANK 5: per_zone=205523712, base=0x715c54000000
+[2026-05-24 18:20:31.692] [INFO ] [TR] [EB#5] Before staging_memory_numa_node call
+[2026-05-24 18:20:31.692] [INFO ] [TR] [EB#5] After staging_memory_numa_node call, numa_node=20
+[StagingDebug] TransferStation configured: engine_id=5, numa_node=20, workers_per_engine=16
+[StagingDebug]   associated_workers=[5, 13, 21, 29, 37, 45, 53, 61, 69, 77, 85, 93, 101, 109, 117, 125]
+[StagingDebug]   Zone A: labels=0x715c54000000, data=0x715c54000a00
+[StagingDebug]   Zone B: labels=0x715c60400b00, data=0x715c60401500
+[StagingDebug]   transfer_size=205523712B (labels=2560B, data=205521152B)
+[2026-05-24 18:20:31.692] [INFO ] [TR] [EB#5] reset_and_update(): phase=VAL, current_resolution_=224, num_color_channels_=3, current_sample_bytes_=401408
+[2026-05-24 18:20:31.692] [INFO ] [TR] [EB#6] Using StagingBufferPool RANK 6: per_zone=205523712, base=0x715c38000000
+[2026-05-24 18:20:31.692] [INFO ] [TR] [EB#6] Before staging_memory_numa_node call
+[2026-05-24 18:20:31.692] [INFO ] [TR] [EB#6] After staging_memory_numa_node call, numa_node=16
+[StagingDebug] TransferStation configured: engine_id=6, numa_node=16, workers_per_engine=16
+[StagingDebug]   associated_workers=[6, 14, 22, 30, 38, 46, 54, 62, 70, 78, 86, 94, 102, 110, 118, 126]
+[StagingDebug]   Zone A: labels=0x715c38000000, data=0x715c38000a00
+[StagingDebug]   Zone B: labels=0x715c44400b00, data=0x715c44401500
+[StagingDebug]   transfer_size=205523712B (labels=2560B, data=205521152B)
+[2026-05-24 18:20:31.692] [INFO ] [TR] [EB#6] reset_and_update(): phase=VAL, current_resolution_=224, num_color_channels_=3, current_sample_bytes_=401408
+[2026-05-24 18:20:31.692] [INFO ] [TR] [EB#7] Using StagingBufferPool RANK 7: per_zone=205523712, base=0x715bac000000
+[2026-05-24 18:20:31.692] [INFO ] [TR] [EB#7] Before staging_memory_numa_node call
+[2026-05-24 18:20:31.692] [INFO ] [TR] [EB#7] After staging_memory_numa_node call, numa_node=16
+[StagingDebug] TransferStation configured: engine_id=7, numa_node=16, workers_per_engine=16
+[StagingDebug]   associated_workers=[7, 15, 23, 31, 39, 47, 55, 63, 71, 79, 87, 95, 103, 111, 119, 127]
+[StagingDebug]   Zone A: labels=0x715bac000000, data=0x715bac000a00
+[StagingDebug]   Zone B: labels=0x715bb8400b00, data=0x715bb8401500
+[StagingDebug]   transfer_size=205523712B (labels=2560B, data=205521152B)
+[2026-05-24 18:20:31.692] [INFO ] [TR] [EB#7] reset_and_update(): phase=VAL, current_resolution_=224, num_color_channels_=3, current_sample_bytes_=401408
+[2026-05-24 18:20:31.722] [INFO ] [TR] Preprocessor initialized.
+[2026-05-24 18:20:31.722] [INFO ] [TR] GlobalRegistry: fixed_optimizer_kind set to 1
+[2026-05-24 18:20:31.722] [INFO ] [TR] Compiler::compile - starting five-phase compilation
+[2026-05-24 18:20:31.722] [INFO ] [TR]   ArchPlan: 3 layers
+[2026-05-24 18:20:31.722] [WARN ] [TR] Expected 6 CompileSpec (base + 5 variants), got 1
+[2026-05-24 18:20:31.723] [INFO ] [TR] Compiler: optimizer_kind=1, needs_momentum=1
+[2026-05-24 18:20:31.723] [INFO ] [TR] [COMPILER] BWD l=2 kind=10 grad_id=23 prev_grad_id=23
+[2026-05-24 18:20:31.723] [INFO ] [TR] [COMPILER] BWD l=1 kind=7 grad_id=13 prev_grad_id=13
+[2026-05-24 18:20:31.723] [INFO ] [TR] [COMPILER] BWD l=0 kind=8 grad_id=-1 prev_grad_id=13
+[2026-05-24 18:20:31.723] [INFO ] [TR] [COMPILER] DEEP[0] op=49 in=[13,14,15] out=[16]
+[2026-05-24 18:20:31.723] [INFO ] [TR] [COMPILER] DEEP[1] op=86 in=[16,7,4] out=[8,26,25,24,9,10]
+[2026-05-24 18:20:31.723] [INFO ] [TR] [COMPILER] DEEP[2] op=87 in=[23,24,26,7,4] out=[23]
+[2026-05-24 18:20:31.723] [INFO ] [TR] [COMPILER] DEEP[3] op=50 in=[23,14,16,13] out=[13,17,18]
+[2026-05-24 18:20:31.723] [INFO ] [TR] Compiler::compile - five-phase compilation complete
+[2026-05-24 18:20:31.723] [INFO ] [TR]   Generated 1 variants
+[2026-05-24 18:20:31.749] [INFO ] [backend] DeviceContext 0: created 5 non-blocking streams + per-stream cuDNN + cuBLAS handles
+[2026-05-24 18:20:31.764] [INFO ] [backend] DeviceContext 1: created 5 non-blocking streams + per-stream cuDNN + cuBLAS handles
+[2026-05-24 18:20:31.778] [INFO ] [backend] DeviceContext 2: created 5 non-blocking streams + per-stream cuDNN + cuBLAS handles
+[2026-05-24 18:20:31.791] [INFO ] [backend] DeviceContext 3: created 5 non-blocking streams + per-stream cuDNN + cuBLAS handles
+[2026-05-24 18:20:31.802] [INFO ] [backend] DeviceContext 4: created 5 non-blocking streams + per-stream cuDNN + cuBLAS handles
+[2026-05-24 18:20:31.818] [INFO ] [backend] DeviceContext 5: created 5 non-blocking streams + per-stream cuDNN + cuBLAS handles
+[2026-05-24 18:20:31.829] [INFO ] [backend] DeviceContext 6: created 5 non-blocking streams + per-stream cuDNN + cuBLAS handles
+[2026-05-24 18:20:31.839] [INFO ] [backend] DeviceContext 7: created 5 non-blocking streams + per-stream cuDNN + cuBLAS handles
+[2026-05-24 18:20:33.067] [INFO ] [task] NCCL initialized for 8 GPUs
+[2026-05-24 18:20:33.067] [INFO ] [task] Allocated 8 GPU device context(s), 2839.81 MB each
+[2026-05-24 18:20:33.080] [INFO ] [graph] [B2] cuDNN warmup on rank 0 (GPU 0) for 2 unique graphs
+[2026-05-24 18:20:33.080] [INFO ] [graph] [B2] cuDNN warmup on rank 1 (GPU 1) for 2 unique graphs
+[2026-05-24 18:20:33.080] [INFO ] [graph] [B2] cuDNN warmup on rank 2 (GPU 2) for 2 unique graphs
+[2026-05-24 18:20:33.080] [INFO ] [graph] [B2] cuDNN warmup on rank 3 (GPU 3) for 2 unique graphs
+[2026-05-24 18:20:33.081] [INFO ] [graph] [B2] cuDNN warmup on rank 4 (GPU 4) for 2 unique graphs
+[2026-05-24 18:20:33.081] [INFO ] [graph] [B2] cuDNN warmup on rank 5 (GPU 5) for 2 unique graphs
+[2026-05-24 18:20:33.081] [INFO ] [graph] [B2] cuDNN warmup on rank 6 (GPU 6) for 2 unique graphs
+[2026-05-24 18:20:33.081] [INFO ] [graph] [B2] cuDNN warmup on rank 7 (GPU 7) for 2 unique graphs
+[2026-05-24 18:20:33.081] [INFO ] [graph] [B2] cuDNN warmup completed on all 8 ranks
+[2026-05-24 18:20:33.081] [INFO ] [graph] [B3] Capturing rank 0 in main thread
+[2026-05-24 18:20:33.081] [INFO ] [TR] [CAPTURE-CUDA] gid=0 nodes=1
+[H2D_DEBUG] rank=0 staging_base=0x715c1c000000 per_zone=205523712 label_aligned=2560 block_size=411047424 num_output_ranges=2
+[H2D_DEBUG] range[0] start_region=49 end_region=49 dst_off=2408463872 dst_size=2560
+[H2D_DEBUG]   -> dst=0x715b798e3e00 src=0x715c1c000000 src_end=0x715c1c000a00 stream=0x5983e66d6a60
+[H2D_DEBUG] range[1] start_region=50 end_region=50 dst_off=2408466432 dst_size=205521152
+[H2D_DEBUG]   -> dst=0x715b798e4800 src=0x715c1c000a00 src_end=0x715c28400b00 stream=0x5983e66d6a60
+[2026-05-24 18:20:33.081] [INFO ] [TR] [CAPTURE-CUDA] gid=1 nodes=1
+[H2D_DEBUG] rank=0 staging_base=0x715c1c000000 per_zone=205523712 label_aligned=2560 block_size=411047424 num_output_ranges=2
+[H2D_DEBUG] range[0] start_region=51 end_region=51 dst_off=2613987584 dst_size=2560
+[H2D_DEBUG]   -> dst=0x715b85ce4900 src=0x715c28400b00 src_end=0x715c28401500 stream=0x5983e66d6a60
+[H2D_DEBUG] range[1] start_region=52 end_region=52 dst_off=2613990144 dst_size=205521152
+[H2D_DEBUG]   -> dst=0x715b85ce5300 src=0x715c28401500 src_end=0x715c34801600 stream=0x5983e66d6a60
+[2026-05-24 18:20:33.081] [INFO ] [graph] [B3] Capturing ranks 1~7 in parallel threads
+[2026-05-24 18:20:33.082] [INFO ] [TR] [CAPTURE-CUDA] gid=0 nodes=1
+[H2D_DEBUG] rank=1 staging_base=0x715be4000000 per_zone=205523712 label_aligned=2560 block_size=411047424 num_output_ranges=2
+[H2D_DEBUG] range[0] start_region=49 end_region=49 dst_off=2408463872 dst_size=[2026-05-24 18:20:33.082] [INFO ] [TR] [CAPTURE-CUDA] gid=0 nodes=1
+[H2D_DEBUG] rank=2 staging_base=0x715bc8000000 per_zone=205523712 label_aligned=2560 block_size=411047424 num_output_ranges=2
+[H2D_DEBUG] range[0] start_region=49 end_region=492560
+[H2D_DEBUG]   -> dst=0x715ac58e3e00 src=0x715be4000000[2026-05-24 18:20:33.082] [INFO ] [TR] [CAPTURE-CUDA] gid=0 nodes=1
+ dst_off=[H2D_DEBUG] rank=3 staging_base=0x715c00000000 per_zone=2408463872 dst_size=2560
+[2026-05-24 18:20:33.082] [INFO ] [TR] [CAPTURE-CUDA] gid=0 nodes=1
+205523712[H2D_DEBUG] rank= label_aligned=2560 block_size=411047424 num_output_ranges=2
+[H2D_DEBUG] range[0] start_region=49 end_region=49 dst_off=2408463872 dst_size=2560
+[H2D_DEBUG]   -> dst= src_end=0x715be4000a00 stream=0x5983e6609100
+[H2D_DEBUG]   -> dst=0x715a118e3e00 src=0x715bc8000000 src_end=0x715bc8000a00 stream=0x5983e60f99304 staging_base=0x715ca0000000 per_zone=205523712 label_aligned=[H2D_DEBUG] range[1] start_region=50 end_region=50 dst_off=2408466432 dst_size=0x71595d8e3e00[2026-05-24 18:20:33.082] [INFO ] [TR] [CAPTURE-CUDA] gid=0 nodes=1
+0xc400100
+2560 block_size=411047424 num_output_ranges=2
+[H2D_DEBUG] range[0[H2D_DEBUG] rank=5 staging_base=0x715c54000000 per_zone=205523712 label_aligned=] start_region=49 end_region=
+[2026-05-24 18:20:33.082] [INFO ] [TR] [CAPTURE-CUDA] gid=0 nodes=1[H2D_DEBUG]   -> dst= src=
+[H2D_DEBUG] rank=6 staging_base=0x715c38000000 per_zone=0xc400b00 label_aligned=0xa00 block_size=[2026-05-24 18:20:33.082] [INFO ] [TR] [CAPTURE-CUDA] gid=0 nodes=1
+0x715c000000000x188016000x715ac58e4800 src=0x715be4000a00 src_end=0x715bf0400b00 stream=0x5983e6609100[H2D_DEBUG] range[0x1] start_region=0x32 src_end=0x715c00000a00 stream=0x5983e627f610
+ end_region=0x32 num_output_ranges=0x20x31 dst_off=0x8f8e3e00 dst_size=[H2D_DEBUG] range[0x12560[H2D_DEBUG] rank=0x7 staging_base=0x715bac000000 per_zone=0xc400b00
+[H2D_DEBUG] range[ block_size=0x18801600
+ num_output_ranges=0x2
+ label_aligned=0xa000xa00]
+ start_region=0x32 end_region=0x32 dst_off=0x8f8e4800 dst_size=0xc400100
+0] start_region=0x31[H2D_DEBUG] range[ dst_off=[2026-05-24 18:20:33.083] [INFO ] [TR] [CAPTURE-CUDA] gid=1 nodes=1
+[H2D_DEBUG] rank= end_region=0x310x8f8e4800 dst_size=0xc400100
+[H2D_DEBUG]   -> dst=0x1[H2D_DEBUG]   -> dst=0 dst_off=0x8f8e3e00 dst_size=0x71595d8e4800 src= block_size=0xa00
+[H2D_DEBUG]   -> dst=0x7157418e3e00 staging_base=0x715be4000000 per_zone=0xc400b000x18801600 num_output_ranges= src=0x715c38000000]0x715a118e4800 src=0x715bc8000a000x2
+[H2D_DEBUG]   -> dst=[H2D_DEBUG] range[0 src_end= label_aligned= start_region=0x31 end_region=0x715c00000a00] start_region=0xa00 block_size=0x18801600 num_output_ranges=0x2
+ src_end=0x715c38000a00 src_end=0x31 stream=0x7158a98e3e00 src=0x715ca0000000 src_end=0x715ca0000a00 stream=0x5983e64fca500x5983e63b6d90 end_region=0x31 dst_off=0x8f8e3e00 dst_size=0xa00
+
+0x715bd4400b00[H2D_DEBUG]   -> dst=0x71568d8e3e000x715c0c400b00
+ stream=0x5983e60f9930
+[H2D_DEBUG] range[[H2D_DEBUG] range[0x31 dst_off=[H2D_DEBUG] range[0]0x1] start_region=0x32 end_region= src= stream=0x1] start_region=0x715bac000000[2026-05-24 18:20:33.084] [INFO ] [TR] [CAPTURE-CUDA] gid=1 nodes=1
+0x32[H2D_DEBUG] rank=0x2 start_region=0x33 end_region=0x33 dst_off=0x8f8e4800 dst_size= src_end= staging_base=0x715bac000a00 stream=0x5983e6102fc0
+0x5983e627f610
+0xc4001000x715bc8000000[H2D_DEBUG] range[0x1] start_region=0x320x8f8e3e00 dst_size=
+[H2D_DEBUG]   -> dst= end_region=0x320x32 end_region=0x32 per_zone=0xc400b00 label_aligned=0xa00 dst_off=0x7157418e4800 block_size=0x18801600 num_output_ranges=0x2
+ dst_off=0x8f8e4800 dst_size=0x9bce4900 dst_size=0xa00
+[H2D_DEBUG]   -> dst=0x715ad1ce49000xc400100 src=[2026-05-24 18:20:33.084] [INFO ] [TR] [CAPTURE-CUDA] gid=1 nodes=10xa00 dst_off=
+0x8f8e4800
+0x715c38000a00 src_end= src=[H2D_DEBUG] range[[H2D_DEBUG] rank=0x30x715c44400b00 stream= staging_base=0x715c00000000 per_zone=0xc400b00 label_aligned=0xa00 block_size=0x18801600 num_output_ranges=0x2
+[H2D_DEBUG] range[0]0x715bf0400b00 dst_size=0xc400100
+[H2D_DEBUG]   -> dst=0x7158a98e4800 src=0x715ca0000a00 src_end=0x715cac400b00 stream=0x5983e64fca50
+[H2D_DEBUG]   -> dst=0x71568d8e4800 src=0x715bac000a00 src_end=0x715bb8400b00 stream=0x5983e6102fc0
+
+[H2D_DEBUG]   -> dst=0x7157f58e3e00 src=0x715c54000000 src_end=0x715c54000a00 stream=0x5983e640f200
+0x5983e63b6d90
+ src_end=0x715bf0401500 stream=0x5983e66091000[2026-05-24 18:20:33.084] [INFO ] [TR] [CAPTURE-CUDA] gid=1 nodes=1
+[H2D_DEBUG] rank=0x4 staging_base=0x715ca0000000 per_zone=0xc400b00 label_aligned=[2026-05-24 18:20:33.084] [INFO ] [TR] [CAPTURE-CUDA] gid=1 nodes=1
+ start_region=] start_region=[H2D_DEBUG] rank=0x7 staging_base=[2026-05-24 18:20:33.084] [INFO ] [TR] [CAPTURE-CUDA] gid=1 nodes=1
+
+0x715bac000000[H2D_DEBUG] rank=0x6 staging_base=0x715c380000000xa000x33 end_region=0x330x33[H2D_DEBUG] range[0x1 per_zone= block_size=[H2D_DEBUG] range[0x1] start_region= per_zone= dst_off=0x9bce4900 dst_size=0xa000x188016000xc400b000x340xc400b00 label_aligned=0xa00 block_size=0x18801600] start_region=0x32 end_region=0x34 dst_off=0x9bce5300 end_region= num_output_ranges= label_aligned=0xa00 block_size=0x18801600 num_output_ranges=0x2
+[H2D_DEBUG] range[0]0x33 end_region=0x2
+[H2D_DEBUG] range[0] start_region=0x33 start_region=0x33 end_region=0x33 dst_off= dst_off=
+[H2D_DEBUG]   -> dst=0x715a1dce4900 src= end_region= num_output_ranges=0x2
+0x9bce49000x330x32 dst_off=0x8f8e4800 dst_size= dst_size=0xc400100
+ dst_size=0xc400100
+[H2D_DEBUG]   -> dst=0x7157f58e4800 src=0x715c54000a00 src_end=0x9bce4900 dst_size=0xa00
+0x715bd4400b00 src_end= dst_off=0x9bce4900[H2D_DEBUG]   -> dst=0x71574dce4900 src= dst_size=0xa000xa000x715c44400b00
+[H2D_DEBUG]   -> dst= src_end=0x715c44401500 stream=0x5983e63b6d90
+[H2D_DEBUG] range[0x1] start_region=0x715c60400b00 stream=0x715969ce4900 src=0x715c0c400b00 src_end=[H2D_DEBUG] range[0] start_region=[H2D_DEBUG]   -> dst=0x715ad1ce5300 src=0x715bf0401500 src_end=0x5983e640f200
+[H2D_DEBUG]   -> dst=0x715699ce4900 src=0x715bb8400b00 src_end=0x330x34 end_region=0x34 dst_off=0x715bb84015000x715bfc801600 stream=0x715bd4401500 stream=0x5983e6102fc0
+[H2D_DEBUG] range[0x10x9bce53000x715c0c401500 stream=0x5983e627f610
+ end_region=0x5983e6609100
+
+ stream=0x5983e60f9930
+ dst_size=0xc400100
+[H2D_DEBUG]   -> dst=0x71574dce5300[H2D_DEBUG] range[] start_region=0x34 end_region=0x340x33 dst_off=0x9bce4900 dst_off=0x9bce5300 dst_size= src=[2026-05-24 18:20:33.085] [INFO ] [TR] [CAPTURE-CUDA] gid=1 nodes=1
+ dst_size=0x715c44401500 src_end=0xc400100
+[H2D_DEBUG]   -> dst=0x715699ce5300[H2D_DEBUG] rank=0x5 staging_base=0x715c540000000x715c50801600 src=0x715bb8401500 src_end=0x715bc4801600 stream=0x5983e6102fc0[H2D_DEBUG] range[0x1] start_region=
+0x34 end_region=0x34 dst_off=0x9bce5300 per_zone=0x1] start_region=0x34 end_region=0x34 dst_off= stream=0x5983e63b6d900xc400b00 label_aligned=0x9bce5300 dst_size= dst_size=0xc400100
+[H2D_DEBUG]   -> dst=0x715a1dce5300 src=0x715bd4401500 src_end=0x715be0801600 stream=0x5983e60f9930
+0xa000xa00
+[H2D_DEBUG]   -> dst=
+ block_size=0x18801600 num_output_ranges=0x2
+[H2D_DEBUG] range[0] start_region=0x33 end_region=0x33 dst_off=0x9bce4900 dst_size=0xa00
+[H2D_DEBUG]   -> dst=0x715801ce4900 src=0x715c60400b00 src_end=0xc4001000x7158b5ce4900 src=0x715cac400b00 src_end=0x715cac401500 stream=0x5983e64fca50
+0x715c60401500[H2D_DEBUG] range[0x1] start_region=0x34 end_region=0x34 dst_off=0x9bce5300 dst_size=0xc400100
+[H2D_DEBUG]   -> dst=
+ stream=0x5983e640f200
+[H2D_DEBUG] range[0x1] start_region=0x34 end_region=0x34 dst_off=0x9bce5300 dst_size=0xc400100
+[H2D_DEBUG]   -> dst=0x715801ce5300 src=0x715c60401500 src_end=[H2D_DEBUG]   -> dst=0x715969ce5300 src=0x715c0c401500 src_end=0x715c18801600 stream=0x5983e627f610
+0x7158b5ce5300 src=0x715cac401500 src_end=0x715cb8801600 stream=0x5983e64fca50
+0x715c6c801600 stream=0x5983e640f200
+[2026-05-24 18:20:33.086] [INFO ] [graph] [B4] Warmup launching 2 graphs on rank 0
+[2026-05-24 18:20:33.103] [INFO ] [graph] [B4] Warmup launch completed
+[2026-05-24 18:20:33.103] [INFO ] [graph] [PRE_CAPTURE] Summary: 2 slots, 2 captured, 0 reused, 2 unique graphs, 8 ranks
+[2026-05-24 18:20:33.103] [INFO ] [TR] [DEBUG] init_all: dtensors count=27
+[2026-05-24 18:20:33.103] [INFO ] [TR] [DEBUG] dtensor[0] id=0 region=49 shape=[512,1,1,1] init=0
+[2026-05-24 18:20:33.103] [INFO ] [TR] [DEBUG] dtensor[1] id=1 region=50 shape=[512,224,224,4] init=0
+[2026-05-24 18:20:33.103] [INFO ] [TR] [DEBUG] dtensor[2] id=2 region=51 shape=[512,1,1,1] init=0
+[2026-05-24 18:20:33.103] [INFO ] [TR] [DEBUG] dtensor[3] id=3 region=52 shape=[512,224,224,4] init=0
+[2026-05-24 18:20:33.103] [INFO ] [TR] [DEBUG] dtensor[4] id=4 region=62 shape=[512,1,1,1] init=0
+[2026-05-24 18:20:33.103] [INFO ] [TR] [DEBUG] dtensor[5] id=5 region=59 shape=[1,1,1,1] init=0
+[2026-05-24 18:20:33.103] [INFO ] [TR] [DEBUG] dtensor[6] id=6 region=57 shape=[1,1,1,1] init=0
+[2026-05-24 18:20:33.103] [INFO ] [TR] [DEBUG] dtensor[7] id=7 region=57 shape=[1,1,1,1] init=0
+[2026-05-24 18:20:33.103] [INFO ] [TR] [DEBUG] dtensor[8] id=8 region=30 shape=[1,1,1,1] init=0
+[2026-05-24 18:20:33.103] [INFO ] [TR] [DEBUG] dtensor[9] id=9 region=30 shape=[1,1,1,1] init=0
+[2026-05-24 18:20:33.103] [INFO ] [TR] [DEBUG] dtensor[10] id=10 region=30 shape=[1,1,1,1] init=0
+[2026-05-24 18:20:33.103] [INFO ] [TR] [DEBUG] dtensor[11] id=11 region=57 shape=[1,1,1,1] init=0
+[2026-05-24 18:20:33.103] [INFO ] [TR] [DEBUG] dtensor[12] id=12 region=57 shape=[1,1,1,1] init=0
+[2026-05-24 18:20:33.103] [INFO ] [TR] [DEBUG] dtensor[13] id=13 region=55 shape=[512,1,1,150528] init=0
+[2026-05-24 18:20:33.103] [INFO ] [TR] [DEBUG] dtensor[14] id=14 region=9 shape=[1000,1,1,150528] init=8
+[2026-05-24 18:20:33.103] [INFO ] [TR] [DEBUG] dtensor[15] id=15 region=8 shape=[1,1,1,1000] init=1
+[2026-05-24 18:20:33.103] [INFO ] [TR] [DEBUG] dtensor[16] id=16 region=55 shape=[512,1,1,1000] init=0
+[2026-05-24 18:20:33.103] [INFO ] [TR] [DEBUG] dtensor[17] id=17 region=27 shape=[1000,1,1,150528] init=0
+[2026-05-24 18:20:33.103] [INFO ] [TR] [DEBUG] dtensor[18] id=18 region=26 shape=[1,1,1,1000] init=1
+[2026-05-24 18:20:33.103] [INFO ] [TR] [DEBUG] dtensor[19] id=19 region=21 shape=[1000,1,1,150528] init=0
+[2026-05-24 18:20:33.103] [INFO ] [TR] [DEBUG] dtensor[20] id=20 region=31 shape=[1000,1,1,150528] init=0
+[2026-05-24 18:20:33.103] [INFO ] [TR] [DEBUG] dtensor[21] id=21 region=37 shape=[1000,1,1,150528] init=0
+[2026-05-24 18:20:33.103] [INFO ] [TR] [DEBUG] dtensor[22] id=22 region=36 shape=[1,1,1,1000] init=0
+[2026-05-24 18:20:33.103] [INFO ] [TR] [DEBUG] dtensor[23] id=23 region=55 shape=[512,1,1,1000] init=0
+[2026-05-24 18:20:33.103] [INFO ] [TR] [DEBUG] dtensor[24] id=24 region=62 shape=[512,1,1,1000] init=0
+[2026-05-24 18:20:33.103] [INFO ] [TR] [DEBUG] dtensor[25] id=25 region=66 shape=[512,1,1,1] init=0
+[2026-05-24 18:20:33.103] [INFO ] [TR] [DEBUG] dtensor[26] id=26 region=57 shape=[1,1,1,1] init=0
+[2026-05-24 18:20:33.968] [INFO ] [TR] GlobalRegistry initialized successfully
+[StagingDebug] PW created: worker_id=0, tid=124609101824000, RANK=0, NUMA=6, CPU=0
+[2026-05-24 18:20:36.425] [INFO ] [TR] [EB#0] reset_and_update(): phase=TRAIN, current_resolution_=224, num_color_channels_=3, current_sample_bytes_=401408
+[StagingDebug] PW created: worker_id=1, tid=124609112309760, RANK=1, NUMA=6, CPU=1
+[2026-05-24 18:20:36.425] [INFO ] [TR] [EB#1] reset_and_update(): phase=TRAIN, current_resolution_=224, num_color_channels_=3, current_sample_bytes_=401408
+[StagingDebug] PW created: worker_id=3, tid=124609236041728, RANK=3, NUMA=2, CPU=3
+[2026-05-24 18:20:36.426] [INFO ] [TR] [EB#3] reset_and_update(): phase=TRAIN, current_resolution_=224, num_color_channels_=3, current_sample_bytes_=401408
+[StagingDebug] PW created: worker_id=2, tid=124609225555968, RANK=2, NUMA=2, CPU=2
+[2026-05-24 18:20:36.426] [INFO ] [TR] [EB#2] reset_and_update(): phase=TRAIN, current_resolution_=224, num_color_channels_=3, current_sample_bytes_=401408
+[StagingDebug] PW created: worker_id=4, tid=124610242674688, RANK=4, NUMA=20, CPU=4
+[2026-05-24 18:20:36.426] [INFO ] [TR] [EB#4] reset_and_update(): phase=TRAIN, current_resolution_=224, num_color_channels_=3, current_sample_bytes_=401408
+[StagingDebug] PW created: worker_id=5, tid=124610232188928, RANK=5, NUMA=20, CPU=5
+[2026-05-24 18:20:36.426] [INFO ] [TR] [EB#5] reset_and_update(): phase=TRAIN, current_resolution_=224, num_color_channels_=3, current_sample_bytes_=401408
+[StagingDebug] PW created: worker_id=6, tid=124609783398400, RANK=6, NUMA=16, CPU=6
+[2026-05-24 18:20:36.426] [INFO ] [TR] [EB#6] reset_and_update(): phase=TRAIN, current_resolution_=224, num_color_channels_=3, current_sample_bytes_=401408
+[StagingDebug] PW created: worker_id=7, tid=124609772912640, RANK=7, NUMA=16, CPU=7
+[2026-05-24 18:20:36.426] [INFO ] [TR] [EB#7] reset_and_update(): phase=TRAIN, current_resolution_=224, num_color_channels_=3, current_sample_bytes_=401408
+[StagingDebug] PW created: worker_id=8, tid=124609762426880, RANK=0, NUMA=6, CPU=8
+[StagingDebug] PW created: worker_id=9, tid=124609582071808, RANK=1, NUMA=6, CPU=9
+[StagingDebug] PW created: worker_id=10, tid=124609571586048, RANK=2, NUMA=2, CPU=10
+[StagingDebug] PW created: worker_id=11, tid=124609561100288, RANK=3, NUMA=2, CPU=11
+[StagingDebug] PW created: worker_id=12, tid=124609447854080, RANK=4, NUMA=20, CPU=12
+[StagingDebug] PW created: worker_id=13, tid=124609437368320, RANK=5, NUMA=20, CPU=13
+[StagingDebug] PW created: worker_id=14, tid=124609426882560, RANK=6, NUMA=16, CPU=14
+[StagingDebug] PW created: worker_id=15, tid=124609246527488, RANK=7, NUMA=16, CPU=15
+[StagingDebug] PW created: worker_id=16, tid=124609091338240, RANK=0, NUMA=6, CPU=16
+[StagingDebug] PW created: worker_id=18, tid=124608967606272, RANK=2, NUMA=2, CPU=18
+[StagingDebug] PW created: worker_id=17, tid=124608978092032, RANK=1, NUMA=6, CPU=17
+[StagingDebug] PW created: worker_id=19, tid=124608957120512, RANK=3, NUMA=2, CPU=19
+[StagingDebug] PW created: worker_id=20, tid=124608776765440, RANK=4, NUMA=20, CPU=20
+[StagingDebug] PW created: worker_id=21, tid=124608766279680, RANK=5, NUMA=20, CPU=21
+[StagingDebug] PW created: worker_id=23, tid=124608575438848, RANK=7, NUMA=16, CPU=23
+[StagingDebug] PW created: worker_id=22, tid=124608755793920, RANK=6, NUMA=16, CPU=22
+[StagingDebug] PW created: worker_id=24, tid=124608564953088, RANK=0, NUMA=6, CPU=24
+[StagingDebug] PW created: worker_id=25, tid=124608554467328, RANK=1, NUMA=6, CPU=25
+[StagingDebug] PW created: worker_id=26, tid=124608374112256, RANK=2, NUMA=2, CPU=26
+[StagingDebug] PW created: worker_id=27, tid=124608363626496, RANK=3, NUMA=2, CPU=27
+[StagingDebug] PW created: worker_id=28, tid=124608353140736, RANK=4, NUMA=20, CPU=28
+[StagingDebug] PW created: worker_id=29, tid=124608172785664, RANK=5, NUMA=20, CPU=29
+[StagingDebug] PW created: worker_id=30, tid=124608162299904, RANK=6, NUMA=16, CPU=30
+[StagingDebug] PW created: worker_id=31, tid=124608151814144, RANK=7, NUMA=16, CPU=31
+[StagingDebug] PW created: worker_id=32, tid=124607971459072, RANK=0, NUMA=6, CPU=32
+[StagingDebug] PW created: worker_id=33, tid=124607960973312, RANK=1, NUMA=6, CPU=33
+[StagingDebug] PW created: worker_id=34, tid=124607950487552, RANK=2, NUMA=2, CPU=34
+[StagingDebug] PW created: worker_id=35, tid=124607770132480, RANK=3, NUMA=2, CPU=35
+[StagingDebug] PW created: worker_id=36, tid=124607759646720, RANK=4, NUMA=20, CPU=36
+[StagingDebug] PW created: worker_id=37, tid=124607749160960, RANK=5, NUMA=20, CPU=37
+[StagingDebug] PW created: worker_id=38, tid=124607602360320, RANK=6, NUMA=16, CPU=38
+[StagingDebug] PW created: worker_id=39, tid=124607591874560, RANK=7, NUMA=16, CPU=39
+[StagingDebug] PW created: worker_id=40, tid=124607581388800, RANK=0, NUMA=6, CPU=40
+[StagingDebug] PW created: worker_id=41, tid=124607570903040, RANK=1, NUMA=6, CPU=41
+[StagingDebug] PW created: worker_id=42, tid=124607560417280, RANK=2, NUMA=2, CPU=42
+[StagingDebug] PW created: worker_id=43, tid=124607549931520, RANK=3, NUMA=2, CPU=43
+[StagingDebug] PW created: worker_id=44, tid=124607401033728, RANK=4, NUMA=20, CPU=44
+[StagingDebug] PW created: worker_id=45, tid=124607390547968, RANK=5, NUMA=20, CPU=45
+[StagingDebug] PW created: worker_id=46, tid=124607380062208, RANK=6, NUMA=16, CPU=46
+[StagingDebug] PW created: worker_id=47, tid=124607369576448, RANK=7, NUMA=16, CPU=47
+[StagingDebug] PW created: worker_id=48, tid=124607359090688, RANK=0, NUMA=6, CPU=48
+[StagingDebug] PW created: worker_id=49, tid=124607348604928, RANK=1, NUMA=6, CPU=49
+[StagingDebug] PW created: worker_id=50, tid=124607199707136, RANK=2, NUMA=2, CPU=50
+[StagingDebug] PW created: worker_id=52, tid=124607178735616, RANK=4, NUMA=20, CPU=52
+[StagingDebug] PW created: worker_id=53, tid=124607168249856, RANK=5, NUMA=20, CPU=53
+[StagingDebug] PW created: worker_id=54, tid=124607157764096, RANK=6, NUMA=16, CPU=54
+[StagingDebug] PW created: worker_id=51, tid=124607189221376, RANK=3, NUMA=2, CPU=51
+[StagingDebug] PW created: worker_id=55, tid=124607147278336, RANK=7, NUMA=16, CPU=55
+[StagingDebug] PW created: worker_id=56, tid=124606998380544, RANK=0, NUMA=6, CPU=56
+[StagingDebug] PW created: worker_id=57, tid=124606987894784, RANK=1, NUMA=6, CPU=57
+[StagingDebug] PW created: worker_id=58, tid=124606977409024, RANK=2, NUMA=2, CPU=58
+[StagingDebug] PW created: worker_id=59, tid=124603609382912, RANK=3, NUMA=2, CPU=59
+[StagingDebug] PW created: worker_id=60, tid=124603598897152, RANK=4, NUMA=20, CPU=60
+[StagingDebug] PW created: worker_id=61, tid=124603588411392, RANK=5, NUMA=20, CPU=61
+[StagingDebug] PW created: worker_id=62, tid=124603072512000, RANK=6, NUMA=16, CPU=62
+[StagingDebug] PW created: worker_id=63, tid=124603062026240, RANK=7, NUMA=16, CPU=63
+[StagingDebug] PW created: worker_id=64, tid=124603051540480, RANK=0, NUMA=6, CPU=64
+[StagingDebug] PW created: worker_id=65, tid=124602535641088, RANK=1, NUMA=6, CPU=65
+[StagingDebug] PW created: worker_id=66, tid=124602525155328, RANK=2, NUMA=2, CPU=66
+[StagingDebug] PW created: worker_id=67, tid=124602514669568, RANK=3, NUMA=2, CPU=67
+[StagingDebug] PW created: worker_id=68, tid=124601998770176, RANK=4, NUMA=20, CPU=68
+[StagingDebug] PW created: worker_id=69, tid=124601988284416, RANK=5, NUMA=20, CPU=69
+[StagingDebug] PW created: worker_id=70, tid=124601977798656, RANK=6, NUMA=16, CPU=70
+[StagingDebug] PW created: worker_id=71, tid=124601461899264, RANK=7, NUMA=16, CPU=71
+[StagingDebug] PW created: worker_id=72, tid=124601451413504, RANK=0, NUMA=6, CPU=72
+[StagingDebug] PW created: worker_id=73, tid=124601440927744, RANK=1, NUMA=6, CPU=73
+[StagingDebug] PW created: worker_id=74, tid=124600925028352, RANK=2, NUMA=2, CPU=74
+[StagingDebug] PW created: worker_id=75, tid=124600914542592, RANK=3, NUMA=2, CPU=75
+[StagingDebug] PW created: worker_id=76, tid=124600904056832, RANK=4, NUMA=20, CPU=76
+[StagingDebug] PW created: worker_id=77, tid=124600388157440, RANK=5, NUMA=20, CPU=77
+[StagingDebug] PW created: worker_id=78, tid=124600377671680, RANK=6, NUMA=16, CPU=78
+[StagingDebug] PW created: worker_id=79, tid=124600367185920, RANK=7, NUMA=16, CPU=79
+[StagingDebug] PW created: worker_id=80, tid=124599851286528, RANK=0, NUMA=6, CPU=80
+[StagingDebug] PW created: worker_id=81, tid=124599840800768, RANK=1, NUMA=6, CPU=81
+[StagingDebug] PW created: worker_id=82, tid=124599830315008, RANK=2, NUMA=2, CPU=82
+[StagingDebug] PW created: worker_id=83, tid=124590720286720, RANK=3, NUMA=2, CPU=83
+[StagingDebug] PW created: worker_id=84, tid=124590709800960, RANK=4, NUMA=20, CPU=84
+[StagingDebug] PW created: worker_id=85, tid=124590623817728, RANK=5, NUMA=20, CPU=85
+[StagingDebug] PW created: worker_id=86, tid=124590613331968, RANK=6, NUMA=16, CPU=86
+[StagingDebug] PW created: worker_id=87, tid=124590602846208, RANK=7, NUMA=16, CPU=87
+[StagingDebug] PW created: worker_id=88, tid=124590592360448, RANK=0, NUMA=6, CPU=88
+[StagingDebug] PW created: worker_id=89, tid=124590581874688, RANK=1, NUMA=6, CPU=89
+[StagingDebug] PW created: worker_id=90, tid=124590571388928, RANK=2, NUMA=2, CPU=90
+[StagingDebug] PW created: worker_id=91, tid=124590422491136, RANK=3, NUMA=2, CPU=91
+[StagingDebug] PW created: worker_id=92, tid=124590412005376, RANK=4, NUMA=20, CPU=92
+[StagingDebug] PW created: worker_id=93, tid=124590401519616, RANK=5, NUMA=20, CPU=93
+[StagingDebug] PW created: worker_id=94, tid=124590391033856, RANK=6, NUMA=16, CPU=94
+[StagingDebug] PW created: worker_id=95, tid=124590380548096, RANK=7, NUMA=16, CPU=95
+[StagingDebug] PW created: worker_id=96, tid=124590370062336, RANK=0, NUMA=6, CPU=96
+[StagingDebug] PW created: worker_id=97, tid=124590221164544, RANK=1, NUMA=6, CPU=97
+[StagingDebug] PW created: worker_id=98, tid=124590210678784, RANK=2, NUMA=2, CPU=98
+[StagingDebug] PW created: worker_id=99, tid=124590200193024, RANK=3, NUMA=2, CPU=99
+[StagingDebug] PW created: worker_id=100, tid=124590189707264, RANK=4, NUMA=20, CPU=100
+[StagingDebug] PW created: worker_id=101, tid=124590179221504, RANK=5, NUMA=20, CPU=101
+[StagingDebug] PW created: worker_id=102, tid=124590168735744, RANK=6, NUMA=16, CPU=102
+[StagingDebug] PW created: worker_id=103, tid=124590019837952, RANK=7, NUMA=16, CPU=103
+[StagingDebug] PW created: worker_id=105, tid=124589998866432, RANK=1, NUMA=6, CPU=105
+[StagingDebug] PW created: worker_id=106, tid=124589988380672, RANK=2, NUMA=2, CPU=106
+[StagingDebug] PW created: worker_id=107, tid=124589977894912, RANK=3, NUMA=2, CPU=107
+[StagingDebug] PW created: worker_id=108, tid=124589967409152, RANK=4, NUMA=20, CPU=108
+[StagingDebug] PW created: worker_id=109, tid=124589818511360, RANK=5, NUMA=20, CPU=109
+[StagingDebug] PW created: worker_id=110, tid=124589808025600, RANK=6, NUMA=16, CPU=110
+[StagingDebug] PW created: worker_id=111, tid=124589797539840, RANK=7, NUMA=16, CPU=111
+[StagingDebug] PW created: worker_id=112, tid=124589787054080, RANK=0, NUMA=6, CPU=112
+[StagingDebug] PW created: worker_id=113, tid=124589776568320, RANK=1, NUMA=6, CPU=113
+[StagingDebug] PW created: worker_id=104, tid=124590009352192, RANK=0, NUMA=6, CPU=104
+[StagingDebug] PW created: worker_id=114, tid=124589766082560, RANK=2, NUMA=2, CPU=114
+[StagingDebug] PW created: worker_id=115, tid=124589617184768, RANK=3, NUMA=2, CPU=115
+[StagingDebug] PW created: worker_id=116, tid=124589606699008, RANK=4, NUMA=20, CPU=116
+[StagingDebug] PW created: worker_id=117, tid=124589596213248, RANK=5, NUMA=20, CPU=117
+[StagingDebug] PW created: worker_id=118, tid=124589585727488, RANK=6, NUMA=16, CPU=118
+[StagingDebug] PW created: worker_id=119, tid=124589575241728, RANK=7, NUMA=16, CPU=119
+[StagingDebug] PW created: worker_id=120, tid=124589564755968, RANK=0, NUMA=6, CPU=120
+[StagingDebug] PW created: worker_id=121, tid=124589415858176, RANK=1, NUMA=6, CPU=121
+[StagingDebug] PW created: worker_id=122, tid=124589405372416, RANK=2, NUMA=2, CPU=122
+[StagingDebug] PW created: worker_id=123, tid=124589394886656, RANK=3, NUMA=2, CPU=123
+[StagingDebug] PW created: worker_id=124, tid=124589384400896, RANK=4, NUMA=20, CPU=124
+[StagingDebug] PW created: worker_id=125, tid=124589373915136, RANK=5, NUMA=20, CPU=125
+[StagingDebug] PW created: worker_id=126, tid=124589363429376, RANK=6, NUMA=16, CPU=126
+[StagingDebug] PW created: worker_id=127, tid=124585154445312, RANK=7, NUMA=16, CPU=127
+[2026-05-24 18:20:36.553] [INFO ] [TR] [DIAG-WORKER] pid=5 wkr=47 lbl=43 fout_ptr=0x715bac1eaa00 | raw: first_nz=0 nz=725 [1,255] | norm: first_nz=0 nz=784 [-1.07772e+13,5.81228e+11]
+[2026-05-24 18:20:36.553] [INFO ] [TR] [DIAG-WORKER] pid=15 wkr=126 lbl=182 fout_ptr=0x715c385bea00 | raw: first_nz=0 nz=412 [1,255] | norm: first_nz=0 nz=784 [-1.12612e+14,9.09383e+12]
+[2026-05-24 18:20:36.553] [INFO ] [TR] [DIAG-WORKER] pid=12 wkr=99 lbl=766 fout_ptr=0x715c00498a00 | raw: first_nz=0 nz=719 [1,255] | norm: first_nz=0 nz=784 [-3.03516e+13,9.25102e+14]
+[2026-05-24 18:20:36.553] [INFO ] [TR] [DIAG-WORKER] pid=2 wkr=18 lbl=527 fout_ptr=0x715bc80c4a00 | raw: first_nz=0 nz=721 [1,255] | norm: first_nz=0 nz=784 [-2.25227e+14,9.25103e+14]
+[2026-05-24 18:20:36.553] [INFO ] [TR] [DIAG-WORKER] pid=6 wkr=54 lbl=220 fout_ptr=0x715c3824ca00 | raw: first_nz=0 nz=718 [1,255] | norm: first_nz=0 nz=784 [-3.25476e+13,3.92282e+12]
+[2026-05-24 18:21:13.653] [INFO ] [TR] Preprocessor completed: 1281167 total samples
+[2026-05-24 18:21:13.653] [INFO ] [TR] Total buffers processed: 35
+[2026-05-24 18:21:13.653] [INFO ] [TR] Total epoch time: 37.2277 seconds
+
+=== Results ===
+Batches:        313
+Elapsed:        39.694 s
+Avg latency:    126.817 ms/batch
+Per-rank bytes: 59.911 GB
+Per-rank BW:    1.509 GB/s
+Aggregate bytes: 479.288 GB
+Aggregate BW:   12.075 GB/s
+=== DONE ===

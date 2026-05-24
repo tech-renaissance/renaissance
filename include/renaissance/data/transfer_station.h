@@ -190,6 +190,9 @@ public:
     bool buffer_is_writeable(int buffer_id);
     bool both_buffers_writeable() const;  // 查询两个buffer是否都可写（供Preprocessor检查phase结束条件）
 
+    void wait_buffer_readable(int buffer_id);   // GPU 侧：阻塞直到 buffer 可读（condition_variable，替换忙轮询）
+    void wait_buffer_writeable(int buffer_id);  // Preprocessor 侧：阻塞直到 buffer 可写
+
     uint8_t* get_buffer_ptr(int buffer_id);  // 仅供深度学习引擎调用，获取buffer的起始位置指针。注意！是buffer_labels_而不是buffer_data_！
     uint8_t* get_image_data_ptr(int buffer_id) const;  // 仅供深度学习引擎调用，获取image data区的起始位置指针
     size_t get_buffer_actual_transfer_bytes(int buffer_id);  // 仅供深度学习引擎调用，注意，这是包含了整个buffer_labels_区和实际图像字节的
@@ -264,6 +267,11 @@ private:
     std::atomic<bool> buffer_1_is_readable_{false};
     std::atomic<bool> buffer_0_is_writeable_{true};
     std::atomic<bool> buffer_1_is_writeable_{true};
+
+    // condition_variable 同步设施（替换忙轮询）
+    std::mutex buffer_sync_mtx_;
+    std::condition_variable cv_readable_[2];
+    std::condition_variable cv_writeable_[2];
 
     std::atomic<size_t> buffer_0_actual_transfer_bytes_{0};
     std::atomic<size_t> buffer_1_actual_transfer_bytes_{0};

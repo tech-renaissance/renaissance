@@ -26,6 +26,19 @@
 
 namespace tr {
 
+/// Test-only result for H2D copy tests
+struct H2DTestResult {
+    int    batches     = 0;
+    double elapsed_us  = 0.0;
+    size_t total_bytes = 0;
+    double bandwidth_gbps = 0.0;
+    bool   labels_ok   = true;
+    bool   data_ok     = true;
+    double avg_lat_us  = 0.0;
+    double min_lat_us  = 0.0;
+    double max_lat_us  = 0.0;
+};
+
 /**
  * @class DeepLearningTask
  * @brief 深度学习训练任务门面
@@ -369,6 +382,7 @@ private:
     float best_ema_top5_ = 0.0f;
     int best_epoch_ = -1;
     bool early_stopped_ = false;
+    bool h2d_only_ = false;
 
     // ------------------------------------------------------------------
     // GPU 执行表（compile 阶段一次性构建，run 阶段只读）
@@ -406,10 +420,22 @@ public:
     void build_exec_table();
     float fetch_lr_for_batch(int batch_id) const;
 
+    // --- 测试接口：H2D copy 算子的正确性和带宽测试 ---
+    /// @brief 验证 H2D copy 数据正确性（第一个 epoch 的前 2 个 batch）
+    H2DTestResult test_h2d_copy_correctness();
+    /// @brief 测量 H2D copy 等效带宽（第一个 epoch 全部 batch）
+    H2DTestResult test_h2d_copy_bandwidth();
+
+    /// @brief 只编译 H2D 传输图（TRANSFER_A + TRANSFER_B），不编译训练图
+    void compile_h2d_only();
+
+    /// @brief 只运行 H2D 传输图一个 epoch（联动 Preprocessor/TransferStation）
+    H2DTestResult run_h2d_only();
+
 private:
 
-    void run_train_epoch_gpu();
-    void run_val_epoch_gpu(bool validate_ema);
+    float run_train_epoch_gpu();
+    std::tuple<float, float, float> run_val_epoch_gpu(bool validate_ema);
 
     void run_train_epoch_cpu();
     void run_val_epoch_cpu(bool validate_ema);

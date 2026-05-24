@@ -113,5 +113,6 @@ void register_op_range_check_nan();
 void register_op_range_allreduce();
 void register_op_range_optimizer();
 void register_op_lars();
+void register_op_dtensor_copy();
 
 } // namespace tr

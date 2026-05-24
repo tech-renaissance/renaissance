@@ -103,7 +103,6 @@ static void softmax_ce_fwd_inner(
 {
     float inv_b = 1.0f / static_cast<float>(batch);
     *inv_sc = inv_b;
-    *loss   = 0.0f;
 
     for (int b = 0; b < batch; ++b) {
         const float* logit_b = logits + b * num_cls;
@@ -148,7 +147,6 @@ static void softmax_ce_inf_inner(
 {
     float inv_b = 1.0f / static_cast<float>(batch);
     *inv_sc = inv_b;
-    *loss   = 0.0f;
     int top1_cnt = 0;
     int top5_cnt = 0;
 
@@ -356,8 +354,6 @@ static void launch_softmax_ce_fp32_fwd_cuda(
     int batch   = logits_dt.shape.n();
     int num_cls = logits_dt.shape.c();
 
-    cudaMemsetAsync(loss, 0, sizeof(float), s);
-
     int stride = logits_dt.n_stride_cuda();
     const DTensor& probs_dt = mp.get_dtensor(ids_out[3]);
     int probs_stride = probs_dt.n_stride_cuda();
@@ -399,8 +395,6 @@ static void launch_softmax_ce_amp_fwd_cuda(
     const DTensor& logits_dt = mp.get_dtensor(ids_in[0]);
     int batch   = logits_dt.shape.n();
     int num_cls = logits_dt.shape.c();
-
-    cudaMemsetAsync(loss, 0, sizeof(float), s);
 
     int stride = logits_dt.n_stride_cuda();
     const DTensor& probs_dt = mp.get_dtensor(ids_out[3]);
@@ -444,10 +438,6 @@ static void launch_softmax_ce_fp32_inf_cuda(
     int batch   = logits_dt.shape.n();
     int num_cls = logits_dt.shape.c();
 
-    cudaMemsetAsync(loss, 0, sizeof(float), s);
-    cudaMemsetAsync(top1, 0, sizeof(float), s);
-    cudaMemsetAsync(top5, 0, sizeof(float), s);
-
     int stride = logits_dt.n_stride_cuda();
     const DTensor& probs_dt = mp.get_dtensor(ids_out[3]);
     int probs_stride = probs_dt.n_stride_cuda();
@@ -489,10 +479,6 @@ static void launch_softmax_ce_amp_inf_cuda(
     const DTensor& logits_dt = mp.get_dtensor(ids_in[0]);
     int batch   = logits_dt.shape.n();
     int num_cls = logits_dt.shape.c();
-
-    cudaMemsetAsync(loss, 0, sizeof(float), s);
-    cudaMemsetAsync(top1, 0, sizeof(float), s);
-    cudaMemsetAsync(top5, 0, sizeof(float), s);
 
     int stride = logits_dt.n_stride_cuda();
     const DTensor& probs_dt = mp.get_dtensor(ids_out[3]);

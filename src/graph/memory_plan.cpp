@@ -365,6 +365,9 @@ void MemoryPlan::alloc_baseline_dtensors(const Shape& label_shape,
     baseline_.label_b = lb.id;
     baseline_.data_b  = db.id;
 
+    // Step 1.5: SoftmaxCE 专属标签区（双缓冲统一入口）
+    baseline_.label_smce = alloc_impl(label_shape, DType::INT32, Region::T_TEMP_INT32).id;
+
     // Step 2: 必选标量（ID 4-9）
     Shape scalar_shape{1, 1, 1, 1};
 

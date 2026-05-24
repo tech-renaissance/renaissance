@@ -87,6 +87,7 @@ list(APPEND RENAISSANCE_SOURCES
     backend/ops/range/optimizer_op.cu
     backend/ops/dtensor/lars_op.cpp
     backend/ops/dtensor/lars_op.cu
+    backend/ops/dtensor/dtensor_copy_op.cpp
     backend/infra_kernels.cpp
     backend/infra_kernels.cu
 )

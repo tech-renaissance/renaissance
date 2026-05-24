@@ -11,6 +11,7 @@
 #include <turbojpeg.h>
 
 #include <iostream>
+#include <sstream>
 
 #ifdef _WIN32
     #include <windows.h>
@@ -1208,10 +1209,51 @@ bool PreprocessWorker::work(
     				);
 				}
 				input_stride = output_stride;
-				input_w = output_w;
-				input_h = output_h;
-				src_ptr = dest_ptr;
+			input_w = output_w;
+			input_h = output_h;
+			src_ptr = dest_ptr;
+		}
+
+		{
+			static int diag_worker_count = 0;
+			if (is_train && diag_worker_count < 5 && final_output_ptr != nullptr) {
+				diag_worker_count++;
+				float* fout = reinterpret_cast<float*>(final_output_ptr);
+				const uint8_t* raw = data_ptr;
+
+				int first_nz = -1, nz_count = 0;
+				float min_val = 999, max_val = -999;
+				for (int i = 0; i < 784; ++i) {
+					if (raw[i] != 0) {
+						if (first_nz < 0) first_nz = i;
+						nz_count++;
+						if (raw[i] < min_val) min_val = (float)raw[i];
+						if (raw[i] > max_val) max_val = (float)raw[i];
+					}
+				}
+
+				// scan normalized output for non-(-0.424213) values
+				int fnz = -1, fnz_count = 0;
+				float fmin = 999, fmax = -999;
+				for (int i = 0; i < 784; ++i) {
+					float v = fout[i];
+					if (v > -0.424f && v < -0.423f) continue; // background
+					if (fnz < 0) fnz = i;
+					fnz_count++;
+					if (v < fmin) fmin = v;
+					if (v > fmax) fmax = v;
+				}
+
+				LOG_INFO << "[DIAG-WORKER] pid=" << config_.pid_in_engine
+						 << " wkr=" << config_.worker_id
+						 << " lbl=" << label
+						 << " fout_ptr=" << (void*)fout
+						 << " | raw: first_nz=" << first_nz << " nz=" << nz_count
+						 << " [" << (int)min_val << "," << (int)max_val << "]"
+						 << " | norm: first_nz=" << fnz << " nz=" << fnz_count
+						 << " [" << fmin << "," << fmax << "]";
 			}
+		}
 	}
 
 

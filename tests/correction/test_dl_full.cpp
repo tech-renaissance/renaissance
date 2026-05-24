@@ -25,11 +25,12 @@ int main() {
         .val_transforms(DoNothing())
         .commit();
 
-    BluePrint mlp = seq(fc(512, true), relu(), fc(256, true), relu(), fc(10, true));
+    BluePrint mlp = seq(fc(512, true), tanh_act(), fc(256, true), tanh_act(), fc(10, true));
 
     DeepLearningTask task;
     task.model(mlp)
         .loss(CrossEntropyLoss())
+        .initializer(Initializer().fc(InitKind::KAIMING_UNIFORM))
         .total_epochs(3)
         .optimizer(SGD().momentum(0.9f).weight_decay(5e-4f).nesterov(false).dampening(0.0f))
         .scheduler(CosineAnnealingLR().base_lr(0.01f).eta_min(1e-5f).step_by_epoch())

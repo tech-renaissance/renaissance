@@ -343,7 +343,7 @@ SubgraphPattern build_relu_backward(const OpParams&, const std::vector<TensorDes
     if (descs.size() < 2) return p;
     SubgraphPattern::Node n;
     n.op = GlobalRegistry::instance().using_amp() ? ComputeOp::RELU_AMP_BWD : ComputeOp::RELU_FP32_BWD;
-    n.input_indices  = {0, 1};  // output, mask
+    n.input_indices  = {1};     // mask only (dy injected by compiler as input_ids[0])
     n.output_indices = {0};     // grad propagated in-place to output
     p.nodes.push_back(n);
     return p;
@@ -542,7 +542,8 @@ SubgraphPattern build_softmaxce_inference(const OpParams&, const std::vector<Ten
     SubgraphPattern p;
     if (descs.size() < 4) return p;
     SubgraphPattern::Node n;
-    n.op = ComputeOp::SOFTMAX_CE_FP32_FWD;
+    n.op = GlobalRegistry::instance().using_amp() ? ComputeOp::SOFTMAX_CE_AMP_INF
+                                                   : ComputeOp::SOFTMAX_CE_FP32_INF;
     n.output_indices = {3, 2, 1};
     p.nodes.push_back(n);
     return p;

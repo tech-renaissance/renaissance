@@ -1,0 +1,252 @@
+root@2af6a1cc17a3:~/epfs# /root/epfs/R/renaissance/build/bin/tests/prep/test_pw_ultimate --dataset imagenet --path /root/epfs/dataset/imagenet --format raw --lv 0 --mode partial --batch-size 512 --resolution 224 --loaders 16 --preproc 128 --device GPU --gpu-ids "0,1,2,3,4,5,6,7" --epoch 4 --po-train1 FastRandomResizedCrop --po-train2 RandomHorizontalFlip --po-val1 Resize --po-val2 CenterCrop --seed 42 --sdmp 1 --cpvs true --reproducible --cpu-bind
+Random Seed: 0x000000000000002A
+Reproducible mode: ENABLED
+Device: GPU [0, 1, 2, 3, 4, 5, 6, 7]
+
+=== Calculating Max Resolution ===
+Train PO chain final output: 224
+Val PO chain final output: 224
+Calculated max_resolution: 224
+
+=== Configuration Summary ===
+Dataset: imagenet
+Format: RAW
+Path: /root/epfs/dataset/imagenet
+Load workers: 16
+Preprocess workers: 128
+Mode: Partial
+Shuffle train: disabled
+Resolution parameter: 224
+Calculated max_resolution: 224
+Batch size: 512
+SDMP factor: 1
+CPVS: enabled
+CPU binding: enabled
+Test mode: false (NORMAL mode with TransferStation)
+
+=== Setting Transforms ===
+Train PO 1: FastRandomResizedCrop (224)
+Train PO 2: RandomHorizontalFlip
+Val PO 1: Resize (224)
+Val PO 2: CenterCrop
+Random seed: 42
+[StagingDebug] StagingBufferPool created: blocks=8, per_block=588MB, type=pinned (cudaHostAlloc)
+[StagingDebug]   RANK[0]: GPU=0, NUMA=6, base=0x7b27f0000000, size=616567808B
+[StagingDebug]   RANK[1]: GPU=1, NUMA=6, base=0x7b2750000000, size=616567808B
+[StagingDebug]   RANK[2]: GPU=2, NUMA=2, base=0x7b2840000000, size=616567808B
+[StagingDebug]   RANK[3]: GPU=3, NUMA=2, base=0x7b2898000000, size=616567808B
+[StagingDebug]   RANK[4]: GPU=4, NUMA=20, base=0x7b27c8000000, size=616567808B
+[StagingDebug]   RANK[5]: GPU=5, NUMA=20, base=0x7b27a0000000, size=616567808B
+[StagingDebug]   RANK[6]: GPU=6, NUMA=16, base=0x7b2818000000, size=616567808B
+[StagingDebug]   RANK[7]: GPU=7, NUMA=16, base=0x7b2778000000, size=616567808B
+[StagingDebug] TransferStation configured: engine_id=0, numa_node=6, workers_per_engine=16
+[StagingDebug]   associated_workers=[0, 8, 16, 24, 32, 40, 48, 56, 64, 72, 80, 88, 96, 104, 112, 120]
+[StagingDebug]   Zone A: labels=0x7b27f0000000, data=0x7b27f0000900
+[StagingDebug]   Zone B: labels=0x7b2802600a00, data=0x7b2802601300
+[StagingDebug]   transfer_size=308283904B (labels=2304B, data=308281600B)
+[StagingDebug] TransferStation configured: engine_id=2, numa_node=2, workers_per_engine=16
+[StagingDebug]   associated_workers=[2, 10, 18, 26, 34, 42, 50, 58, 66, 74, 82, 90, 98, 106, 114, 122]
+[StagingDebug]   Zone A: labels=0x7b2840000000, data=0x7b2840000900
+[StagingDebug]   Zone B: labels=0x7b2852600a00, data=0x7b2852601300
+[StagingDebug]   transfer_size=308283904B (labels=2304B, data=308281600B)
+[StagingDebug] TransferStation configured: engine_id=1, numa_node=6, workers_per_engine=16
+[StagingDebug]   associated_workers=[1, 9, 17, 25, 33, 41, 49, 57, 65, 73, 81, 89, 97, 105, 113, 121]
+[StagingDebug]   Zone A: labels=0x7b2750000000, data=0x7b2750000900
+[StagingDebug]   Zone B: labels=0x7b2762600a00, data=0x7b2762601300
+[StagingDebug]   transfer_size=308283904B (labels=2304B, data=308281600B)
+[StagingDebug] TransferStation configured: engine_id=5, numa_node=20, workers_per_engine=16
+[StagingDebug]   associated_workers=[5, 13, 21, 29, 37, 45, 53, 61, 69, 77, 85, 93, 101, 109, 117, 125]
+[StagingDebug]   Zone A: labels=0x7b27a0000000, data=0x7b27a0000900
+[StagingDebug]   Zone B: labels=0x7b27b2600a00, data=0x7b27b2601300
+[StagingDebug]   transfer_size=308283904B (labels=2304B, data=308281600B)
+[StagingDebug] TransferStation configured: engine_id=7, numa_node=16, workers_per_engine=16
+[StagingDebug]   associated_workers=[7, 15, 23, 31, 39, 47, 55, 63, 71, 79, 87, 95, 103, 111, 119, 127]
+[StagingDebug]   Zone A: labels=0x7b2778000000, data=0x7b2778000900
+[StagingDebug]   Zone B: labels=0x7b278a600a00, data=0x7b278a601300
+[StagingDebug]   transfer_size=308283904B (labels=2304B, data=308281600B)
+[StagingDebug] TransferStation configured: engine_id=3, numa_node=2, workers_per_engine=16
+[StagingDebug]   associated_workers=[3, 11, 19, 27, 35, 43, 51, 59, 67, 75, 83, 91, 99, 107, 115, 123]
+[StagingDebug]   Zone A: labels=0x7b2898000000, data=0x7b2898000900
+[StagingDebug]   Zone B: labels=0x7b28aa600a00, data=0x7b28aa601300
+[StagingDebug]   transfer_size=308283904B (labels=2304B, data=308281600B)
+[StagingDebug] TransferStation configured: engine_id=6, numa_node=16, workers_per_engine=16
+[StagingDebug]   associated_workers=[6, 14, 22, 30, 38, 46, 54, 62, 70, 78, 86, 94, 102, 110, 118, 126]
+[StagingDebug]   Zone A: labels=0x7b2818000000, data=0x7b2818000900
+[StagingDebug]   Zone B: labels=0x7b282a600a00, data=0x7b282a601300
+[StagingDebug]   transfer_size=308283904B (labels=2304B, data=308281600B)
+[StagingDebug] TransferStation configured: engine_id=4, numa_node=20, workers_per_engine=16
+[StagingDebug]   associated_workers=[4, 12, 20, 28, 36, 44, 52, 60, 68, 76, 84, 92, 100, 108, 116, 124]
+[StagingDebug]   Zone A: labels=0x7b27c8000000, data=0x7b27c8000900
+[StagingDebug]   Zone B: labels=0x7b27da600a00, data=0x7b27da601300
+[StagingDebug]   transfer_size=308283904B (labels=2304B, data=308281600B)
+
+=== Running 4 Epoch(s) ===
+
+========== Epoch 0 ==========
+
+[TRAIN]
+[StagingDebug] PW created: worker_id=0, tid=135418360102912, RANK=0, NUMA=6, CPU=0
+[StagingDebug] PW created: worker_id=1, tid=135418370588672, RANK=1, NUMA=6, CPU=1
+[StagingDebug] PW created: worker_id=2, tid=135418416726016, RANK=2, NUMA=2, CPU=2
+[StagingDebug] PW created: worker_id=3, tid=135418427211776, RANK=3, NUMA=2, CPU=3
+[StagingDebug] PW created: worker_id=4, tid=135418622246912, RANK=4, NUMA=20, CPU=4
+[StagingDebug] PW created: worker_id=9, tid=135418494320640, RANK=1, NUMA=6, CPU=9
+[StagingDebug] PW created: worker_id=6, tid=135418561429504, RANK=6, NUMA=16, CPU=6
+[StagingDebug] PW created: worker_id=7, tid=135418550943744, RANK=7, NUMA=16, CPU=7
+[StagingDebug] PW created: worker_id=12, tid=135418349617152, RANK=4, NUMA=20, CPU=12
+[StagingDebug] PW created: worker_id=5, tid=135418571915264, RANK=5, NUMA=20, CPU=5
+[StagingDebug] PW created: worker_id=10, tid=135418483834880, RANK=2, NUMA=2, CPU=10
+[StagingDebug] PW created: worker_id=15, tid=135418282508288, RANK=7, NUMA=16, CPU=15
+[StagingDebug] PW created: worker_id=8, tid=135418504806400, RANK=0, NUMA=6, CPU=8
+[StagingDebug] PW created: worker_id=13, tid=135418303479808, RANK=5, NUMA=20, CPU=13
+[StagingDebug] PW created: worker_id=14, tid=135418292994048, RANK=6, NUMA=16, CPU=14
+[StagingDebug] PW created: worker_id=19, tid=135418102153216, RANK=3, NUMA=2, CPU=19
+[StagingDebug] PW created: worker_id=21, tid=135418081181696, RANK=5, NUMA=20, CPU=21
+[StagingDebug] PW created: worker_id=17, tid=135418192330752, RANK=1, NUMA=6, CPU=17
+[StagingDebug] PW created: worker_id=18, tid=135418181844992, RANK=2, NUMA=2, CPU=18
+[StagingDebug] PW created: worker_id=26, tid=135417890340864, RANK=2, NUMA=2, CPU=26
+[StagingDebug] PW created: worker_id=20, tid=135418091667456, RANK=4, NUMA=20, CPU=20
+[StagingDebug] PW created: worker_id=16, tid=135418202816512, RANK=0, NUMA=6, CPU=16
+[StagingDebug] PW created: worker_id=22, tid=135418001489920, RANK=6, NUMA=16, CPU=22
+[StagingDebug] PW created: worker_id=23, tid=135417991004160, RANK=7, NUMA=16, CPU=23
+[StagingDebug] PW created: worker_id=24, tid=135417980518400, RANK=0, NUMA=6, CPU=24
+[StagingDebug] PW created: worker_id=25, tid=135417900826624, RANK=1, NUMA=6, CPU=25
+[StagingDebug] PW created: worker_id=11, tid=135418437697536, RANK=3, NUMA=2, CPU=11
+[StagingDebug] PW created: worker_id=27, tid=135417879855104, RANK=3, NUMA=2, CPU=27
+[StagingDebug] PW created: worker_id=28, tid=135417800163328, RANK=4, NUMA=20, CPU=28
+[StagingDebug] PW created: worker_id=29, tid=135417789677568, RANK=5, NUMA=20, CPU=29
+[StagingDebug] PW created: worker_id=30, tid=135417779191808, RANK=6, NUMA=16, CPU=30
+[StagingDebug] PW created: worker_id=31, tid=135417699500032, RANK=7, NUMA=16, CPU=31
+[StagingDebug] PW created: worker_id=32, tid=135417689014272, RANK=0, NUMA=6, CPU=32
+[StagingDebug] PW created: worker_id=33, tid=135417678528512, RANK=1, NUMA=6, CPU=33
+[StagingDebug] PW created: worker_id=34, tid=135417598836736, RANK=2, NUMA=2, CPU=34
+[StagingDebug] PW created: worker_id=35, tid=135417588350976, RANK=3, NUMA=2, CPU=35
+[StagingDebug] PW created: worker_id=36, tid=135417577865216, RANK=4, NUMA=20, CPU=36
+[StagingDebug] PW created: worker_id=54, tid=135415463936000, RANK=6, NUMA=16, CPU=54
+[StagingDebug] PW created: worker_id=38, tid=135417487687680, RANK=6, NUMA=16, CPU=38
+[StagingDebug] PW created: worker_id=39, tid=135417477201920, RANK=7, NUMA=16, CPU=39
+[StagingDebug] PW created: worker_id=40, tid=135417095520256, RANK=0, NUMA=6, CPU=40
+[StagingDebug] PW created: worker_id=61, tid=135414948036608, RANK=5, NUMA=20, CPU=61
+[StagingDebug] PW created: worker_id=42, tid=135417074548736, RANK=2, NUMA=2, CPU=42
+[StagingDebug] PW created: worker_id=43, tid=135416692867072, RANK=3, NUMA=2, CPU=43
+[StagingDebug] PW created: worker_id=44, tid=135416682381312, RANK=4, NUMA=20, CPU=44
+[StagingDebug] PW created: worker_id=45, tid=135416671895552, RANK=5, NUMA=20, CPU=45
+[StagingDebug] PW created: worker_id=46, tid=135416290213888, RANK=6, NUMA=16, CPU=46
+[StagingDebug] PW created: worker_id=47, tid=135416279728128, RANK=7, NUMA=16, CPU=47
+[StagingDebug] PW created: worker_id=48, tid=135416269242368, RANK=0, NUMA=6, CPU=48
+[StagingDebug] PW created: worker_id=49, tid=135415887560704, RANK=1, NUMA=6, CPU=49
+[StagingDebug] PW created: worker_id=50, tid=135415877074944, RANK=2, NUMA=2, CPU=50
+[StagingDebug] PW created: worker_id=51, tid=135415866589184, RANK=3, NUMA=2, CPU=51
+[StagingDebug] PW created: worker_id=52, tid=135415484907520, RANK=4, NUMA=20, CPU=52
+[StagingDebug] PW created: worker_id=81, tid=135411437404160, RANK=1, NUMA=6, CPU=81
+[StagingDebug] PW created: worker_id=83, tid=135410776801280, RANK=3, NUMA=2, CPU=83
+[StagingDebug] PW created: worker_id=55, tid=135415082254336, RANK=7, NUMA=16, CPU=55
+[StagingDebug] PW created: worker_id=56, tid=135415071768576, RANK=0, NUMA=6, CPU=56
+[StagingDebug] PW created: worker_id=57, tid=135415061282816, RANK=1, NUMA=6, CPU=57
+[StagingDebug] PW created: worker_id=58, tid=135415050797056, RANK=2, NUMA=2, CPU=58
+[StagingDebug] PW created: worker_id=59, tid=135415040311296, RANK=3, NUMA=2, CPU=59
+[StagingDebug] PW created: worker_id=60, tid=135415029825536, RANK=4, NUMA=20, CPU=60
+[StagingDebug] PW created: worker_id=41, tid=135417085034496, RANK=1, NUMA=6, CPU=41
+[StagingDebug] PW created: worker_id=62, tid=135414937550848, RANK=6, NUMA=16, CPU=62
+[StagingDebug] PW created: worker_id=63, tid=135414927065088, RANK=7, NUMA=16, CPU=63
+[StagingDebug] PW created: worker_id=64, tid=135414276947968, RANK=0, NUMA=6, CPU=64
+[StagingDebug] PW created: worker_id=65, tid=135414266462208, RANK=1, NUMA=6, CPU=65
+[StagingDebug] PW created: worker_id=66, tid=135414255976448, RANK=2, NUMA=2, CPU=66
+[StagingDebug] PW created: worker_id=103, tid=135399848542208, RANK=7, NUMA=16, CPU=103
+[StagingDebug] PW created: worker_id=106, tid=135399817084928, RANK=2, NUMA=2, CPU=106
+[StagingDebug] PW created: worker_id=69, tid=135413853323264, RANK=5, NUMA=20, CPU=69
+[StagingDebug] PW created: worker_id=70, tid=135413471641600, RANK=6, NUMA=16, CPU=70
+[StagingDebug] PW created: worker_id=71, tid=135413461155840, RANK=7, NUMA=16, CPU=71
+[StagingDebug] PW created: worker_id=72, tid=135413450670080, RANK=0, NUMA=6, CPU=72
+[StagingDebug] PW created: worker_id=73, tid=135412800552960, RANK=1, NUMA=6, CPU=73
+[StagingDebug] PW created: worker_id=74, tid=135412790067200, RANK=2, NUMA=2, CPU=74
+[StagingDebug] PW created: worker_id=75, tid=135412779581440, RANK=3, NUMA=2, CPU=75
+[StagingDebug] PW created: worker_id=76, tid=135412129464320, RANK=4, NUMA=20, CPU=76
+[StagingDebug] PW created: worker_id=77, tid=135412118978560, RANK=5, NUMA=20, CPU=77
+[StagingDebug] PW created: worker_id=78, tid=135412108492800, RANK=6, NUMA=16, CPU=78
+[StagingDebug] PW created: worker_id=79, tid=135411458375680, RANK=7, NUMA=16, CPU=79
+[StagingDebug] PW created: worker_id=80, tid=135411447889920, RANK=0, NUMA=6, CPU=80
+[StagingDebug] PW created: worker_id=53, tid=135415474421760, RANK=5, NUMA=20, CPU=53
+[StagingDebug] PW created: worker_id=82, tid=135410787287040, RANK=2, NUMA=2, CPU=82
+[StagingDebug] PW created: worker_id=37, tid=135417498173440, RANK=5, NUMA=20, CPU=37
+[StagingDebug] PW created: worker_id=84, tid=135410766315520, RANK=4, NUMA=20, CPU=84
+[StagingDebug] PW created: worker_id=85, tid=135410116198400, RANK=5, NUMA=20, CPU=85
+[StagingDebug] PW created: worker_id=86, tid=135410105712640, RANK=6, NUMA=16, CPU=86
+[StagingDebug] PW created: worker_id=87, tid=135410095226880, RANK=7, NUMA=16, CPU=87
+[StagingDebug] PW created: worker_id=88, tid=135409445109760, RANK=0, NUMA=6, CPU=88
+[StagingDebug] PW created: worker_id=89, tid=135409434624000, RANK=1, NUMA=6, CPU=89
+[StagingDebug] PW created: worker_id=90, tid=135409424138240, RANK=2, NUMA=2, CPU=90
+[StagingDebug] PW created: worker_id=91, tid=135408639803392, RANK=3, NUMA=2, CPU=91
+[StagingDebug] PW created: worker_id=92, tid=135408629317632, RANK=4, NUMA=20, CPU=92
+[StagingDebug] PW created: worker_id=93, tid=135408618831872, RANK=5, NUMA=20, CPU=93
+[StagingDebug] PW created: worker_id=94, tid=135408608346112, RANK=6, NUMA=16, CPU=94
+[StagingDebug] PW created: worker_id=95, tid=135408597860352, RANK=7, NUMA=16, CPU=95
+[StagingDebug] PW created: worker_id=96, tid=135408587374592, RANK=0, NUMA=6, CPU=96
+[StagingDebug] PW created: worker_id=97, tid=135408576888832, RANK=1, NUMA=6, CPU=97
+[StagingDebug] PW created: worker_id=98, tid=135408566403072, RANK=2, NUMA=2, CPU=98
+[StagingDebug] PW created: worker_id=99, tid=135408555917312, RANK=3, NUMA=2, CPU=99
+[StagingDebug] PW created: worker_id=100, tid=135399949205504, RANK=4, NUMA=20, CPU=100
+[StagingDebug] PW created: worker_id=101, tid=135399938719744, RANK=5, NUMA=20, CPU=101
+[StagingDebug] PW created: worker_id=102, tid=135399928233984, RANK=6, NUMA=16, CPU=102
+[StagingDebug] PW created: worker_id=67, tid=135413874294784, RANK=3, NUMA=2, CPU=67
+[StagingDebug] PW created: worker_id=104, tid=135399838056448, RANK=0, NUMA=6, CPU=104
+[StagingDebug] PW created: worker_id=105, tid=135399827570688, RANK=1, NUMA=6, CPU=105
+[StagingDebug] PW created: worker_id=68, tid=135413863809024, RANK=4, NUMA=20, CPU=68
+[StagingDebug] PW created: worker_id=107, tid=135399806599168, RANK=3, NUMA=2, CPU=107
+[StagingDebug] PW created: worker_id=108, tid=135399796113408, RANK=4, NUMA=20, CPU=108
+[StagingDebug] PW created: worker_id=109, tid=135399714324480, RANK=5, NUMA=20, CPU=109
+[StagingDebug] PW created: worker_id=110, tid=135399703838720, RANK=6, NUMA=16, CPU=110
+[StagingDebug] PW created: worker_id=111, tid=135399693352960, RANK=7, NUMA=16, CPU=111
+[StagingDebug] PW created: worker_id=112, tid=135399682867200, RANK=0, NUMA=6, CPU=112
+[StagingDebug] PW created: worker_id=113, tid=135399672381440, RANK=1, NUMA=6, CPU=113
+[StagingDebug] PW created: worker_id=114, tid=135399661895680, RANK=2, NUMA=2, CPU=114
+[StagingDebug] PW created: worker_id=115, tid=135399512997888, RANK=3, NUMA=2, CPU=115
+[StagingDebug] PW created: worker_id=116, tid=135399502512128, RANK=4, NUMA=20, CPU=116
+[StagingDebug] PW created: worker_id=117, tid=135399492026368, RANK=5, NUMA=20, CPU=117
+[StagingDebug] PW created: worker_id=118, tid=135399481540608, RANK=6, NUMA=16, CPU=118
+[StagingDebug] PW created: worker_id=119, tid=135399471054848, RANK=7, NUMA=16, CPU=119
+[StagingDebug] PW created: worker_id=120, tid=135399460569088, RANK=0, NUMA=6, CPU=120
+[StagingDebug] PW created: worker_id=121, tid=135393976516608, RANK=1, NUMA=6, CPU=121
+[StagingDebug] PW created: worker_id=122, tid=135393966030848, RANK=2, NUMA=2, CPU=122
+[StagingDebug] PW created: worker_id=123, tid=135393955545088, RANK=3, NUMA=2, CPU=123
+[StagingDebug] PW created: worker_id=124, tid=135369248997376, RANK=4, NUMA=20, CPU=124
+[StagingDebug] PW created: worker_id=125, tid=135369314009088, RANK=5, NUMA=20, CPU=125
+[StagingDebug] PW created: worker_id=126, tid=135369303523328, RANK=6, NUMA=16, CPU=126
+[StagingDebug] PW created: worker_id=127, tid=135369293037568, RANK=7, NUMA=16, CPU=127
+  Time: 40.993 s, Samples: 1281167, Throughput: 31253.3 samples/s
+
+[VAL]
+  Time: 3.280 s, Samples: 50000, Throughput: 15244.3 samples/s
+========== Epoch 1 ==========
+
+[TRAIN]
+  Time: 39.096 s, Samples: 1281167, Throughput: 32769.8 samples/s
+
+[VAL]
+  Time: 1.538 s, Samples: 50000, Throughput: 32509.0 samples/s
+========== Epoch 2 ==========
+
+[TRAIN]
+  Time: 38.108 s, Samples: 1281167, Throughput: 33619.5 samples/s
+
+[VAL]
+  Time: 1.600 s, Samples: 50000, Throughput: 31245.3 samples/s
+========== Epoch 3 ==========
+
+[TRAIN]
+  Time: 37.972 s, Samples: 1281167, Throughput: 33739.4 samples/s
+
+[VAL]
+  Time: 1.423 s, Samples: 50000, Throughput: 35144.6 samples/s
+
+========================================
+=== FINAL SUMMARY ===
+========================================
+Total train time: 156.169 s (5124668 samples)
+Total val time: 7.841 s (200000 samples)
+Total time: 164.010 s
+Avg train time: 39.042 s
+Avg val time: 1.960 s
+Avg epoch time: 41.003 s
+
+=== Test Completed Successfully ===

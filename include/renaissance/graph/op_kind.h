@@ -239,6 +239,8 @@ enum class ComputeOp : uint16_t {
     ADAMW_UPDATE,
     EMA_UPDATE,
 
+    DTENSOR_COPY,       ///< 通用 DTensor 级 D2D 拷贝（标签双缓冲专用）
+
     COUNT,              ///< 算子类型总数（哨兵值，用于数组大小计算）
     UNKNOWN = 0xFFFF
 };

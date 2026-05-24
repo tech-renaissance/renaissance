@@ -1,0 +1,378 @@
+root@2af6a1cc17a3:~/epfs/R/renaissance/build/bin/tests/correction# ./perf_h2d_copy_a --amp
+[2026-05-24 10:04:03.546] [INFO ] [TR] GlobalRegistry: fixed_using_gpu set to true
+[2026-05-24 10:04:03.547] [INFO ] [TR] GlobalRegistry: fixed_gpu_ids set to [0, 1, 2, 3, 4, 5, 6, 7]
+Device: GPU [0, 1, 2, 3, 4, 5, 6, 7]
+[2026-05-24 10:04:03.547] [INFO ] [TR] GlobalRegistry: fixed_reproducibility_insurance set to true
+Random Seed: 0x18B25E142F156615
+[2026-05-24 10:04:03.547] [INFO ] [TR] GlobalRegistry: fixed_max_sample_resolution_ updated to 224
+[2026-05-24 10:04:03.547] [INFO ] [TR] GlobalRegistry: fixed_train_sample_resolution_begin_ and end_ set to 224
+[2026-05-24 10:04:03.547] [INFO ] [TR] GlobalRegistry: fixed_using_progressive_resolution set to false
+[2026-05-24 10:04:03.547] [INFO ] [TR] GlobalRegistry: fixed_val_sample_resolution_ set to 224
+[2026-05-24 10:04:03.547] [INFO ] [TR] GlobalRegistry: fixed_batch_size set to 512
+[2026-05-24 10:04:03.547] [INFO ] [TR] GlobalRegistry: fixed_num_color_channels set to 3
+[2026-05-24 10:04:03.547] [INFO ] [TR] GlobalRegistry: fixed_using_amp set to true
+[2026-05-24 10:04:04.732] [INFO ] [backend] DeviceContext 0: created 5 non-blocking streams + per-stream cuDNN + cuBLAS handles
+[2026-05-24 10:04:04.743] [INFO ] [backend] DeviceContext 1: created 5 non-blocking streams + per-stream cuDNN + cuBLAS handles
+[2026-05-24 10:04:04.754] [INFO ] [backend] DeviceContext 2: created 5 non-blocking streams + per-stream cuDNN + cuBLAS handles
+[2026-05-24 10:04:04.768] [INFO ] [backend] DeviceContext 3: created 5 non-blocking streams + per-stream cuDNN + cuBLAS handles
+[2026-05-24 10:04:04.779] [INFO ] [backend] DeviceContext 4: created 5 non-blocking streams + per-stream cuDNN + cuBLAS handles
+[2026-05-24 10:04:04.790] [INFO ] [backend] DeviceContext 5: created 5 non-blocking streams + per-stream cuDNN + cuBLAS handles
+[2026-05-24 10:04:04.801] [INFO ] [backend] DeviceContext 6: created 5 non-blocking streams + per-stream cuDNN + cuBLAS handles
+[2026-05-24 10:04:04.812] [INFO ] [backend] DeviceContext 7: created 5 non-blocking streams + per-stream cuDNN + cuBLAS handles
+[2026-05-24 10:04:06.042] [INFO ] [task] NCCL initialized for 8 GPUs
+[2026-05-24 10:04:06.042] [INFO ] [task] Allocated 8 GPU device context(s), 392.005 MB each
+[2026-05-24 10:04:07.993] [INFO ] [TR] StagingBufferPool: allocated 8 blocks of 392 MB each
+[StagingDebug] StagingBufferPool created: blocks=8, per_block=392MB, type=pinned (cudaHostAlloc)
+[StagingDebug]   RANK[0]: GPU=0, NUMA=6, base=0x7f531c000000, size=411047424B
+[StagingDebug]   RANK[1]: GPU=1, NUMA=6, base=0x7f52e4000000, size=411047424B
+[StagingDebug]   RANK[2]: GPU=2, NUMA=2, base=0x7f5300000000, size=411047424B
+[StagingDebug]   RANK[3]: GPU=3, NUMA=2, base=0x7f52c8000000, size=411047424B
+[StagingDebug]   RANK[4]: GPU=4, NUMA=20, base=0x7f52ac000000, size=411047424B
+[StagingDebug]   RANK[5]: GPU=5, NUMA=20, base=0x7f5290000000, size=411047424B
+[StagingDebug]   RANK[6]: GPU=6, NUMA=16, base=0x7f5274000000, size=411047424B
+[StagingDebug]   RANK[7]: GPU=7, NUMA=16, base=0x7f5258000000, size=411047424B
+[2026-05-24 10:04:07.993] [INFO ] [TR] GlobalRegistry: Staging buffer pool created with 8 blocks, 392 MB each
+[2026-05-24 10:04:07.993] [INFO ] [task] [DBG] compile_capture_simple: enter
+[2026-05-24 10:04:07.993] [INFO ] [task] [DBG] compile_capture_simple: start warmup loop, num_gpus=8
+[2026-05-24 10:04:07.993] [INFO ] [task] [DBG] warmup rank 0 begin
+[2026-05-24 10:04:07.993] [INFO ] [task] [DBG] warmup rank 0 gpu_id=0
+[2026-05-24 10:04:07.993] [INFO ] [task] [DBG] warmup rank 0 end
+[2026-05-24 10:04:07.993] [INFO ] [task] [DBG] warmup rank 1 begin
+[2026-05-24 10:04:07.993] [INFO ] [task] [DBG] warmup rank 1 gpu_id=1
+[2026-05-24 10:04:07.993] [INFO ] [task] [DBG] warmup rank 1 end
+[2026-05-24 10:04:07.993] [INFO ] [task] [DBG] warmup rank 2 begin
+[2026-05-24 10:04:07.993] [INFO ] [task] [DBG] warmup rank 2 gpu_id=2
+[2026-05-24 10:04:07.993] [INFO ] [task] [DBG] warmup rank 2 end
+[2026-05-24 10:04:07.993] [INFO ] [task] [DBG] warmup rank 3 begin
+[2026-05-24 10:04:07.993] [INFO ] [task] [DBG] warmup rank 3 gpu_id=3
+[2026-05-24 10:04:07.993] [INFO ] [task] [DBG] warmup rank 3 end
+[2026-05-24 10:04:07.993] [INFO ] [task] [DBG] warmup rank 4 begin
+[2026-05-24 10:04:07.993] [INFO ] [task] [DBG] warmup rank 4 gpu_id=4
+[2026-05-24 10:04:07.993] [INFO ] [task] [DBG] warmup rank 4 end
+[2026-05-24 10:04:07.993] [INFO ] [task] [DBG] warmup rank 5 begin
+[2026-05-24 10:04:07.993] [INFO ] [task] [DBG] warmup rank 5 gpu_id=5
+[2026-05-24 10:04:07.993] [INFO ] [task] [DBG] warmup rank 5 end
+[2026-05-24 10:04:07.993] [INFO ] [task] [DBG] warmup rank 6 begin
+[2026-05-24 10:04:07.993] [INFO ] [task] [DBG] warmup rank 6 gpu_id=6
+[2026-05-24 10:04:07.993] [INFO ] [task] [DBG] warmup rank 6 end
+[2026-05-24 10:04:07.994] [INFO ] [task] [DBG] warmup rank 7 begin
+[2026-05-24 10:04:07.994] [INFO ] [task] [DBG] warmup rank 7 gpu_id=7
+[2026-05-24 10:04:07.994] [INFO ] [task] [DBG] warmup rank 7 end
+[2026-05-24 10:04:07.994] [INFO ] [task] [DBG] compile_capture_simple: warmup done
+[2026-05-24 10:04:07.994] [INFO ] [task] [DBG] compile_capture_simple: starting capture phase, num_graphs=1 num_gpus=8
+[2026-05-24 10:04:07.994] [INFO ] [task] [DBG] capture graph 'xfer_a_perf' graph_index=0
+[2026-05-24 10:04:07.994] [INFO ] [task] [DBG] capture rank 0 begin
+[2026-05-24 10:04:07.994] [INFO ] [task] [DBG] calling CapturedGraph::capture...
+[2026-05-24 10:04:07.994] [INFO ] [TR] [CAPTURE-CUDA] gid=20 nodes=1
+[H2D_DEBUG] rank=0 staging_base=0x7f531c000000 per_zone=205523712 label_aligned=2560 block_size=411047424 num_output_ranges=2
+[H2D_DEBUG] range[0] start_region=49 end_region=49 dst_off=0 dst_size=2560
+[H2D_DEBUG]   -> dst=0x7f55b8000000 src=0x7f531c000000 src_end=0x7f531c000a00 stream=0x60fcde6b5ec0
+[H2D_DEBUG] range[1] start_region=50 end_region=50 dst_off=2560 dst_size=205521152
+[H2D_DEBUG]   -> dst=0x7f55b8000a00 src=0x7f531c000a00 src_end=0x7f5328400b00 stream=0x60fcde6b5ec0
+[2026-05-24 10:04:07.994] [INFO ] [task] [DBG] CapturedGraph::capture done, is_cuda=1
+[2026-05-24 10:04:07.994] [INFO ] [task] [DBG] set_metadata_from...
+[2026-05-24 10:04:07.994] [INFO ] [task] [DBG] move_cpu_ops_from...
+[2026-05-24 10:04:07.994] [INFO ] [task] [DBG] rank0 metadata done
+[2026-05-24 10:04:07.994] [INFO ] [task] [DBG] check is_cuda=1
+[2026-05-24 10:04:07.994] [INFO ] [task] [DBG] release_rank_exec...
+[2026-05-24 10:04:07.994] [INFO ] [task] [DBG] release_rank_exec done, exec=0x60fcdb113b30
+[2026-05-24 10:04:07.994] [INFO ] [task] [DBG] set_rank_exec done
+[2026-05-24 10:04:07.994] [INFO ] [task] [DBG] capture rank 0 end
+[2026-05-24 10:04:07.994] [INFO ] [task] [DBG] capture rank 1 begin
+[2026-05-24 10:04:07.994] [INFO ] [task] [DBG] calling CapturedGraph::capture...
+[2026-05-24 10:04:07.994] [INFO ] [TR] [CAPTURE-CUDA] gid=20 nodes=1
+[H2D_DEBUG] rank=1 staging_base=0x7f52e4000000 per_zone=205523712 label_aligned=2560 block_size=411047424 num_output_ranges=2
+[H2D_DEBUG] range[0] start_region=49 end_region=49 dst_off=0 dst_size=2560
+[H2D_DEBUG]   -> dst=0x7f559c000000 src=0x7f52e4000000 src_end=0x7f52e4000a00 stream=0x60fcd807cf70
+[H2D_DEBUG] range[1] start_region=50 end_region=50 dst_off=2560 dst_size=205521152
+[H2D_DEBUG]   -> dst=0x7f559c000a00 src=0x7f52e4000a00 src_end=0x7f52f0400b00 stream=0x60fcd807cf70
+[2026-05-24 10:04:07.995] [INFO ] [task] [DBG] CapturedGraph::capture done, is_cuda=1
+[2026-05-24 10:04:07.995] [INFO ] [task] [DBG] check is_cuda=1
+[2026-05-24 10:04:07.995] [INFO ] [task] [DBG] release_rank_exec...
+[2026-05-24 10:04:07.995] [INFO ] [task] [DBG] release_rank_exec done, exec=0x60fcda3c38d0
+[2026-05-24 10:04:07.995] [INFO ] [task] [DBG] set_rank_exec done
+[2026-05-24 10:04:07.995] [INFO ] [task] [DBG] capture rank 1 end
+[2026-05-24 10:04:07.995] [INFO ] [task] [DBG] capture rank 2 begin
+[2026-05-24 10:04:07.995] [INFO ] [task] [DBG] calling CapturedGraph::capture...
+[2026-05-24 10:04:07.995] [INFO ] [TR] [CAPTURE-CUDA] gid=20 nodes=1
+[H2D_DEBUG] rank=2 staging_base=0x7f5300000000 per_zone=205523712 label_aligned=2560 block_size=411047424 num_output_ranges=2
+[H2D_DEBUG] range[0] start_region=49 end_region=49 dst_off=0 dst_size=2560
+[H2D_DEBUG]   -> dst=0x7f557c000000 src=0x7f5300000000 src_end=0x7f5300000a00 stream=0x60fcd7b01fc0
+[H2D_DEBUG] range[1] start_region=50 end_region=50 dst_off=2560 dst_size=205521152
+[H2D_DEBUG]   -> dst=0x7f557c000a00 src=0x7f5300000a00 src_end=0x7f530c400b00 stream=0x60fcd7b01fc0
+[2026-05-24 10:04:07.995] [INFO ] [task] [DBG] CapturedGraph::capture done, is_cuda=1
+[2026-05-24 10:04:07.995] [INFO ] [task] [DBG] check is_cuda=1
+[2026-05-24 10:04:07.995] [INFO ] [task] [DBG] release_rank_exec...
+[2026-05-24 10:04:07.995] [INFO ] [task] [DBG] release_rank_exec done, exec=0x60fcdd93f150
+[2026-05-24 10:04:07.995] [INFO ] [task] [DBG] set_rank_exec done
+[2026-05-24 10:04:07.995] [INFO ] [task] [DBG] capture rank 2 end
+[2026-05-24 10:04:07.995] [INFO ] [task] [DBG] capture rank 3 begin
+[2026-05-24 10:04:07.995] [INFO ] [task] [DBG] calling CapturedGraph::capture...
+[2026-05-24 10:04:07.995] [INFO ] [TR] [CAPTURE-CUDA] gid=20 nodes=1
+[H2D_DEBUG] rank=3 staging_base=0x7f52c8000000 per_zone=205523712 label_aligned=2560 block_size=411047424 num_output_ranges=2
+[H2D_DEBUG] range[0] start_region=49 end_region=49 dst_off=0 dst_size=2560
+[H2D_DEBUG]   -> dst=0x7f5538000000 src=0x7f52c8000000 src_end=0x7f52c8000a00 stream=0x60fcd7e0f340
+[H2D_DEBUG] range[1] start_region=50 end_region=50 dst_off=2560 dst_size=205521152
+[H2D_DEBUG]   -> dst=0x7f5538000a00 src=0x7f52c8000a00 src_end=0x7f52d4400b00 stream=0x60fcd7e0f340
+[2026-05-24 10:04:07.995] [INFO ] [task] [DBG] CapturedGraph::capture done, is_cuda=1
+[2026-05-24 10:04:07.995] [INFO ] [task] [DBG] check is_cuda=1
+[2026-05-24 10:04:07.996] [INFO ] [task] [DBG] release_rank_exec...
+[2026-05-24 10:04:07.996] [INFO ] [task] [DBG] release_rank_exec done, exec=0x60fcde6b5a40
+[2026-05-24 10:04:07.996] [INFO ] [task] [DBG] set_rank_exec done
+[2026-05-24 10:04:07.996] [INFO ] [task] [DBG] capture rank 3 end
+[2026-05-24 10:04:07.996] [INFO ] [task] [DBG] capture rank 4 begin
+[2026-05-24 10:04:07.996] [INFO ] [task] [DBG] calling CapturedGraph::capture...
+[2026-05-24 10:04:07.996] [INFO ] [TR] [CAPTURE-CUDA] gid=20 nodes=1
+[H2D_DEBUG] rank=4 staging_base=0x7f52ac000000 per_zone=205523712 label_aligned=2560 block_size=411047424 num_output_ranges=2
+[H2D_DEBUG] range[0] start_region=49 end_region=49 dst_off=0 dst_size=2560
+[H2D_DEBUG]   -> dst=0x7f5554000000 src=0x7f52ac000000 src_end=0x7f52ac000a00 stream=0x60fcd7dbb8f0
+[H2D_DEBUG] range[1] start_region=50 end_region=50 dst_off=2560 dst_size=205521152
+[H2D_DEBUG]   -> dst=0x7f5554000a00 src=0x7f52ac000a00 src_end=0x7f52b8400b00 stream=0x60fcd7dbb8f0
+[2026-05-24 10:04:07.996] [INFO ] [task] [DBG] CapturedGraph::capture done, is_cuda=1
+[2026-05-24 10:04:07.996] [INFO ] [task] [DBG] check is_cuda=1
+[2026-05-24 10:04:07.996] [INFO ] [task] [DBG] release_rank_exec...
+[2026-05-24 10:04:07.996] [INFO ] [task] [DBG] release_rank_exec done, exec=0x60fcdbe6e490
+[2026-05-24 10:04:07.996] [INFO ] [task] [DBG] set_rank_exec done
+[2026-05-24 10:04:07.996] [INFO ] [task] [DBG] capture rank 4 end
+[2026-05-24 10:04:07.996] [INFO ] [task] [DBG] capture rank 5 begin
+[2026-05-24 10:04:07.996] [INFO ] [task] [DBG] calling CapturedGraph::capture...
+[2026-05-24 10:04:07.996] [INFO ] [TR] [CAPTURE-CUDA] gid=20 nodes=1
+[H2D_DEBUG] rank=5 staging_base=0x7f5290000000 per_zone=205523712 label_aligned=2560 block_size=411047424 num_output_ranges=2
+[H2D_DEBUG] range[0] start_region=49 end_region=49 dst_off=0 dst_size=2560
+[H2D_DEBUG]   -> dst=0x7f5514000000 src=0x7f5290000000 src_end=0x7f5290000a00 stream=0x60fcd7ee2cc0
+[H2D_DEBUG] range[1] start_region=50 end_region=50 dst_off=2560 dst_size=205521152
+[H2D_DEBUG]   -> dst=0x7f5514000a00 src=0x7f5290000a00 src_end=0x7f529c400b00 stream=0x60fcd7ee2cc0
+[2026-05-24 10:04:07.996] [INFO ] [task] [DBG] CapturedGraph::capture done, is_cuda=1
+[2026-05-24 10:04:07.996] [INFO ] [task] [DBG] check is_cuda=1
+[2026-05-24 10:04:07.996] [INFO ] [task] [DBG] release_rank_exec...
+[2026-05-24 10:04:07.996] [INFO ] [task] [DBG] release_rank_exec done, exec=0x60fcd80db3b0
+[2026-05-24 10:04:07.996] [INFO ] [task] [DBG] set_rank_exec done
+[2026-05-24 10:04:07.996] [INFO ] [task] [DBG] capture rank 5 end
+[2026-05-24 10:04:07.996] [INFO ] [task] [DBG] capture rank 6 begin
+[2026-05-24 10:04:07.996] [INFO ] [task] [DBG] calling CapturedGraph::capture...
+[2026-05-24 10:04:07.996] [INFO ] [TR] [CAPTURE-CUDA] gid=20 nodes=1
+[H2D_DEBUG] rank=6 staging_base=0x7f5274000000 per_zone=205523712 label_aligned=2560 block_size=411047424 num_output_ranges=2
+[H2D_DEBUG] range[0] start_region=49 end_region=49 dst_off=0 dst_size=2560
+[H2D_DEBUG]   -> dst=0x7f54f4000000 src=0x7f5274000000 src_end=0x7f5274000a00 stream=0x60fcd7dbaf30
+[H2D_DEBUG] range[1] start_region=50 end_region=50 dst_off=2560 dst_size=205521152
+[H2D_DEBUG]   -> dst=0x7f54f4000a00 src=0x7f5274000a00 src_end=0x7f5280400b00 stream=0x60fcd7dbaf30
+[2026-05-24 10:04:07.996] [INFO ] [task] [DBG] CapturedGraph::capture done, is_cuda=1
+[2026-05-24 10:04:07.996] [INFO ] [task] [DBG] check is_cuda=1
+[2026-05-24 10:04:07.996] [INFO ] [task] [DBG] release_rank_exec...
+[2026-05-24 10:04:07.996] [INFO ] [task] [DBG] release_rank_exec done, exec=0x60fcd80dbed0
+[2026-05-24 10:04:07.996] [INFO ] [task] [DBG] set_rank_exec done
+[2026-05-24 10:04:07.996] [INFO ] [task] [DBG] capture rank 6 end
+[2026-05-24 10:04:07.996] [INFO ] [task] [DBG] capture rank 7 begin
+[2026-05-24 10:04:07.996] [INFO ] [task] [DBG] calling CapturedGraph::capture...
+[2026-05-24 10:04:07.996] [INFO ] [TR] [CAPTURE-CUDA] gid=20 nodes=1
+[H2D_DEBUG] rank=7 staging_base=0x7f5258000000 per_zone=205523712 label_aligned=2560 block_size=411047424 num_output_ranges=2
+[H2D_DEBUG] range[0] start_region=49 end_region=49 dst_off=0 dst_size=2560
+[H2D_DEBUG]   -> dst=0x7f54d0000000 src=0x7f5258000000 src_end=0x7f5258000a00 stream=0x60fcd7dadca0
+[H2D_DEBUG] range[1] start_region=50 end_region=50 dst_off=2560 dst_size=205521152
+[H2D_DEBUG]   -> dst=0x7f54d0000a00 src=0x7f5258000a00 src_end=0x7f5264400b00 stream=0x60fcd7dadca0
+[2026-05-24 10:04:07.997] [INFO ] [task] [DBG] CapturedGraph::capture done, is_cuda=1
+[2026-05-24 10:04:07.997] [INFO ] [task] [DBG] check is_cuda=1
+[2026-05-24 10:04:07.997] [INFO ] [task] [DBG] release_rank_exec...
+[2026-05-24 10:04:07.997] [INFO ] [task] [DBG] release_rank_exec done, exec=0x60fcd8b60c40
+[2026-05-24 10:04:07.997] [INFO ] [task] [DBG] set_rank_exec done
+[2026-05-24 10:04:07.997] [INFO ] [task] [DBG] capture rank 7 end
+[2026-05-24 10:04:07.997] [INFO ] [task] [DBG] emplace simple_captured_graphs_ ...
+[2026-05-24 10:04:07.997] [INFO ] [task] [DBG] emplace done
+[2026-05-24 10:04:07.997] [INFO ] [task] [DBG] compile_capture_simple: all done
+=== RANGE_H2D_COPY_A Performance ===
+  Batch size:       512
+  Resolution:       224x224
+  Channels:         3
+  Amp:              true
+  Per-rank bytes:   205523712 (196.00 MB)
+  Total bytes:      1644189696 (1568.02 MB)
+  Num ranks:        8
+  Warmup iters:     20
+  Measure iters:    200
+  Mean latency:     18837.67 us/iter
+  Std dev:          119.44 us
+  Per-rank BW:      10.16 GB/s
+  Aggregate BW:     81.29 GB/s
+root@2af6a1cc17a3:~/epfs/R/renaissance/build/bin/tests/correction# ./perf_h2d_copy_b --amp
+[2026-05-24 10:04:19.256] [INFO ] [TR] GlobalRegistry: fixed_using_gpu set to true
+[2026-05-24 10:04:19.256] [INFO ] [TR] GlobalRegistry: fixed_gpu_ids set to [0, 1, 2, 3, 4, 5, 6, 7]
+Device: GPU [0, 1, 2, 3, 4, 5, 6, 7]
+[2026-05-24 10:04:19.256] [INFO ] [TR] GlobalRegistry: fixed_reproducibility_insurance set to true
+Random Seed: 0x18B25E17D76E7772
+[2026-05-24 10:04:19.256] [INFO ] [TR] GlobalRegistry: fixed_max_sample_resolution_ updated to 224
+[2026-05-24 10:04:19.256] [INFO ] [TR] GlobalRegistry: fixed_train_sample_resolution_begin_ and end_ set to 224
+[2026-05-24 10:04:19.256] [INFO ] [TR] GlobalRegistry: fixed_using_progressive_resolution set to false
+[2026-05-24 10:04:19.256] [INFO ] [TR] GlobalRegistry: fixed_val_sample_resolution_ set to 224
+[2026-05-24 10:04:19.256] [INFO ] [TR] GlobalRegistry: fixed_batch_size set to 512
+[2026-05-24 10:04:19.256] [INFO ] [TR] GlobalRegistry: fixed_num_color_channels set to 3
+[2026-05-24 10:04:19.256] [INFO ] [TR] GlobalRegistry: fixed_using_amp set to true
+[2026-05-24 10:04:20.461] [INFO ] [backend] DeviceContext 0: created 5 non-blocking streams + per-stream cuDNN + cuBLAS handles
+[2026-05-24 10:04:20.472] [INFO ] [backend] DeviceContext 1: created 5 non-blocking streams + per-stream cuDNN + cuBLAS handles
+[2026-05-24 10:04:20.483] [INFO ] [backend] DeviceContext 2: created 5 non-blocking streams + per-stream cuDNN + cuBLAS handles
+[2026-05-24 10:04:20.494] [INFO ] [backend] DeviceContext 3: created 5 non-blocking streams + per-stream cuDNN + cuBLAS handles
+[2026-05-24 10:04:20.504] [INFO ] [backend] DeviceContext 4: created 5 non-blocking streams + per-stream cuDNN + cuBLAS handles
+[2026-05-24 10:04:20.515] [INFO ] [backend] DeviceContext 5: created 5 non-blocking streams + per-stream cuDNN + cuBLAS handles
+[2026-05-24 10:04:20.525] [INFO ] [backend] DeviceContext 6: created 5 non-blocking streams + per-stream cuDNN + cuBLAS handles
+[2026-05-24 10:04:20.536] [INFO ] [backend] DeviceContext 7: created 5 non-blocking streams + per-stream cuDNN + cuBLAS handles
+[2026-05-24 10:04:21.784] [INFO ] [task] NCCL initialized for 8 GPUs
+[2026-05-24 10:04:21.784] [INFO ] [task] Allocated 8 GPU device context(s), 392.005 MB each
+[2026-05-24 10:04:23.559] [INFO ] [TR] StagingBufferPool: allocated 8 blocks of 392 MB each
+[StagingDebug] StagingBufferPool created: blocks=8, per_block=392MB, type=pinned (cudaHostAlloc)
+[StagingDebug]   RANK[0]: GPU=0, NUMA=6, base=0x7984c4000000, size=411047424B
+[StagingDebug]   RANK[1]: GPU=1, NUMA=6, base=0x7984a8000000, size=411047424B
+[StagingDebug]   RANK[2]: GPU=2, NUMA=2, base=0x79848c000000, size=411047424B
+[StagingDebug]   RANK[3]: GPU=3, NUMA=2, base=0x798470000000, size=411047424B
+[StagingDebug]   RANK[4]: GPU=4, NUMA=20, base=0x798454000000, size=411047424B
+[StagingDebug]   RANK[5]: GPU=5, NUMA=20, base=0x798438000000, size=411047424B
+[StagingDebug]   RANK[6]: GPU=6, NUMA=16, base=0x79841c000000, size=411047424B
+[StagingDebug]   RANK[7]: GPU=7, NUMA=16, base=0x798400000000, size=411047424B
+[2026-05-24 10:04:23.559] [INFO ] [TR] GlobalRegistry: Staging buffer pool created with 8 blocks, 392 MB each
+[2026-05-24 10:04:23.559] [INFO ] [task] [DBG] compile_capture_simple: enter
+[2026-05-24 10:04:23.559] [INFO ] [task] [DBG] compile_capture_simple: start warmup loop, num_gpus=8
+[2026-05-24 10:04:23.559] [INFO ] [task] [DBG] warmup rank 0 begin
+[2026-05-24 10:04:23.559] [INFO ] [task] [DBG] warmup rank 0 gpu_id=0
+[2026-05-24 10:04:23.559] [INFO ] [task] [DBG] warmup rank 0 end
+[2026-05-24 10:04:23.559] [INFO ] [task] [DBG] warmup rank 1 begin
+[2026-05-24 10:04:23.559] [INFO ] [task] [DBG] warmup rank 1 gpu_id=1
+[2026-05-24 10:04:23.559] [INFO ] [task] [DBG] warmup rank 1 end
+[2026-05-24 10:04:23.559] [INFO ] [task] [DBG] warmup rank 2 begin
+[2026-05-24 10:04:23.559] [INFO ] [task] [DBG] warmup rank 2 gpu_id=2
+[2026-05-24 10:04:23.559] [INFO ] [task] [DBG] warmup rank 2 end
+[2026-05-24 10:04:23.559] [INFO ] [task] [DBG] warmup rank 3 begin
+[2026-05-24 10:04:23.559] [INFO ] [task] [DBG] warmup rank 3 gpu_id=3
+[2026-05-24 10:04:23.559] [INFO ] [task] [DBG] warmup rank 3 end
+[2026-05-24 10:04:23.559] [INFO ] [task] [DBG] warmup rank 4 begin
+[2026-05-24 10:04:23.559] [INFO ] [task] [DBG] warmup rank 4 gpu_id=4
+[2026-05-24 10:04:23.559] [INFO ] [task] [DBG] warmup rank 4 end
+[2026-05-24 10:04:23.559] [INFO ] [task] [DBG] warmup rank 5 begin
+[2026-05-24 10:04:23.559] [INFO ] [task] [DBG] warmup rank 5 gpu_id=5
+[2026-05-24 10:04:23.560] [INFO ] [task] [DBG] warmup rank 5 end
+[2026-05-24 10:04:23.560] [INFO ] [task] [DBG] warmup rank 6 begin
+[2026-05-24 10:04:23.560] [INFO ] [task] [DBG] warmup rank 6 gpu_id=6
+[2026-05-24 10:04:23.560] [INFO ] [task] [DBG] warmup rank 6 end
+[2026-05-24 10:04:23.560] [INFO ] [task] [DBG] warmup rank 7 begin
+[2026-05-24 10:04:23.560] [INFO ] [task] [DBG] warmup rank 7 gpu_id=7
+[2026-05-24 10:04:23.560] [INFO ] [task] [DBG] warmup rank 7 end
+[2026-05-24 10:04:23.560] [INFO ] [task] [DBG] compile_capture_simple: warmup done
+[2026-05-24 10:04:23.560] [INFO ] [task] [DBG] compile_capture_simple: starting capture phase, num_graphs=1 num_gpus=8
+[2026-05-24 10:04:23.560] [INFO ] [task] [DBG] capture graph 'xfer_b_perf' graph_index=0
+[2026-05-24 10:04:23.560] [INFO ] [task] [DBG] capture rank 0 begin
+[2026-05-24 10:04:23.560] [INFO ] [task] [DBG] calling CapturedGraph::capture...
+[2026-05-24 10:04:23.560] [INFO ] [TR] [CAPTURE-CUDA] gid=20 nodes=1
+[H2D_DEBUG] rank=0 staging_base=0x7984c4000000 per_zone=205523712 label_aligned=2560 block_size=411047424 num_output_ranges=2
+[H2D_DEBUG] range[0] start_region=51 end_region=51 dst_off=205523712 dst_size=2560
+[H2D_DEBUG]   -> dst=0x79877c400b00 src=0x7984d0400b00 src_end=0x7984d0401500 stream=0x5c7dc2cde080
+[H2D_DEBUG] range[1] start_region=52 end_region=52 dst_off=205526272 dst_size=205521152
+[H2D_DEBUG]   -> dst=0x79877c401500 src=0x7984d0401500 src_end=0x7984dc801600 stream=0x5c7dc2cde080
+[2026-05-24 10:04:23.560] [INFO ] [task] [DBG] CapturedGraph::capture done, is_cuda=1
+[2026-05-24 10:04:23.560] [INFO ] [task] [DBG] set_metadata_from...
+[2026-05-24 10:04:23.560] [INFO ] [task] [DBG] move_cpu_ops_from...
+[2026-05-24 10:04:23.560] [INFO ] [task] [DBG] rank0 metadata done
+[2026-05-24 10:04:23.560] [INFO ] [task] [DBG] check is_cuda=1
+[2026-05-24 10:04:23.560] [INFO ] [task] [DBG] release_rank_exec...
+[2026-05-24 10:04:23.560] [INFO ] [task] [DBG] release_rank_exec done, exec=0x5c7dc0496510
+[2026-05-24 10:04:23.560] [INFO ] [task] [DBG] set_rank_exec done
+[2026-05-24 10:04:23.560] [INFO ] [task] [DBG] capture rank 0 end
+[2026-05-24 10:04:23.560] [INFO ] [task] [DBG] capture rank 1 begin
+[2026-05-24 10:04:23.560] [INFO ] [task] [DBG] calling CapturedGraph::capture...
+[2026-05-24 10:04:23.560] [INFO ] [TR] [CAPTURE-CUDA] gid=20 nodes=1
+[H2D_DEBUG] rank=1 staging_base=0x7984a8000000 per_zone=205523712 label_aligned=2560 block_size=411047424 num_output_ranges=2
+[H2D_DEBUG] range[0] start_region=51 end_region=51 dst_off=205523712 dst_size=2560
+[H2D_DEBUG]   -> dst=0x798758400b00 src=0x7984b4400b00 src_end=0x7984b4401500 stream=0x5c7dbc5ea210
+[H2D_DEBUG] range[1] start_region=52 end_region=52 dst_off=205526272 dst_size=205521152
+[H2D_DEBUG]   -> dst=0x798758401500 src=0x7984b4401500 src_end=0x7984c0801600 stream=0x5c7dbc5ea210
+[2026-05-24 10:04:23.560] [INFO ] [task] [DBG] CapturedGraph::capture done, is_cuda=1
+[2026-05-24 10:04:23.560] [INFO ] [task] [DBG] check is_cuda=1
+[2026-05-24 10:04:23.560] [INFO ] [task] [DBG] release_rank_exec...
+[2026-05-24 10:04:23.560] [INFO ] [task] [DBG] release_rank_exec done, exec=0x5c7dbf73b8e0
+[2026-05-24 10:04:23.560] [INFO ] [task] [DBG] set_rank_exec done
+[2026-05-24 10:04:23.560] [INFO ] [task] [DBG] capture rank 1 end
+[2026-05-24 10:04:23.560] [INFO ] [task] [DBG] capture rank 2 begin
+[2026-05-24 10:04:23.560] [INFO ] [task] [DBG] calling CapturedGraph::capture...
+[2026-05-24 10:04:23.560] [INFO ] [TR] [CAPTURE-CUDA] gid=20 nodes=1
+[H2D_DEBUG] rank=2 staging_base=0x79848c000000 per_zone=205523712 label_aligned=2560 block_size=411047424 num_output_ranges=2
+[H2D_DEBUG] range[0] start_region=51 end_region=51 dst_off=205523712 dst_size=2560
+[H2D_DEBUG]   -> dst=0x798738400b00 src=0x798498400b00 src_end=0x798498401500 stream=0x5c7dbc32ae90
+[H2D_DEBUG] range[1] start_region=52 end_region=52 dst_off=205526272 dst_size=205521152
+[H2D_DEBUG]   -> dst=0x798738401500 src=0x798498401500 src_end=0x7984a4801600 stream=0x5c7dbc32ae90
+[2026-05-24 10:04:23.561] [INFO ] [task] [DBG] CapturedGraph::capture done, is_cuda=1
+[2026-05-24 10:04:23.561] [INFO ] [task] [DBG] check is_cuda=1
+[2026-05-24 10:04:23.561] [INFO ] [task] [DBG] release_rank_exec...
+[2026-05-24 10:04:23.561] [INFO ] [task] [DBG] release_rank_exec done, exec=0x5c7dbdca43e0
+[2026-05-24 10:04:23.561] [INFO ] [task] [DBG] set_rank_exec done
+[2026-05-24 10:04:23.561] [INFO ] [task] [DBG] capture rank 2 end
+[2026-05-24 10:04:23.561] [INFO ] [task] [DBG] capture rank 3 begin
+[2026-05-24 10:04:23.561] [INFO ] [task] [DBG] calling CapturedGraph::capture...
+[2026-05-24 10:04:23.561] [INFO ] [TR] [CAPTURE-CUDA] gid=20 nodes=1
+[H2D_DEBUG] rank=3 staging_base=0x798470000000 per_zone=205523712 label_aligned=2560 block_size=411047424 num_output_ranges=2
+[H2D_DEBUG] range[0] start_region=51 end_region=51 dst_off=205523712 dst_size=2560
+[H2D_DEBUG]   -> dst=0x798710400b00 src=0x79847c400b00 src_end=0x79847c401500 stream=0x5c7dbc31f190
+[H2D_DEBUG] range[1] start_region=52 end_region=52 dst_off=205526272 dst_size=205521152
+[H2D_DEBUG]   -> dst=0x798710401500 src=0x79847c401500 src_end=0x798488801600 stream=0x5c7dbc31f190
+[2026-05-24 10:04:23.561] [INFO ] [task] [DBG] CapturedGraph::capture done, is_cuda=1
+[2026-05-24 10:04:23.561] [INFO ] [task] [DBG] check is_cuda=1
+[2026-05-24 10:04:23.561] [INFO ] [task] [DBG] release_rank_exec...
+[2026-05-24 10:04:23.561] [INFO ] [task] [DBG] release_rank_exec done, exec=0x5c7dc1f66f80
+[2026-05-24 10:04:23.561] [INFO ] [task] [DBG] set_rank_exec done
+[2026-05-24 10:04:23.561] [INFO ] [task] [DBG] capture rank 3 end
+[2026-05-24 10:04:23.561] [INFO ] [task] [DBG] capture rank 4 begin
+[2026-05-24 10:04:23.561] [INFO ] [task] [DBG] calling CapturedGraph::capture...
+[2026-05-24 10:04:23.561] [INFO ] [TR] [CAPTURE-CUDA] gid=20 nodes=1
+[H2D_DEBUG] rank=4 staging_base=0x798454000000 per_zone=205523712 label_aligned=2560 block_size=411047424 num_output_ranges=2
+[H2D_DEBUG] range[0] start_region=51 end_region=51 dst_off=205523712 dst_size=2560
+[H2D_DEBUG]   -> dst=0x7986f4400b00 src=0x798460400b00 src_end=0x798460401500 stream=0x5c7dbc32a710
+[H2D_DEBUG] range[1] start_region=52 end_region=52 dst_off=205526272 dst_size=205521152
+[H2D_DEBUG]   -> dst=0x7986f4401500 src=0x798460401500 src_end=0x79846c801600 stream=0x5c7dbc32a710
+[2026-05-24 10:04:23.561] [INFO ] [task] [DBG] CapturedGraph::capture done, is_cuda=1
+[2026-05-24 10:04:23.561] [INFO ] [task] [DBG] check is_cuda=1
+[2026-05-24 10:04:23.561] [INFO ] [task] [DBG] release_rank_exec...
+[2026-05-24 10:04:23.561] [INFO ] [task] [DBG] release_rank_exec done, exec=0x5c7dc11f9da0
+[2026-05-24 10:04:23.561] [INFO ] [task] [DBG] set_rank_exec done
+[2026-05-24 10:04:23.561] [INFO ] [task] [DBG] capture rank 4 end
+[2026-05-24 10:04:23.561] [INFO ] [task] [DBG] capture rank 5 begin
+[2026-05-24 10:04:23.561] [INFO ] [task] [DBG] calling CapturedGraph::capture...
+[2026-05-24 10:04:23.561] [INFO ] [TR] [CAPTURE-CUDA] gid=20 nodes=1
+[H2D_DEBUG] rank=5 staging_base=0x798438000000 per_zone=205523712 label_aligned=2560 block_size=411047424 num_output_ranges=2
+[H2D_DEBUG] range[0] start_region=51 end_region=51 dst_off=205523712 dst_size=2560
+[H2D_DEBUG]   -> dst=0x7986cc400b00 src=0x798444400b00 src_end=0x798444401500 stream=0x5c7dbc43fd20
+[H2D_DEBUG] range[1] start_region=52 end_region=52 dst_off=205526272 dst_size=205521152
+[H2D_DEBUG]   -> dst=0x7986cc401500 src=0x798444401500 src_end=0x798450801600 stream=0x5c7dbc43fd20
+[2026-05-24 10:04:23.562] [INFO ] [task] [DBG] CapturedGraph::capture done, is_cuda=1
+[2026-05-24 10:04:23.562] [INFO ] [task] [DBG] check is_cuda=1
+[2026-05-24 10:04:23.562] [INFO ] [task] [DBG] release_rank_exec...
+[2026-05-24 10:04:23.562] [INFO ] [task] [DBG] release_rank_exec done, exec=0x5c7dbc7033c0
+[2026-05-24 10:04:23.562] [INFO ] [task] [DBG] set_rank_exec done
+[2026-05-24 10:04:23.562] [INFO ] [task] [DBG] capture rank 5 end
+[2026-05-24 10:04:23.562] [INFO ] [task] [DBG] capture rank 6 begin
+[2026-05-24 10:04:23.562] [INFO ] [task] [DBG] calling CapturedGraph::capture...
+[2026-05-24 10:04:23.562] [INFO ] [TR] [CAPTURE-CUDA] gid=20 nodes=1
+[H2D_DEBUG] rank=6 staging_base=0x79841c000000 per_zone=205523712 label_aligned=2560 block_size=411047424 num_output_ranges=2
+[H2D_DEBUG] range[0] start_region=51 end_region=51 dst_off=205523712 dst_size=2560
+[H2D_DEBUG]   -> dst=0x7986b0400b00 src=0x798428400b00 src_end=0x798428401500 stream=0x5c7dbc436020
+[H2D_DEBUG] range[1] start_region=52 end_region=52 dst_off=205526272 dst_size=205521152
+[H2D_DEBUG]   -> dst=0x7986b0401500 src=0x798428401500 src_end=0x798434801600 stream=0x5c7dbc436020
+[2026-05-24 10:04:23.562] [INFO ] [task] [DBG] CapturedGraph::capture done, is_cuda=1
+[2026-05-24 10:04:23.562] [INFO ] [task] [DBG] check is_cuda=1
+[2026-05-24 10:04:23.562] [INFO ] [task] [DBG] release_rank_exec...
+[2026-05-24 10:04:23.562] [INFO ] [task] [DBG] release_rank_exec done, exec=0x5c7dbd1885f0
+[2026-05-24 10:04:23.562] [INFO ] [task] [DBG] set_rank_exec done
+[2026-05-24 10:04:23.562] [INFO ] [task] [DBG] capture rank 6 end
+[2026-05-24 10:04:23.562] [INFO ] [task] [DBG] capture rank 7 begin
+[2026-05-24 10:04:23.562] [INFO ] [task] [DBG] calling CapturedGraph::capture...
+[2026-05-24 10:04:23.562] [INFO ] [TR] [CAPTURE-CUDA] gid=20 nodes=1
+[H2D_DEBUG] rank=7 staging_base=0x798400000000 per_zone=205523712 label_aligned=2560 block_size=411047424 num_output_ranges=2
+[H2D_DEBUG] range[0] start_region=51 end_region=51 dst_off=205523712 dst_size=2560
+[H2D_DEBUG]   -> dst=0x79868c400b00 src=0x79840c400b00 src_end=0x79840c401500 stream=0x5c7dbc3e9b90
+[H2D_DEBUG] range[1] start_region=52 end_region=52 dst_off=205526272 dst_size=205521152
+[H2D_DEBUG]   -> dst=0x79868c401500 src=0x79840c401500 src_end=0x798418801600 stream=0x5c7dbc3e9b90
+[2026-05-24 10:04:23.562] [INFO ] [task] [DBG] CapturedGraph::capture done, is_cuda=1
+[2026-05-24 10:04:23.562] [INFO ] [task] [DBG] check is_cuda=1
+[2026-05-24 10:04:23.562] [INFO ] [task] [DBG] release_rank_exec...
+[2026-05-24 10:04:23.562] [INFO ] [task] [DBG] release_rank_exec done, exec=0x5c7dbd189110
+[2026-05-24 10:04:23.562] [INFO ] [task] [DBG] set_rank_exec done
+[2026-05-24 10:04:23.562] [INFO ] [task] [DBG] capture rank 7 end
+[2026-05-24 10:04:23.562] [INFO ] [task] [DBG] emplace simple_captured_graphs_ ...
+[2026-05-24 10:04:23.562] [INFO ] [task] [DBG] emplace done
+[2026-05-24 10:04:23.562] [INFO ] [task] [DBG] compile_capture_simple: all done
+Segmentation fault (core dumped)
+root@2af6a1cc17a3:~/epfs/R/renaissance/build/bin/tests/correction# 

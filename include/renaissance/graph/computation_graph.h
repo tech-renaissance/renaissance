@@ -77,7 +77,8 @@ enum class GraphId : uint8_t {
     FIRST_FWD_B,       ///< 首层前向 B（高分辨率）
     DEEP_FWD_BWD,      ///< 深层前向+反向融合
     ZERO_GRAD,          ///< 梯度清零（前反向之间）
-    FIRST_BWD,         ///< 首层反向
+    FIRST_BWD,         ///< 首层反向（写回 I_A_DATA）
+    FIRST_BWD_B,       ///< 首层反向 B（写回 I_B_DATA）
     FIRST_COMM,        ///< 首层梯度通信（桶2，仅 AllReduce）
     DEEP_COMM,         ///< 深层梯度通信（桶1，仅 AllReduce）
     CAST_AND_CHECK,    ///< AMP 梯度转换+NaN检查（FP16→FP32 → NAN_CHECK）
@@ -107,6 +108,7 @@ inline const char* graph_id_to_string(GraphId gid) noexcept {
         case GraphId::DEEP_FWD_BWD:      return "DEEP_FWD_BWD";
         case GraphId::ZERO_GRAD:         return "ZERO_GRAD";
         case GraphId::FIRST_BWD:         return "FIRST_BWD";
+        case GraphId::FIRST_BWD_B:       return "FIRST_BWD_B";
         case GraphId::FIRST_COMM:        return "FIRST_COMM";
         case GraphId::DEEP_COMM:         return "DEEP_COMM";
         case GraphId::CAST_AND_CHECK:    return "CAST_AND_CHECK";
@@ -158,6 +160,7 @@ inline bool is_train_graph(GraphId gid) noexcept {
         case GraphId::DEEP_FWD_BWD:
         case GraphId::ZERO_GRAD:
         case GraphId::FIRST_BWD:
+        case GraphId::FIRST_BWD_B:
         case GraphId::CAST_AND_CHECK:
         case GraphId::FIRST_COMM:
         case GraphId::DEEP_COMM:

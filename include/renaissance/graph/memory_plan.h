@@ -151,6 +151,7 @@ public:
     // 基线分配器：一次性分配所有必定存在的 DTensor
     struct BaselineIds {
         int32_t label_a = -1, data_a = -1, label_b = -1, data_b = -1;
+        int32_t label_smce = -1;  ///< SoftmaxCE 专属标签区（双缓冲统一入口）
         int32_t has_nan  = -1;
         int32_t lr       = -1;
         int32_t scaling  = -1;

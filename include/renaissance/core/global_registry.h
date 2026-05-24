@@ -1043,9 +1043,9 @@ private:
     // 初始化策略配置（fixed型变量）
     // =========================================================================
 
-    std::atomic<int> fixed_conv_init_kind_{static_cast<int>(InitKind::TRUNC_NORMAL)}; ///< 卷积层初始化策略
-    std::atomic<int> fixed_fc_init_kind_{static_cast<int>(InitKind::FIXED_NORMAL)};   ///< 全连接层初始化策略
-    std::atomic<int> fixed_bn_init_kind_{static_cast<int>(InitKind::STANDARD)};       ///< 批归一化层初始化策略
+    std::atomic<int> fixed_conv_init_kind_{-1}; ///< 卷积层初始化策略（-1=未设置）
+    std::atomic<int> fixed_fc_init_kind_{-1};   ///< 全连接层初始化策略（-1=未设置，由Initializer首次设置决定）
+    std::atomic<int> fixed_bn_init_kind_{-1};       ///< 批归一化层初始化策略（-1=未设置）
     std::atomic<int> fixed_fan_mode_{static_cast<int>(FanMode::FAN_IN)};              ///< Fan计算模式
 
     // =========================================================================

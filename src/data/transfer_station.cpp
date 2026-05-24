@@ -246,8 +246,15 @@ void TransferStation::configure(
     size_t label_raw = local_batch_size * sizeof(int32_t);
     size_t data_raw = local_batch_size * max_sample;
 
-    label_aligned_ = utils::align_up_256(label_raw + 16);   // 与StagingBufferPool一致
-    data_aligned_ = utils::align_up_256(data_raw + 16);     // 与StagingBufferPool一致
+    // FP32/INT32 slot = 2 * align_up_256(elems * 2 + 16); FP16 slot = align_up_256(elems * 2 + 16)
+    label_aligned_ = 2 * utils::align_up_256(label_raw / 2 + 16);
+
+    bool using_amp = GlobalRegistry::instance().using_amp();
+    if (using_amp) {
+        data_aligned_ = utils::align_up_256(data_raw + 16);
+    } else {
+        data_aligned_ = 2 * utils::align_up_256(data_raw / 2 + 16);
+    }
 
     // 验证容量完全匹配
     size_t expected_zone_size = label_aligned_ + data_aligned_;
@@ -831,8 +838,7 @@ void TransferStation::execute_transfer_locked(int samples_count, bool fill_befor
     // - 这是正常的背压机制：预处理被下游深度学习引擎阻塞
     //
     while (!buffer_is_writeable(next_buf)) {
-        // 等待深度学习引擎消费完毕next_buf并设为可写
-        std::this_thread::sleep_for(std::chrono::microseconds(50));
+        wait_buffer_writeable(next_buf);
     }
 
     set_buffer_readable(next_buf, false);  // 切换前先将其设为不可读，以免深度学习引擎读入未完成的buffer
@@ -1012,6 +1018,10 @@ void TransferStation::set_buffer_readable(int buffer_id, bool readable_flag) {
     } else {
         buffer_1_is_readable_.store(readable_flag, std::memory_order_release);
     }
+
+    if (readable_flag) {
+        cv_readable_[buffer_id].notify_all();
+    }
 }
 
 void TransferStation::set_buffer_writeable(int buffer_id, bool writeable_flag) {
@@ -1022,6 +1032,10 @@ void TransferStation::set_buffer_writeable(int buffer_id, bool writeable_flag) {
         buffer_0_is_writeable_.store(writeable_flag, std::memory_order_release);
     } else {
         buffer_1_is_writeable_.store(writeable_flag, std::memory_order_release);
+    }
+
+    if (writeable_flag) {
+        cv_writeable_[buffer_id].notify_all();
     }
 }
 
@@ -1045,6 +1059,20 @@ bool TransferStation::buffer_is_writeable(int buffer_id) {
     } else {
         return buffer_1_is_writeable_.load(std::memory_order_acquire);
     }
+}
+
+void TransferStation::wait_buffer_readable(int buffer_id) {
+    std::unique_lock<std::mutex> lk(buffer_sync_mtx_);
+    cv_readable_[buffer_id].wait(lk, [&]{
+        return buffer_is_readable(buffer_id);
+    });
+}
+
+void TransferStation::wait_buffer_writeable(int buffer_id) {
+    std::unique_lock<std::mutex> lk(buffer_sync_mtx_);
+    cv_writeable_[buffer_id].wait(lk, [&]{
+        return buffer_is_writeable(buffer_id);
+    });
 }
 
 uint8_t* TransferStation::get_buffer_ptr(int buffer_id) {

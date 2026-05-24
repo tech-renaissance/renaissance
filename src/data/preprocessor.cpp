@@ -637,6 +637,8 @@ void Preprocessor::run(DataLoader& loader) {
             wait_workers_complete_buffer(false);  // 20s超时
         }
 
+        ++buffer_count;
+
         // 触发DataLoader加载下一个buffer（会等待当前buffer被消费完）
         if (loader.has_more_buffers()) {
             loader.load_next_buffer();
@@ -3027,8 +3029,14 @@ static size_t calculate_staging_buffer_size(GlobalRegistry& registry) {
     size_t data_raw  = channel_bytes * static_cast<size_t>(res) * res * batch;
     size_t label_raw = 4ULL * static_cast<size_t>(batch);
 
-    size_t data_aligned  = utils::align_up_256(data_raw + 16);
-    size_t label_aligned = utils::align_up_256(label_raw + 16);
+    // FP32/INT32 slot = 2 * align_up_256(elems * 2 + 16); FP16 slot = align_up_256(elems * 2 + 16)
+    size_t label_aligned = 2 * utils::align_up_256(label_raw / 2 + 16);
+    size_t data_aligned;
+    if (amp) {
+        data_aligned = utils::align_up_256(data_raw + 16);
+    } else {
+        data_aligned = 2 * utils::align_up_256(data_raw / 2 + 16);
+    }
 
     size_t total = 2ULL * (data_aligned + label_aligned);
 

@@ -53,6 +53,7 @@ void register_default_ops() {
     register_op_range_allreduce();
     register_op_range_optimizer();
     register_op_lars();
+    register_op_dtensor_copy();
 }
 
 #ifdef TR_USE_CUDA

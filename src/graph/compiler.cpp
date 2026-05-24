@@ -795,6 +795,11 @@ void Compiler::create_memory_plans(
 
                 DTensor dt = memory_plans[s]->alloc(alloc_shape, desc.dtype, desc.region, slot_bytes);
 
+                {
+                    InitConfig config = initializer.derive(desc.region);
+                    memory_plans[s]->set_init_config(dt.id, config);
+                }
+
                 // base 变体：收集真实 DTensor ID
                 if (s == 0) {
                     base_layer_contexts[l].tensor_ids.push_back(dt.id);
@@ -936,7 +941,7 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
             case LayerKind::Flatten:            idx = -1; break; // 梯度写回I_A_DATA，死梯度不往上层传
             case LayerKind::SoftmaxCE:          idx = 0; break;  // ce_output (gradient in-place覆写)
             case LayerKind::Identity:           idx = -1; break;  // in-place
-            case LayerKind::Tanh:               idx = 0; break;  // dX inplace to tanh_output
+            case LayerKind::Tanh:               idx = -1; break;  // dX in-place to x (handled by prev_grad_id tracking)
             case LayerKind::Add2Start: case LayerKind::Add2ShortcutEnd: case LayerKind::Add2End: idx = 0; break;  // inplace到第一个input
             case LayerKind::ConvBNReLU:         idx = 2; break;  // 融合层的grad_slot
             case LayerKind::ConvBN:             idx = 2; break;
@@ -991,6 +996,26 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
         GraphId graph_id = layer.is_first_layer ? GraphId::FIRST_FWD_A : GraphId::DEEP_FWD_BWD;
         GraphId graph_id_b = layer.is_first_layer ? GraphId::FIRST_FWD_B : GraphId::DEEP_FWD_BWD;
 
+        // 首层：注入标签拷贝节点（双缓冲统一入口 → label_smce）
+        if (layer.is_first_layer) {
+            const auto& b = memory_plan.baseline();
+            if (b.label_smce >= 0) {
+                GraphNode copy_a;
+                copy_a.kind = GraphNode::Kind::COMPUTE;
+                copy_a.compute_op = ComputeOp::DTENSOR_COPY;
+                copy_a.input_ids = {b.label_a};
+                copy_a.output_ids = {b.label_smce};
+                train_cg.append(graph_id, copy_a);
+
+                GraphNode copy_b;
+                copy_b.kind = GraphNode::Kind::COMPUTE;
+                copy_b.compute_op = ComputeOp::DTENSOR_COPY;
+                copy_b.input_ids = {b.label_b};
+                copy_b.output_ids = {b.label_smce};
+                train_cg.append(graph_id_b, copy_b);
+            }
+        }
+
         // 构建前向图
         OpParams op_params = convert_to_op_params(layer.params);
         SubgraphPattern forward_pattern = descriptor.build_forward(op_params, descs);
@@ -1041,7 +1066,7 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
                 gn.compute_op == ComputeOp::SOFTMAX_CE_AMP_INF) {
                 const auto& b = memory_plan.baseline();
                 gn.input_ids.push_back(b.scaling);
-                gn.input_ids.push_back(b.label_a);
+                gn.input_ids.push_back(b.label_smce);
                 gn.output_ids.insert(gn.output_ids.begin(), b.loss);
                 gn.output_ids.push_back(b.top1);
                 gn.output_ids.push_back(b.top5);
@@ -1140,6 +1165,14 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
                 }
             }
 
+            if (gn.compute_op == ComputeOp::TANH_FP32_BWD || gn.compute_op == ComputeOp::TANH_AMP_BWD ||
+                gn.compute_op == ComputeOp::RELU_FP32_BWD || gn.compute_op == ComputeOp::RELU_AMP_BWD) {
+                auto it = layer_input_ids.find(l);
+                if (it != layer_input_ids.end() && it->second >= 0) {
+                    gn.output_ids = {it->second};  // dX in-place to X (dX covers X)
+                }
+            }
+
             if (gn.compute_op == ComputeOp::ADD_BWD && prev_grad_id >= 0) {
                 gn.output_ids.push_back(prev_grad_id);
             }
@@ -1148,7 +1181,11 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
             if (gn.compute_op == ComputeOp::FLATTEN_FP32_BWD ||
                 gn.compute_op == ComputeOp::FLATTEN_AMP_BWD) {
                 if (layer.is_first_layer) {
-                    gn.output_ids = {1};  // 首层：I_A_DATA
+                    gn.output_ids = {1};  // 首层A：写回 I_A_DATA
+                    train_cg.append(GraphId::FIRST_BWD, gn);
+                    gn.output_ids = {3};  // 首层B：写回 I_B_DATA
+                    train_cg.append(GraphId::FIRST_BWD_B, gn);
+                    continue;
                 } else {
                     auto it = layer_input_ids.find(l);
                     if (it != layer_input_ids.end() && it->second >= 0) {
@@ -1162,10 +1199,13 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
                 gn.compute_op == ComputeOp::SOFTMAX_CE_AMP_BWD) {
                 const auto& b = memory_plan.baseline();
                 gn.input_ids.push_back(b.scaling);
-                gn.input_ids.push_back(b.label_a);
+                gn.input_ids.push_back(b.label_smce);
             }
 
             train_cg.append(backward_graph_id, gn);
+            if (layer.is_first_layer) {
+                train_cg.append(GraphId::FIRST_BWD_B, gn);
+            }
         }
 
         // 跟踪当前层梯度输出，供前一层使用（梯度反向传播）
@@ -1173,11 +1213,32 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
         int32_t grad_id = get_grad_output_id(layer.kind, tensor_ids);
         // FC dX in-place：梯度直接写入X张量（前一层输出），追踪该张量ID
         if (grad_id < 0 && (layer.kind == LayerKind::FC || layer.kind == LayerKind::FCReLU ||
-            layer.kind == LayerKind::FCBNReLU || layer.kind == LayerKind::GapFC)) {
+            layer.kind == LayerKind::FCBNReLU || layer.kind == LayerKind::GapFC ||
+            layer.kind == LayerKind::Tanh || layer.kind == LayerKind::ReLU)) {
             auto it = layer_input_ids.find(l);
             if (it != layer_input_ids.end() && it->second >= 0) grad_id = it->second;
         }
         if (grad_id >= 0) prev_grad_id = grad_id;
+        LOG_INFO << "[COMPILER] BWD l=" << l << " kind=" << static_cast<int>(layer.kind)
+                 << " grad_id=" << grad_id << " prev_grad_id=" << prev_grad_id;
+    }
+
+    // ===== DEBUG: 打印 DEEP_FWD_BWD 图节点 =====
+    {
+        const auto& nodes = train_cg.nodes(GraphId::DEEP_FWD_BWD);
+        for (size_t i = 0; i < nodes.size(); ++i) {
+            const auto& n = nodes[i];
+            std::stringstream ss;
+            ss << "[COMPILER] DEEP[" << i << "] op=" << static_cast<int>(n.compute_op);
+            ss << " in=[";
+            for (size_t j = 0; j < n.input_ids.size(); ++j)
+                ss << (j?",":"") << n.input_ids[j];
+            ss << "] out=[";
+            for (size_t j = 0; j < n.output_ids.size(); ++j)
+                ss << (j?",":"") << n.output_ids[j];
+            ss << "]";
+            LOG_INFO << ss.str();
+        }
     }
 
     // 构建辅助图：通信、优化器、EMA等
@@ -1217,6 +1278,26 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
 
         GraphId infer_graph_id = GraphId::INF_MAIN_A;
         GraphId infer_graph_id_b = GraphId::INF_MAIN_B;
+
+        // 首层推理：注入标签拷贝节点（双缓冲统一入口 → label_smce）
+        if (layer.is_first_layer) {
+            const auto& b = memory_plan.baseline();
+            if (b.label_smce >= 0) {
+                GraphNode copy_a;
+                copy_a.kind = GraphNode::Kind::COMPUTE;
+                copy_a.compute_op = ComputeOp::DTENSOR_COPY;
+                copy_a.input_ids = {b.label_a};
+                copy_a.output_ids = {b.label_smce};
+                infer_cg.append(infer_graph_id, copy_a);
+
+                GraphNode copy_b;
+                copy_b.kind = GraphNode::Kind::COMPUTE;
+                copy_b.compute_op = ComputeOp::DTENSOR_COPY;
+                copy_b.input_ids = {b.label_b};
+                copy_b.output_ids = {b.label_smce};
+                infer_cg.append(infer_graph_id_b, copy_b);
+            }
+        }
 
         for (const auto& pattern_node : inference_pattern.nodes) {
             GraphNode gn;
@@ -1262,7 +1343,7 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
                 gn.compute_op == ComputeOp::SOFTMAX_CE_FP32_INF) {
                 const auto& b = memory_plan.baseline();
                 gn.input_ids.push_back(b.scaling);
-                gn.input_ids.push_back(b.label_a);
+                gn.input_ids.push_back(b.label_smce);
                 gn.output_ids.insert(gn.output_ids.begin(), b.loss);
                 gn.output_ids.push_back(b.top1);
                 gn.output_ids.push_back(b.top5);
