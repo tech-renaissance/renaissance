@@ -495,7 +495,7 @@ private:
     std::tuple<float, float, float> run_val_epoch_gpu(bool validate_ema);
 
     float run_train_epoch_cpu();
-    std::tuple<float, float, float> run_val_epoch_cpu_impl(bool validate_ema);
+    std::tuple<float, float, float> run_val_epoch_cpu(bool validate_ema);
 
     /** @brief 执行 SEMA 切换（将 EMA 权重复制回主模型） */
     void apply_sema_switch();

@@ -1086,7 +1086,11 @@ TrainingResult DeepLearningTask::run_cpu() {
     LOG_INFO << " Tech-Renaissance Training Started  [CPU Mode]";
     LOG_INFO << "--------------------------------------------------";
     LOG_INFO << " Local batch size: " << reg.get_local_batch_size();
+    LOG_INFO << " World size: " << reg.world_size();
+    LOG_INFO << " Total batch size: " << (reg.get_local_batch_size() * reg.world_size());
     LOG_INFO << " Total epochs: " << total_epochs_;
+    LOG_INFO << " AMP: disabled (CPU)";
+    LOG_INFO << " SEMA: " << (use_sema_ ? "enabled" : "disabled");
     LOG_INFO << " Validate every: " << val_interval_ << " epochs, offset: " << val_offset_;
     LOG_INFO << " Early stop by Top-1: " << early_stop_thr_;
     LOG_INFO << "==================================================";
@@ -1109,6 +1113,42 @@ TrainingResult DeepLearningTask::run_cpu() {
         current_epoch_ = epoch;
         const auto epoch_start = std::chrono::steady_clock::now();
 
+        if (reg.using_progressive_resolution()) {
+            int new_res = get_current_train_resolution();
+            const_cast<GlobalRegistry&>(reg).set_current_resolution_train(new_res);
+
+            if (progressive_crop_begin_ > 0) {
+                int boundary = reg.boundary_epoch();
+                float ratio = std::min(1.0f,
+                    static_cast<float>(epoch) / static_cast<float>(boundary));
+                int crop_val = progressive_crop_begin_ +
+                    static_cast<int>((progressive_crop_end_ - progressive_crop_begin_) * ratio);
+                const_cast<GlobalRegistry&>(reg).set_train_crop_output(crop_val);
+                const_cast<GlobalRegistry&>(reg).set_val_crop_output(crop_val);
+                const_cast<GlobalRegistry&>(reg).set_current_resolution_train(crop_val);
+                LOG_INFO << "Epoch " << epoch << ": crop set to " << crop_val;
+            }
+
+            if (progressive_resize_begin_ > 0) {
+                int boundary = reg.boundary_epoch();
+                float ratio = std::min(1.0f,
+                    static_cast<float>(epoch) / static_cast<float>(boundary));
+                int resize_val = progressive_resize_begin_ +
+                    static_cast<int>((progressive_resize_end_ - progressive_resize_begin_) * ratio);
+                const_cast<GlobalRegistry&>(reg).set_train_resize_output(resize_val);
+                const_cast<GlobalRegistry&>(reg).set_val_resize_output(resize_val);
+                if (progressive_crop_begin_ <= 0) {
+                    const_cast<GlobalRegistry&>(reg).set_current_resolution_train(resize_val);
+                    const_cast<GlobalRegistry&>(reg).set_current_resolution_val(resize_val);
+                }
+                LOG_INFO << "Epoch " << epoch << ": resize set to " << resize_val;
+            }
+        }
+
+        if (use_sema_ && epoch > 0) {
+            apply_sema_switch();
+        }
+
         std::exception_ptr prep_exc;
         std::thread prep_thread([&]() {
             try { prep.train(); }
@@ -1128,13 +1168,18 @@ TrainingResult DeepLearningTask::run_cpu() {
                 try { prep.val(); }
                 catch (...) { val_exc = std::current_exception(); }
             });
-            auto [vloss, vtop1, vtop5] = run_val_epoch_cpu_impl(false);
+            auto [vloss, vtop1, vtop5] = run_val_epoch_cpu(false);
             val_loss = vloss;
             top1 = vtop1;
             top5 = vtop5;
             val_prep_thread.join();
             if (val_exc) std::rethrow_exception(val_exc);
             did_validate = true;
+            if (use_sema_) {
+                auto [_, etop1, etop5] = run_val_epoch_cpu(true);
+                ema_top1 = etop1;
+                ema_top5 = etop5;
+            }
         }
 
         const auto epoch_end = std::chrono::steady_clock::now();
@@ -1146,13 +1191,29 @@ TrainingResult DeepLearningTask::run_cpu() {
                 best_top5_ = top5;
                 best_epoch_ = epoch + 1;
             }
+            if (use_sema_ && ema_top1 > best_ema_top1_) {
+                best_ema_top1_ = ema_top1;
+                best_ema_top5_ = ema_top5;
+            }
         }
 
         log_epoch_results(train_loss, val_loss, top1, top5, ema_top1, ema_top5,
                          fetch_lr_for_batch(0), epoch_time);
 
+        if (should_save_this_epoch()) {
+            save_model_to(save_path_, false);
+        }
+        if (save_best_ && did_validate) {
+            float best_this_epoch = use_sema_ ? std::max(top1, ema_top1) : top1;
+            float best_overall = use_sema_ ? std::max(best_top1_, best_ema_top1_) : best_top1_;
+            if (best_this_epoch >= best_overall) {
+                bool save_ema = use_sema_ && (ema_top1 > top1);
+                save_model_to(save_best_path_, save_ema);
+            }
+        }
+
         if (did_validate) {
-            float best_this_epoch = top1;
+            float best_this_epoch = use_sema_ ? std::max(top1, ema_top1) : top1;
             if (best_this_epoch >= early_stop_thr_) {
                 LOG_INFO << "Early stop triggered at epoch " << epoch
                          << " (Top-1: " << best_this_epoch * 100.0f << "%)";
@@ -1215,6 +1276,7 @@ float DeepLearningTask::run_train_epoch_cpu() {
     void*   lr_ptr    = ctx.ptr_at(lr_dtensor_id_);
 
     float train_loss = 0.0f;
+    bool frozen = is_first_layer_frozen();
 
     ts->wait_buffer_readable(0);
     launch(idx_xfer_a);
@@ -1226,7 +1288,7 @@ float DeepLearningTask::run_train_epoch_cpu() {
         launch(idx_fwd_a);
         if (loss_ptr) std::memset(loss_ptr, 0, sizeof(float));
         launch(idx_deep);
-        launch(idx_bwd_a);
+        if (!frozen) launch(idx_bwd_a);
         launch(idx_dar);
         {
             float lr = fetch_lr_for_batch(0);
@@ -1258,7 +1320,7 @@ float DeepLearningTask::run_train_epoch_cpu() {
         ts->set_buffer_readable(next_buf, false);
         ts->set_buffer_writeable(next_buf, true);
 
-        launch(from_a ? idx_bwd_a : idx_bwd_b);
+        if (!frozen) launch(from_a ? idx_bwd_a : idx_bwd_b);
         launch(idx_dar);
 
         {
@@ -1278,7 +1340,7 @@ float DeepLearningTask::run_train_epoch_cpu() {
         if (loss_ptr) std::memset(loss_ptr, 0, sizeof(float));
         launch(idx_deep);
 
-        launch(last_a ? idx_bwd_a : idx_bwd_b);
+        if (!frozen) launch(last_a ? idx_bwd_a : idx_bwd_b);
         launch(idx_dar);
 
         {
@@ -1441,7 +1503,7 @@ std::tuple<float, float, float> DeepLearningTask::run_val_epoch_gpu(bool validat
 #endif
 }
 
-std::tuple<float, float, float> DeepLearningTask::run_val_epoch_cpu_impl(bool validate_ema) {
+std::tuple<float, float, float> DeepLearningTask::run_val_epoch_cpu(bool validate_ema) {
     (void)validate_ema;
 
     auto& registry = GlobalRegistry::instance();

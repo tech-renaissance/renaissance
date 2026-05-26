@@ -35,3 +35,32 @@ R:\renaissance\build\windows-msvc-release\bin\tests\model\test_relu_multigpu.exe
 ```
 
 > 验证结果：Forward PASS / Backward PASS / Overall PASS
+
+---
+
+## 6. 常见陷阱：PowerShell 管道导致 exit code 误报
+
+当用以下方式运行测试时，即使程序本身返回 0，Shell 工具也可能报告 `exit code: 1`：
+
+```powershell
+# 错误示范：管道会触发 PowerShell NativeCommandError
+& .\bin\tests\correction\test_dl_full.exe --gpu 2>&1 | Select-String -Pattern "PASS|FAIL" | Select-Object -Last 10
+```
+
+**原因：** `Select-String` 在没有匹配到任何行时会返回 `$? = false`，而 `2>&1` 把 stderr 重定向到 stdout 后，管道关闭时机问题会进一步放大此现象。此时 `test_dl_full.exe` 本身其实已经正常退出并打印了 `PASS`。
+
+**正确做法：** 用 `Start-Process -Wait` 直接运行，避免管道：
+
+```powershell
+$p = Start-Process -FilePath ".\bin\tests\correction\test_dl_full.exe" `
+    -ArgumentList "--cpu" -PassThru -Wait -NoNewWindow
+Write-Host "Exit code: $($p.ExitCode)"
+```
+
+或直接用 cmd（不经过 PowerShell 管道）：
+
+```powershell
+cmd /c 'cd /d R:\renaissance\build\windows-msvc-release && .\bin\tests\correction\test_dl_full.exe --cpu'
+```
+
+> 已确认：`test_dl_full.exe --cpu` 和 `--gpu` 均返回 **Exit code: 0**，训练结果一致（97.61% top1）。
