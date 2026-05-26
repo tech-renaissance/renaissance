@@ -745,6 +745,9 @@ void Compiler::create_memory_plans(
         auto opt = GlobalRegistry::instance().optimizer_kind();
         memory_plans[s]->alloc_baseline_dtensors(label_shape, input_shape, input_dtype, opt);
 
+        memory_plans[s]->set_init_config(
+            memory_plans[s]->baseline().scaling, kInitConstant(1.0f));
+
         if (s == 0) {
             const auto& b = memory_plans[s]->baseline();
             nan_flag_id     = b.has_nan;
@@ -993,8 +996,8 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
             return ids;
         };
 
-        GraphId graph_id = layer.is_first_layer ? GraphId::FIRST_FWD_A : GraphId::DEEP_FWD_BWD;
-        GraphId graph_id_b = layer.is_first_layer ? GraphId::FIRST_FWD_B : GraphId::DEEP_FWD_BWD;
+        GraphId graph_id = layer.is_first_layer ? GraphId::FIRST_LAYER_FWD_A : GraphId::DEEP_FWD_BWD;
+        GraphId graph_id_b = layer.is_first_layer ? GraphId::FIRST_LAYER_FWD_B : GraphId::DEEP_FWD_BWD;
 
         // 首层：注入标签拷贝节点（双缓冲统一入口 → label_smce）
         if (layer.is_first_layer) {
@@ -1138,7 +1141,7 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
         // 构建反向图
         OpParams op_params = convert_to_op_params(layer.params);
         SubgraphPattern backward_pattern = descriptor.build_backward(op_params, descs);
-        GraphId backward_graph_id = layer.is_first_layer ? GraphId::FIRST_BWD : GraphId::DEEP_FWD_BWD;
+        GraphId backward_graph_id = layer.is_first_layer ? GraphId::FIRST_LAYER_BWD_A : GraphId::DEEP_FWD_BWD;
 
         for (const auto& pattern_node : backward_pattern.nodes) {
             GraphNode gn;
@@ -1182,9 +1185,9 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
                 gn.compute_op == ComputeOp::FLATTEN_AMP_BWD) {
                 if (layer.is_first_layer) {
                     gn.output_ids = {1};  // 首层A：写回 I_A_DATA
-                    train_cg.append(GraphId::FIRST_BWD, gn);
+                    train_cg.append(GraphId::FIRST_LAYER_BWD_A, gn);
                     gn.output_ids = {3};  // 首层B：写回 I_B_DATA
-                    train_cg.append(GraphId::FIRST_BWD_B, gn);
+                    train_cg.append(GraphId::FIRST_LAYER_BWD_B, gn);
                     continue;
                 } else {
                     auto it = layer_input_ids.find(l);
@@ -1204,7 +1207,7 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
 
             train_cg.append(backward_graph_id, gn);
             if (layer.is_first_layer) {
-                train_cg.append(GraphId::FIRST_BWD_B, gn);
+                train_cg.append(GraphId::FIRST_LAYER_BWD_B, gn);
             }
         }
 

@@ -93,6 +93,14 @@ public:
      */
     Initializer& scale(float s);
 
+    /**
+     * @brief 设置 Kaiming 初始化的非线性参数 a（负斜率）
+     * @param a LeakyReLU 负斜率，gain = √(2/(1+a²))
+     *         a=0 (默认) → gain=√2 (ReLU)
+     *         a=√5 ≈ 2.236 → gain=√(2/6) (PyTorch nn.Linear 默认)
+     */
+    Initializer& nonlinearity(float a);
+
     // ====================
     // 核心：全局层策略 → 具体张量 InitConfig
     // ====================
@@ -166,6 +174,7 @@ private:
     InitKind fc_kind_      = InitKind::FIXED_NORMAL;   ///< MLPerf FC 默认
     InitKind bn_kind_      = InitKind::STANDARD;       ///< BN 默认 STANDARD
     float    fc_param_     = 0.01f;                     ///< FC FIXED_NORMAL 的 σ
+    float    kaiming_a_    = 0.0f;                      ///< Kaiming a 参数，gain=√(2/(1+a²))
     FanMode  fan_mode_     = FanMode::FAN_IN;           ///< fan 模式
     float    global_scale_ = 1.0f;                      ///< 全局 gain
     bool     zero_gamma_   = false;                     ///< BN ZERO_GAMMA 策略开关

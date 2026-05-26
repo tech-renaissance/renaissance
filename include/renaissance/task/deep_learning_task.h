@@ -11,11 +11,13 @@
 #pragma once
 
 #include "renaissance/task/task_base.h"
+#include "renaissance/graph/arch_plan.h"
 #include "renaissance/graph/blueprint.h"
 #include "renaissance/graph/compiler.h"
 #include "renaissance/algo/loss.h"
 #include "renaissance/algo/optimizer.h"
 #include "renaissance/algo/scheduler.h"
+#include "renaissance/core/init_config.h"
 
 #ifdef TR_USE_CUDA
 #include <cuda_runtime.h>
@@ -37,6 +39,18 @@ struct H2DTestResult {
     double avg_lat_us  = 0.0;
     double min_lat_us  = 0.0;
     double max_lat_us  = 0.0;
+};
+
+/// Multi-epoch H2D-only run result container
+struct H2DRunResult {
+    int epochs_run = 0;
+    int vals_run   = 0;
+    std::vector<H2DTestResult> train_per_epoch;
+    std::vector<H2DTestResult> val_per_epoch;
+    double total_elapsed_us = 0.0;
+
+    H2DTestResult aggregate_train() const;
+    H2DTestResult aggregate_val() const;
 };
 
 /**
@@ -239,8 +253,9 @@ protected:
 
         bool use_fuse = gr.using_amp();
         InputSpec input_spec = {batch_size, channels, resolution, resolution};
-        ArchPlan plan = ArchPlan::from_blueprint(blueprint_, input_spec, use_fuse);
-        plan.build(GlobalRegistry::instance().num_classes());
+        arch_plan_ = ArchPlan::from_blueprint(blueprint_, input_spec, use_fuse);
+        arch_plan_.build(GlobalRegistry::instance().num_classes());
+        ArchPlan& plan = arch_plan_;
 
         plan_config_.bn_folded = use_fuse;
         bool needs_mask = false;
@@ -270,7 +285,7 @@ protected:
         plan_config_.need_mask = needs_mask;
 
         CompileSpec spec = CompileSpec::from_global_registry();
-        auto result = Compiler::compile(plan, spec, plan_config_);
+        auto result = Compiler::compile(plan, spec, plan_config_, initializer_);
 
         memory_plan_ptr_ = std::move(result.variants[0].memory_plan);
         if (!memory_plan_ptr_->is_finalized()) {
@@ -288,6 +303,42 @@ protected:
         }
         TR_CHECK(lr_dtensor_id_ >= 0, ValueError,
                  "LR DTensor not found: no DTensor with region S_SCALAR_FP32");
+
+        // 设置优化器标量 DTensor 的 init_config，使 init_all() 能将其初始化为正确常数
+        auto set_scalar_init = [this](int32_t id, float value) {
+            if (id >= 0) active_memory_plan_->set_init_config(id, InitConfig{value, InitKind::CONSTANTS, FanMode::FAN_IN});
+        };
+        if (auto* sgd = std::get_if<SGD>(&opt_cfg_)) {
+            Optimizer opt = *sgd;
+            if (const auto* cfg = opt.as<SGDConfig>()) {
+                set_scalar_init(active_memory_plan_->beta_id(), cfg->momentum);
+                set_scalar_init(active_memory_plan_->wd_id(),   cfg->weight_decay);
+            }
+        } else if (auto* lars = std::get_if<LARS>(&opt_cfg_)) {
+            Optimizer opt = *lars;
+            if (const auto* cfg = opt.as<LARSConfig>()) {
+                set_scalar_init(active_memory_plan_->beta_id(), cfg->momentum);
+                set_scalar_init(active_memory_plan_->wd_id(),   cfg->weight_decay);
+                set_scalar_init(active_memory_plan_->tc_id(),   cfg->trust_coefficient);
+                set_scalar_init(active_memory_plan_->eps_id(),  cfg->eps);
+            }
+        } else if (auto* adam = std::get_if<Adam>(&opt_cfg_)) {
+            Optimizer opt = *adam;
+            if (const auto* cfg = opt.as<AdamConfig>()) {
+                set_scalar_init(active_memory_plan_->beta_id(),  cfg->beta1);
+                set_scalar_init(active_memory_plan_->wd_id(),    cfg->weight_decay);
+                set_scalar_init(active_memory_plan_->beta2_id(), cfg->beta2);
+                set_scalar_init(active_memory_plan_->eps_id(),   cfg->eps);
+            }
+        } else if (auto* adamw = std::get_if<AdamW>(&opt_cfg_)) {
+            Optimizer opt = *adamw;
+            if (const auto* cfg = opt.as<AdamWConfig>()) {
+                set_scalar_init(active_memory_plan_->beta_id(),  cfg->beta1);
+                set_scalar_init(active_memory_plan_->wd_id(),    cfg->weight_decay);
+                set_scalar_init(active_memory_plan_->beta2_id(), cfg->beta2);
+                set_scalar_init(active_memory_plan_->eps_id(),   cfg->eps);
+            }
+        }
 
         add_graph("train", std::move(result.train_cg), StreamKind::COMP_1);
         add_graph("inference", std::move(result.infer_cg), StreamKind::COMP_1);
@@ -331,6 +382,9 @@ private:
     // 初始化器显式配置标志（DeepLearningTask 特有兜底逻辑使用）
     bool has_explicit_initializer_ = false;
 
+    // ArchPlan（编译后保存，供诊断打印）
+    ArchPlan arch_plan_;
+
     // MemoryPlan指针（因为MemoryPlan不可移动）
     std::unique_ptr<MemoryPlan> memory_plan_ptr_;
 
@@ -346,7 +400,7 @@ private:
     int num_classes_ = 1000;
     int val_interval_ = 1;
     int val_offset_ = 0;
-    float early_stop_thr_ = 0.759f;
+    float early_stop_thr_ = 0.999f;
     bool use_sema_ = false;
     float sema_decay_ = 0.9f;
     TTA tta_mode_ = TTA::DISABLED;  // TTA模式
@@ -429,16 +483,19 @@ public:
     /// @brief 只编译 H2D 传输图（TRANSFER_A + TRANSFER_B），不编译训练图
     void compile_h2d_only();
 
-    /// @brief 只运行 H2D 传输图一个 epoch（联动 Preprocessor/TransferStation）
-    H2DTestResult run_h2d_only();
+    /// @brief 只运行 H2D 传输图（联动 Preprocessor/TransferStation，支持多 epoch + val）
+    H2DRunResult run_h2d_only();
 
 private:
+
+    H2DTestResult run_h2d_only_train_epoch();
+    H2DTestResult run_h2d_only_val_epoch();
 
     float run_train_epoch_gpu();
     std::tuple<float, float, float> run_val_epoch_gpu(bool validate_ema);
 
-    void run_train_epoch_cpu();
-    void run_val_epoch_cpu(bool validate_ema);
+    float run_train_epoch_cpu();
+    std::tuple<float, float, float> run_val_epoch_cpu_impl(bool validate_ema);
 
     /** @brief 执行 SEMA 切换（将 EMA 权重复制回主模型） */
     void apply_sema_switch();

@@ -115,12 +115,9 @@ inline void simd_process_4pixels_c1(const std::uint8_t* p, std::uint16_t* dst,
 
     __m128i zero = _mm_setzero_si128();
     __m128i t0 = _mm_unpacklo_epi16(h, zero);
-    __m128i t1 = _mm_unpackhi_epi16(h, zero);
 
     _mm_storeu_si128(reinterpret_cast<__m128i*>(dst),      _mm_unpacklo_epi32(t0, zero));
     _mm_storeu_si128(reinterpret_cast<__m128i*>(dst + 8),  _mm_unpackhi_epi32(t0, zero));
-    _mm_storeu_si128(reinterpret_cast<__m128i*>(dst + 16), _mm_unpacklo_epi32(t1, zero));
-    _mm_storeu_si128(reinterpret_cast<__m128i*>(dst + 24), _mm_unpackhi_epi32(t1, zero));
 }
 
 inline void scalar_process_pixel_c3(const std::uint8_t* p, std::uint16_t* dst,
@@ -144,10 +141,10 @@ inline void simd_row_c3_noflip(const std::uint8_t* src, std::uint16_t* dst, std:
                                 __m128 mul_v, __m128 sub_v,
                                 const float* mul, const float* sub) noexcept {
     std::size_t w = 0;
-    for (; w + 1 < W; w += 2) {
+    for (; w + 3 <= W; w += 2) {
         simd_process_2pixels_c3(src + w * 3, dst + w * 4, mul_v, sub_v);
     }
-    if (w < W) {
+    for (; w < W; ++w) {
         scalar_process_pixel_c3(src + w * 3, dst + w * 4, mul, sub);
     }
 }
@@ -156,10 +153,10 @@ inline void simd_row_c3_flip(const std::uint8_t* src, std::uint16_t* dst, std::s
                               __m128 mul_v, __m128 sub_v,
                               const float* mul, const float* sub) noexcept {
     std::size_t w = 0;
-    for (; w + 1 < W; w += 2) {
+    for (; w + 3 <= W; w += 2) {
         simd_process_2pixels_c3_flip(src + w * 3, dst, W, w, mul_v, sub_v);
     }
-    if (w < W) {
+    for (; w < W; ++w) {
         scalar_process_pixel_c3(src + w * 3, dst + (W - 1 - w) * 4, mul, sub);
     }
 }
@@ -533,14 +530,14 @@ void FusedNormalization::execute(
                 simd_row_c3_flip(input_ptr + h * W * 3, dst + h * W * 4, W, mul_v, sub_v, mul, sub);
             }
         } else if (C == 1 && !do_flip) {
-            __m128 mul_v = _mm_set_ps(0.0f, 0.0f, 0.0f, mul[0]);
-            __m128 sub_v = _mm_set_ps(0.0f, 0.0f, 0.0f, sub[0]);
+            __m128 mul_v = _mm_set1_ps(mul[0]);
+            __m128 sub_v = _mm_set1_ps(sub[0]);
             for (std::size_t h = 0; h < H; ++h) {
                 simd_row_c1_noflip(input_ptr + h * W, dst + h * W * 4, W, mul_v, sub_v, mul[0], sub[0]);
             }
         } else if (C == 1 && do_flip) {
-            __m128 mul_v = _mm_set_ps(0.0f, 0.0f, 0.0f, mul[0]);
-            __m128 sub_v = _mm_set_ps(0.0f, 0.0f, 0.0f, sub[0]);
+            __m128 mul_v = _mm_set1_ps(mul[0]);
+            __m128 sub_v = _mm_set1_ps(sub[0]);
             for (std::size_t h = 0; h < H; ++h) {
                 simd_row_c1_flip(input_ptr + h * W, dst + h * W * 4, W, mul_v, sub_v, mul[0], sub[0]);
             }

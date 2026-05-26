@@ -906,6 +906,10 @@ void MemoryPlan::set_init_config(int32_t id, const InitConfig& config) {
              "DTensor id " << id << " not found in MemoryPlan");
 
     entries_[it->second].dt.init_config = config;
+    // 同步更新 dtensor_cache_，确保 init_all() 等遍历路径可见
+    if (!dtensor_cache_.empty() && it->second < static_cast<int32_t>(dtensor_cache_.size())) {
+        dtensor_cache_[it->second].init_config = config;
+    }
 }
 
 } // namespace tr

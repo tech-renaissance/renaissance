@@ -66,7 +66,13 @@ Initializer& Initializer::fan(FanMode m) {
 }
 
 Initializer& Initializer::scale(float s) {
+    TR_CHECK(s >= 0.0f, ValueError, "Initializer::scale must be >= 0, got " << s);
     global_scale_ = s;
+    return *this;
+}
+
+Initializer& Initializer::nonlinearity(float a) {
+    kaiming_a_ = a;
     return *this;
 }
 
@@ -151,6 +157,18 @@ InitConfig Initializer::derive(Region region) const {
     }
 
     // ====================
+    // 第一段半：动量/速度权重区 → ZEROS
+    //   动量(M)和速度(V)的权重缓冲区必须在首次使用前显式归零，
+    //   否则 cudaMalloc 分配的未初始化 GPU 内存会被 optimizer kernel 当作有效值读入。
+    // ====================
+    if (region == Region::M_BN_WEIGHT  || region == Region::M_FC_WEIGHT  ||
+        region == Region::M_FIRST_CONV || region == Region::M_DEEP_CONV  ||
+        region == Region::V_BN_WEIGHT  || region == Region::V_FC_WEIGHT  ||
+        region == Region::V_FIRST_CONV || region == Region::V_DEEP_CONV) {
+        return InitConfig{0.0f, InitKind::ZEROS, FanMode::FAN_IN};
+    }
+
+    // ====================
     // 第二段：非参数区 → NONE
     // ====================
     if (!is_param_region(region)) {
@@ -176,7 +194,9 @@ InitConfig Initializer::derive(Region region) const {
     // CONV weight → {conv_kind_, fan_mode_, gain}
     if (is_conv_weight(region)) {
         float gain = global_scale_ * (conv_kind_ == InitKind::KAIMING_NORMAL ||
-                                      conv_kind_ == InitKind::KAIMING_UNIFORM ? std::sqrt(2.0f) : 1.0f);
+                                      conv_kind_ == InitKind::KAIMING_UNIFORM
+                                      ? std::sqrt(2.0f / (1.0f + kaiming_a_ * kaiming_a_))
+                                      : 1.0f);
         return InitConfig{gain, conv_kind_, fan_mode_};
     }
 
@@ -186,7 +206,9 @@ InitConfig Initializer::derive(Region region) const {
             return InitConfig{fc_param_, InitKind::FIXED_NORMAL, fan_mode_};
         } else {
             float gain = global_scale_ * (fc_kind_ == InitKind::KAIMING_NORMAL ||
-                                         fc_kind_ == InitKind::KAIMING_UNIFORM ? std::sqrt(2.0f) : 1.0f);
+                                         fc_kind_ == InitKind::KAIMING_UNIFORM
+                                         ? std::sqrt(2.0f / (1.0f + kaiming_a_ * kaiming_a_))
+                                         : 1.0f);
             return InitConfig{gain, fc_kind_, fan_mode_};
         }
     }

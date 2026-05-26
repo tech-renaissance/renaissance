@@ -36,7 +36,7 @@ enum class GraphSlot : uint8_t {
     XFER_B,
     FWD_BWD_DEEP_A,
     FWD_BWD_DEEP_B,
-    FIRST_LAYER_BWD,
+    FIRST_LAYER_BWD_A,
     FIRST_LAYER_BWD_B,
     ZERO_GRAD,
     DEEP_ALLREDUCE,
@@ -44,8 +44,8 @@ enum class GraphSlot : uint8_t {
     WEIGHT_UPDATE,
     EMA_UPDATE,
     GRAD_CONVERT,
-    FIRST_FWD_A,
-    FIRST_FWD_B,
+    FIRST_LAYER_FWD_A,
+    FIRST_LAYER_FWD_B,
     CAST_AND_CHECK,
     INF_MAIN_A,
     INF_MAIN_B,
@@ -537,10 +537,11 @@ StreamKind DeepLearningTask::stream_for(GraphId gid) {
     switch (gid) {
         case GraphId::TRANSFER_A:       return StreamKind::TRANS;
         case GraphId::TRANSFER_B:       return StreamKind::TRANS;
-        case GraphId::FIRST_FWD_A:      return StreamKind::COMP_1;
-        case GraphId::FIRST_FWD_B:      return StreamKind::COMP_1;
+        case GraphId::FIRST_LAYER_FWD_A:  return StreamKind::COMP_1;
+        case GraphId::FIRST_LAYER_FWD_B:  return StreamKind::COMP_1;
         case GraphId::DEEP_FWD_BWD:     return StreamKind::COMP_1;
-        case GraphId::FIRST_BWD:        return StreamKind::COMP_1;
+        case GraphId::FIRST_LAYER_BWD_A:  return StreamKind::COMP_1;
+        case GraphId::FIRST_LAYER_BWD_B:  return StreamKind::COMP_1;
         case GraphId::ZERO_GRAD:
         case GraphId::FIRST_COMM:
         case GraphId::DEEP_COMM:
@@ -613,16 +614,16 @@ void DeepLearningTask::build_exec_table() {
         g[S(GraphSlot::XFER_B)]           = resolve(GraphId::TRANSFER_B, rank);
         g[S(GraphSlot::FWD_BWD_DEEP_A)]   = resolve(GraphId::DEEP_FWD_BWD, rank);
         g[S(GraphSlot::FWD_BWD_DEEP_B)]   = resolve(GraphId::DEEP_FWD_BWD, rank);
-        g[S(GraphSlot::FIRST_LAYER_BWD)]  = resolve(GraphId::FIRST_BWD, rank);
-        g[S(GraphSlot::FIRST_LAYER_BWD_B)] = resolve(GraphId::FIRST_BWD_B, rank);
+        g[S(GraphSlot::FIRST_LAYER_BWD_A)]  = resolve(GraphId::FIRST_LAYER_BWD_A, rank);
+        g[S(GraphSlot::FIRST_LAYER_BWD_B)] = resolve(GraphId::FIRST_LAYER_BWD_B, rank);
         g[S(GraphSlot::ZERO_GRAD)]        = resolve(GraphId::ZERO_GRAD, rank);
         g[S(GraphSlot::DEEP_ALLREDUCE)]   = resolve(GraphId::DEEP_COMM, rank);
         g[S(GraphSlot::FIRST_LAYER_ALLREDUCE)] = resolve(GraphId::FIRST_COMM, rank);
         g[S(GraphSlot::WEIGHT_UPDATE)]    = resolve(GraphId::OPTIMIZER, rank);
         g[S(GraphSlot::EMA_UPDATE)]       = resolve(GraphId::EMA_UPDATE, rank);
         g[S(GraphSlot::GRAD_CONVERT)]     = resolve(GraphId::CAST_AND_CHECK, rank);
-        g[S(GraphSlot::FIRST_FWD_A)]      = resolve(GraphId::FIRST_FWD_A, rank);
-        g[S(GraphSlot::FIRST_FWD_B)]      = resolve(GraphId::FIRST_FWD_B, rank);
+        g[S(GraphSlot::FIRST_LAYER_FWD_A)]      = resolve(GraphId::FIRST_LAYER_FWD_A, rank);
+        g[S(GraphSlot::FIRST_LAYER_FWD_B)]      = resolve(GraphId::FIRST_LAYER_FWD_B, rank);
         g[S(GraphSlot::CAST_AND_CHECK)]   = resolve(GraphId::CAST_AND_CHECK, rank);
         g[S(GraphSlot::INF_MAIN_A)]       = resolve(GraphId::INF_MAIN_A, rank);
         g[S(GraphSlot::INF_MAIN_B)]       = resolve(GraphId::INF_MAIN_B, rank);
@@ -632,19 +633,28 @@ void DeepLearningTask::build_exec_table() {
         LOG_INFO << "[EXEC-TABLE] rank=" << rank
                  << " DEEP=" << (g[S(GraphSlot::FWD_BWD_DEEP_A)] ? "OK" : "NULL")
                  << " ZG=" << (g[S(GraphSlot::ZERO_GRAD)] ? "OK" : "NULL")
-                 << " BWD_A=" << (g[S(GraphSlot::FIRST_LAYER_BWD)] ? "OK" : "NULL")
+                 << " BWD_A=" << (g[S(GraphSlot::FIRST_LAYER_BWD_A)] ? "OK" : "NULL")
                  << " BWD_B=" << (g[S(GraphSlot::FIRST_LAYER_BWD_B)] ? "OK" : "NULL")
-                 << " FWD_A=" << (g[S(GraphSlot::FIRST_FWD_A)] ? "OK" : "NULL")
+                 << " FWD_A=" << (g[S(GraphSlot::FIRST_LAYER_FWD_A)] ? "OK" : "NULL")
+                 << " FWD_B=" << (g[S(GraphSlot::FIRST_LAYER_FWD_B)] ? "OK" : "NULL")
                  << " OPT=" << (g[S(GraphSlot::WEIGHT_UPDATE)] ? "OK" : "NULL")
                  << " XFER_A=" << (g[S(GraphSlot::XFER_A)] ? "OK" : "NULL")
+                 << " XFER_B=" << (g[S(GraphSlot::XFER_B)] ? "OK" : "NULL")
                  << " INF_A=" << (g[S(GraphSlot::INF_MAIN_A)] ? "OK" : "NULL")
                  << " INF_B=" << (g[S(GraphSlot::INF_MAIN_B)] ? "OK" : "NULL");
+    for (int gi = 0; gi < static_cast<int>(GraphId::COUNT); ++gi) {
+        int32_t idx = captured_result_.atlas.index(0, static_cast<GraphId>(gi));
+        if (idx >= 0) {
+            LOG_INFO << "[ATLAS] gid=" << gi << " atlas_idx=" << idx;
+        }
+    }
     }
 
     static const GraphSlot kRequired[] = {
         GraphSlot::XFER_A, GraphSlot::XFER_B,
         GraphSlot::FWD_BWD_DEEP_A, GraphSlot::FWD_BWD_DEEP_B,
-        GraphSlot::FIRST_LAYER_BWD,
+        GraphSlot::FIRST_LAYER_BWD_A,
+        GraphSlot::FIRST_LAYER_BWD_B,
     };
     for (int rank = 0; rank < K; ++rank) {
         for (auto slot : kRequired) {
@@ -658,14 +668,14 @@ void DeepLearningTask::build_exec_table() {
     }
 
     for (int rank = 0; rank < K; ++rank) {
-        if (captured_result_.atlas.index(0, GraphId::FIRST_FWD_A) >= 0)
-            TR_CHECK(gpu_exec_.graphs[rank][S(GraphSlot::FIRST_FWD_A)],
+        if (captured_result_.atlas.index(0, GraphId::FIRST_LAYER_FWD_A) >= 0)
+            TR_CHECK(gpu_exec_.graphs[rank][S(GraphSlot::FIRST_LAYER_FWD_A)],
                      ValueError,
-                     "FIRST_FWD_A is nullptr");
-        if (captured_result_.atlas.index(0, GraphId::FIRST_FWD_B) >= 0)
-            TR_CHECK(gpu_exec_.graphs[rank][S(GraphSlot::FIRST_FWD_B)],
+                     "FIRST_LAYER_FWD_A is nullptr");
+        if (captured_result_.atlas.index(0, GraphId::FIRST_LAYER_FWD_B) >= 0)
+            TR_CHECK(gpu_exec_.graphs[rank][S(GraphSlot::FIRST_LAYER_FWD_B)],
                      ValueError,
-                     "FIRST_FWD_B is nullptr");
+                     "FIRST_LAYER_FWD_B is nullptr");
     }
 #endif
 }
@@ -716,33 +726,6 @@ TrainingResult DeepLearningTask::run_gpu() {
             sch.prepare(total_epochs, steps_per_epoch);
         }
     }, sched_cfg_);
-
-    {
-        cudaSetDevice(gpu_exec_.device_ids[0]);
-        auto S = [](GraphSlot s) { return static_cast<size_t>(s); };
-        const auto& g_tab = gpu_exec_.graphs[0];
-        auto g_deep = g_tab[S(GraphSlot::FWD_BWD_DEEP_A)];
-        auto g_opt = g_tab[S(GraphSlot::WEIGHT_UPDATE)];
-        cudaStream_t s_c1 = static_cast<cudaStream_t>(context(0).stream(StreamKind::COMP_1));
-        cudaStream_t s_up = static_cast<cudaStream_t>(context(0).stream(StreamKind::UPDATE));
-
-        if (g_deep) {
-            LOG_INFO << "[PRE-TEST] Launching DEEP graph...";
-            cudaGraphLaunch(g_deep, s_c1);
-            cudaStreamSynchronize(s_c1);
-            LOG_INFO << "[PRE-TEST] DEEP sync done";
-        }
-        if (g_opt) {
-            LOG_INFO << "[PRE-TEST] Launching OPT graph...";
-            cudaGraphLaunch(g_opt, s_up);
-            cudaStreamSynchronize(s_up);
-            LOG_INFO << "[PRE-TEST] OPT sync done";
-        }
-
-        float w0 = -1.0f;
-        cudaMemcpy(&w0, context(0).ptr_at(13), sizeof(float), cudaMemcpyDeviceToHost);
-        LOG_INFO << "[PRE-TEST] w13[0] after direct launch=" << w0;
-    }
 
     const auto t0 = std::chrono::steady_clock::now();
 
@@ -882,8 +865,10 @@ float DeepLearningTask::run_train_epoch_gpu() {
     auto& prep = Preprocessor::instance();
     const int batches = prep.steps_per_epoch();
     auto& registry = GlobalRegistry::instance();
-    TransferStation* ts = static_cast<TransferStation*>(registry.transfer_station_ptr(0));
     const int K = num_gpus_;
+
+    LOG_INFO << "[DIAG-STEPS] steps_per_epoch=" << prep.steps_per_epoch()
+             << " batches=" << batches;
     bool using_amp = registry.using_amp();
 
     std::vector<std::exception_ptr> exc(K);
@@ -892,36 +877,9 @@ float DeepLearningTask::run_train_epoch_gpu() {
     threads.reserve(K);
 
     int32_t loss_id = active_memory_plan_->baseline().loss;
-    LOG_INFO << "[LOSS-DBG] loss_id=" << loss_id;
-    if (loss_id >= 0) {
-        float init_val = 3.14f;
-        for (int rank = 0; rank < K; ++rank) {
-            cudaSetDevice(gpu_exec_.device_ids[rank]);
-            float* loss_dev = static_cast<float*>(context(rank).ptr_at(loss_id));
-            cudaMemcpy(loss_dev, &init_val, sizeof(float), cudaMemcpyHostToDevice);
-        }
-    }
-
-    int32_t sc_id = active_memory_plan_->baseline().scaling;
-    if (sc_id >= 0) {
-        float sc_val = 1.0f;
-        for (int rank = 0; rank < K; ++rank) {
-            cudaSetDevice(gpu_exec_.device_ids[rank]);
-            float* sc_dev = static_cast<float*>(context(rank).ptr_at(sc_id));
-            cudaMemcpy(sc_dev, &sc_val, sizeof(float), cudaMemcpyHostToDevice);
-        }
-    }
-
-    int32_t w_id = 13;
-    {
-        float w0 = -1.0f;
-        cudaSetDevice(gpu_exec_.device_ids[0]);
-        cudaMemcpy(&w0, context(0).ptr_at(w_id), sizeof(float), cudaMemcpyDeviceToHost);
-        LOG_INFO << "[WGHT-DBG] w" << w_id << "[0] BEFORE=" << w0;
-    }
 
     for (int rank = 0; rank < K; ++rank) {
-        threads.emplace_back([this, rank, batches, ts, K, using_amp, &exc]() {
+        threads.emplace_back([this, rank, batches, K, using_amp, &exc, loss_id]() {
             try {
                 cudaError_t err = cudaSetDevice(gpu_exec_.device_ids[rank]);
                 if (err != cudaSuccess) {
@@ -936,15 +894,15 @@ float DeepLearningTask::run_train_epoch_gpu() {
                 auto g_xfer_b  = g_tab[S(GraphSlot::XFER_B)];
                 auto g_deep_a  = g_tab[S(GraphSlot::FWD_BWD_DEEP_A)];
                 auto g_deep_b  = g_tab[S(GraphSlot::FWD_BWD_DEEP_B)];
-                auto g_first   = g_tab[S(GraphSlot::FIRST_LAYER_BWD)];
+                auto g_first   = g_tab[S(GraphSlot::FIRST_LAYER_BWD_A)];
                 auto g_first_b = g_tab[S(GraphSlot::FIRST_LAYER_BWD_B)];
                 auto g_far     = g_tab[S(GraphSlot::FIRST_LAYER_ALLREDUCE)];
                 auto g_zg      = g_tab[S(GraphSlot::ZERO_GRAD)];
                 auto g_dar     = g_tab[S(GraphSlot::DEEP_ALLREDUCE)];
                 auto g_wu      = g_tab[S(GraphSlot::WEIGHT_UPDATE)];
                 auto g_gc      = g_tab[S(GraphSlot::GRAD_CONVERT)];
-                auto g_fwd_a   = g_tab[S(GraphSlot::FIRST_FWD_A)];
-                auto g_fwd_b   = g_tab[S(GraphSlot::FIRST_FWD_B)];
+                auto g_fwd_a   = g_tab[S(GraphSlot::FIRST_LAYER_FWD_A)];
+                auto g_fwd_b   = g_tab[S(GraphSlot::FIRST_LAYER_FWD_B)];
 
                 DeviceContext& ctx = context(rank);
                 cudaStream_t s_up     = static_cast<cudaStream_t>(ctx.stream(StreamKind::UPDATE));
@@ -959,129 +917,48 @@ float DeepLearningTask::run_train_epoch_gpu() {
                 auto sync_up   = [&]() { cudaStreamSynchronize(s_up); };
                 auto sync_tr   = [&]() { cudaStreamSynchronize(s_trans); };
 
+                auto& registry = GlobalRegistry::instance();
+                TransferStation* ts = nullptr;
+                for (int w = 0; w < 200; ++w) {
+                    ts = static_cast<TransferStation*>(
+                        registry.transfer_station_ptr(rank));
+                    if (ts) break;
+                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                }
+                if (!ts) TR_DEVICE_ERROR("TransferStation not ready for rank " << rank);
+
                 float lr;
                 float* lr_dev_ptr = static_cast<float*>(ctx.ptr_at(lr_dtensor_id_));
                 bool frozen = is_first_layer_frozen();
 
                 // ========== Batch 0 预传输 ==========
-                while (!ts->buffer_is_readable(0))
-                    std::this_thread::sleep_for(std::chrono::microseconds(100));
+                ts->wait_buffer_readable(0);
                 if (g_xfer_a) cudaGraphLaunch(g_xfer_a, s_trans);
                 sync_tr();
-                // === 预传输后立即诊断: GPU I_A_DATA vs CPU staging buffer ===
-                if (rank == 0) {
-                    int da_id = active_memory_plan_->baseline().data_a;
-                    int la_id = active_memory_plan_->baseline().label_a;
+                ts->set_buffer_readable(0, false);
+                ts->set_buffer_writeable(0, true);
 
-                    // CPU staging buffer 0 - full scan + labels
-                    std::ostringstream osc;
-                    uint8_t* sdata = ts->get_image_data_ptr(0);
-                    size_t sbytes = ts->get_buffer_actual_transfer_bytes(0);
-                    osc << "[DIAG-XFER0] buf=0 sdata=" << (void*)sdata << " size=" << sbytes;
-                    int32_t* slabels = reinterpret_cast<int32_t*>(ts->get_buffer_ptr(0));
-                    for (int si = 0; si < 5; ++si) osc << " lbl" << si << "=" << slabels[si];
-
-                    // scan all 784 pixels in staging buffer sample 0
-                    float* sf = reinterpret_cast<float*>(sdata);
-                    int sfnz = -1, sfnz_count = 0;
-                    float sfmin = 999, sfmax = -999;
-                    for (int i = 0; i < 784; ++i) {
-                        float v = sf[i];
-                        if (v > -0.4245f && v < -0.4225f) continue;
-                        if (sfnz < 0) sfnz = i;
-                        sfnz_count++;
-                        if (v < sfmin) sfmin = v;
-                        if (v > sfmax) sfmax = v;
-                    }
-                    osc << " | stage_norm: fnz=" << sfnz << " nz=" << sfnz_count
-                        << " [" << sfmin << "," << sfmax << "]";
-                    LOG_INFO << osc.str();
-
-                    // GPU I_A_DATA - full scan
-                    if (da_id >= 0) {
-                        std::ostringstream osg;
-                        osg << "[DIAG-XFER0] GPU I_A_DATA(id=" << da_id << "):";
-                        char* gbase = static_cast<char*>(ctx.ptr_at(da_id));
-                        // read all 784 floats from GPU
-                        float gbuf[784];
-                        cudaMemcpy(gbuf, gbase, 784 * sizeof(float), cudaMemcpyDeviceToHost);
-                        int gfnz = -1, gfnz_count = 0;
-                        float gfmin = 999, gfmax = -999;
-                        for (int i = 0; i < 784; ++i) {
-                            float v = gbuf[i];
-                            if (v > -0.4245f && v < -0.4225f) continue;
-                            if (gfnz < 0) gfnz = i;
-                            gfnz_count++;
-                            if (v < gfmin) gfmin = v;
-                            if (v > gfmax) gfmax = v;
-                        }
-                        osg << " gpu_norm: fnz=" << gfnz << " nz=" << gfnz_count
-                            << " [" << gfmin << "," << gfmax << "]";
-                        if (la_id >= 0) {
-                            int32_t glabels[5] = {-99};
-                            for (int si = 0; si < 5; ++si) {
-                                cudaMemcpy(&glabels[si], static_cast<int32_t*>(ctx.ptr_at(la_id)) + si, sizeof(int32_t), cudaMemcpyDeviceToHost);
-                                osg << " gl" << si << "=" << glabels[si];
-                            }
-                        }
-                        LOG_INFO << osg.str();
-                    }
-                    ts->set_buffer_readable(0, false);
-                    ts->set_buffer_writeable(0, true);
-                }
-
-                // === 诊断: 在 batch loop 前检查 GPU 上各 tensor 的初始值 ===
-                if (rank == 0) {
-                    LOG_INFO << "[DIAG-INIT] ptr(1)=" << ctx.ptr_at(1) << " ptr(5)=" << ctx.ptr_at(5)
-                             << " (same=" << (ctx.ptr_at(1) == ctx.ptr_at(5) ? "YES" : "NO") << ")";
-                    for (int tid = 1; tid <= 16; ++tid) {
-                        float v = -999;
-                        cudaMemcpy(&v, static_cast<float*>(ctx.ptr_at(tid)), sizeof(float), cudaMemcpyDeviceToHost);
-                        LOG_INFO << "[DIAG-INIT] id=" << tid << " ptr=" << ctx.ptr_at(tid) << " first_val=" << v;
-                    }
-                }
-
-                // ========== 单 batch 边界 ==========
                 if (batches == 1) {
                     if (g_zg) cudaGraphLaunch(g_zg, s_up);
                     if (g_fwd_a) cudaGraphLaunch(g_fwd_a, s_c1);
                     sync_comp(); sync_up();
 
-                    // === 诊断: Phase 1 完成后 I_A_DATA + Flatten 输出 (单batch) ===
-                    if (rank == 0) {
-                        int da_id = active_memory_plan_->baseline().data_a;
-                        float idata[784], flat[784];
-                        cudaMemcpy(idata, static_cast<float*>(ctx.ptr_at(da_id)), 784*sizeof(float), cudaMemcpyDeviceToHost);
-                        cudaMemcpy(flat, static_cast<float*>(ctx.ptr_at(5)), 784*sizeof(float), cudaMemcpyDeviceToHost);
-                        int inz=-1,inc=0,fnz=-1,fnc=0; float imin=999,imax=-999,fmin=999,fmax=-999;
-                        for(int i=0;i<784;++i){
-                            float v=idata[i]; if(v>-0.4245f&&v<-0.4225f)continue; if(inz<0)inz=i;inc++; if(v<imin)imin=v; if(v>imax)imax=v;
-                        }
-                        for(int i=0;i<784;++i){
-                            float v=flat[i]; if(v>-0.4245f&&v<-0.4225f)continue; if(fnz<0)fnz=i;fnc++; if(v<fmin)fmin=v; if(v>fmax)fmax=v;
-                        }
-                        LOG_INFO << "[DIAG-PHASE1] batches=1 after FIRST_FWD | I_A_DATA(id=" << da_id
-                                 << "): fnz=" << inz << " nz=" << inc << " [" << imin << "," << imax << "]"
-                                 << " | flatten(id=5): fnz=" << fnz << " nz=" << fnc << " [" << fmin << "," << fmax << "]";
-                    }
-
+                    if (loss_id >= 0)
+                        cudaMemsetAsync(ctx.ptr_at(loss_id), 0, sizeof(float), s_c1);
                     if (g_deep_a) cudaGraphLaunch(g_deep_a, s_c1);
                     sync_comp();
 
-                    if (!frozen) {
-                        if (g_first) cudaGraphLaunch(g_first, s_c1);
-                    }
+                    if (!frozen && g_first) cudaGraphLaunch(g_first, s_c1);
                     if (g_dar) cudaGraphLaunch(g_dar, s_up);
                     sync_comp(); sync_up();
 
-                    if (using_amp && g_gc) { if (g_gc) cudaGraphLaunch(g_gc, s_up); sync_up(); }
+                    if (using_amp && g_gc) { cudaGraphLaunch(g_gc, s_up); sync_up(); }
 
-                    {
-                        lr = fetch_lr_for_batch(0);
-                        *lr_pinned_[rank] = lr;
-                        cudaMemcpyAsync(lr_dev_ptr, lr_pinned_[rank], sizeof(float),
-                                        cudaMemcpyHostToDevice, s_up);
-                    }
+                    lr = fetch_lr_for_batch(0);
+                    LOG_INFO << "[LR] epoch=" << current_epoch_ << " batch=" << 0 << " lr=" << lr;
+                    *lr_pinned_[rank] = lr;
+                    cudaMemcpyAsync(lr_dev_ptr, lr_pinned_[rank], sizeof(float),
+                                    cudaMemcpyHostToDevice, s_up);
                     if (g_far) cudaGraphLaunch(g_far, s_up);
                     if (g_wu) cudaGraphLaunch(g_wu, s_up);
                     sync_up();
@@ -1096,258 +973,26 @@ float DeepLearningTask::run_train_epoch_gpu() {
                     auto g_deep  = from_a ? g_deep_a : g_deep_b;
                     auto g_xfer_n = from_a ? g_xfer_b : g_xfer_a;
 
-                    // Phase 1: ZERO_GRAD ‖ FIRST_FWD
-                    if (g_zg) {
-                        cudaError_t e = cudaGraphLaunch(g_zg, s_up);
-                        if (e != cudaSuccess && batch == 0 && rank == 0) {
-                            LOG_ERROR << "[GEXEC] ZERO_GRAD launch: " << cudaGetErrorString(e);
-                        }
-                    }
-                    if (g_fwd) {
-                        cudaError_t e = cudaGraphLaunch(g_fwd, s_c1);
-                        if (e != cudaSuccess && batch == 0 && rank == 0) {
-                            LOG_ERROR << "[GEXEC] FIRST_FWD launch: " << cudaGetErrorString(e);
-                        }
-                    }
+                    // Phase 1: ZERO_GRAD ‖ FIRST_LAYER_FWD
+                    if (g_zg) cudaGraphLaunch(g_zg, s_up);
+                    if (g_fwd) cudaGraphLaunch(g_fwd, s_c1);
                     sync_comp(); sync_up();
 
-                    // === 诊断: Phase 1 完成后扫描所有 tensor 找 Flatten 输出 ===
-                    if (rank == 0 && batch == 0) {
-                        int da_id = active_memory_plan_->baseline().data_a;
-                        float idata[784];
-                        cudaMemcpy(idata, static_cast<float*>(ctx.ptr_at(da_id)), 784*sizeof(float), cudaMemcpyDeviceToHost);
-                        int inz=-1; float imin=999,imax=-999;
-                        for(int i=0;i<784;++i){
-                            float v=idata[i]; if(v>-0.4245f&&v<-0.4225f)continue;
-                            if(inz<0)inz=i; if(v<imin)imin=v; if(v>imax)imax=v;
-                        }
-                        LOG_INFO << "[DIAG-PHASE1] I_A_DATA(id=" << da_id << ") fnz=" << inz << " [" << imin << "," << imax << "]";
-
-                        for (int tid = 1; tid <= 16; ++tid) {
-                            if (tid == da_id) continue;
-                            float buf[784];
-                            cudaMemcpy(buf, static_cast<float*>(ctx.ptr_at(tid)), 784*sizeof(float), cudaMemcpyDeviceToHost);
-                            int nz=-1,nc=0; float mn=999,mx=-999;
-                            bool has_bg = false;
-                            for(int i=0;i<784;++i){
-                                float v=buf[i];
-                                if(v>-0.4245f&&v<-0.4225f){has_bg=true;continue;}
-                                if(nz<0)nz=i; nc++; if(v<mn)mn=v; if(v>mx)mx=v;
-                            }
-                            bool match = (nc > 0 && nz == inz && std::abs(mn-imin)<0.01f && std::abs(mx-imax)<0.01f);
-                            if (nc > 0 || has_bg) {
-                                LOG_INFO << "[DIAG-PHASE1] id=" << tid << " fnz=" << nz << " nz=" << nc
-                                         << " [" << mn << "," << mx << "] bg=" << has_bg
-                                         << " match=" << (match?"YES":"NO");
-                            }
-                        }
-                    }
-
                     // Wait next buffer
-                    while (!ts->buffer_is_readable(next_buf))
-                        std::this_thread::sleep_for(std::chrono::microseconds(100));
+                    ts->wait_buffer_readable(next_buf);
 
                     // Phase 2: DEEP_FWD_BWD ‖ XFER(next)
-                    {
-                        int lid = active_memory_plan_->baseline().loss;
-                        if (lid >= 0) {
-                            cudaMemsetAsync(ctx.ptr_at(lid), 0, sizeof(float), s_c1);
-                        }
-                    }
-                    if (g_deep) {
-                        cudaError_t e = cudaGraphLaunch(g_deep, s_c1);
-                        if (e != cudaSuccess && batch == 0 && rank == 0) {
-                            LOG_ERROR << "[GEXEC] DEEP launch: " << cudaGetErrorString(e);
-                        }
-                    }
+                    if (loss_id >= 0)
+                        cudaMemsetAsync(ctx.ptr_at(loss_id), 0, sizeof(float), s_c1);
+                    if (g_deep) cudaGraphLaunch(g_deep, s_c1);
                     if (g_xfer_n) cudaGraphLaunch(g_xfer_n, s_trans);
                     sync_comp(); sync_tr();
-                    if (rank == 0 && batch == 0) {
-                        LOG_INFO << "[GEXEC] Phase2 sync ok (batch 0)";
-                        float loss_val = -1.0f;
-                        int32_t lid = active_memory_plan_->baseline().loss;
-                        cudaMemcpy(&loss_val, static_cast<float*>(ctx.ptr_at(lid)), sizeof(float), cudaMemcpyDeviceToHost);
-                        LOG_INFO << "[DIAG-B0] loss after DEEP=" << loss_val;
-                        float t1_val = -1.0f;
-                        int32_t t1id = active_memory_plan_->baseline().top1;
-                        if (t1id >= 0) {
-                            cudaMemcpy(&t1_val, static_cast<float*>(ctx.ptr_at(t1id)), sizeof(float), cudaMemcpyDeviceToHost);
-                            LOG_INFO << "[DIAG-B0] top1 after DEEP=" << t1_val;
-                        }
 
-                        // 扫描 id=8,9,12 after DEEP (FC1输出 / ReLU输出 / Flatten输出)
-                        int diag_ids[] = {8, 9, 12};
-                        for (int di = 0; di < 3; ++di) {
-                            int did = diag_ids[di];
-                            float buf[784];
-                            cudaMemcpy(buf, static_cast<float*>(ctx.ptr_at(did)), 784*sizeof(float), cudaMemcpyDeviceToHost);
-                            int nz=-1,nc=0; float mn=999,mx=-999;
-                            for(int i=0;i<784;++i){
-                                float v=buf[i];
-                                if(v>-0.4245f&&v<-0.4225f)continue;
-                                if(nz<0)nz=i; nc++;
-                                if(v<mn)mn=v; if(v>mx)mx=v;
-                            }
-                            LOG_INFO << "[DIAG-B0] id=" << did << " fnz=" << nz << " nz=" << nc
-                                     << " [" << mn << "," << mx << "]";
-                        }
-                        float sc_val = -1.0f;
-                        int32_t scid = active_memory_plan_->baseline().scaling;
-                        if (scid >= 0) {
-                            cudaMemcpy(&sc_val, static_cast<float*>(ctx.ptr_at(scid)), sizeof(float), cudaMemcpyDeviceToHost);
-                            LOG_INFO << "[DIAG-B0] scaling=" << sc_val;
-                        }
-                        int lbl_val = -1;
-                        int32_t lba_id = active_memory_plan_->baseline().label_a;
-                        if (lba_id >= 0) {
-                            cudaMemcpy(&lbl_val, static_cast<int*>(ctx.ptr_at(lba_id)), sizeof(int), cudaMemcpyDeviceToHost);
-                            LOG_INFO << "[DIAG-B0] label_a[0]=" << lbl_val;
-                        }
-                        {
-                            float isc_val = -1.0f;
-                            cudaMemcpy(&isc_val, static_cast<float*>(ctx.ptr_at(8)), sizeof(float), cudaMemcpyDeviceToHost);
-                            LOG_INFO << "[DIAG-B0] inv_scaling(id=8)=" << isc_val;
-                        }
-                        {
-                            float gw_val = 0.0f;
-                            cudaMemcpy(&gw_val, static_cast<float*>(ctx.ptr_at(16)), sizeof(float), cudaMemcpyDeviceToHost);
-                            LOG_INFO << "[DIAG-B0] grad_w13[0] (id=16)=" << gw_val;
-                        }
-                        {
-                            std::ostringstream oss;
-                            for (int tid = 4; tid <= 11; ++tid) {
-                                float v = -999.0f;
-                                cudaMemcpy(&v, static_cast<float*>(ctx.ptr_at(tid)), sizeof(float), cudaMemcpyDeviceToHost);
-                                oss << v << " ";
-                            }
-                            float v47 = -999.0f;
-                            if (active_memory_plan_ && active_memory_plan_->has_dtensor(47)) {
-                                cudaMemcpy(&v47, static_cast<float*>(ctx.ptr_at(47)), sizeof(float), cudaMemcpyDeviceToHost);
-                            }
-                            oss << v47;
-                            LOG_INFO << "[DIAG-B0] ALL_SCALARS[4..11,47]=" << oss.str();
-                        }
-                    }
-                    if (rank == 0) {
-                        ts->set_buffer_readable(next_buf, false);
-                        ts->set_buffer_writeable(next_buf, true);
-                    }
 
-                    // === 5步诊断法: 逐步验证数据管线 ===
-                    if (rank == 0 && (batch <= 3 || batch % 100 == 0)) {
-                        int offsets[5] = {0, 196, 392, 588, 784};
-                        int sample_slots[5] = {0, 32, 64, 96, 127};
-                        int curr_data_id = from_a ? active_memory_plan_->baseline().data_a
-                                                  : active_memory_plan_->baseline().data_b;
-                        int next_data_id = (next_buf == 0)
-                            ? active_memory_plan_->baseline().data_a
-                            : active_memory_plan_->baseline().data_b;
+                    ts->set_buffer_readable(next_buf, false);
+                    ts->set_buffer_writeable(next_buf, true);
 
-                        // ---- Step 1: TransferStation CPU staging buffer 数据随batch变化 ----
-                        {
-                            std::ostringstream oss;
-                            oss << "[DIAG-S1] batch=" << batch << " from_a=" << from_a
-                                << " next_buf=" << next_buf;
-                            for (int bi = 0; bi < 2; ++bi) {
-                                size_t sample_bytes = ts->get_buffer_actual_transfer_bytes(bi);
-                                int n_samples = (int)(sample_bytes / (28*28*4));
-                                oss << " buf" << bi << "_samples=" << n_samples;
-                                uint8_t* dptr = ts->get_image_data_ptr(bi);
-                                // 读5个不同槽位的第1像素
-                                for (int si = 0; si < 5; ++si) {
-                                    float v = -999;
-                                    int slot = sample_slots[si];
-                                    if (slot < n_samples) {
-                                        std::memcpy(&v, dptr + slot * 28*28*4, sizeof(float));
-                                    }
-                                    oss << " s" << slot << "=" << v;
-                                }
-                                // 读5个不同像素位置 (slot 0)
-                                oss << " px[";
-                                for (int pi = 0; pi < 5; ++pi) {
-                                    float v = -999;
-                                    if (offsets[pi] * 4 < 28*28*4 * n_samples) {
-                                        std::memcpy(&v, dptr + offsets[pi]*4, sizeof(float));
-                                    }
-                                    oss << (pi>0?",":"") << v;
-                                }
-                                oss << "]";
-                            }
-                            LOG_INFO << oss.str();
-                        }
-
-                        // ---- Step 2: GPU 数据区 vs CPU staging 对比 ----
-                        {
-                            std::ostringstream oss;
-                            oss << "[DIAG-S2] batch=" << batch
-                                << " curr_id=" << curr_data_id << " next_id=" << next_data_id;
-                            if (curr_data_id >= 0) {
-                                char* gbase = static_cast<char*>(ctx.ptr_at(curr_data_id));
-                                float gp[5] = {-999};
-                                for (int pi = 0; pi < 5; ++pi)
-                                    cudaMemcpy(&gp[pi], gbase + offsets[pi]*4, sizeof(float), cudaMemcpyDeviceToHost);
-                                oss << " gpu_cur=[" << gp[0] << "," << gp[1] << "," << gp[2] << "," << gp[3] << "," << gp[4] << "]";
-                            }
-                            if (next_data_id >= 0) {
-                                char* gbase = static_cast<char*>(ctx.ptr_at(next_data_id));
-                                float gp[5] = {-999};
-                                for (int pi = 0; pi < 5; ++pi)
-                                    cudaMemcpy(&gp[pi], gbase + offsets[pi]*4, sizeof(float), cudaMemcpyDeviceToHost);
-                                oss << " gpu_next=[" << gp[0] << "," << gp[1] << "," << gp[2] << "," << gp[3] << "," << gp[4] << "]";
-                            }
-                            LOG_INFO << oss.str();
-                        }
-
-                        // ---- Step 3: 首层Flatten FWD输出 (id=5) + I_A_DATA 全扫描对比 ----
-                        if (batch == 0) {
-                            int da_id = active_memory_plan_->baseline().data_a;
-                            float idata_buf[784], flat_buf[784];
-                            cudaMemcpy(idata_buf, static_cast<float*>(ctx.ptr_at(da_id)), 784 * sizeof(float), cudaMemcpyDeviceToHost);
-                            cudaMemcpy(flat_buf, static_cast<float*>(ctx.ptr_at(5)), 784 * sizeof(float), cudaMemcpyDeviceToHost);
-
-                            int inz = -1, inc = 0; float imin = 999, imax = -999;
-                            for (int i = 0; i < 784; ++i) {
-                                float v = idata_buf[i];
-                                if (v > -0.4245f && v < -0.4225f) continue;
-                                if (inz < 0) inz = i; inc++;
-                                if (v < imin) imin = v; if (v > imax) imax = v;
-                            }
-                            int fnz = -1, fnc = 0; float fmin = 999, fmax = -999;
-                            for (int i = 0; i < 784; ++i) {
-                                float v = flat_buf[i];
-                                if (v > -0.4245f && v < -0.4225f) continue;
-                                if (fnz < 0) fnz = i; fnc++;
-                                if (v < fmin) fmin = v; if (v > fmax) fmax = v;
-                            }
-                            LOG_INFO << "[DIAG-S3] batch=0 I_A_DATA(id=" << da_id << "): fnz=" << inz
-                                     << " nz=" << inc << " [" << imin << "," << imax << "]"
-                                     << " | flatten(id=5): fnz=" << fnz << " nz=" << fnc
-                                     << " [" << fmin << "," << fmax << "]";
-                        } else {
-                            float f0 = -999, f196 = -999, f392 = -999;
-                            cudaMemcpy(&f0, static_cast<float*>(ctx.ptr_at(5)), sizeof(float), cudaMemcpyDeviceToHost);
-                            cudaMemcpy(&f196, static_cast<float*>(ctx.ptr_at(5)) + 196, sizeof(float), cudaMemcpyDeviceToHost);
-                            cudaMemcpy(&f392, static_cast<float*>(ctx.ptr_at(5)) + 392, sizeof(float), cudaMemcpyDeviceToHost);
-                            LOG_INFO << "[DIAG-S3] batch=" << batch
-                                     << " flatten_out[0]=" << f0
-                                     << " flatten_out[196]=" << f196
-                                     << " flatten_out[392]=" << f392;
-                        }
-
-                        // ---- Step 4: 第一个batch的正向反向: loss + dX写回 ----
-                        {
-                            float loss_v = -1, dX0 = -999, dX196 = -999;
-                            cudaMemcpy(&loss_v, static_cast<float*>(ctx.ptr_at(7)), sizeof(float), cudaMemcpyDeviceToHost);
-                            cudaMemcpy(&dX0, static_cast<float*>(ctx.ptr_at(curr_data_id)), sizeof(float), cudaMemcpyDeviceToHost);
-                            cudaMemcpy(&dX196, static_cast<float*>(ctx.ptr_at(curr_data_id)) + 196, sizeof(float), cudaMemcpyDeviceToHost);
-                            LOG_INFO << "[DIAG-S4] batch=" << batch
-                                     << " loss=" << loss_v
-                                     << " dX_buf[0]=" << dX0
-                                     << " dX_buf[196]=" << dX196;
-                        }
-                    }
-
-                    // Phase 3: FIRST_BWD ‖ DEEP_ALLREDUCE
+                    // Phase 3: FIRST_LAYER_BWD_A/B ‖ DEEP_ALLREDUCE
                     if (!frozen) {
                         auto g_first_cur = from_a ? g_first : g_first_b;
                         if (g_first_cur) cudaGraphLaunch(g_first_cur, s_c1);
@@ -1355,24 +1000,17 @@ float DeepLearningTask::run_train_epoch_gpu() {
                     if (g_dar) cudaGraphLaunch(g_dar, s_up);
                     sync_comp(); sync_up();
 
-                    // AMP
-                    if (using_amp && g_gc) { if (g_gc) cudaGraphLaunch(g_gc, s_up); sync_up(); }
+                    if (using_amp && g_gc) { cudaGraphLaunch(g_gc, s_up); sync_up(); }
 
-                    // Phase 4: LR H2D → FIRST_ALLREDUCE → WEIGHT_UPDATE
-                    {
-                        lr = fetch_lr_for_batch(batch);
-                        *lr_pinned_[rank] = lr;
-                        cudaMemcpyAsync(lr_dev_ptr, lr_pinned_[rank], sizeof(float),
-                                        cudaMemcpyHostToDevice, s_up);
-                    }
+                    lr = fetch_lr_for_batch(batch);
+                    if (batch % 100 == 0)
+                        LOG_INFO << "[LR] epoch=" << current_epoch_ << " batch=" << batch << " lr=" << lr;
+                    *lr_pinned_[rank] = lr;
+                    cudaMemcpyAsync(lr_dev_ptr, lr_pinned_[rank], sizeof(float),
+                                    cudaMemcpyHostToDevice, s_up);
                     if (g_far) cudaGraphLaunch(g_far, s_up);
                     if (g_wu) cudaGraphLaunch(g_wu, s_up);
                     sync_up();
-                    if (rank == 0 && batch == 0) {
-                        float w_val = -1.0f;
-                        cudaMemcpy(&w_val, static_cast<float*>(ctx.ptr_at(13)), sizeof(float), cudaMemcpyDeviceToHost);
-                        LOG_INFO << "[DIAG-B0] w13 after OPT=" << w_val;
-                    }
                 }
 
                 // ========== Last batch (batch = batches-1) ==========
@@ -1385,12 +1023,8 @@ float DeepLearningTask::run_train_epoch_gpu() {
                     if (g_fwd_l) cudaGraphLaunch(g_fwd_l, s_c1);
                     sync_comp(); sync_up();
 
-                    {
-                        int lid = active_memory_plan_->baseline().loss;
-                        if (lid >= 0) {
-                            cudaMemsetAsync(ctx.ptr_at(lid), 0, sizeof(float), s_c1);
-                        }
-                    }
+                    if (loss_id >= 0)
+                        cudaMemsetAsync(ctx.ptr_at(loss_id), 0, sizeof(float), s_c1);
                     if (g_deep_l) cudaGraphLaunch(g_deep_l, s_c1);
                     sync_comp();
 
@@ -1401,14 +1035,13 @@ float DeepLearningTask::run_train_epoch_gpu() {
                     if (g_dar) cudaGraphLaunch(g_dar, s_up);
                     sync_comp(); sync_up();
 
-                    if (using_amp && g_gc) { if (g_gc) cudaGraphLaunch(g_gc, s_up); sync_up(); }
+                    if (using_amp && g_gc) { cudaGraphLaunch(g_gc, s_up); sync_up(); }
 
-                    {
-                        lr = fetch_lr_for_batch(batches - 1);
-                        *lr_pinned_[rank] = lr;
-                        cudaMemcpyAsync(lr_dev_ptr, lr_pinned_[rank], sizeof(float),
-                                        cudaMemcpyHostToDevice, s_up);
-                    }
+                    lr = fetch_lr_for_batch(batches - 1);
+                    LOG_INFO << "[LR] epoch=" << current_epoch_ << " batch=" << (batches - 1) << " lr=" << lr;
+                    *lr_pinned_[rank] = lr;
+                    cudaMemcpyAsync(lr_dev_ptr, lr_pinned_[rank], sizeof(float),
+                                    cudaMemcpyHostToDevice, s_up);
                     if (g_far) cudaGraphLaunch(g_far, s_up);
                     if (g_wu) cudaGraphLaunch(g_wu, s_up);
                     sync_up();
@@ -1431,22 +1064,8 @@ float DeepLearningTask::run_train_epoch_gpu() {
     float train_loss = 0.0f;
     if (loss_id >= 0) {
         const auto& loss_dt = active_memory_plan_->get_dtensor(loss_id);
-        float* raw_ptr = static_cast<float*>(context(0).ptr_at(loss_id));
-        float gpu_val = -1.0f;
-        cudaSetDevice(gpu_exec_.device_ids[0]);
-        cudaMemcpy(&gpu_val, raw_ptr, sizeof(float), cudaMemcpyDeviceToHost);
-        LOG_INFO << "[LOSS-DBG] raw ptr=" << raw_ptr << " gpu_val=" << gpu_val;
-
         Tensor h_loss = fetch_from_rank(loss_dt, 0);
         train_loss = h_loss.data<float>()[0];
-        LOG_INFO << "[LOSS-DBG] fetch numel=" << h_loss.numel() << " val=" << train_loss;
-    }
-
-    {
-        float w0 = -1.0f;
-        cudaSetDevice(gpu_exec_.device_ids[0]);
-        cudaMemcpy(&w0, context(0).ptr_at(13), sizeof(float), cudaMemcpyDeviceToHost);
-        LOG_INFO << "[WGHT-DBG] w13[0] AFTER=" << w0;
     }
 
     return train_loss;
@@ -1458,12 +1077,224 @@ float DeepLearningTask::run_train_epoch_gpu() {
 // =============================================================================
 
 TrainingResult DeepLearningTask::run_cpu() {
-    LOG_INFO << "DeepLearningTask::run_cpu() — CPU path not yet implemented";
-    return TrainingResult::debug_stub();
+    auto& reg = GlobalRegistry::instance();
+    auto& prep = Preprocessor::instance();
+    const int total_epochs = total_epochs_;
+    const int steps_per_epoch = prep.steps_per_epoch();
+
+    LOG_INFO << "==================================================";
+    LOG_INFO << " Tech-Renaissance Training Started  [CPU Mode]";
+    LOG_INFO << "--------------------------------------------------";
+    LOG_INFO << " Local batch size: " << reg.get_local_batch_size();
+    LOG_INFO << " Total epochs: " << total_epochs_;
+    LOG_INFO << " Validate every: " << val_interval_ << " epochs, offset: " << val_offset_;
+    LOG_INFO << " Early stop by Top-1: " << early_stop_thr_;
+    LOG_INFO << "==================================================";
+
+    current_epoch_ = 0;
+    best_top1_ = best_top5_ = best_ema_top1_ = best_ema_top5_ = 0.0f;
+    best_epoch_ = -1;
+    early_stopped_ = false;
+
+    std::visit([total_epochs, steps_per_epoch](auto&& sch) {
+        using T = std::decay_t<decltype(sch)>;
+        if constexpr (!std::is_same_v<T, std::monostate>) {
+            sch.prepare(total_epochs, steps_per_epoch);
+        }
+    }, sched_cfg_);
+
+    const auto t0 = std::chrono::steady_clock::now();
+
+    for (int epoch = 0; epoch < total_epochs_; ++epoch) {
+        current_epoch_ = epoch;
+        const auto epoch_start = std::chrono::steady_clock::now();
+
+        std::exception_ptr prep_exc;
+        std::thread prep_thread([&]() {
+            try { prep.train(); }
+            catch (...) { prep_exc = std::current_exception(); }
+        });
+        float train_loss = run_train_epoch_cpu();
+        prep_thread.join();
+        if (prep_exc) std::rethrow_exception(prep_exc);
+
+        bool did_validate = false;
+        float val_loss = 0.0f, top1 = 0.0f, top5 = 0.0f;
+        float ema_top1 = 0.0f, ema_top5 = 0.0f;
+
+        if (should_validate_this_epoch()) {
+            std::exception_ptr val_exc;
+            std::thread val_prep_thread([&]() {
+                try { prep.val(); }
+                catch (...) { val_exc = std::current_exception(); }
+            });
+            auto [vloss, vtop1, vtop5] = run_val_epoch_cpu_impl(false);
+            val_loss = vloss;
+            top1 = vtop1;
+            top5 = vtop5;
+            val_prep_thread.join();
+            if (val_exc) std::rethrow_exception(val_exc);
+            did_validate = true;
+        }
+
+        const auto epoch_end = std::chrono::steady_clock::now();
+        const double epoch_time = std::chrono::duration<double>(epoch_end - epoch_start).count();
+
+        if (did_validate) {
+            if (top1 > best_top1_) {
+                best_top1_ = top1;
+                best_top5_ = top5;
+                best_epoch_ = epoch + 1;
+            }
+        }
+
+        log_epoch_results(train_loss, val_loss, top1, top5, ema_top1, ema_top5,
+                         fetch_lr_for_batch(0), epoch_time);
+
+        if (did_validate) {
+            float best_this_epoch = top1;
+            if (best_this_epoch >= early_stop_thr_) {
+                LOG_INFO << "Early stop triggered at epoch " << epoch
+                         << " (Top-1: " << best_this_epoch * 100.0f << "%)";
+                early_stopped_ = true;
+                break;
+            }
+        }
+    }
+
+    const auto t1 = std::chrono::steady_clock::now();
+    log_final_summary(std::chrono::duration<double>(t1 - t0).count());
+
+    TrainingResult result;
+    result.best_top1 = best_top1_;
+    result.best_top5 = best_top5_;
+    result.best_ema_top1 = best_ema_top1_;
+    result.best_ema_top5 = best_ema_top5_;
+    result.best_epoch = best_epoch_;
+    return result;
 }
 
-void DeepLearningTask::run_train_epoch_cpu() {
-    LOG_DEBUG << "DeepLearningTask::run_train_epoch_cpu() — stub";
+float DeepLearningTask::run_train_epoch_cpu() {
+    auto& prep = Preprocessor::instance();
+    const int batches = prep.steps_per_epoch();
+    auto& registry = GlobalRegistry::instance();
+
+    TransferStation* ts = nullptr;
+    for (int w = 0; w < 200; ++w) {
+        ts = static_cast<TransferStation*>(registry.transfer_station_ptr(0));
+        if (ts) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    if (!ts) TR_DEVICE_ERROR("TransferStation not ready for CPU path");
+
+    DeviceContext& ctx = context(0);
+    const auto& atlas = captured_result_.atlas;
+    const auto& graphs = captured_result_.graphs;
+
+    auto idx_for = [&atlas](GraphId gid) -> int32_t {
+        return atlas.index(0, gid);
+    };
+    auto launch = [&graphs](int32_t idx) {
+        if (idx >= 0) graphs[idx].launch(0, nullptr);
+    };
+
+    int32_t idx_xfer_a = idx_for(GraphId::TRANSFER_A);
+    int32_t idx_xfer_b = idx_for(GraphId::TRANSFER_B);
+    int32_t idx_deep   = idx_for(GraphId::DEEP_FWD_BWD);
+    int32_t idx_fwd_a  = idx_for(GraphId::FIRST_LAYER_FWD_A);
+    int32_t idx_fwd_b  = idx_for(GraphId::FIRST_LAYER_FWD_B);
+    int32_t idx_bwd_a  = idx_for(GraphId::FIRST_LAYER_BWD_A);
+    int32_t idx_bwd_b  = idx_for(GraphId::FIRST_LAYER_BWD_B);
+    int32_t idx_zg     = idx_for(GraphId::ZERO_GRAD);
+    int32_t idx_far    = idx_for(GraphId::FIRST_COMM);
+    int32_t idx_dar    = idx_for(GraphId::DEEP_COMM);
+    int32_t idx_opt    = idx_for(GraphId::OPTIMIZER);
+
+    int32_t loss_id   = active_memory_plan_->baseline().loss;
+    void*   loss_ptr  = loss_id >= 0 ? ctx.ptr_at(loss_id) : nullptr;
+    void*   lr_ptr    = ctx.ptr_at(lr_dtensor_id_);
+
+    float train_loss = 0.0f;
+
+    ts->wait_buffer_readable(0);
+    launch(idx_xfer_a);
+    ts->set_buffer_readable(0, false);
+    ts->set_buffer_writeable(0, true);
+
+    if (batches == 1) {
+        launch(idx_zg);
+        launch(idx_fwd_a);
+        if (loss_ptr) std::memset(loss_ptr, 0, sizeof(float));
+        launch(idx_deep);
+        launch(idx_bwd_a);
+        launch(idx_dar);
+        {
+            float lr = fetch_lr_for_batch(0);
+            *static_cast<float*>(lr_ptr) = lr;
+        }
+        launch(idx_far);
+        launch(idx_opt);
+
+        if (loss_id >= 0) {
+            Tensor h_loss = fetch_from_rank(active_memory_plan_->get_dtensor(loss_id), 0);
+            train_loss = h_loss.data<float>()[0];
+        }
+        return train_loss;
+    }
+
+    for (int batch = 0; batch < batches - 1; ++batch) {
+        bool from_a  = (batch % 2 == 0);
+        int next_buf = from_a ? 1 : 0;
+
+        launch(idx_zg);
+        launch(from_a ? idx_fwd_a : idx_fwd_b);
+
+        ts->wait_buffer_readable(next_buf);
+
+        if (loss_ptr) std::memset(loss_ptr, 0, sizeof(float));
+        launch(idx_deep);
+        launch(from_a ? idx_xfer_b : idx_xfer_a);
+
+        ts->set_buffer_readable(next_buf, false);
+        ts->set_buffer_writeable(next_buf, true);
+
+        launch(from_a ? idx_bwd_a : idx_bwd_b);
+        launch(idx_dar);
+
+        {
+            float lr = fetch_lr_for_batch(batch);
+            *static_cast<float*>(lr_ptr) = lr;
+        }
+        launch(idx_far);
+        launch(idx_opt);
+    }
+
+    {
+        bool last_a = ((batches - 1) % 2 == 0);
+
+        launch(idx_zg);
+        launch(last_a ? idx_fwd_a : idx_fwd_b);
+
+        if (loss_ptr) std::memset(loss_ptr, 0, sizeof(float));
+        launch(idx_deep);
+
+        launch(last_a ? idx_bwd_a : idx_bwd_b);
+        launch(idx_dar);
+
+        {
+            float lr = fetch_lr_for_batch(batches - 1);
+            *static_cast<float*>(lr_ptr) = lr;
+        }
+        launch(idx_far);
+        launch(idx_opt);
+    }
+
+    if (loss_id >= 0) {
+        Tensor h_loss = fetch_from_rank(active_memory_plan_->get_dtensor(loss_id), 0);
+        train_loss = h_loss.data<float>()[0];
+    }
+
+    return train_loss;
 }
 
 std::tuple<float, float, float> DeepLearningTask::run_val_epoch_gpu(bool validate_ema) {
@@ -1471,7 +1302,6 @@ std::tuple<float, float, float> DeepLearningTask::run_val_epoch_gpu(bool validat
     (void)validate_ema;  // EMA model not yet implemented, always use main model
 
     auto& registry = GlobalRegistry::instance();
-    TransferStation* ts = static_cast<TransferStation*>(registry.transfer_station_ptr(0));
     const int K = num_gpus_;
 
     size_t num_val = registry.num_val_samples();
@@ -1514,6 +1344,15 @@ std::tuple<float, float, float> DeepLearningTask::run_val_epoch_gpu(bool validat
                 auto sync_comp = [&]() { cudaStreamSynchronize(s_c1); };
                 auto sync_tr   = [&]() { cudaStreamSynchronize(s_trans); };
 
+                TransferStation* ts = nullptr;
+                for (int w = 0; w < 200; ++w) {
+                    ts = static_cast<TransferStation*>(
+                        registry.transfer_station_ptr(rank));
+                    if (ts) break;
+                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                }
+                if (!ts) TR_DEVICE_ERROR("TransferStation not ready for rank " << rank);
+
                 const auto& b = active_memory_plan_->baseline();
                 int32_t loss_id = b.loss;
                 int32_t top1_id = b.top1;
@@ -1532,8 +1371,7 @@ std::tuple<float, float, float> DeepLearningTask::run_val_epoch_gpu(bool validat
                     if (top5_id >= 0) cudaMemsetAsync(ctx.ptr_at(top5_id), 0, sizeof(float), s_c1);
 
                     // Wait for staging buffer
-                    while (!ts->buffer_is_readable(buf))
-                        std::this_thread::sleep_for(std::chrono::microseconds(100));
+                    ts->wait_buffer_readable(buf);
 
                     // H2D transfer
                     auto g_xfer = (buf == 0) ? g_xfer_a : g_xfer_b;
@@ -1562,10 +1400,8 @@ std::tuple<float, float, float> DeepLearningTask::run_val_epoch_gpu(bool validat
                     acc_top5 += batch_top5;
 
                     // Release buffer back to Preprocessor
-                    if (rank == 0) {
-                        ts->set_buffer_readable(buf, false);
-                        ts->set_buffer_writeable(buf, true);
-                    }
+                    ts->set_buffer_readable(buf, false);
+                    ts->set_buffer_writeable(buf, true);
                 }
 
                 rank_loss[rank] = acc_loss;
@@ -1605,9 +1441,84 @@ std::tuple<float, float, float> DeepLearningTask::run_val_epoch_gpu(bool validat
 #endif
 }
 
-void DeepLearningTask::run_val_epoch_cpu(bool validate_ema) {
-    LOG_DEBUG << "DeepLearningTask::run_val_epoch_cpu() — "
-              << (validate_ema ? "EMA model" : "main model") << " (stub)";
+std::tuple<float, float, float> DeepLearningTask::run_val_epoch_cpu_impl(bool validate_ema) {
+    (void)validate_ema;
+
+    auto& registry = GlobalRegistry::instance();
+    size_t num_val = registry.num_val_samples();
+    int batch_size = registry.get_local_batch_size();
+    if (batch_size <= 0) batch_size = 1;
+    int val_batches = static_cast<int>((num_val + batch_size - 1) / batch_size);
+
+    const auto& atlas = captured_result_.atlas;
+    const auto& graphs = captured_result_.graphs;
+
+    auto idx_for = [&atlas](GraphId gid) -> int32_t {
+        return atlas.index(0, gid);
+    };
+    auto launch = [&graphs](int32_t idx) {
+        if (idx >= 0) graphs[idx].launch(0, nullptr);
+    };
+
+    int32_t idx_xfer_a = idx_for(GraphId::TRANSFER_A);
+    int32_t idx_xfer_b = idx_for(GraphId::TRANSFER_B);
+    int32_t idx_inf_a  = idx_for(GraphId::INF_MAIN_A);
+    int32_t idx_inf_b  = idx_for(GraphId::INF_MAIN_B);
+
+    const auto& bl = active_memory_plan_->baseline();
+    int32_t loss_id = bl.loss;
+    int32_t top1_id = bl.top1;
+    int32_t top5_id = bl.top5;
+
+    DeviceContext& ctx = context(0);
+    void* loss_ptr = loss_id >= 0 ? ctx.ptr_at(loss_id) : nullptr;
+    void* top1_ptr = top1_id >= 0 ? ctx.ptr_at(top1_id) : nullptr;
+    void* top5_ptr = top5_id >= 0 ? ctx.ptr_at(top5_id) : nullptr;
+
+    TransferStation* ts = nullptr;
+    for (int w = 0; w < 200; ++w) {
+        ts = static_cast<TransferStation*>(registry.transfer_station_ptr(0));
+        if (ts) break;
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    if (!ts) TR_DEVICE_ERROR("TransferStation not ready for CPU val path");
+
+    double acc_loss = 0.0;
+    double acc_top1 = 0.0;
+    double acc_top5 = 0.0;
+
+    for (int batch = 0; batch < val_batches; ++batch) {
+        int buf = batch % 2;
+
+        if (loss_ptr) std::memset(loss_ptr, 0, sizeof(float));
+        if (top1_ptr) std::memset(top1_ptr, 0, sizeof(float));
+        if (top5_ptr) std::memset(top5_ptr, 0, sizeof(float));
+
+        ts->wait_buffer_readable(buf);
+
+        launch(buf == 0 ? idx_xfer_a : idx_xfer_b);
+        launch(buf == 0 ? idx_inf_a : idx_inf_b);
+
+        float batch_loss = loss_ptr ? *static_cast<float*>(loss_ptr) : 0.0f;
+        float batch_top1 = top1_ptr ? *static_cast<float*>(top1_ptr) : 0.0f;
+        float batch_top5 = top5_ptr ? *static_cast<float*>(top5_ptr) : 0.0f;
+
+        acc_loss += batch_loss;
+        acc_top1 += batch_top1;
+        acc_top5 += batch_top5;
+
+        ts->set_buffer_readable(buf, false);
+        ts->set_buffer_writeable(buf, true);
+    }
+
+    float avg_loss = static_cast<float>(acc_loss / val_batches);
+    float avg_top1 = static_cast<float>(acc_top1 / val_batches);
+    float avg_top5 = static_cast<float>(acc_top5 / val_batches);
+
+    LOG_INFO << "[VAL-CPU] loss=" << avg_loss << " top1=" << avg_top1 * 100.0f
+             << "% top5=" << avg_top5 * 100.0f << "%";
+
+    return {avg_loss, avg_top1, avg_top5};
 }
 
 void DeepLearningTask::update_ema_model() {
@@ -2145,10 +2056,8 @@ void DeepLearningTask::compile_h2d_only() {
     compile();
 }
 
-H2DTestResult DeepLearningTask::run_h2d_only() {
+H2DTestResult DeepLearningTask::run_h2d_only_train_epoch() {
     H2DTestResult r;
-
-#ifdef TR_USE_CUDA
     auto& prep = Preprocessor::instance();
     const int batches = prep.steps_per_epoch();
     auto& registry = GlobalRegistry::instance();
@@ -2168,93 +2077,386 @@ H2DTestResult DeepLearningTask::run_h2d_only() {
             per_zone_bytes += static_cast<size_t>(d.slot_bytes());
     }
 
-    std::vector<std::exception_ptr> rank_exc(K);
-    std::vector<std::thread> threads;
-    threads.reserve(K);
-
     auto t0 = std::chrono::steady_clock::now();
 
-    for (int rank = 0; rank < K; ++rank) {
-        threads.emplace_back([&, rank]() {
-            try {
-                cudaError_t err = cudaSetDevice(gpu_exec_.device_ids[rank]);
-                if (err != cudaSuccess)
-                    TR_DEVICE_ERROR("cudaSetDevice failed for rank " << rank
-                                    << ": " << cudaGetErrorString(err));
+    std::vector<std::exception_ptr> rank_exc;
+#ifdef TR_USE_CUDA
+    if (registry.using_gpu()) {
+        rank_exc.resize(K);
+        std::vector<std::thread> threads;
+        threads.reserve(K);
 
-                // 每个rank获取自己的TransferStation
-                TransferStation* ts = nullptr;
-                for (int w = 0; w < 200; ++w) {
-                    ts = static_cast<TransferStation*>(
-                        GlobalRegistry::instance().transfer_station_ptr(rank));
-                    if (ts) break;
-                    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        for (int rank = 0; rank < K; ++rank) {
+            threads.emplace_back([&, rank]() {
+                try {
+                    cudaError_t err = cudaSetDevice(gpu_exec_.device_ids[rank]);
+                    if (err != cudaSuccess)
+                        TR_DEVICE_ERROR("cudaSetDevice failed for rank " << rank
+                                        << ": " << cudaGetErrorString(err));
+
+                    TransferStation* ts = nullptr;
+                    for (int w = 0; w < 200; ++w) {
+                        ts = static_cast<TransferStation*>(
+                            registry.transfer_station_ptr(rank));
+                        if (ts) break;
+                        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                    }
+                    if (!ts) {
+                        TR_DEVICE_ERROR("TransferStation not ready for rank " << rank);
+                    }
+
+                    auto S = [](GraphSlot s) { return static_cast<size_t>(s); };
+                    const auto& g_tab = gpu_exec_.graphs[rank];
+                    auto g_xfer_a = g_tab[S(GraphSlot::XFER_A)];
+                    auto g_xfer_b = g_tab[S(GraphSlot::XFER_B)];
+                    cudaStream_t s_trans = static_cast<cudaStream_t>(
+                        context(rank).stream(StreamKind::TRANS));
+
+                    const auto& bl = active_memory_plan_->baseline();
+                    auto label_ptr_a = context(rank).ptr_at(bl.label_a);
+                    auto label_ptr_b = context(rank).ptr_at(bl.label_b);
+                    auto label_smce_ptr = context(rank).ptr_at(bl.label_smce);
+                    size_t label_nbytes = static_cast<size_t>(
+                        active_memory_plan_->get_dtensor(bl.label_a).slot_bytes());
+
+                    for (int batch = 0; batch < batches; ++batch) {
+                        int buf_id = batch % 2;
+                        auto g_xfer = (buf_id == 0) ? g_xfer_a : g_xfer_b;
+
+                        ts->wait_buffer_readable(buf_id);
+#ifdef TR_TEST_TWO_BATCH_CORRECTION
+                        if (batch < 2) {
+#endif
+                            cudaGraphLaunch(g_xfer, s_trans);
+                            cudaStreamSynchronize(s_trans);
+
+                            ts->set_buffer_readable(buf_id, false);
+                            ts->set_buffer_writeable(buf_id, true);
+
+                            cudaMemcpyAsync(label_smce_ptr,
+                                (buf_id == 0) ? label_ptr_a : label_ptr_b,
+                                label_nbytes, cudaMemcpyDeviceToDevice, s_trans);
+                            cudaStreamSynchronize(s_trans);
+#ifdef TR_TEST_TWO_BATCH_CORRECTION
+                        } else {
+                            ts->set_buffer_readable(buf_id, false);
+                            ts->set_buffer_writeable(buf_id, true);
+                        }
+#endif
+                    }
+                } catch (...) {
+                    rank_exc[rank] = std::current_exception();
                 }
-                if (!ts) {
-                    TR_DEVICE_ERROR("TransferStation not ready for rank " << rank);
-                }
+            });
+        }
 
-                auto S = [](GraphSlot s) { return static_cast<size_t>(s); };
-                const auto& g_tab = gpu_exec_.graphs[rank];
-                auto g_xfer_a = g_tab[S(GraphSlot::XFER_A)];
-                auto g_xfer_b = g_tab[S(GraphSlot::XFER_B)];
-                cudaStream_t s_trans = static_cast<cudaStream_t>(
-                    context(rank).stream(StreamKind::TRANS));
+        for (auto& t : threads) t.join();
+    } else
+#endif
+    {
+        void*  staging_base  = registry.staging_memory_ptr(0);
+        size_t per_zone      = registry.staging_memory_size() / 2;
+        const auto& bl       = active_memory_plan_->baseline();
+        size_t label_aligned = static_cast<size_t>(
+            active_memory_plan_->get_dtensor(bl.label_a).slot_bytes());
 
-                const auto& bl = active_memory_plan_->baseline();
-                auto label_ptr_a = context(rank).ptr_at(bl.label_a);
-                auto label_ptr_b = context(rank).ptr_at(bl.label_b);
-                auto label_smce_ptr = context(rank).ptr_at(bl.label_smce);
-                size_t label_nbytes = static_cast<size_t>(active_memory_plan_->get_dtensor(bl.label_a).slot_bytes());
+        void* label_ptr_a    = context(0).ptr_at(bl.label_a);
+        void* label_ptr_b    = context(0).ptr_at(bl.label_b);
+        void* label_smce_ptr = context(0).ptr_at(bl.label_smce);
+        size_t label_nbytes  = label_aligned;
 
-                for (int batch = 0; batch < batches; ++batch) {
-                    int buf_id = batch % 2;
-                    auto g_xfer = (buf_id == 0) ? g_xfer_a : g_xfer_b;
+        TransferStation* ts = nullptr;
+        for (int w = 0; w < 200; ++w) {
+            ts = static_cast<TransferStation*>(registry.transfer_station_ptr(0));
+            if (ts) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        if (!ts) TR_DEVICE_ERROR("TransferStation not ready for CPU path");
 
-                    ts->wait_buffer_readable(buf_id);
-
-                    cudaGraphLaunch(g_xfer, s_trans);
-                    cudaStreamSynchronize(s_trans);
-
-                    // 每个rank释放自己的buffer
-                    ts->set_buffer_readable(buf_id, false);
-                    ts->set_buffer_writeable(buf_id, true);
-
-                    // 用传输流把标签复制到SoftmaxCE的专用标签区域
-                    cudaMemcpyAsync(label_smce_ptr, ((buf_id == 0) ? label_ptr_a : label_ptr_b), label_nbytes, cudaMemcpyDeviceToDevice, s_trans);
-                    cudaStreamSynchronize(s_trans);
-                }
-            } catch (...) {
-                rank_exc[rank] = std::current_exception();
+        struct CopyTask { void* dst; void* src_base; size_t nbytes; };
+        std::vector<CopyTask> copy_a, copy_b;
+        for (const auto& d : active_memory_plan_->dtensors()) {
+            void* dst = context(0).ptr_at(d.id);
+            size_t n  = static_cast<size_t>(d.slot_bytes());
+            void* src = nullptr;
+            switch (d.region) {
+                case Region::I_A_LABEL: src = staging_base; break;
+                case Region::I_A_DATA:  src = static_cast<uint8_t*>(staging_base) + label_aligned; break;
+                case Region::I_B_LABEL: src = static_cast<uint8_t*>(staging_base) + per_zone; break;
+                case Region::I_B_DATA:  src = static_cast<uint8_t*>(staging_base) + per_zone + label_aligned; break;
+                default: continue;
             }
-        });
+            if (d.region == Region::I_A_LABEL || d.region == Region::I_A_DATA)
+                copy_a.push_back({dst, src, n});
+            else
+                copy_b.push_back({dst, src, n});
+        }
+
+        for (int batch = 0; batch < batches; ++batch) {
+            int buf_id = batch % 2;
+            ts->wait_buffer_readable(buf_id);
+
+#ifdef TR_TEST_TWO_BATCH_CORRECTION
+            if (batch < 2) {
+#endif
+                const auto& tasks = (buf_id == 0) ? copy_a : copy_b;
+                for (const auto& t : tasks)
+                    std::memcpy(t.dst, t.src_base, t.nbytes);
+
+                std::memcpy(label_smce_ptr,
+                    (buf_id == 0) ? label_ptr_a : label_ptr_b, label_nbytes);
+#ifdef TR_TEST_TWO_BATCH_CORRECTION
+            }
+#endif
+            ts->set_buffer_readable(buf_id, false);
+            ts->set_buffer_writeable(buf_id, true);
+        }
     }
 
-    for (auto& t : threads) t.join();
     auto t1 = std::chrono::steady_clock::now();
-
     prep_thread.join();
     if (prep_exc) std::rethrow_exception(prep_exc);
-    for (int rank = 0; rank < K; ++rank)
-        if (rank_exc[rank]) std::rethrow_exception(rank_exc[rank]);
+    if (!rank_exc.empty()) {
+        for (size_t rank = 0; rank < rank_exc.size(); ++rank)
+            if (rank_exc[rank]) std::rethrow_exception(rank_exc[rank]);
+    }
 
     double elapsed_us = static_cast<double>(
         std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count());
-
     r.batches     = batches;
     r.elapsed_us  = elapsed_us;
     r.total_bytes = per_zone_bytes * static_cast<size_t>(batches);
-
-    if (batches > 0) {
-        r.avg_lat_us = elapsed_us / static_cast<double>(batches);
-    }
+    if (batches > 0) r.avg_lat_us = elapsed_us / static_cast<double>(batches);
     if (elapsed_us > 0.0 && r.total_bytes > 0) {
-        double bw = static_cast<double>(r.total_bytes) / (elapsed_us / 1e6);
-        r.bandwidth_gbps = bw / (1024.0 * 1024.0 * 1024.0);
+        r.bandwidth_gbps = static_cast<double>(r.total_bytes) / (elapsed_us / 1e6)
+                           / (1024.0 * 1024.0 * 1024.0);
     }
-#else
-    (void)r;
+    return r;
+}
+
+H2DTestResult DeepLearningTask::run_h2d_only_val_epoch() {
+    H2DTestResult r;
+    auto& prep = Preprocessor::instance();
+    auto& registry = GlobalRegistry::instance();
+
+    size_t num_val   = registry.num_val_samples();
+    int    batch_size = registry.get_local_batch_size();
+    if (batch_size <= 0) batch_size = 1;
+    const int K = num_gpus_;
+    int val_batches = static_cast<int>((num_val + static_cast<size_t>(K * batch_size) - 1) / static_cast<size_t>(K * batch_size));
+
+    if (val_batches == 0) return r;
+
+    std::exception_ptr prep_exc;
+    std::thread prep_thread([&]() {
+        try { prep.val(); }
+        catch (...) { prep_exc = std::current_exception(); }
+    });
+
+    size_t per_zone_bytes = 0;
+    for (const auto& d : active_memory_plan_->dtensors()) {
+        if (d.region == Region::I_A_LABEL || d.region == Region::I_A_DATA)
+            per_zone_bytes += static_cast<size_t>(d.slot_bytes());
+    }
+
+    auto t0 = std::chrono::steady_clock::now();
+
+    std::vector<std::exception_ptr> rank_exc;
+#ifdef TR_USE_CUDA
+    if (registry.using_gpu()) {
+        rank_exc.resize(K);
+        std::vector<std::thread> threads;
+        threads.reserve(K);
+
+        for (int rank = 0; rank < K; ++rank) {
+            threads.emplace_back([&, rank]() {
+                try {
+                    cudaError_t err = cudaSetDevice(gpu_exec_.device_ids[rank]);
+                    if (err != cudaSuccess)
+                        TR_DEVICE_ERROR("cudaSetDevice failed for rank " << rank
+                                        << ": " << cudaGetErrorString(err));
+
+                    TransferStation* ts = nullptr;
+                    for (int w = 0; w < 200; ++w) {
+                        ts = static_cast<TransferStation*>(
+                            registry.transfer_station_ptr(rank));
+                        if (ts) break;
+                        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+                    }
+                    if (!ts) {
+                        TR_DEVICE_ERROR("TransferStation not ready for rank " << rank);
+                    }
+
+                    auto S = [](GraphSlot s) { return static_cast<size_t>(s); };
+                    const auto& g_tab = gpu_exec_.graphs[rank];
+                    auto g_xfer_a = g_tab[S(GraphSlot::XFER_A)];
+                    auto g_xfer_b = g_tab[S(GraphSlot::XFER_B)];
+                    cudaStream_t s_trans = static_cast<cudaStream_t>(
+                        context(rank).stream(StreamKind::TRANS));
+
+                    for (int batch = 0; batch < val_batches; ++batch) {
+                        int buf_id = batch % 2;
+                        auto g_xfer = (buf_id == 0) ? g_xfer_a : g_xfer_b;
+
+                        ts->wait_buffer_readable(buf_id);
+#ifdef TR_TEST_TWO_BATCH_CORRECTION
+                        if (batch < 2) {
 #endif
+                            cudaGraphLaunch(g_xfer, s_trans);
+                            cudaStreamSynchronize(s_trans);
+#ifdef TR_TEST_TWO_BATCH_CORRECTION
+                        }
+#endif
+
+                        ts->set_buffer_readable(buf_id, false);
+                        ts->set_buffer_writeable(buf_id, true);
+                    }
+                } catch (...) {
+                    rank_exc[rank] = std::current_exception();
+                }
+            });
+        }
+
+        for (auto& t : threads) t.join();
+    } else
+#endif
+    {
+        void*  staging_base  = registry.staging_memory_ptr(0);
+        size_t per_zone      = registry.staging_memory_size() / 2;
+        const auto& bl       = active_memory_plan_->baseline();
+        size_t label_aligned = static_cast<size_t>(
+            active_memory_plan_->get_dtensor(bl.label_a).slot_bytes());
+
+        TransferStation* ts = nullptr;
+        for (int w = 0; w < 200; ++w) {
+            ts = static_cast<TransferStation*>(registry.transfer_station_ptr(0));
+            if (ts) break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+        if (!ts) TR_DEVICE_ERROR("TransferStation not ready for CPU path (val)");
+
+        struct CopyTask { void* dst; void* src_base; size_t nbytes; };
+        std::vector<CopyTask> copy_a, copy_b;
+        for (const auto& d : active_memory_plan_->dtensors()) {
+            void* dst = context(0).ptr_at(d.id);
+            size_t n  = static_cast<size_t>(d.slot_bytes());
+            void* src = nullptr;
+            switch (d.region) {
+                case Region::I_A_LABEL: src = staging_base; break;
+                case Region::I_A_DATA:  src = static_cast<uint8_t*>(staging_base) + label_aligned; break;
+                case Region::I_B_LABEL: src = static_cast<uint8_t*>(staging_base) + per_zone; break;
+                case Region::I_B_DATA:  src = static_cast<uint8_t*>(staging_base) + per_zone + label_aligned; break;
+                default: continue;
+            }
+            if (d.region == Region::I_A_LABEL || d.region == Region::I_A_DATA)
+                copy_a.push_back({dst, src, n});
+            else
+                copy_b.push_back({dst, src, n});
+        }
+
+        for (int batch = 0; batch < val_batches; ++batch) {
+            int buf_id = batch % 2;
+            ts->wait_buffer_readable(buf_id);
+
+#ifdef TR_TEST_TWO_BATCH_CORRECTION
+            if (batch < 2) {
+#endif
+                const auto& tasks = (buf_id == 0) ? copy_a : copy_b;
+                for (const auto& t : tasks)
+                    std::memcpy(t.dst, t.src_base, t.nbytes);
+#ifdef TR_TEST_TWO_BATCH_CORRECTION
+            }
+#endif
+
+            ts->set_buffer_readable(buf_id, false);
+            ts->set_buffer_writeable(buf_id, true);
+        }
+    }
+
+    auto t1 = std::chrono::steady_clock::now();
+    prep_thread.join();
+    if (prep_exc) std::rethrow_exception(prep_exc);
+    if (!rank_exc.empty()) {
+        for (size_t rank = 0; rank < rank_exc.size(); ++rank)
+            if (rank_exc[rank]) std::rethrow_exception(rank_exc[rank]);
+    }
+
+    double elapsed_us = static_cast<double>(
+        std::chrono::duration_cast<std::chrono::microseconds>(t1 - t0).count());
+    r.batches     = val_batches;
+    r.elapsed_us  = elapsed_us;
+    r.total_bytes = per_zone_bytes * static_cast<size_t>(val_batches);
+    if (val_batches > 0) r.avg_lat_us = elapsed_us / static_cast<double>(val_batches);
+    if (elapsed_us > 0.0 && r.total_bytes > 0) {
+        r.bandwidth_gbps = static_cast<double>(r.total_bytes) / (elapsed_us / 1e6)
+                           / (1024.0 * 1024.0 * 1024.0);
+    }
+    return r;
+}
+
+H2DRunResult DeepLearningTask::run_h2d_only() {
+    H2DRunResult result;
+
+    for (int epoch = 0; epoch < total_epochs_; ++epoch) {
+        current_epoch_ = epoch;
+        auto t_epoch0 = std::chrono::steady_clock::now();
+
+        H2DTestResult train_res = run_h2d_only_train_epoch();
+        result.train_per_epoch.push_back(train_res);
+        result.epochs_run++;
+
+        if (should_validate_this_epoch()) {
+            H2DTestResult val_res = run_h2d_only_val_epoch();
+            result.val_per_epoch.push_back(val_res);
+            result.vals_run++;
+        }
+
+        auto t_epoch1 = std::chrono::steady_clock::now();
+        result.total_elapsed_us += static_cast<double>(
+            std::chrono::duration_cast<std::chrono::microseconds>(
+                t_epoch1 - t_epoch0).count());
+    }
+
+    return result;
+}
+
+H2DTestResult H2DRunResult::aggregate_train() const {
+    H2DTestResult r;
+    r.min_lat_us = 1e18;
+    r.max_lat_us = 0.0;
+    for (const auto& e : train_per_epoch) {
+        r.batches     += e.batches;
+        r.total_bytes += e.total_bytes;
+        r.elapsed_us  += e.elapsed_us;
+        if (e.avg_lat_us < r.min_lat_us) r.min_lat_us = e.avg_lat_us;
+        if (e.avg_lat_us > r.max_lat_us) r.max_lat_us = e.avg_lat_us;
+    }
+    if (train_per_epoch.empty()) { r.min_lat_us = 0.0; }
+    if (r.batches > 0) r.avg_lat_us = r.elapsed_us / static_cast<double>(r.batches);
+    if (r.elapsed_us > 0.0 && r.total_bytes > 0) {
+        r.bandwidth_gbps = static_cast<double>(r.total_bytes) / (r.elapsed_us / 1e6)
+                           / (1024.0 * 1024.0 * 1024.0);
+    }
+    return r;
+}
+
+H2DTestResult H2DRunResult::aggregate_val() const {
+    H2DTestResult r;
+    r.min_lat_us = 1e18;
+    r.max_lat_us = 0.0;
+    for (const auto& e : val_per_epoch) {
+        r.batches     += e.batches;
+        r.total_bytes += e.total_bytes;
+        r.elapsed_us  += e.elapsed_us;
+        if (e.avg_lat_us < r.min_lat_us) r.min_lat_us = e.avg_lat_us;
+        if (e.avg_lat_us > r.max_lat_us) r.max_lat_us = e.avg_lat_us;
+    }
+    if (val_per_epoch.empty()) { r.min_lat_us = 0.0; }
+    if (r.batches > 0) r.avg_lat_us = r.elapsed_us / static_cast<double>(r.batches);
+    if (r.elapsed_us > 0.0 && r.total_bytes > 0) {
+        r.bandwidth_gbps = static_cast<double>(r.total_bytes) / (r.elapsed_us / 1e6)
+                           / (1024.0 * 1024.0 * 1024.0);
+    }
     return r;
 }
 

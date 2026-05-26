@@ -60,6 +60,7 @@ void print_usage(const char* program_name) {
               << "  --gpu-ids <IDS>      GPU IDs (e.g., \"0,1,2,3\")\n"
               << "  --amp                Enable Automatic Mixed Precision (AMP) mode\n"
               << "  --seed <N>           Random seed (default: 42)\n"
+              << "  --epoch <N>          Number of epochs to run (default: 1)\n"
               << "  --help               Show this help message\n\n"
               << "PO Parameters (RandomResizedCrop/FastRandomResizedCrop):\n"
               << "  --scale-min <F>      Min scale (default: 0.08)\n"
@@ -258,6 +259,7 @@ int main(int argc, char* argv[]) {
     std::string gpu_ids_str = "";
     bool using_amp = false;
     uint64_t random_seed = 42;
+    int total_epochs_arg = 1;
 
     float scale_min = 0.08f;
     float scale_max = 1.0f;
@@ -346,7 +348,9 @@ int main(int argc, char* argv[]) {
         } else if (arg == "--amp") {
             using_amp = true;
         } else if (arg == "--seed" && i + 1 < argc) {
-            random_seed = std::stoull(argv[++i]);
+            random_seed = static_cast<uint64_t>(std::stoull(argv[++i]));
+        } else if (arg == "--epoch" && i + 1 < argc) {
+            total_epochs_arg = std::stoi(argv[++i]);
         } else if (arg == "--scale-min" && i + 1 < argc) {
             scale_min = std::stof(argv[++i]);
         } else if (arg == "--scale-max" && i + 1 < argc) {
@@ -547,11 +551,13 @@ int main(int argc, char* argv[]) {
         .num_classes(num_classes)
         .loss(CrossEntropyLoss())
         .optimizer(SGD().momentum(0.9f).weight_decay(5e-4f))
-        .scheduler(StepLR().step_size(30).gamma(0.1f));
+        .scheduler(StepLR().step_size(30).gamma(0.1f))
+        .total_epochs(total_epochs_arg);
 
     task.compile_h2d_only();
 
-    auto res = task.run_h2d_only();
+    auto run_res = task.run_h2d_only();
+    auto res = run_res.aggregate_train();
 
     std::cout << "\n=== Results ===\n";
     std::cout << "Batches:        " << res.batches << "\n";

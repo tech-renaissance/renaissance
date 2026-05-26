@@ -261,6 +261,8 @@ void TaskBase::compile_impl(bool debug_mode) {
 
             captured_result_ = pre_capture(atlas, ctx_ptrs);
             dl->build_exec_table();
+            // 绑定 lr DTensor ID，供 run_train_epoch_gpu() 使用
+            dl->lr_dtensor_id_ = active_memory_plan_->lr_id();
             // compile_mark_compiled() 延迟到 if/else 块之后无条件调用
         } else {
             GraphAtlas atlas = build_simple_atlas(name_to_gid_);
@@ -289,6 +291,24 @@ void TaskBase::compile_impl(bool debug_mode) {
             }
         }
         #endif
+
+        // ========== 诊断打印：ArchPlan / MemoryPlan / ComputationGraph ==========
+        LOG_INFO << "\n========== COMPILE DIAGNOSTICS ==========";
+        LOG_INFO << "--- ArchPlan ---";
+        LOG_INFO << dl->arch_plan_.to_string();
+        LOG_INFO << "--- MemoryPlan ---";
+        if (dl->active_memory_plan_) {
+            LOG_INFO << dl->active_memory_plan_->dump_layout();
+        }
+        LOG_INFO << "--- Train ComputationGraph ---";
+        if (dl->train_cg_) {
+            LOG_INFO << dl->train_cg_->debug_dump(true);
+        }
+        LOG_INFO << "--- Inference ComputationGraph ---";
+        if (dl->infer_cg_) {
+            LOG_INFO << dl->infer_cg_->debug_dump(true);
+        }
+        LOG_INFO << "=========================================\n";
     }
 }
 

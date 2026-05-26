@@ -377,6 +377,14 @@ add_executable(test_h2d_only_epoch test_h2d_only_epoch.cpp)
 setup_dl_test(test_h2d_only_epoch)
 message(STATUS "  - test_h2d_only_epoch: H2D-only epoch test (compile_h2d_only + run_h2d_only)")
 
+add_executable(test_two_batch_correction
+    test_two_batch_correction.cpp
+    ${CMAKE_SOURCE_DIR}/src/task/deep_learning_task.cpp
+)
+setup_dl_test(test_two_batch_correction)
+target_compile_definitions(test_two_batch_correction PRIVATE TR_TEST_TWO_BATCH_CORRECTION)
+message(STATUS "  - test_two_batch_correction: Two-batch H2D correction test")
+
 add_executable(test_pw_ultimate
     test_pw_ultimate.cpp
     ${CMAKE_SOURCE_DIR}/src/data/transfer_station.cpp

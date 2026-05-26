@@ -3,10 +3,11 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
+import time
 
 torch.manual_seed(42)
 
-batch_size = 128
+batch_size = 200
 epochs = 3
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -30,6 +31,11 @@ class MLP(nn.Module):
         self.tanh2 = nn.Tanh()
         self.fc3 = nn.Linear(256, 10, bias=True)
 
+        # 初始化bias为0，与Renaissance一致
+        nn.init.zeros_(self.fc1.bias)
+        nn.init.zeros_(self.fc2.bias)
+        nn.init.zeros_(self.fc3.bias)
+
     def forward(self, x):
         x = x.view(x.size(0), -1)
         x = self.tanh1(self.fc1(x))
@@ -39,20 +45,24 @@ class MLP(nn.Module):
 
 model = MLP().to(device)
 criterion = nn.CrossEntropyLoss()
-optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.9, weight_decay=5e-4, nesterov=False, dampening=0.0)
-scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs, eta_min=1e-5)
+optimizer = optim.SGD(model.parameters(), lr=0.1, momentum=0.9, weight_decay=0.0, nesterov=False, dampening=0.0)
+scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=10)
 
+t0 = time.perf_counter()
 for epoch in range(epochs):
     model.train()
     total_loss = 0.0
     for batch_idx, (data, target) in enumerate(train_loader):
         data, target = data.to(device), target.to(device)
+        current_lr = scheduler.get_last_lr()[0]
         optimizer.zero_grad()
         output = model(data)
         loss = criterion(output, target)
         loss.backward()
         optimizer.step()
         total_loss += loss.item()
+        if batch_idx % 100 == 0:
+            print(f"  batch {batch_idx}: lr={current_lr:.4f}  loss={loss.item():.4f}")
     scheduler.step()
 
     avg_loss = total_loss / len(train_loader)
@@ -72,4 +82,6 @@ for epoch in range(epochs):
     acc = 100.0 * correct / total
     print(f"Epoch {epoch}: train_loss={avg_loss:.4f}  val_loss={avg_val_loss:.4f}  val_acc={acc:.2f}%")
 
+t1 = time.perf_counter()
 print(f"\nFinal Val Accuracy: {acc:.2f}%")
+print(f"Training time (3 epochs): {t1 - t0:.3f}s")

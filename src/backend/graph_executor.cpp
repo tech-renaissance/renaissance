@@ -90,7 +90,7 @@ void GraphExecutor::run_train_step() {
     update_lr_scalar();
 
     GraphId xfer_gid      = ab_toggle_ ? GraphId::TRANSFER_A : GraphId::TRANSFER_B;
-    GraphId first_fwd_gid = ab_toggle_ ? GraphId::FIRST_FWD_A : GraphId::FIRST_FWD_B;
+    GraphId first_fwd_gid = ab_toggle_ ? GraphId::FIRST_LAYER_FWD_A : GraphId::FIRST_LAYER_FWD_B;
 
     // 1. Transfer 到计算区
     launch(xfer_gid);
@@ -111,7 +111,7 @@ void GraphExecutor::run_train_step() {
 
     // 6. 深层通信 + 首层反向
     if (!skip_first_bwd_) {
-        launch_dual(GraphId::DEEP_COMM, GraphId::FIRST_BWD);
+        launch_dual(GraphId::DEEP_COMM, GraphId::FIRST_LAYER_BWD_A);
     } else {
         launch(GraphId::DEEP_COMM);
     }
@@ -145,7 +145,7 @@ void GraphExecutor::run_train_step() {
 void GraphExecutor::run_train_step_last_batch() {
     update_lr_scalar();
 
-    GraphId first_fwd_gid = ab_toggle_ ? GraphId::FIRST_FWD_A : GraphId::FIRST_FWD_B;
+    GraphId first_fwd_gid = ab_toggle_ ? GraphId::FIRST_LAYER_FWD_A : GraphId::FIRST_LAYER_FWD_B;
 
     // 1. ZERO GRAD
     launch(GraphId::ZERO_GRAD);
@@ -162,7 +162,7 @@ void GraphExecutor::run_train_step_last_batch() {
 
     // 5. 深层通信 + 首层反向
     if (!skip_first_bwd_) {
-        launch_dual(GraphId::DEEP_COMM, GraphId::FIRST_BWD);
+        launch_dual(GraphId::DEEP_COMM, GraphId::FIRST_LAYER_BWD_A);
     } else {
         launch(GraphId::DEEP_COMM);
     }

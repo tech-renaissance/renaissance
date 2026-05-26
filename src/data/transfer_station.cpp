@@ -1013,14 +1013,17 @@ void TransferStation::set_buffer_readable(int buffer_id, bool readable_flag) {
     TR_CHECK(buffer_id == 0 || buffer_id == 1, ValueError,
              "buffer_id must be 0 or 1, got " << buffer_id);
 
-    if (buffer_id == 0) {
-        buffer_0_is_readable_.store(readable_flag, std::memory_order_release);
-    } else {
-        buffer_1_is_readable_.store(readable_flag, std::memory_order_release);
-    }
+    {
+        std::lock_guard<std::mutex> lk(buffer_sync_mtx_);
+        if (buffer_id == 0) {
+            buffer_0_is_readable_.store(readable_flag, std::memory_order_release);
+        } else {
+            buffer_1_is_readable_.store(readable_flag, std::memory_order_release);
+        }
 
-    if (readable_flag) {
-        cv_readable_[buffer_id].notify_all();
+        if (readable_flag) {
+            cv_readable_[buffer_id].notify_all();
+        }
     }
 }
 
@@ -1028,14 +1031,17 @@ void TransferStation::set_buffer_writeable(int buffer_id, bool writeable_flag) {
     TR_CHECK(buffer_id == 0 || buffer_id == 1, ValueError,
              "buffer_id must be 0 or 1, got " << buffer_id);
 
-    if (buffer_id == 0) {
-        buffer_0_is_writeable_.store(writeable_flag, std::memory_order_release);
-    } else {
-        buffer_1_is_writeable_.store(writeable_flag, std::memory_order_release);
-    }
+    {
+        std::lock_guard<std::mutex> lk(buffer_sync_mtx_);
+        if (buffer_id == 0) {
+            buffer_0_is_writeable_.store(writeable_flag, std::memory_order_release);
+        } else {
+            buffer_1_is_writeable_.store(writeable_flag, std::memory_order_release);
+        }
 
-    if (writeable_flag) {
-        cv_writeable_[buffer_id].notify_all();
+        if (writeable_flag) {
+            cv_writeable_[buffer_id].notify_all();
+        }
     }
 }
 
