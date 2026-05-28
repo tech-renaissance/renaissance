@@ -405,6 +405,64 @@ void MemoryPlan::alloc_baseline_dtensors(const Shape& label_shape,
     }
 }
 
+void MemoryPlan::alloc_baseline_dtensors(
+    const Shape& label_shape,
+    const Shape& data_shape,
+    DType input_dtype,
+    OptimizerKind opt,
+    uint64_t io_label_slot_bytes,
+    uint64_t io_data_slot_bytes,
+    uint64_t smce_slot_bytes)
+{
+    auto la = alloc_impl(label_shape, DType::INT32, Region::I_A_LABEL,
+                          io_label_slot_bytes);
+    auto da = alloc_impl(data_shape, input_dtype, Region::I_A_DATA,
+                          io_data_slot_bytes);
+    auto lb = alloc_impl(label_shape, DType::INT32, Region::I_B_LABEL,
+                          io_label_slot_bytes);
+    auto db = alloc_impl(data_shape, input_dtype, Region::I_B_DATA,
+                          io_data_slot_bytes);
+
+    baseline_.label_a = la.id;
+    baseline_.data_a  = da.id;
+    baseline_.label_b = lb.id;
+    baseline_.data_b  = db.id;
+
+    baseline_.label_smce = alloc_impl(label_shape, DType::INT32,
+                                       Region::T_TEMP_INT32, smce_slot_bytes).id;
+
+    Shape scalar_shape{1, 1, 1, 1};
+
+    baseline_.has_nan = alloc_impl(scalar_shape, DType::INT32, Region::S_SCALAR_INT32).id;
+    baseline_.lr      = alloc_impl(scalar_shape, DType::FP32,  Region::S_SCALAR_FP32).id;
+    baseline_.scaling = alloc_impl(scalar_shape, DType::FP32,  Region::S_SCALAR_FP32).id;
+
+    baseline_.loss = alloc_impl(scalar_shape, DType::FP32, Region::R_RESULT).id;
+    baseline_.top1 = alloc_impl(scalar_shape, DType::FP32, Region::R_RESULT).id;
+    baseline_.top5 = alloc_impl(scalar_shape, DType::FP32, Region::R_RESULT).id;
+
+    baseline_.local_batch_size      = alloc_impl(scalar_shape, DType::INT32, Region::S_SCALAR_INT32).id;
+    baseline_.last_train_batch_size = alloc_impl(scalar_shape, DType::INT32, Region::S_SCALAR_INT32).id;
+    baseline_.last_val_batch_size   = alloc_impl(scalar_shape, DType::INT32, Region::S_SCALAR_INT32).id;
+
+    baseline_.accum_loss = alloc_impl(scalar_shape, DType::FP32, Region::R_RESULT_ACCUMULATED).id;
+    baseline_.accum_top1 = alloc_impl(scalar_shape, DType::FP32, Region::R_RESULT_ACCUMULATED).id;
+    baseline_.accum_top5 = alloc_impl(scalar_shape, DType::FP32, Region::R_RESULT_ACCUMULATED).id;
+
+    if (opt != OptimizerKind::SGD) {
+        baseline_.beta = alloc_impl(scalar_shape, DType::FP32, Region::S_SCALAR_FP32).id;
+        baseline_.wd   = alloc_impl(scalar_shape, DType::FP32, Region::S_SCALAR_FP32).id;
+    }
+    if (opt == OptimizerKind::ADAM || opt == OptimizerKind::ADAMW) {
+        baseline_.beta2 = alloc_impl(scalar_shape, DType::FP32, Region::S_SCALAR_FP32).id;
+        baseline_.eps   = alloc_impl(scalar_shape, DType::FP32, Region::S_SCALAR_FP32).id;
+    }
+    if (opt == OptimizerKind::LARS || opt == OptimizerKind::LARS_NESTEROV) {
+        baseline_.tc  = alloc_impl(scalar_shape, DType::FP32, Region::S_SCALAR_FP32).id;
+        baseline_.eps = alloc_impl(scalar_shape, DType::FP32, Region::S_SCALAR_FP32).id;
+    }
+}
+
 // F-Series
 DTensor MemoryPlan::alloc_feature(const Shape& shape, DType dtype) {
     bool amp = GlobalRegistry::instance().using_amp();

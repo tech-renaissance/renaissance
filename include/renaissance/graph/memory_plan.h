@@ -176,6 +176,14 @@ public:
                                  DType input_dtype,
                                  OptimizerKind opt = OptimizerKind::SGD);
 
+    void alloc_baseline_dtensors(const Shape& label_shape,
+                                 const Shape& data_shape,
+                                 DType input_dtype,
+                                 OptimizerKind opt,
+                                 uint64_t io_label_slot_bytes,
+                                 uint64_t io_data_slot_bytes,
+                                 uint64_t smce_slot_bytes);
+
     const BaselineIds& baseline() const noexcept { return baseline_; }
 
     int32_t nan_flag_id()      const noexcept { return baseline_.has_nan; }

@@ -731,24 +731,39 @@ void Compiler::create_memory_plans(
     scalar_ids.wd = -1;
     scalar_ids.eps = -1;
 
+    int64_t max_batch = 0;
+    int max_resolution = 0;
+    int input_channels = 0;
+    for (size_t s = 0; s < specs.size(); ++s) {
+        max_batch = std::max(max_batch, static_cast<int64_t>(specs[s].batch_size));
+        max_resolution = std::max(max_resolution, specs[s].max_sample_resolution);
+        input_channels = specs[s].num_color_channels;
+    }
+    bool amp = GlobalRegistry::instance().using_amp();
+    DType input_dtype = amp ? DType::FP16 : DType::FP32;
+
+    Shape max_label_shape{static_cast<int>(max_batch), 1, 1, 1};
+    Shape max_data_shape{static_cast<int>(max_batch), max_resolution, max_resolution, input_channels};
+
+    uint64_t max_io_label_bytes = DTensor::compute_slot_bytes(
+        max_label_shape, DType::INT32, Region::I_A_LABEL);
+    uint64_t max_io_data_bytes  = DTensor::compute_slot_bytes(
+        max_data_shape, input_dtype, Region::I_A_DATA);
+    uint64_t max_smce_bytes     = DTensor::compute_slot_bytes(
+        max_label_shape, DType::INT32, Region::T_TEMP_INT32);
+
     for (size_t s = 0; s < all_shapes.size(); ++s) {
         memory_plans[s] = std::make_unique<MemoryPlan>(plan_config);
 
-        // 输入缓冲区维度
-        bool amp = GlobalRegistry::instance().using_amp();
-        // Shape 必须存逻辑通道数（如 MNIST 的 1），padding 由 DTensor 根据
-        // dtype+region 自动计算（FP16+I_A_DATA 时 padded_c=4）。若此处硬编码 4，
-        // 会导致 Flatten 等算子把 padding 当作有效数据展平，产生每 4 个值仅 1 个
-        // 有效的错误输出。
         int input_channels = specs[s].num_color_channels;
         Shape input_shape{specs[s].batch_size, specs[s].max_sample_resolution,
                          specs[s].max_sample_resolution, input_channels};
         Shape label_shape{specs[s].batch_size, 1, 1, 1};
-        DType input_dtype = amp ? DType::FP16 : DType::FP32;
 
-        // 基线分配器：一次性分配输入缓冲区 + 标量 + 结果区 + 条件优化器标量
         auto opt = GlobalRegistry::instance().optimizer_kind();
-        memory_plans[s]->alloc_baseline_dtensors(label_shape, input_shape, input_dtype, opt);
+        memory_plans[s]->alloc_baseline_dtensors(
+            label_shape, input_shape, input_dtype, opt,
+            max_io_label_bytes, max_io_data_bytes, max_smce_bytes);
 
         float init_scaling = amp ? TR_AMP_INITIAL_SCALING : 1.0f;
         LOG_INFO << "[COMPILER] amp=" << amp << " TR_AMP_INITIAL_SCALING=" << TR_AMP_INITIAL_SCALING << " init_scaling=" << init_scaling;

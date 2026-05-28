@@ -249,6 +249,11 @@ void TaskBase::compile_impl(bool debug_mode) {
             }
 
             captured_result_ = pre_capture(atlas, ctx_ptrs);
+
+            for (int rank = 0; rank < num_gpus_; ++rank) {
+                backend_->contexts[rank]->set_memory_plan(active_memory_plan_);
+            }
+
             dl->build_exec_table();
             // 绑定 lr DTensor ID，供 run_train_epoch_gpu() 使用
             dl->lr_dtensor_id_ = active_memory_plan_->lr_id();

@@ -62,7 +62,7 @@ int main(int argc, char** argv) {
     }
     GLOBAL_SETTING
         .manual_seed(42)
-        .local_batch_size(200)
+        .local_batch_size(199)
         .train_resolution(28)
         .val_resolution(28);
 
@@ -99,7 +99,7 @@ int main(int argc, char** argv) {
     auto result = task.run();
     auto t1 = std::chrono::steady_clock::now();
 
-    std::cout << std::fixed << std::setprecision(3)
+    std::cout << std::fixed << std::setprecision(2)
               << "\n=====================================\n"
               << " Mode: " << mode_name(mode) << "\n"
               << " Best Top-1: " << result.best_top1 * 100.0f << "%\n"

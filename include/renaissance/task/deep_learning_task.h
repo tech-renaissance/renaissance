@@ -284,14 +284,63 @@ protected:
         }
         plan_config_.need_mask = needs_mask;
 
-        CompileSpec spec = CompileSpec::from_global_registry();
-        auto result = Compiler::compile(plan, spec, plan_config_, initializer_);
+        CompileSpec base_spec = CompileSpec::from_global_registry();
 
-        memory_plan_ptr_ = std::move(result.variants[0].memory_plan);
-        if (!memory_plan_ptr_->is_finalized()) {
-            memory_plan_ptr_->finalize();
+        // ===== 生成 5 个 variant specs =====
+        std::vector<CompileSpec> variant_specs;
+
+        // v1: train_last
+        {
+            CompileSpec s = base_spec;
+            s.batch_size = gr.get_last_train_batch_size();
+            variant_specs.push_back(s);
         }
-        active_memory_plan_ = memory_plan_ptr_.get();
+        // v2: train_lowres
+        {
+            CompileSpec s = base_spec;
+            s.actual_resolution = gr.train_sample_resolution_end();
+            variant_specs.push_back(s);
+        }
+        // v3: train_lowres_last
+        {
+            CompileSpec s = base_spec;
+            s.batch_size = gr.get_last_train_batch_size();
+            s.actual_resolution = gr.train_sample_resolution_end();
+            variant_specs.push_back(s);
+        }
+        // v4: val_base
+        {
+            CompileSpec s = base_spec;
+            s.actual_resolution = gr.val_sample_resolution();
+            variant_specs.push_back(s);
+        }
+        // v5: val_last
+        {
+            CompileSpec s = base_spec;
+            s.batch_size = gr.get_last_val_batch_size();
+            s.actual_resolution = gr.val_sample_resolution();
+            variant_specs.push_back(s);
+        }
+
+        // ===== 保存 CompileSpec（用于 build_graph_atlas 获取 ShapeId）=====
+        variant_compile_specs_[0] = base_spec;
+        for (size_t i = 0; i < variant_specs.size() && i < GraphAtlas::kMaxVariants - 1; ++i) {
+            variant_compile_specs_[i + 1] = variant_specs[i];
+        }
+
+        auto result = Compiler::compile(plan, base_spec, plan_config_,
+                                        initializer_, variant_specs);
+
+        // ===== 转移所有 variant 的 MemoryPlan =====
+        for (size_t i = 0; i < result.variants.size() && i < GraphAtlas::kMaxVariants; ++i) {
+            variant_memory_plans_[i] = std::move(result.variants[i].memory_plan);
+        }
+
+        // ===== 保持向后兼容（不移动所有权，build_graph_atlas 需要遍历所有 variant）=====
+        active_memory_plan_ = variant_memory_plans_[0].get();
+        if (!active_memory_plan_->is_finalized()) {
+            active_memory_plan_->finalize();
+        }
         phase_ = Phase::MEMORY_LOCKED;
 
         lr_dtensor_id_ = -1;
@@ -388,6 +437,12 @@ private:
     // MemoryPlan指针（因为MemoryPlan不可移动）
     std::unique_ptr<MemoryPlan> memory_plan_ptr_;
 
+    // 6-Variant 系统：各变体的独立 MemoryPlan（slot_bytes 跨变体一致，shape 不同）
+    std::array<std::unique_ptr<MemoryPlan>, GraphAtlas::kMaxVariants> variant_memory_plans_;
+
+    // 各变体的 CompileSpec（用于 build_graph_atlas 获取 ShapeId）
+    std::array<CompileSpec, GraphAtlas::kMaxVariants> variant_compile_specs_;
+
     // Compiler 输出的 ComputationGraph 只读指针（图数据存储在 named_graphs_ 中）
     const ComputationGraph* train_cg_ = nullptr;
     const ComputationGraph* infer_cg_ = nullptr;
@@ -444,7 +499,7 @@ private:
 
 #ifdef TR_USE_CUDA
     struct GpuExecTable {
-        std::vector<std::vector<cudaGraphExec_t>> graphs;
+        std::array<std::vector<std::vector<cudaGraphExec_t>>, GraphAtlas::kMaxVariants> variant_graphs;
         std::vector<int> device_ids;
     };
     GpuExecTable gpu_exec_;
