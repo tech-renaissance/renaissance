@@ -284,6 +284,8 @@ enum class RangeOp : uint16_t {
 
     // === 通用 NaN 检查 ===
     RANGE_CHECK_NAN,                // 通用 NaN 检查（超集 NAN_CHECK_ALL_G）
+    RANGE_GRAD_SCALING,             // AMP grad scaling 条件回退
+    RANGE_ACCUM_METRICS,            // 累积 batch 结果到 R_RESULT_ACCUMULATED
 
     COUNT,
     UNKNOWN = 0xFFFF

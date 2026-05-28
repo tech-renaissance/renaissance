@@ -28,6 +28,120 @@
 #include <cmath>
 #include <unordered_map>
 #include <tuple>
+#include <cstdlib>
+
+// =============================================================================
+// Batch-0 debug dump (test-only global flag)
+// =============================================================================
+bool g_tr_exit_after_batch0 = false;
+
+static const char* region_name(tr::Region r) {
+    using tr::Region;
+    switch (r) {
+        case Region::W_FC_WEIGHT:       return "W_FC_WEIGHT";
+        case Region::W_FC_BIAS:         return "W_FC_BIAS";
+        case Region::W_EQ_BIAS:         return "W_EQ_BIAS";
+        case Region::W_EQ_SCALE:        return "W_EQ_SCALE";
+        case Region::W_BN_BIAS:         return "W_BN_BIAS";
+        case Region::W_BN_WEIGHT:       return "W_BN_WEIGHT";
+        case Region::W_FIRST_CONV:      return "W_FIRST_CONV";
+        case Region::W_DEEP_CONV:       return "W_DEEP_CONV";
+        case Region::A_FC_WEIGHT:       return "A_FC_WEIGHT";
+        case Region::A_FIRST_CONV:      return "A_FIRST_CONV";
+        case Region::A_DEEP_CONV:       return "A_DEEP_CONV";
+        case Region::I_A_DATA:          return "I_A_DATA";
+        case Region::I_A_LABEL:         return "I_A_LABEL";
+        case Region::I_B_DATA:          return "I_B_DATA";
+        case Region::I_B_LABEL:         return "I_B_LABEL";
+        case Region::F_FEATURE_FP32:    return "F_FEATURE_FP32";
+        case Region::F_FEATURE_FP16:    return "F_FEATURE_FP16";
+        case Region::F_GRAD_SLOT_FP32:  return "F_GRAD_SLOT_FP32";
+        case Region::F_GRAD_SLOT_FP16:  return "F_GRAD_SLOT_FP16";
+        case Region::G_FC_WEIGHT:       return "G_FC_WEIGHT";
+        case Region::G_FC_BIAS:         return "G_FC_BIAS";
+        case Region::G_FC_WEIGHT_FP16:  return "G_FC_WEIGHT_FP16";
+        case Region::G_FIRST_CONV:      return "G_FIRST_CONV";
+        case Region::G_DEEP_CONV:       return "G_DEEP_CONV";
+        case Region::G_FIRST_CONV_FP16: return "G_FIRST_CONV_FP16";
+        case Region::G_DEEP_CONV_FP16:  return "G_DEEP_CONV_FP16";
+        case Region::M_FC_WEIGHT:       return "M_FC_WEIGHT";
+        case Region::M_FC_BIAS:         return "M_FC_BIAS";
+        case Region::M_FIRST_CONV:      return "M_FIRST_CONV";
+        case Region::M_DEEP_CONV:       return "M_DEEP_CONV";
+        case Region::R_RESULT:          return "R_RESULT";
+        case Region::R_RESULT_ACCUMULATED: return "R_RESULT_ACCUM";
+        case Region::S_SCALAR_FP32:     return "S_SCALAR_FP32";
+        case Region::S_SCALAR_FP16:     return "S_SCALAR_FP16";
+        default: return nullptr;
+    }
+}
+
+static float fp16_to_fp32_raw(uint16_t h) {
+    uint32_t sign = (h >> 15) & 0x1;
+    uint32_t exp  = (h >> 10) & 0x1f;
+    uint32_t mant = h & 0x3ff;
+    if (exp == 0) {
+        if (mant == 0) return sign ? -0.0f : 0.0f;
+        float v = static_cast<float>(mant) / 1024.0f;
+        float r = v * std::pow(2.0f, -14.0f);
+        return sign ? -r : r;
+    } else if (exp == 31) {
+        return (mant == 0) ? (sign ? -std::numeric_limits<float>::infinity()
+                                   : std::numeric_limits<float>::infinity())
+                           : std::numeric_limits<float>::quiet_NaN();
+    }
+    float v = 1.0f + static_cast<float>(mant) / 1024.0f;
+    float r = v * std::pow(2.0f, static_cast<int>(exp) - 15);
+    return sign ? -r : r;
+}
+
+static void dump_batch0_tensors(tr::DeepLearningTask* task,
+                                 const tr::MemoryPlan* mp,
+                                 int rank) {
+    if (rank != 0) return;
+    std::cout << "\n========== BATCH 0 TENSOR DUMP ==========\n";
+    for (const auto& dt : mp->dtensors()) {
+        const char* name = region_name(dt.region);
+        if (!name || !dt.valid()) continue;
+        tr::Tensor h = task->fetch_from_rank(dt, 0);
+        std::cout << "[" << name << "] id=" << dt.id
+                  << " shape=[" << dt.shape.n() << "," << dt.shape.h()
+                  << "," << dt.shape.w() << "," << dt.shape.c() << "]"
+                  << " dtype=" << (dt.dtype == tr::DType::FP32 ? "FP32" :
+                                   (dt.dtype == tr::DType::FP16 ? "FP16" : "OTHER"))
+                  << "\n  vals: ";
+        int64_t n = std::min<int64_t>(8, dt.numel());
+        if (dt.dtype == tr::DType::FP32) {
+            const float* p = h.data<float>();
+            for (int64_t i = 0; i < n; ++i) std::cout << p[i] << " ";
+        } else if (dt.dtype == tr::DType::FP16) {
+            const uint16_t* p = static_cast<const uint16_t*>(h.data<void>());
+            for (int64_t i = 0; i < n; ++i) std::cout << fp16_to_fp32_raw(p[i]) << " ";
+        }
+        std::cout << "\n";
+
+        // Save FC weights & biases to TSR for cross-mode comparison
+        auto& reg = tr::GlobalRegistry::instance();
+        std::string suffix = reg.using_amp() ? "_amp" : "_gpu";
+        auto save_tsr_if = [&](int target_id, const std::string& base_name) {
+            if (dt.id == target_id) {
+                std::string path = std::string(TR_WORKSPACE) + "/" + base_name + suffix + ".tsr";
+                tr::Tensor::save_tensor(h, path);
+                std::cout << "  [SAVED TSR] " << path << "\n";
+            }
+        };
+        save_tsr_if(20, "fc1_weight");
+        save_tsr_if(21, "fc1_bias");
+        save_tsr_if(30, "fc2_weight");
+        save_tsr_if(31, "fc2_bias");
+        save_tsr_if(40, "fc3_weight");
+        save_tsr_if(41, "fc3_bias");
+        save_tsr_if(19, "flatten_output");
+    }
+    std::cout << "========== END DUMP ==========\n";
+    std::cout.flush();
+    std::exit(0);
+}
 
 namespace {
 
@@ -51,12 +165,125 @@ enum class GraphSlot : uint8_t {
     INF_MAIN_B,
     INF_EMA_A,
     INF_EMA_B,
+    CAST_MAIN,
+    ACCUM_METRICS,
+    ACCUM_METRICS_TRAIN_LAST,
+    ACCUM_METRICS_VAL_LAST,
+    VAL_RESULT_ALLREDUCE,
+    CLEAR_METRICS,
     COUNT
 };
 
 }
 
 namespace tr {
+
+// =============================================================================
+// H2D NaN 调试检查（AMP/FP32 通用）
+// =============================================================================
+#ifdef TR_USE_CUDA
+// FP16 NaN check via bit pattern (no __half in .cpp)
+static inline bool is_fp16_nan(uint16_t u) {
+    return (u & 0x7C00u) == 0x7C00u && (u & 0x03FFu) != 0;
+}
+
+static inline bool is_fp16_nan_or_inf(uint16_t u) {
+    return (u & 0x7C00u) == 0x7C00u;
+}
+
+static bool debug_check_buffer_nan(const void* gpu_ptr, int64_t num_elements,
+                                    DType dtype, cudaStream_t stream,
+                                    const char* tag)
+{
+    if (dtype == DType::FP16) {
+        std::vector<uint16_t> hbuf(num_elements);
+        cudaError_t err = cudaMemcpyAsync(hbuf.data(), gpu_ptr,
+                                          num_elements * sizeof(uint16_t),
+                                          cudaMemcpyDeviceToHost, stream);
+        if (err != cudaSuccess) {
+            LOG_INFO << "[NAN-CHECK] " << tag << " cudaMemcpy failed: " << cudaGetErrorString(err);
+            return true;
+        }
+        cudaStreamSynchronize(stream);
+        int nan_count = 0;
+        uint16_t first_nan_hex = 0;
+        for (int64_t i = 0; i < num_elements; ++i) {
+            if (is_fp16_nan_or_inf(hbuf[i])) {
+                if (nan_count == 0) first_nan_hex = hbuf[i];
+                ++nan_count;
+            }
+        }
+        if (nan_count > 0) {
+            fprintf(stderr, "[NAN-CHECK] %s TOTAL NaN/INF count=%d / %lld first_hex=0x%04x\n",
+                   tag, nan_count, (long long)num_elements, first_nan_hex);
+            fprintf(stderr, "[NAN-CHECK] >>> NaN/INF DETECTED AT %s (non-fatal, continuing) <<<\n", tag);
+            fflush(stderr);
+        }
+    } else if (dtype == DType::FP32) {
+        std::vector<float> hbuf(num_elements);
+        cudaError_t err = cudaMemcpyAsync(hbuf.data(), gpu_ptr,
+                                          num_elements * sizeof(float),
+                                          cudaMemcpyDeviceToHost, stream);
+        if (err != cudaSuccess) {
+            LOG_INFO << "[NAN-CHECK] " << tag << " cudaMemcpy failed: " << cudaGetErrorString(err);
+            return true;
+        }
+        cudaStreamSynchronize(stream);
+        int nan_count = 0;
+        for (int64_t i = 0; i < num_elements; ++i) {
+            if (std::isnan(hbuf[i]) || std::isinf(hbuf[i])) {
+                if (nan_count < 5) {
+                    LOG_INFO << "[NAN-CHECK] " << tag << " index=" << i << " val=" << hbuf[i];
+                }
+                ++nan_count;
+            }
+        }
+        if (nan_count > 0) {
+            fprintf(stderr, "[NAN-CHECK] %s TOTAL NaN/INF count=%d / %lld\n",
+                   tag, nan_count, (long long)num_elements);
+            fprintf(stderr, "[NAN-CHECK] >>> NaN/INF DETECTED AT %s (non-fatal, continuing) <<<\n", tag);
+            fflush(stderr);
+        }
+    }
+    return false;
+}
+
+static int debug_count_nan(const void* gpu_ptr, int64_t num_elements,
+                           DType dtype, cudaStream_t stream) {
+    if (dtype == DType::FP16) {
+        std::vector<uint16_t> hbuf(num_elements);
+        cudaMemcpyAsync(hbuf.data(), gpu_ptr,
+                        num_elements * sizeof(uint16_t),
+                        cudaMemcpyDeviceToHost, stream);
+        cudaStreamSynchronize(stream);
+        int nan_count = 0;
+        for (int64_t i = 0; i < num_elements; ++i) {
+            if (is_fp16_nan_or_inf(hbuf[i])) ++nan_count;
+        }
+        return nan_count;
+    } else if (dtype == DType::FP32) {
+        std::vector<float> hbuf(num_elements);
+        cudaMemcpyAsync(hbuf.data(), gpu_ptr,
+                        num_elements * sizeof(float),
+                        cudaMemcpyDeviceToHost, stream);
+        cudaStreamSynchronize(stream);
+        int nan_count = 0;
+        for (int64_t i = 0; i < num_elements; ++i) {
+            if (std::isnan(hbuf[i]) || std::isinf(hbuf[i])) ++nan_count;
+        }
+        return nan_count;
+    }
+    return 0;
+}
+
+// 辅助：读取单个 FP32 标量
+static float debug_fetch_fp32_scalar(void* gpu_ptr, cudaStream_t stream) {
+    float v = 0.0f;
+    cudaMemcpyAsync(&v, gpu_ptr, sizeof(float), cudaMemcpyDeviceToHost, stream);
+    cudaStreamSynchronize(stream);
+    return v;
+}
+#endif
 
 // =============================================================================
 // 构造与配置
@@ -508,16 +735,13 @@ GraphAtlas DeepLearningTask::build_graph_atlas() {
     }
 
     if (infer_cg_) {
-        static const GraphId kInferIds[] = {
-            GraphId::INF_MAIN_A, GraphId::INF_MAIN_B,
-            GraphId::INF_EMA_A,  GraphId::INF_EMA_B
-        };
-        for (GraphId gid : kInferIds) {
+        for (uint8_t gi = 0; gi < static_cast<uint8_t>(GraphId::COUNT); ++gi) {
+            GraphId gid = static_cast<GraphId>(gi);
             if (infer_cg_->nodes(gid).empty()) continue;
-            auto& sl = atlas.slot(0, static_cast<uint8_t>(gid));
+            auto& sl = atlas.slot(0, gi);
             sl.cg = infer_cg_;
             sl.mp = active_memory_plan_;
-            sl.stream_kind = StreamKind::COMP_1;
+            sl.stream_kind = stream_for(gid);
             sl.shape_id = kShapeInvariant;
         }
     }
@@ -548,9 +772,16 @@ StreamKind DeepLearningTask::stream_for(GraphId gid) {
         case GraphId::CAST_AND_CHECK:
         case GraphId::OPTIMIZER:
         case GraphId::EMA_UPDATE:
+        case GraphId::CAST_MAIN_FP32_TO_FP16:
             return StreamKind::UPDATE;
         case GraphId::INF_MAIN_A:       return StreamKind::COMP_1;
         case GraphId::INF_MAIN_B:       return StreamKind::COMP_1;
+        case GraphId::ACCUM_METRICS:
+        case GraphId::ACCUM_METRICS_TRAIN_LAST:
+        case GraphId::ACCUM_METRICS_VAL_LAST:
+        case GraphId::VAL_RESULT_COMM:
+        case GraphId::CLEAR_METRICS:
+            return StreamKind::UPDATE;
         default:                        return StreamKind::COMP_1;
     }
 }
@@ -625,10 +856,16 @@ void DeepLearningTask::build_exec_table() {
         g[S(GraphSlot::FIRST_LAYER_FWD_A)]      = resolve(GraphId::FIRST_LAYER_FWD_A, rank);
         g[S(GraphSlot::FIRST_LAYER_FWD_B)]      = resolve(GraphId::FIRST_LAYER_FWD_B, rank);
         g[S(GraphSlot::CAST_AND_CHECK)]   = resolve(GraphId::CAST_AND_CHECK, rank);
+        g[S(GraphSlot::CAST_MAIN)]        = resolve(GraphId::CAST_MAIN_FP32_TO_FP16, rank);
         g[S(GraphSlot::INF_MAIN_A)]       = resolve(GraphId::INF_MAIN_A, rank);
         g[S(GraphSlot::INF_MAIN_B)]       = resolve(GraphId::INF_MAIN_B, rank);
         g[S(GraphSlot::INF_EMA_A)]        = resolve(GraphId::INF_EMA_A, rank);
         g[S(GraphSlot::INF_EMA_B)]        = resolve(GraphId::INF_EMA_B, rank);
+        g[S(GraphSlot::ACCUM_METRICS)]           = resolve(GraphId::ACCUM_METRICS, rank);
+        g[S(GraphSlot::ACCUM_METRICS_TRAIN_LAST)] = resolve(GraphId::ACCUM_METRICS_TRAIN_LAST, rank);
+        g[S(GraphSlot::ACCUM_METRICS_VAL_LAST)]   = resolve(GraphId::ACCUM_METRICS_VAL_LAST, rank);
+        g[S(GraphSlot::VAL_RESULT_ALLREDUCE)]     = resolve(GraphId::VAL_RESULT_COMM, rank);
+        g[S(GraphSlot::CLEAR_METRICS)]            = resolve(GraphId::CLEAR_METRICS, rank);
 
         LOG_INFO << "[EXEC-TABLE] rank=" << rank
                  << " DEEP=" << (g[S(GraphSlot::FWD_BWD_DEEP_A)] ? "OK" : "NULL")
@@ -677,6 +914,7 @@ void DeepLearningTask::build_exec_table() {
                      ValueError,
                      "FIRST_LAYER_FWD_B is nullptr");
     }
+
 #endif
 }
 
@@ -867,8 +1105,6 @@ float DeepLearningTask::run_train_epoch_gpu() {
     auto& registry = GlobalRegistry::instance();
     const int K = num_gpus_;
 
-    LOG_INFO << "[DIAG-STEPS] steps_per_epoch=" << prep.steps_per_epoch()
-             << " batches=" << batches;
     bool using_amp = registry.using_amp();
 
     std::vector<std::exception_ptr> exc(K);
@@ -903,19 +1139,28 @@ float DeepLearningTask::run_train_epoch_gpu() {
                 auto g_gc      = g_tab[S(GraphSlot::GRAD_CONVERT)];
                 auto g_fwd_a   = g_tab[S(GraphSlot::FIRST_LAYER_FWD_A)];
                 auto g_fwd_b   = g_tab[S(GraphSlot::FIRST_LAYER_FWD_B)];
+                auto g_cm      = g_tab[S(GraphSlot::CAST_MAIN)];
+                auto g_accum            = g_tab[S(GraphSlot::ACCUM_METRICS)];
+                auto g_accum_train_last = g_tab[S(GraphSlot::ACCUM_METRICS_TRAIN_LAST)];
+                auto g_accum_val_last   = g_tab[S(GraphSlot::ACCUM_METRICS_VAL_LAST)];
+                auto g_clear_metrics    = g_tab[S(GraphSlot::CLEAR_METRICS)];
 
                 DeviceContext& ctx = context(rank);
                 cudaStream_t s_up     = static_cast<cudaStream_t>(ctx.stream(StreamKind::UPDATE));
                 cudaStream_t s_trans  = static_cast<cudaStream_t>(ctx.stream(StreamKind::TRANS));
                 cudaStream_t s_c1     = static_cast<cudaStream_t>(ctx.stream(StreamKind::COMP_1));
                 cudaStream_t s_c2     = static_cast<cudaStream_t>(ctx.stream(StreamKind::COMP_2));
+                cudaStream_t s_c3     = static_cast<cudaStream_t>(ctx.stream(StreamKind::COMP_3));
 
                 auto sync_comp = [&]() {
                     cudaStreamSynchronize(s_c1);
                     cudaStreamSynchronize(s_c2);
+                    cudaStreamSynchronize(s_c3);
                 };
                 auto sync_up   = [&]() { cudaStreamSynchronize(s_up); };
                 auto sync_tr   = [&]() { cudaStreamSynchronize(s_trans); };
+
+                if (using_amp && g_cm) { cudaGraphLaunch(g_cm, s_up); sync_up(); }
 
                 auto& registry = GlobalRegistry::instance();
                 TransferStation* ts = nullptr;
@@ -935,8 +1180,22 @@ float DeepLearningTask::run_train_epoch_gpu() {
                 ts->wait_buffer_readable(0);
                 if (g_xfer_a) cudaGraphLaunch(g_xfer_a, s_trans);
                 sync_tr();
+
+#ifdef TR_USE_CUDA
+                {
+                    const auto& bl = active_memory_plan_->baseline();
+                    const auto& dt = active_memory_plan_->get_dtensor(bl.data_a);
+                    int64_t nelem = dt.shape.numel();
+                    bool has_nan = debug_check_buffer_nan(ctx.ptr_at(bl.data_a), nelem,
+                                                            dt.dtype, s_trans, "TRAIN-H2D-batch0-A");
+                    if (has_nan) LOG_INFO << "[NAN-CHECK] TRAIN batch0 data_a HAS NAN";
+                }
+#endif
+
                 ts->set_buffer_readable(0, false);
                 ts->set_buffer_writeable(0, true);
+
+                if (g_clear_metrics) cudaGraphLaunch(g_clear_metrics, s_up);
 
                 if (batches == 1) {
                     if (g_zg) cudaGraphLaunch(g_zg, s_up);
@@ -947,6 +1206,9 @@ float DeepLearningTask::run_train_epoch_gpu() {
                         cudaMemsetAsync(ctx.ptr_at(loss_id), 0, sizeof(float), s_c1);
                     if (g_deep_a) cudaGraphLaunch(g_deep_a, s_c1);
                     sync_comp();
+
+                    if (g_accum_train_last) cudaGraphLaunch(g_accum_train_last, s_up);
+                    sync_up();
 
                     if (!frozen && g_first) cudaGraphLaunch(g_first, s_c1);
                     if (g_dar) cudaGraphLaunch(g_dar, s_up);
@@ -962,10 +1224,13 @@ float DeepLearningTask::run_train_epoch_gpu() {
                     if (g_far) cudaGraphLaunch(g_far, s_up);
                     if (g_wu) cudaGraphLaunch(g_wu, s_up);
                     sync_up();
+                    if (using_amp && g_cm) { cudaGraphLaunch(g_cm, s_up); sync_up(); }
+                    if (g_tr_exit_after_batch0) dump_batch0_tensors(this, active_memory_plan_, rank);
                     return;
                 }
 
                 // ========== 统一循环：batch = 0 .. batches-2 ==========
+
                 for (int batch = 0; batch < batches - 1; ++batch) {
                     bool from_a  = (batch % 2 == 0);
                     int next_buf = from_a ? 1 : 0;
@@ -988,6 +1253,8 @@ float DeepLearningTask::run_train_epoch_gpu() {
                     if (g_xfer_n) cudaGraphLaunch(g_xfer_n, s_trans);
                     sync_comp(); sync_tr();
 
+                    if (g_accum) cudaGraphLaunch(g_accum, s_up);
+                    sync_up();
 
                     ts->set_buffer_readable(next_buf, false);
                     ts->set_buffer_writeable(next_buf, true);
@@ -1011,6 +1278,8 @@ float DeepLearningTask::run_train_epoch_gpu() {
                     if (g_far) cudaGraphLaunch(g_far, s_up);
                     if (g_wu) cudaGraphLaunch(g_wu, s_up);
                     sync_up();
+                    if (using_amp && g_cm) { cudaGraphLaunch(g_cm, s_up); sync_up(); }
+                    if (batch == 0 && g_tr_exit_after_batch0) dump_batch0_tensors(this, active_memory_plan_, rank);
                 }
 
                 // ========== Last batch (batch = batches-1) ==========
@@ -1027,6 +1296,13 @@ float DeepLearningTask::run_train_epoch_gpu() {
                         cudaMemsetAsync(ctx.ptr_at(loss_id), 0, sizeof(float), s_c1);
                     if (g_deep_l) cudaGraphLaunch(g_deep_l, s_c1);
                     sync_comp();
+
+                    {
+                        cudaGraphExec_t g_accum_now = g_accum;
+                        if (g_accum_train_last) g_accum_now = g_accum_train_last;
+                        if (g_accum_now) cudaGraphLaunch(g_accum_now, s_up);
+                    }
+                    sync_up();
 
                     if (!frozen) {
                         auto g_first_cur = last_a ? g_first : g_first_b;
@@ -1045,6 +1321,7 @@ float DeepLearningTask::run_train_epoch_gpu() {
                     if (g_far) cudaGraphLaunch(g_far, s_up);
                     if (g_wu) cudaGraphLaunch(g_wu, s_up);
                     sync_up();
+                    if (using_amp && g_cm) { cudaGraphLaunch(g_cm, s_up); sync_up(); }
                 }
 
             } catch (...) {
@@ -1062,10 +1339,16 @@ float DeepLearningTask::run_train_epoch_gpu() {
     }
 
     float train_loss = 0.0f;
-    if (loss_id >= 0) {
-        const auto& loss_dt = active_memory_plan_->get_dtensor(loss_id);
-        Tensor h_loss = fetch_from_rank(loss_dt, 0);
-        train_loss = h_loss.data<float>()[0];
+    if (active_memory_plan_) {
+        const auto& b = active_memory_plan_->baseline();
+        int32_t accum_loss_id = b.accum_loss;
+        if (accum_loss_id >= 0) {
+            const auto& accum_dt = active_memory_plan_->get_dtensor(accum_loss_id);
+            Tensor h_accum = fetch_from_rank(accum_dt, 0);
+            float accum_val = h_accum.data<float>()[0];
+            size_t total = GlobalRegistry::instance().num_train_samples();
+            if (total > 0) train_loss = accum_val / static_cast<float>(total);
+        }
     }
 
     return train_loss;
@@ -1366,10 +1649,7 @@ std::tuple<float, float, float> DeepLearningTask::run_val_epoch_gpu(bool validat
     auto& registry = GlobalRegistry::instance();
     const int K = num_gpus_;
 
-    size_t num_val = registry.num_val_samples();
-    int batch_size = registry.get_local_batch_size();
-    if (batch_size <= 0) batch_size = 1;
-    int val_batches = static_cast<int>((num_val + batch_size - 1) / batch_size);
+    int val_batches = registry.get_val_steps();
 
     auto S = [](GraphSlot s) { return static_cast<size_t>(s); };
     GraphSlot g_inf_a = GraphSlot::INF_MAIN_A;
@@ -1378,11 +1658,6 @@ std::tuple<float, float, float> DeepLearningTask::run_val_epoch_gpu(bool validat
     std::vector<std::exception_ptr> exc(K);
     std::vector<std::thread> threads;
     threads.reserve(K);
-
-    // Per-rank accumulators
-    std::vector<double> rank_loss(K, 0.0);
-    std::vector<double> rank_top1(K, 0.0);
-    std::vector<double> rank_top5(K, 0.0);
 
     for (int rank = 0; rank < K; ++rank) {
         threads.emplace_back([&, rank]() {
@@ -1398,12 +1673,24 @@ std::tuple<float, float, float> DeepLearningTask::run_val_epoch_gpu(bool validat
                 auto g_xfer_b  = g_tab[S(GraphSlot::XFER_B)];
                 auto g_inf_a_exec = g_tab[S(g_inf_a)];
                 auto g_inf_b_exec = g_tab[S(g_inf_b)];
+                auto g_accum            = g_tab[S(GraphSlot::ACCUM_METRICS)];
+                auto g_accum_val_last   = g_tab[S(GraphSlot::ACCUM_METRICS_VAL_LAST)];
+                auto g_val_comm         = g_tab[S(GraphSlot::VAL_RESULT_ALLREDUCE)];
+                auto g_clear_metrics    = g_tab[S(GraphSlot::CLEAR_METRICS)];
 
                 DeviceContext& ctx = context(rank);
-                cudaStream_t s_trans = static_cast<cudaStream_t>(ctx.stream(StreamKind::TRANS));
-                cudaStream_t s_c1    = static_cast<cudaStream_t>(ctx.stream(StreamKind::COMP_1));
+                cudaStream_t s_up     = static_cast<cudaStream_t>(ctx.stream(StreamKind::UPDATE));
+                cudaStream_t s_trans  = static_cast<cudaStream_t>(ctx.stream(StreamKind::TRANS));
+                cudaStream_t s_c1     = static_cast<cudaStream_t>(ctx.stream(StreamKind::COMP_1));
+                cudaStream_t s_c2     = static_cast<cudaStream_t>(ctx.stream(StreamKind::COMP_2));
+                cudaStream_t s_c3     = static_cast<cudaStream_t>(ctx.stream(StreamKind::COMP_3));
 
-                auto sync_comp = [&]() { cudaStreamSynchronize(s_c1); };
+                auto sync_comp = [&]() {
+                    cudaStreamSynchronize(s_c1);
+                    cudaStreamSynchronize(s_c2);
+                    cudaStreamSynchronize(s_c3);
+                };
+                auto sync_up   = [&]() { cudaStreamSynchronize(s_up); };
                 auto sync_tr   = [&]() { cudaStreamSynchronize(s_trans); };
 
                 TransferStation* ts = nullptr;
@@ -1420,55 +1707,123 @@ std::tuple<float, float, float> DeepLearningTask::run_val_epoch_gpu(bool validat
                 int32_t top1_id = b.top1;
                 int32_t top5_id = b.top5;
 
-                double acc_loss = 0.0;
-                double acc_top1 = 0.0;
-                double acc_top5 = 0.0;
+                if (g_clear_metrics) cudaGraphLaunch(g_clear_metrics, s_up);
+
+                int32_t val_bs = registry.get_local_batch_size();
+                if (val_bs <= 0) val_bs = 1;
 
                 for (int batch = 0; batch < val_batches; ++batch) {
                     int buf = batch % 2;
 
-                    // Clear metric baselines before each batch (SoftmaxCE uses atomicAdd)
                     if (loss_id >= 0) cudaMemsetAsync(ctx.ptr_at(loss_id), 0, sizeof(float), s_c1);
                     if (top1_id >= 0) cudaMemsetAsync(ctx.ptr_at(top1_id), 0, sizeof(float), s_c1);
                     if (top5_id >= 0) cudaMemsetAsync(ctx.ptr_at(top5_id), 0, sizeof(float), s_c1);
 
-                    // Wait for staging buffer
                     ts->wait_buffer_readable(buf);
 
-                    // H2D transfer
                     auto g_xfer = (buf == 0) ? g_xfer_a : g_xfer_b;
                     if (g_xfer) cudaGraphLaunch(g_xfer, s_trans);
                     sync_tr();
 
-                    // Inference
+#ifdef TR_USE_CUDA
+                    {
+                        int32_t data_id = (buf == 0) ? b.data_a : b.data_b;
+                        const auto& dt = active_memory_plan_->get_dtensor(data_id);
+                        int64_t nelem = dt.shape.numel();
+                        char tag[64];
+                        snprintf(tag, sizeof(tag), "VAL-H2D-batch%d-%c", batch, (buf==0)?'A':'B');
+                        bool has_nan = debug_check_buffer_nan(ctx.ptr_at(data_id), nelem,
+                                                                dt.dtype, s_trans, tag);
+                        if (has_nan) LOG_INFO << "[NAN-CHECK] VAL batch=" << batch
+                                              << " buf=" << buf << " HAS NAN";
+                    }
+#endif
+
                     auto g_inf = (buf == 0) ? g_inf_a_exec : g_inf_b_exec;
                     if (g_inf) cudaGraphLaunch(g_inf, s_c1);
                     sync_comp();
 
-                    // Read metrics
-                    float batch_loss = 0.0f, batch_top1 = 0.0f, batch_top5 = 0.0f;
-                    if (loss_id >= 0) {
-                        cudaMemcpy(&batch_loss, ctx.ptr_at(loss_id), sizeof(float), cudaMemcpyDeviceToHost);
-                    }
-                    if (top1_id >= 0) {
-                        cudaMemcpy(&batch_top1, ctx.ptr_at(top1_id), sizeof(float), cudaMemcpyDeviceToHost);
-                    }
-                    if (top5_id >= 0) {
-                        cudaMemcpy(&batch_top5, ctx.ptr_at(top5_id), sizeof(float), cudaMemcpyDeviceToHost);
-                    }
+#ifdef TR_USE_CUDA
+                    {
+                        const auto& mp = *active_memory_plan_;
 
-                    acc_loss += batch_loss;
-                    acc_top1 += batch_top1;
-                    acc_top5 += batch_top5;
+                        // ===== 逐层检查 FEATURE MAP（纯 FWD，从输入到输出）=====
+                        // 1. Flatten 输出 id=19
+                        {
+                            const auto& dt = mp.get_dtensor(19);
+                            debug_check_buffer_nan(ctx.ptr_at(19), dt.shape.numel(), dt.dtype, s_c1, "VAL-feat-flatten");
+                        }
+                        // 2. FC1 输出 id=22
+                        {
+                            const auto& dt = mp.get_dtensor(22);
+                            debug_check_buffer_nan(ctx.ptr_at(22), dt.shape.numel(), dt.dtype, s_c1, "VAL-feat-fc1");
+                        }
+                        // 3. Tanh1 输出 id=29
+                        {
+                            const auto& dt = mp.get_dtensor(29);
+                            debug_check_buffer_nan(ctx.ptr_at(29), dt.shape.numel(), dt.dtype, s_c1, "VAL-feat-tanh1");
+                        }
+                        // 4. FC2 输出 id=32
+                        {
+                            const auto& dt = mp.get_dtensor(32);
+                            debug_check_buffer_nan(ctx.ptr_at(32), dt.shape.numel(), dt.dtype, s_c1, "VAL-feat-fc2");
+                        }
+                        // 5. Tanh2 输出 id=39
+                        {
+                            const auto& dt = mp.get_dtensor(39);
+                            debug_check_buffer_nan(ctx.ptr_at(39), dt.shape.numel(), dt.dtype, s_c1, "VAL-feat-tanh2");
+                        }
+                        // 6. FC3 / logits 输出 id=42
+                        {
+                            const auto& dt = mp.get_dtensor(42);
+                            debug_check_buffer_nan(ctx.ptr_at(42), dt.shape.numel(), dt.dtype, s_c1, "VAL-feat-fc3-logits");
+                        }
+                        // 7. probs (T_TEMP_FP32 id=50)
+                        {
+                            const auto& dt = mp.get_dtensor(50);
+                            debug_check_buffer_nan(ctx.ptr_at(50), dt.shape.numel(), dt.dtype, s_c1, "VAL-feat-probs");
+                        }
+                        // 8. A_FC_WEIGHT FP16 权重
+                        {
+                            const auto& dt25 = mp.get_dtensor(25);
+                            debug_check_buffer_nan(ctx.ptr_at(25), dt25.shape.numel(), dt25.dtype, s_c1, "VAL-amp-w-fc1");
+                            const auto& dt35 = mp.get_dtensor(35);
+                            debug_check_buffer_nan(ctx.ptr_at(35), dt35.shape.numel(), dt35.dtype, s_c1, "VAL-amp-w-fc2");
+                            const auto& dt45 = mp.get_dtensor(45);
+                            debug_check_buffer_nan(ctx.ptr_at(45), dt45.shape.numel(), dt45.dtype, s_c1, "VAL-amp-w-fc3");
+                        }
+                        // =============================================
 
-                    // Release buffer back to Preprocessor
+                        // 保留原有诊断输出
+                        float loss_v = debug_fetch_fp32_scalar(ctx.ptr_at(loss_id), s_c1);
+                        float top1_v = debug_fetch_fp32_scalar(ctx.ptr_at(top1_id), s_c1);
+                        float top5_v = debug_fetch_fp32_scalar(ctx.ptr_at(top5_id), s_c1);
+                        float scaling_v = debug_fetch_fp32_scalar(ctx.ptr_at(b.scaling), s_c1);
+                        int32_t bs_v = 0;
+                        cudaMemcpyAsync(&bs_v, ctx.ptr_at(b.local_batch_size), sizeof(int32_t),
+                                        cudaMemcpyDeviceToHost, s_c1);
+                        cudaStreamSynchronize(s_c1);
+
+                        LOG_INFO << "[NAN-CHECK] VAL batch=" << batch
+                                 << " loss=" << loss_v << " top1=" << top1_v << " top5=" << top5_v
+                                 << " scaling=" << scaling_v << " bs=" << bs_v;
+                    }
+#endif
+
+                    bool is_last = (batch == val_batches - 1);
+                    cudaGraphExec_t g_va = (is_last && g_accum_val_last)
+                        ? g_accum_val_last : g_accum;
+                    if (g_va) cudaGraphLaunch(g_va, s_up);
+                    sync_up();
+
                     ts->set_buffer_readable(buf, false);
                     ts->set_buffer_writeable(buf, true);
                 }
 
-                rank_loss[rank] = acc_loss;
-                rank_top1[rank] = acc_top1;
-                rank_top5[rank] = acc_top5;
+                sync_up();
+
+                if (g_val_comm) cudaGraphLaunch(g_val_comm, s_up);
+                sync_up();
 
             } catch (...) {
                 exc[rank] = std::current_exception();
@@ -1481,17 +1836,31 @@ std::tuple<float, float, float> DeepLearningTask::run_val_epoch_gpu(bool validat
         if (exc[rank]) std::rethrow_exception(exc[rank]);
     }
 
-    // Average across ranks and batches
-    double total_loss = 0.0, total_top1 = 0.0, total_top5 = 0.0;
-    for (int rank = 0; rank < K; ++rank) {
-        total_loss += rank_loss[rank];
-        total_top1 += rank_top1[rank];
-        total_top5 += rank_top5[rank];
+    float avg_loss = 0.0f, avg_top1 = 0.0f, avg_top5 = 0.0f;
+    if (active_memory_plan_) {
+        const auto& b = active_memory_plan_->baseline();
+        int32_t al_id = b.accum_loss;
+        int32_t at1_id = b.accum_top1;
+        int32_t at5_id = b.accum_top5;
+        if (al_id >= 0) {
+            const auto& al_dt = active_memory_plan_->get_dtensor(al_id);
+            Tensor h_al = fetch_from_rank(al_dt, 0);
+            float accum_loss = h_al.data<float>()[0];
+            avg_loss = accum_loss / static_cast<float>(registry.num_val_samples());
+        }
+        if (at1_id >= 0) {
+            const auto& at1_dt = active_memory_plan_->get_dtensor(at1_id);
+            Tensor h_at1 = fetch_from_rank(at1_dt, 0);
+            float accum_top1 = h_at1.data<float>()[0];
+            avg_top1 = accum_top1 / static_cast<float>(registry.num_val_samples());
+        }
+        if (at5_id >= 0) {
+            const auto& at5_dt = active_memory_plan_->get_dtensor(at5_id);
+            Tensor h_at5 = fetch_from_rank(at5_dt, 0);
+            float accum_top5 = h_at5.data<float>()[0];
+            avg_top5 = accum_top5 / static_cast<float>(registry.num_val_samples());
+        }
     }
-
-    float avg_loss = static_cast<float>(total_loss / val_batches);
-    float avg_top1 = static_cast<float>(total_top1 / val_batches);
-    float avg_top5 = static_cast<float>(total_top5 / val_batches);
 
     LOG_INFO << "[VAL] loss=" << avg_loss << " top1=" << avg_top1 * 100.0f
              << "% top5=" << avg_top5 * 100.0f << "%";
@@ -1507,10 +1876,7 @@ std::tuple<float, float, float> DeepLearningTask::run_val_epoch_cpu(bool validat
     (void)validate_ema;
 
     auto& registry = GlobalRegistry::instance();
-    size_t num_val = registry.num_val_samples();
-    int batch_size = registry.get_local_batch_size();
-    if (batch_size <= 0) batch_size = 1;
-    int val_batches = static_cast<int>((num_val + batch_size - 1) / batch_size);
+    int val_batches = registry.get_val_steps();
 
     const auto& atlas = captured_result_.atlas;
     const auto& graphs = captured_result_.graphs;
@@ -2301,11 +2667,8 @@ H2DTestResult DeepLearningTask::run_h2d_only_val_epoch() {
     auto& prep = Preprocessor::instance();
     auto& registry = GlobalRegistry::instance();
 
-    size_t num_val   = registry.num_val_samples();
-    int    batch_size = registry.get_local_batch_size();
-    if (batch_size <= 0) batch_size = 1;
     const int K = num_gpus_;
-    int val_batches = static_cast<int>((num_val + static_cast<size_t>(K * batch_size) - 1) / static_cast<size_t>(K * batch_size));
+    int val_batches = registry.get_val_steps();
 
     if (val_batches == 0) return r;
 

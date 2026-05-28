@@ -50,9 +50,9 @@ public:
     /**
      * @brief 设置全连接层初始化策略
      * @param k 初始化方法（MLPerf 默认 FIXED_NORMAL）
-     * @note FIXED_NORMAL 时固定使用参数 0.01
+     * @param param FIXED_NORMAL 时的 σ 参数（默认 0.01）
      */
-    Initializer& fc(InitKind k);
+    Initializer& fc(InitKind k, float param = 0.01f);
 
     /**
      * @brief 设置批归一化层初始化策略

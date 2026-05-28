@@ -226,7 +226,17 @@ void GraphExecutor::update_lr_scalar() {
 //   2. ctx_.ptr_at(nan_id) 获取设备指针
 //   3. D2H 读取 int32_t flag 值，返回 flag != 0
 bool GraphExecutor::check_nan_flag() const {
-    return false;
+    if (optimizer_scalar_ids_.has_nan < 0) return false;
+    const int32_t* ptr = static_cast<const int32_t*>(
+        ctx_.ptr_at(optimizer_scalar_ids_.has_nan));
+    int32_t flag = 0;
+#ifdef TR_USE_CUDA
+    if (ctx_.is_gpu()) {
+        cudaMemcpy(&flag, ptr, sizeof(int32_t), cudaMemcpyDeviceToHost);
+    } else
+#endif
+    { flag = *ptr; }
+    return flag != 0;
 }
 
 void GraphExecutor::on_nan_detected() {

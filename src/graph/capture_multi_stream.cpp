@@ -73,14 +73,32 @@ void insert_cross_op_barrier(const GraphNode& /*prev_node*/,
     int out_idx = state.output_stream_idx;
     if (out_idx < 0) return;
 
+    StreamKind target_sk;
     if (next_node.kind == GraphNode::Kind::COMPUTE) {
-        StreamKind target_sk = get_op_default_stream(next_node.compute_op);
-        cudaStream_t target_s = static_cast<cudaStream_t>(ctx.stream(target_sk));
-        int target_idx = state.find_stream_index(target_s);
-        if (target_idx >= 0 && target_idx != out_idx) {
-            cudaStreamWaitEvent(target_s,
-                state.streams[out_idx].last_done_event, 0);
+        target_sk = get_op_default_stream(next_node.compute_op);
+    } else if (next_node.kind == GraphNode::Kind::RANGE) {
+        switch (next_node.range_op) {
+            case RangeOp::RANGE_ACCUM_METRICS:
+            case RangeOp::RANGE_CLEAR:
+            case RangeOp::RANGE_CAST_FP32_TO_FP16:
+            case RangeOp::RANGE_CAST_FP16_TO_FP32:
+            case RangeOp::RANGE_EMA_PARAM_UPDATE:
+                target_sk = StreamKind::UPDATE; break;
+            case RangeOp::RANGE_GRAD_SCALING:
+            case RangeOp::RANGE_CHECK_NAN:
+                target_sk = StreamKind::COMP_1; break;
+            default:
+                target_sk = StreamKind::COMP_1; break;
         }
+    } else {
+        return;
+    }
+
+    cudaStream_t target_s = static_cast<cudaStream_t>(ctx.stream(target_sk));
+    int target_idx = state.find_stream_index(target_s);
+    if (target_idx >= 0 && target_idx != out_idx) {
+        cudaStreamWaitEvent(target_s,
+            state.streams[out_idx].last_done_event, 0);
     }
 }
 

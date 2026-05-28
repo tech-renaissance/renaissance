@@ -64,6 +64,7 @@ __global__ void softmax_ce_fwd_kernel(
     float* __restrict__ probs,
     float* __restrict__ inv_scaling,
     const float* __restrict__ scaling_ptr,
+    const int32_t* __restrict__ batch_size_ptr,
     int batch, int logits_stride, int probs_stride, int num_classes)
 {
     extern __shared__ float smem[];
@@ -77,7 +78,7 @@ __global__ void softmax_ce_fwd_kernel(
     int warp_id = tid / WARP_SIZE;
     int lane_id = tid % WARP_SIZE;
     int label_b = static_cast<int>(labels[b]);
-    float inv_batch = 1.0f / static_cast<float>(batch);
+    float inv_batch = 1.0f / static_cast<float>(*batch_size_ptr);
 
     // ===== Step 1: Global max =====
     float local_max = -INFINITY;
@@ -131,12 +132,13 @@ __global__ void softmax_ce_fwd_kernel(
 
         if (c == label_b) {
             float sample_loss = -logf(prob + 1e-8f);
-            float scaling = *scaling_ptr;
-            atomicAdd(loss, sample_loss * inv_batch * scaling);
+            atomicAdd(loss, sample_loss * inv_batch);
         }
     }
 
-    if (b == 0 && tid == 0) *inv_scaling = inv_batch;
+    if (b == 0 && tid == 0) {
+        *inv_scaling = 1.0f / static_cast<float>(*batch_size_ptr);
+    }
 }
 
 /**
@@ -163,6 +165,7 @@ __global__ void softmax_ce_inf_kernel(
     float* __restrict__ probs,
     float* __restrict__ inv_scaling,
     const float* __restrict__ scaling_ptr,
+    const int32_t* __restrict__ batch_size_ptr,
     int batch, int logits_stride, int probs_stride, int num_classes)
 {
     extern __shared__ float smem[];
@@ -178,7 +181,7 @@ __global__ void softmax_ce_inf_kernel(
     int warp_id = tid / WARP_SIZE;
     int lane_id = tid % WARP_SIZE;
     int label_b = static_cast<int>(labels[b]);
-    float inv_batch = 1.0f / static_cast<float>(batch);
+    float inv_batch = 1.0f / static_cast<float>(*batch_size_ptr);
 
     float local_max = -INFINITY;
     for (int c = tid; c < num_classes; c += BLOCK_DIM) {
@@ -232,8 +235,7 @@ __global__ void softmax_ce_inf_kernel(
 
         if (c == label_b) {
             float sample_loss = -logf(prob + 1e-8f);
-            float scaling = *scaling_ptr;
-            atomicAdd(loss, sample_loss * inv_batch * scaling);
+            atomicAdd(loss, sample_loss * inv_batch);
         }
 
         float raw;
@@ -289,7 +291,9 @@ __global__ void softmax_ce_inf_kernel(
             if (global_top1_cls == label_b) atomicAdd(top5, inv_batch);
         }
 
-        if (b == 0) *inv_scaling = inv_batch;
+        if (b == 0) {
+            *inv_scaling = 1.0f / static_cast<float>(*batch_size_ptr);
+        }
     }
 }
 
@@ -336,13 +340,14 @@ cudaError_t launch_softmax_ce_fwd_fp32(
     float* loss, float* top1, float* top5,
     int* pred, float* probs,
     float* inv_scaling, const float* scaling,
+    const int32_t* batch_size,
     int batch, int logits_stride, int probs_stride, int num_classes)
 {
     (void)top1; (void)top5; (void)pred;
     size_t smem = static_cast<size_t>(WARP_COUNT) * 2 * sizeof(float);
     softmax_ce_fwd_kernel<false><<<batch, BLOCK_DIM, smem, s>>>(
         static_cast<const void*>(logits), labels, loss, probs,
-        inv_scaling, scaling, batch, logits_stride, probs_stride, num_classes);
+        inv_scaling, scaling, batch_size, batch, logits_stride, probs_stride, num_classes);
     return cudaGetLastError();
 }
 
@@ -352,13 +357,14 @@ cudaError_t launch_softmax_ce_fwd_amp(
     float* loss, float* top1, float* top5,
     int* pred, float* probs,
     float* inv_scaling, const float* scaling,
+    const int32_t* batch_size,
     int batch, int logits_stride, int probs_stride, int num_classes)
 {
     (void)top1; (void)top5; (void)pred;
     size_t smem = static_cast<size_t>(WARP_COUNT) * 2 * sizeof(float);
     softmax_ce_fwd_kernel<true><<<batch, BLOCK_DIM, smem, s>>>(
         static_cast<const void*>(logits), labels, loss, probs,
-        inv_scaling, scaling, batch, logits_stride, probs_stride, num_classes);
+        inv_scaling, scaling, batch_size, batch, logits_stride, probs_stride, num_classes);
     return cudaGetLastError();
 }
 
@@ -368,13 +374,14 @@ cudaError_t launch_softmax_ce_inf_fp32(
     float* loss, float* top1, float* top5,
     int* pred, float* probs,
     float* inv_scaling, const float* scaling,
+    const int32_t* batch_size,
     int batch, int logits_stride, int probs_stride, int num_classes)
 {
     size_t smem = (static_cast<size_t>(WARP_COUNT) * 2 + BLOCK_DIM) * sizeof(float)
                 + BLOCK_DIM * sizeof(int);
     softmax_ce_inf_kernel<false><<<batch, BLOCK_DIM, smem, s>>>(
         static_cast<const void*>(logits), labels, loss, top1, top5, pred, probs,
-        inv_scaling, scaling, batch, logits_stride, probs_stride, num_classes);
+        inv_scaling, scaling, batch_size, batch, logits_stride, probs_stride, num_classes);
     return cudaGetLastError();
 }
 
@@ -384,13 +391,14 @@ cudaError_t launch_softmax_ce_inf_amp(
     float* loss, float* top1, float* top5,
     int* pred, float* probs,
     float* inv_scaling, const float* scaling,
+    const int32_t* batch_size,
     int batch, int logits_stride, int probs_stride, int num_classes)
 {
     size_t smem = (static_cast<size_t>(WARP_COUNT) * 2 + BLOCK_DIM) * sizeof(float)
                 + BLOCK_DIM * sizeof(int);
     softmax_ce_inf_kernel<true><<<batch, BLOCK_DIM, smem, s>>>(
         static_cast<const void*>(logits), labels, loss, top1, top5, pred, probs,
-        inv_scaling, scaling, batch, logits_stride, probs_stride, num_classes);
+        inv_scaling, scaling, batch_size, batch, logits_stride, probs_stride, num_classes);
     return cudaGetLastError();
 }
 

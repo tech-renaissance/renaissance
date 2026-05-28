@@ -91,8 +91,13 @@ enum class GraphId : uint8_t {
     INF_EMA_B,         ///< EMA 模型推理 B
     CAST_MAIN_FP32_TO_FP16,  ///< 主模型 FP32 权重转 FP16（shape 无关）
     CAST_EMA_FP32_TO_FP16,   ///< EMA 模型 FP32 权重转 FP16（shape 无关）
+    ACCUM_METRICS,             ///< 常规 batch 累积（引用 b.local_batch_size）
+    ACCUM_METRICS_TRAIN_LAST,  ///< 训练末 batch 累积（引用 b.last_train_batch_size）
+    ACCUM_METRICS_VAL_LAST,    ///< 验证末 batch 累积（引用 b.last_val_batch_size）
+    VAL_RESULT_COMM,           ///< 验证集 R_RESULT_ACCUMULATED AllReduce
+    CLEAR_METRICS,             ///< 累积区清零
     SIMPLE_TASK_GRAPH,      ///< SimpleTask 通用图 ID（不受图集数量限制）
-    COUNT              ///< = 21（19 张深度学习图 + 1张SimpleTask图 + 1个哨兵）
+    COUNT              ///< = 26
 };
 
 // ============================================================================
@@ -121,6 +126,11 @@ inline const char* graph_id_to_string(GraphId gid) noexcept {
         case GraphId::INF_EMA_B:         return "INF_EMA_B";
         case GraphId::CAST_MAIN_FP32_TO_FP16: return "CAST_MAIN_FP32_TO_FP16";
         case GraphId::CAST_EMA_FP32_TO_FP16:  return "CAST_EMA_FP32_TO_FP16";
+        case GraphId::ACCUM_METRICS:             return "ACCUM_METRICS";
+        case GraphId::ACCUM_METRICS_TRAIN_LAST:  return "ACCUM_METRICS_TRAIN_LAST";
+        case GraphId::ACCUM_METRICS_VAL_LAST:    return "ACCUM_METRICS_VAL_LAST";
+        case GraphId::VAL_RESULT_COMM:           return "VAL_RESULT_COMM";
+        case GraphId::CLEAR_METRICS:             return "CLEAR_METRICS";
         case GraphId::SIMPLE_TASK_GRAPH:   return "SIMPLE_TASK_GRAPH";
         case GraphId::COUNT:                return "COUNT";
     }
@@ -144,6 +154,11 @@ inline bool is_shape_invariant_graph(GraphId gid) noexcept {
         case GraphId::EMA_UPDATE:
         case GraphId::CAST_MAIN_FP32_TO_FP16:
         case GraphId::CAST_EMA_FP32_TO_FP16:
+        case GraphId::ACCUM_METRICS:
+        case GraphId::ACCUM_METRICS_TRAIN_LAST:
+        case GraphId::ACCUM_METRICS_VAL_LAST:
+        case GraphId::VAL_RESULT_COMM:
+        case GraphId::CLEAR_METRICS:
             return true;
         default:
             return false;
@@ -167,6 +182,9 @@ inline bool is_train_graph(GraphId gid) noexcept {
         case GraphId::STATS_COMM:
         // case GraphId::OPTIMIZER:  // 移除：LARS 下节点数依赖层数
         case GraphId::EMA_UPDATE:
+        case GraphId::ACCUM_METRICS:
+        case GraphId::ACCUM_METRICS_TRAIN_LAST:
+        case GraphId::CLEAR_METRICS:
             return true;
         default:
             return false;

@@ -328,10 +328,11 @@ enum class Region : uint8_t {
     T_TEMP_INT32,        // 065
     T_TEMP_INT8,         // 066
 
-    R_PREDICTED_LABEL,   // 067  推理标签值（[batch] INT32）
+    R_PREDICTED_LABEL,        // 067  推理标签值（[batch] INT32）
+    R_RESULT_ACCUMULATED,     // 068  累积结果区（FP32：sum_loss, sum_top1, sum_top5）
 
     DEFAULT = B_PREV_MEAN,
-    NUM_REGIONS = 68
+    NUM_REGIONS = 69
 };
 
 // ============================================================================

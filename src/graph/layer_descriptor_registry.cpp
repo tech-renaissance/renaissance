@@ -290,8 +290,9 @@ SubgraphPattern build_fc_forward(const OpParams&, const std::vector<TensorDesc>&
     SubgraphPattern p;
     if (descs.size() < 7) return p;
     SubgraphPattern::Node n;
-    n.op = GlobalRegistry::instance().using_amp() ? ComputeOp::FC_AMP_FWD : ComputeOp::FC_FP32_FWD;
-    n.input_indices  = {0, 1};   // weight, bias
+    bool amp = GlobalRegistry::instance().using_amp();
+    n.op = amp ? ComputeOp::FC_AMP_FWD : ComputeOp::FC_FP32_FWD;
+    n.input_indices  = amp ? std::vector<size_t>{5, 1} : std::vector<size_t>{0, 1};   // AMP: fp16_weight, fp32_bias
     n.output_indices = {2};      // output
     p.nodes.push_back(n);
     return p;
@@ -301,9 +302,10 @@ SubgraphPattern build_fc_backward(const OpParams&, const std::vector<TensorDesc>
     SubgraphPattern p;
     if (descs.size() < 7) return p;
     SubgraphPattern::Node n;
-    n.op = GlobalRegistry::instance().using_amp() ? ComputeOp::FC_AMP_BWD : ComputeOp::FC_FP32_BWD;
-    n.input_indices  = {0, 2};   // weight, output
-    n.output_indices = {3, 4};   // dW, db (dX in-place to X via Phase 4)
+    bool amp = GlobalRegistry::instance().using_amp();
+    n.op = amp ? ComputeOp::FC_AMP_BWD : ComputeOp::FC_FP32_BWD;
+    n.input_indices  = amp ? std::vector<size_t>{5, 2} : std::vector<size_t>{0, 2};   // AMP: fp16_weight, output
+    n.output_indices = amp ? std::vector<size_t>{3, 4} : std::vector<size_t>{3, 4};   // AMP/FP32: dW, db both FP32
     p.nodes.push_back(n);
     return p;
 }
@@ -597,7 +599,7 @@ SubgraphPattern build_tanh_forward(const OpParams&, const std::vector<TensorDesc
     SubgraphPattern p;
     if (descs.empty()) return p;
     SubgraphPattern::Node n;
-    n.op = ComputeOp::TANH_FP32_FWD;
+    n.op = GlobalRegistry::instance().using_amp() ? ComputeOp::TANH_AMP_FWD : ComputeOp::TANH_FP32_FWD;
     n.output_indices = {0};
     p.nodes.push_back(n);
     return p;
@@ -606,7 +608,7 @@ SubgraphPattern build_tanh_forward(const OpParams&, const std::vector<TensorDesc
 SubgraphPattern build_tanh_backward(const OpParams&, const std::vector<TensorDesc>&) {
     SubgraphPattern p;
     SubgraphPattern::Node n;
-    n.op = ComputeOp::TANH_FP32_BWD;     // 使用正确的TANH_BWD算子
+    n.op = GlobalRegistry::instance().using_amp() ? ComputeOp::TANH_AMP_BWD : ComputeOp::TANH_FP32_BWD;
     n.input_indices  = {0};         // tanh_output (用于计算 1 - Y^2)
     n.output_indices = {0};         // dX in-place 到 output
     p.nodes.push_back(n);

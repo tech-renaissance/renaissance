@@ -696,6 +696,47 @@ public:
     size_t num_val_samples() const;
 
     /**
+     * @brief 获取pad到world_size整数倍后的训练集总样本数
+     * @details 原始样本数先向上取整到world_size倍数，再除以world_size得到每rank样本数
+     */
+    size_t padded_train_samples() const;
+
+    /**
+     * @brief 获取pad到world_size整数倍后的验证集总样本数
+     */
+    size_t padded_val_samples() const;
+
+    /**
+     * @brief 获取每个rank的训练样本数（已pad后）
+     */
+    size_t train_samples_per_rank() const;
+
+    /**
+     * @brief 获取每个rank的验证样本数（已pad后）
+     */
+    size_t val_samples_per_rank() const;
+
+    /**
+     * @brief 获取训练总batch数（steps）
+     */
+    int get_train_steps() const;
+
+    /**
+     * @brief 获取验证总batch数（steps）
+     */
+    int get_val_steps() const;
+
+    /**
+     * @brief 获取训练最后一个batch的本地样本数
+     */
+    int get_last_train_batch_size() const;
+
+    /**
+     * @brief 获取验证最后一个batch的本地样本数
+     */
+    int get_last_val_batch_size() const;
+
+    /**
      * @brief 设置S区/C区单个样本对齐后大小（64字节对齐）
      * @param size 单个样本字节数（max_resolution × max_resolution × num_color_channels，对齐到64字节）
      * @throws TRException::ValueError 如果已初始化后修改或非幂等赋值

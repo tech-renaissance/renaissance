@@ -30,9 +30,9 @@ Initializer& Initializer::conv(InitKind k) {
     return *this;
 }
 
-Initializer& Initializer::fc(InitKind k) {
+Initializer& Initializer::fc(InitKind k, float param) {
     fc_kind_ = k;
-    fc_param_ = 0.01f;  // 固定使用0.01f
+    fc_param_ = param;
     GlobalRegistry::instance().set_fc_init_kind(k);
     return *this;
 }

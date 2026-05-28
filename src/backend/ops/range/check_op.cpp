@@ -40,6 +40,10 @@ static void launch_range_check_nan_cuda(
     state.output_stream_idx = si;
     state.streams[si].has_pending_work = true;
 
+    TR_CHECK(node.input_ranges.size() == 1, RuntimeError,
+             "RANGE_CHECK_NAN: compiler must emit exactly 1 input range, got "
+             << node.input_ranges.size());
+
     if (node.output_ids.empty()) {
         TR_DEVICE_ERROR("RANGE_CHECK_NAN requires output_ids[0] for nan flag DTensor");
     }
@@ -58,16 +62,13 @@ static void launch_range_check_nan_cuda(
                         << cudaGetErrorString(err));
     }
 
-    for (size_t i = 0; i < node.input_ranges.size(); ++i) {
-        auto [off, sz] = mp.resolve_region_bounds(
-            static_cast<Region>(node.input_ranges[i].start_region_id),
-            static_cast<Region>(node.input_ranges[i].end_region_id));
-        if (sz == 0) continue;
-
+    auto [off, sz] = mp.resolve_region_bounds(
+        static_cast<Region>(node.input_ranges[0].start_region_id),
+        static_cast<Region>(node.input_ranges[0].end_region_id));
+    if (sz > 0) {
         const float* data = static_cast<const float*>(
             ArenaKeeper::instance().ptr_at(ctx.rank_for_context(), off));
         size_t elements = sz / sizeof(float);
-
         launch_check_nan_cuda_impl(has_nan_ptr, data, elements, s);
     }
 
@@ -87,25 +88,6 @@ static void launch_range_check_nan_cpu(CpuOpContext* op_ctx) {
     }
 
     int32_t nan_id = op_ctx->output_ids[0];
-    int32_t has_nan = 0;
-
-    for (int i = 0; i < op_ctx->num_input_ranges; ++i) {
-        uint64_t off = op_ctx->input_ranges[i].offset;
-        uint64_t sz  = op_ctx->input_ranges[i].size;
-        if (sz == 0) continue;
-
-        const float* data = static_cast<const float*>(
-            ArenaKeeper::instance().ptr_at(ctx.rank_for_context(), off));
-        size_t elements = sz / sizeof(float);
-
-        for (size_t j = 0; j < elements; ++j) {
-            if (std::isnan(data[j])) {
-                has_nan = 1;
-                break;
-            }
-        }
-        if (has_nan) break;
-    }
 
     const DTensor& nan_dt = mp->get_dtensor(nan_id);
     TR_CHECK(nan_dt.dtype == DType::INT32, ValueError,
@@ -113,7 +95,26 @@ static void launch_range_check_nan_cpu(CpuOpContext* op_ctx) {
              << static_cast<int>(nan_dt.dtype));
     int32_t* nan_ptr = static_cast<int32_t*>(
         ArenaKeeper::instance().ptr_at(ctx.rank_for_context(), nan_dt.offset()));
-    *nan_ptr = has_nan;
+
+    *nan_ptr = 0;
+
+    TR_CHECK(op_ctx->num_input_ranges == 1, RuntimeError,
+             "RANGE_CHECK_NAN CPU: compiler must emit exactly 1 input range");
+
+    uint64_t off = op_ctx->input_ranges[0].offset;
+    uint64_t sz  = op_ctx->input_ranges[0].size;
+    if (sz > 0) {
+        const float* data = static_cast<const float*>(
+            ArenaKeeper::instance().ptr_at(ctx.rank_for_context(), off));
+        size_t elements = sz / sizeof(float);
+
+        for (size_t j = 0; j < elements; ++j) {
+            if (std::isnan(data[j]) || std::isinf(data[j])) {
+                *nan_ptr = 1;
+                break;
+            }
+        }
+    }
 }
 
 } // namespace

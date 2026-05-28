@@ -184,6 +184,8 @@ std::string range_op_to_string(RangeOp op) {
 
         // === 通用 NaN 检查 ===
         case RangeOp::RANGE_CHECK_NAN:              return "RANGE_CHECK_NAN";
+        case RangeOp::RANGE_GRAD_SCALING:           return "RANGE_GRAD_SCALING";
+        case RangeOp::RANGE_ACCUM_METRICS:          return "RANGE_ACCUM_METRICS";
 
         default:                                    return "UNKNOWN";
     }
