@@ -1429,6 +1429,8 @@ float DeepLearningTask::run_train_epoch_cpu() {
     {
         bool last_a = ((batches - 1) % 2 == 0);
 
+        ctx.set_memory_plan(variant_memory_plans_[v_last].get());
+
         launch(idx_zg);
         launch(last_a ? idx_fwd_a_lb : idx_fwd_b_lb);
 
@@ -1445,6 +1447,8 @@ float DeepLearningTask::run_train_epoch_cpu() {
         *static_cast<float*>(lr_ptr) = fetch_lr_for_batch(batches - 1);
         launch(idx_far);
         launch(idx_opt);
+
+        ctx.set_memory_plan(active_memory_plan_);
     }
 
     float train_loss = 0.0f;
@@ -1658,6 +1662,10 @@ std::tuple<float, float, float> DeepLearningTask::run_val_epoch_cpu(bool validat
         int buf = batch % 2;
         bool is_last = (batch == val_batches - 1);
 
+        if (is_last) {
+            ctx.set_memory_plan(variant_memory_plans_[5].get());
+        }
+
         if (loss_ptr) std::memset(loss_ptr, 0, sizeof(float));
         if (top1_ptr) std::memset(top1_ptr, 0, sizeof(float));
         if (top5_ptr) std::memset(top5_ptr, 0, sizeof(float));
@@ -1681,6 +1689,10 @@ std::tuple<float, float, float> DeepLearningTask::run_val_epoch_cpu(bool validat
 
         ts->set_buffer_readable(buf, false);
         ts->set_buffer_writeable(buf, true);
+
+        if (is_last) {
+            ctx.set_memory_plan(active_memory_plan_);
+        }
     }
 
     size_t total_val = registry.num_val_samples();

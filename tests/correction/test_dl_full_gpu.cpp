@@ -9,7 +9,7 @@ int main() {
     GLOBAL_SETTING.use_gpu("0").amp(false);
     GLOBAL_SETTING
         .manual_seed(42)
-        .local_batch_size(199)
+        .local_batch_size(200)
         .train_resolution(28)
         .val_resolution(28);
 

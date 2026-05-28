@@ -78,7 +78,7 @@ __global__ void softmax_ce_fwd_kernel(
     int warp_id = tid / WARP_SIZE;
     int lane_id = tid % WARP_SIZE;
     int label_b = static_cast<int>(labels[b]);
-    float inv_batch = 1.0f / static_cast<float>(*batch_size_ptr);
+    float inv_batch = 1.0f / static_cast<float>(batch);
 
     // ===== Step 1: Global max =====
     float local_max = -INFINITY;
@@ -137,7 +137,7 @@ __global__ void softmax_ce_fwd_kernel(
     }
 
     if (b == 0 && tid == 0) {
-        *inv_scaling = 1.0f / static_cast<float>(*batch_size_ptr);
+        *inv_scaling = inv_batch;
     }
 }
 
@@ -181,7 +181,7 @@ __global__ void softmax_ce_inf_kernel(
     int warp_id = tid / WARP_SIZE;
     int lane_id = tid % WARP_SIZE;
     int label_b = static_cast<int>(labels[b]);
-    float inv_batch = 1.0f / static_cast<float>(*batch_size_ptr);
+    float inv_batch = 1.0f / static_cast<float>(batch);
 
     float local_max = -INFINITY;
     for (int c = tid; c < num_classes; c += BLOCK_DIM) {
@@ -292,7 +292,7 @@ __global__ void softmax_ce_inf_kernel(
         }
 
         if (b == 0) {
-            *inv_scaling = 1.0f / static_cast<float>(*batch_size_ptr);
+            *inv_scaling = 1.0f / static_cast<float>(batch);
         }
     }
 }
