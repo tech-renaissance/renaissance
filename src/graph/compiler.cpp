@@ -1706,36 +1706,34 @@ void Compiler::build_auxiliary_graphs(ComputationGraph& train_cg, const MemoryPl
             RangeOp::RANGE_EMA_PARAM_UPDATE, {r_w, r_e}, {r_e});
     }
 
-    // 8-10. CAST_AND_CHECK 图：AMP 梯度 FP16→FP32 转换 + NaN 检查（仅 AMP 需要）
-    // ★ 只覆盖 Conv 层（G_FIRST_CONV / G_DEEP_CONV），不覆盖 FC 层：
-    //   FC_AMP_BWD 直接由 cuBLAS GEMM 产出 FP32 的 dW 和 dB，
-    //   无需后续 FP16→FP32 CAST。详见 fc_op.cpp 中 FC_AMP_BWD 注释。
-    if (amp_on) {
-        auto append_cast_fp16_to_fp32 = [&](Region from_region, Region to_region) {
-            if (!memory_plan.is_region_populated(from_region) && !memory_plan.is_region_populated(to_region)) return;
-            MemRange in_mr = memory_plan.region_range(from_region);
-            MemRange out_mr = memory_plan.region_range(to_region);
-            GraphNode node;
-            node.kind = GraphNode::Kind::RANGE;
-            node.range_op = RangeOp::RANGE_CAST_FP16_TO_FP32;
-            node.input_ranges.push_back(in_mr);
-            node.output_ranges.push_back(out_mr);
-            train_cg.append(GraphId::CAST_AND_CHECK, node);
-        };
-        append_cast_fp16_to_fp32(Region::G_FIRST_CONV_FP16, Region::G_FIRST_CONV);
-        append_cast_fp16_to_fp32(Region::G_DEEP_CONV_FP16, Region::G_DEEP_CONV);
+    // 8. CAST_DEEP_GRAD_FP16_TO_FP32 图：深层卷积梯度 FP16→FP32（仅 AMP 需要）
+    // ★ 只覆盖 G_DEEP_CONV，不覆盖 FC 层：FC_AMP_BWD 直接产出 FP32 梯度。
+    if (amp_on && memory_plan.is_region_populated(Region::G_DEEP_CONV_FP16)) {
+        MemRange in_deep  = memory_plan.region_range(Region::G_DEEP_CONV_FP16);
+        MemRange out_deep = memory_plan.region_range(Region::G_DEEP_CONV);
+        train_cg.append_range(GraphId::CAST_DEEP_GRAD_FP16_TO_FP32,
+            RangeOp::RANGE_CAST_FP16_TO_FP32, {in_deep}, {out_deep});
     }
 
-    {
-        if (nan_flag_id >= 0) {
-            GraphNode node;
-            node.kind = GraphNode::Kind::RANGE;
-            node.range_op = RangeOp::RANGE_CHECK_NAN;
-            node.input_ranges.push_back(
-                memory_plan.region_range(Region::G_BN_BIAS, Region::G_DEEP_CONV));
-            node.output_ids.push_back(nan_flag_id);
-            train_cg.append(GraphId::CAST_AND_CHECK, node);
-        }
+    // 9. CAST_FIRST_GRAD_FP16_TO_FP32 图：首层卷积梯度 FP16→FP32（仅 AMP 需要）
+    // ★ 只覆盖 G_FIRST_CONV，不覆盖 FC 层。
+    if (amp_on && memory_plan.is_region_populated(Region::G_FIRST_CONV_FP16)) {
+        MemRange in_first  = memory_plan.region_range(Region::G_FIRST_CONV_FP16);
+        MemRange out_first = memory_plan.region_range(Region::G_FIRST_CONV);
+        train_cg.append_range(GraphId::CAST_FIRST_GRAD_FP16_TO_FP32,
+            RangeOp::RANGE_CAST_FP16_TO_FP32, {in_first}, {out_first});
+    }
+
+    // 10. NAN_CHECK_AND_GRAD_SCALING 图：NaN 检查 + 梯度缩放
+    //     检查范围：G_BN_BIAS ~ G_DEEP_CONV（全部 FP32 梯度区）
+    if (nan_flag_id >= 0) {
+        GraphNode node;
+        node.kind = GraphNode::Kind::RANGE;
+        node.range_op = RangeOp::RANGE_CHECK_NAN;
+        node.input_ranges.push_back(
+            memory_plan.region_range(Region::G_BN_BIAS, Region::G_DEEP_CONV));
+        node.output_ids.push_back(nan_flag_id);
+        train_cg.append(GraphId::NAN_CHECK_AND_GRAD_SCALING, node);
     }
 
     if (amp_on && nan_flag_id >= 0 && scalar_ids.scaling >= 0) {
@@ -1744,7 +1742,7 @@ void Compiler::build_auxiliary_graphs(ComputationGraph& train_cg, const MemoryPl
         node.range_op = RangeOp::RANGE_GRAD_SCALING;
         node.input_ids.push_back(nan_flag_id);
         node.input_ids.push_back(scalar_ids.scaling);
-        train_cg.append(GraphId::CAST_AND_CHECK, node);
+        train_cg.append(GraphId::NAN_CHECK_AND_GRAD_SCALING, node);
     }
 
     // 12-13. RANGE_D2D_COPY - BN统计量复制（新枚举代替 RANGE_BN_STATS_COPY）

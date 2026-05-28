@@ -81,7 +81,9 @@ enum class GraphId : uint8_t {
     FIRST_LAYER_BWD_B,  ///< 首层反向 B（写回 I_B_DATA）
     FIRST_COMM,        ///< 首层梯度通信（桶2，仅 AllReduce）
     DEEP_COMM,         ///< 深层梯度通信（桶1，仅 AllReduce）
-    CAST_AND_CHECK,    ///< AMP 梯度转换+NaN检查（FP16→FP32 → NAN_CHECK）
+    CAST_DEEP_GRAD_FP16_TO_FP32,   ///< AMP 深层卷积梯度 FP16→FP32
+    CAST_FIRST_GRAD_FP16_TO_FP32,  ///< AMP 首层卷积梯度 FP16→FP32
+    NAN_CHECK_AND_GRAD_SCALING,    ///< AMP NaN 检查 + 梯度缩放
     STATS_COMM,        ///< BN 统计量通信
     OPTIMIZER,         ///< 优化器参数更新
     EMA_UPDATE,        ///< EMA 参数更新
@@ -97,7 +99,7 @@ enum class GraphId : uint8_t {
     VAL_RESULT_COMM,           ///< 验证集 R_RESULT_ACCUMULATED AllReduce
     CLEAR_METRICS,             ///< 累积区清零
     SIMPLE_TASK_GRAPH,      ///< SimpleTask 通用图 ID（不受图集数量限制）
-    COUNT              ///< = 26
+    COUNT              ///< = 28
 };
 
 // ============================================================================
@@ -116,7 +118,9 @@ inline const char* graph_id_to_string(GraphId gid) noexcept {
         case GraphId::FIRST_LAYER_BWD_B:   return "FIRST_LAYER_BWD_B";
         case GraphId::FIRST_COMM:        return "FIRST_COMM";
         case GraphId::DEEP_COMM:         return "DEEP_COMM";
-        case GraphId::CAST_AND_CHECK:    return "CAST_AND_CHECK";
+        case GraphId::CAST_DEEP_GRAD_FP16_TO_FP32:   return "CAST_DEEP_GRAD_FP16_TO_FP32";
+        case GraphId::CAST_FIRST_GRAD_FP16_TO_FP32:  return "CAST_FIRST_GRAD_FP16_TO_FP32";
+        case GraphId::NAN_CHECK_AND_GRAD_SCALING:    return "NAN_CHECK_AND_GRAD_SCALING";
         case GraphId::STATS_COMM:        return "STATS_COMM";
         case GraphId::OPTIMIZER:         return "OPTIMIZER";
         case GraphId::EMA_UPDATE:        return "EMA_UPDATE";
@@ -147,7 +151,9 @@ inline bool is_shape_invariant_graph(GraphId gid) noexcept {
         case GraphId::TRANSFER_A:
         case GraphId::TRANSFER_B:
         case GraphId::ZERO_GRAD:
-        case GraphId::CAST_AND_CHECK:
+        case GraphId::CAST_DEEP_GRAD_FP16_TO_FP32:
+        case GraphId::CAST_FIRST_GRAD_FP16_TO_FP32:
+        case GraphId::NAN_CHECK_AND_GRAD_SCALING:
         case GraphId::FIRST_COMM:
         case GraphId::DEEP_COMM:
         case GraphId::STATS_COMM:
@@ -176,7 +182,9 @@ inline bool is_train_graph(GraphId gid) noexcept {
         case GraphId::ZERO_GRAD:
         case GraphId::FIRST_LAYER_BWD_A:
         case GraphId::FIRST_LAYER_BWD_B:
-        case GraphId::CAST_AND_CHECK:
+        case GraphId::CAST_DEEP_GRAD_FP16_TO_FP32:
+        case GraphId::CAST_FIRST_GRAD_FP16_TO_FP32:
+        case GraphId::NAN_CHECK_AND_GRAD_SCALING:
         case GraphId::FIRST_COMM:
         case GraphId::DEEP_COMM:
         case GraphId::STATS_COMM:

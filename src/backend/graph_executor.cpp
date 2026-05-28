@@ -106,26 +106,34 @@ void GraphExecutor::run_train_step() {
     launch_dual(next_xfer, GraphId::DEEP_FWD_BWD);
     sync_all();
 
-    // 5. 梯度 CAST + NaN check（RANGE_CHECK_NAN 写入 nan_flag DTensor）
-    launch(GraphId::CAST_AND_CHECK);
-
-    // 6. 深层通信 + 首层反向
+    // 5. 首层反向
     if (!skip_first_bwd_) {
-        launch_dual(GraphId::DEEP_COMM, GraphId::FIRST_LAYER_BWD_A);
-    } else {
-        launch(GraphId::DEEP_COMM);
+        launch(GraphId::FIRST_LAYER_BWD_A);
     }
     sync_all();
 
-    // 7. 首层通信
+    // 6. 深层卷积梯度 FP16→FP32 CAST（仅 AMP）
+    launch(GraphId::CAST_DEEP_GRAD_FP16_TO_FP32);
+
+    // 7. 深层通信
+    launch(GraphId::DEEP_COMM);
+    sync_all();
+
+    // 8. 首层卷积梯度 FP16→FP32 CAST（仅 AMP）
+    launch(GraphId::CAST_FIRST_GRAD_FP16_TO_FP32);
+
+    // 9. 首层通信
     if (!skip_first_bwd_) {
         launch(GraphId::FIRST_COMM);
     }
 
-    // 8. BN 统计量通信
+    // 10. NaN check + grad scaling
+    launch(GraphId::NAN_CHECK_AND_GRAD_SCALING);
+
+    // 11. BN 统计量通信
     launch(GraphId::STATS_COMM);
 
-    // 9-11. NaN 检查分支
+    // 12. NaN 检查分支
     bool has_nan = check_nan_flag();
     if (!has_nan) {
         launch(GraphId::OPTIMIZER);
@@ -134,7 +142,7 @@ void GraphExecutor::run_train_step() {
         on_nan_detected();
     }
 
-    // 12. 权重 CAST FP32→FP16
+    // 13. 权重 CAST FP32→FP16
     launch_dual(GraphId::CAST_MAIN_FP32_TO_FP16,
                 GraphId::CAST_EMA_FP32_TO_FP16);
     sync_all();
@@ -157,21 +165,31 @@ void GraphExecutor::run_train_step_last_batch() {
     launch(GraphId::DEEP_FWD_BWD);
     sync_all();
 
-    // 4. 梯度 CAST + NaN check
-    launch(GraphId::CAST_AND_CHECK);
-
-    // 5. 深层通信 + 首层反向
+    // 4. 首层反向
     if (!skip_first_bwd_) {
-        launch_dual(GraphId::DEEP_COMM, GraphId::FIRST_LAYER_BWD_A);
-    } else {
-        launch(GraphId::DEEP_COMM);
+        launch(GraphId::FIRST_LAYER_BWD_A);
     }
     sync_all();
 
-    // 6. 后续与标准 batch 相同
+    // 5. 深层卷积梯度 FP16→FP32 CAST（仅 AMP）
+    launch(GraphId::CAST_DEEP_GRAD_FP16_TO_FP32);
+
+    // 6. 深层通信
+    launch(GraphId::DEEP_COMM);
+    sync_all();
+
+    // 7. 首层卷积梯度 FP16→FP32 CAST（仅 AMP）
+    launch(GraphId::CAST_FIRST_GRAD_FP16_TO_FP32);
+
+    // 8. 首层通信
     if (!skip_first_bwd_) {
         launch(GraphId::FIRST_COMM);
     }
+
+    // 9. NaN check + grad scaling
+    launch(GraphId::NAN_CHECK_AND_GRAD_SCALING);
+
+    // 10. 后续与标准 batch 相同
     launch(GraphId::STATS_COMM);
 
     bool has_nan = check_nan_flag();

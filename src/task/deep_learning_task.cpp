@@ -46,10 +46,11 @@ enum class GraphSlot : uint8_t {
     FIRST_LAYER_ALLREDUCE,
     WEIGHT_UPDATE,
     EMA_UPDATE,
-    GRAD_CONVERT,
+    CAST_DEEP_GRAD,
+    CAST_FIRST_GRAD,
+    NAN_CHECK_GRAD_SCALE,
     FIRST_LAYER_FWD_A,
     FIRST_LAYER_FWD_B,
-    CAST_AND_CHECK,
     INF_MAIN_A,
     INF_MAIN_B,
     INF_EMA_A,
@@ -551,7 +552,9 @@ StreamKind DeepLearningTask::stream_for(GraphId gid) {
         case GraphId::ZERO_GRAD:
         case GraphId::FIRST_COMM:
         case GraphId::DEEP_COMM:
-        case GraphId::CAST_AND_CHECK:
+        case GraphId::CAST_DEEP_GRAD_FP16_TO_FP32:
+        case GraphId::CAST_FIRST_GRAD_FP16_TO_FP32:
+        case GraphId::NAN_CHECK_AND_GRAD_SCALING:
         case GraphId::OPTIMIZER:
         case GraphId::EMA_UPDATE:
         case GraphId::CAST_MAIN_FP32_TO_FP16:
@@ -634,10 +637,11 @@ void DeepLearningTask::build_exec_table() {
         g[S(GraphSlot::FIRST_LAYER_ALLREDUCE)] = resolve(GraphId::FIRST_COMM, rank);
         g[S(GraphSlot::WEIGHT_UPDATE)]    = resolve(GraphId::OPTIMIZER, rank);
         g[S(GraphSlot::EMA_UPDATE)]       = resolve(GraphId::EMA_UPDATE, rank);
-        g[S(GraphSlot::GRAD_CONVERT)]     = resolve(GraphId::CAST_AND_CHECK, rank);
+        g[S(GraphSlot::CAST_DEEP_GRAD)]     = resolve(GraphId::CAST_DEEP_GRAD_FP16_TO_FP32, rank);
+        g[S(GraphSlot::CAST_FIRST_GRAD)]    = resolve(GraphId::CAST_FIRST_GRAD_FP16_TO_FP32, rank);
+        g[S(GraphSlot::NAN_CHECK_GRAD_SCALE)] = resolve(GraphId::NAN_CHECK_AND_GRAD_SCALING, rank);
         g[S(GraphSlot::FIRST_LAYER_FWD_A)]      = resolve(GraphId::FIRST_LAYER_FWD_A, rank);
         g[S(GraphSlot::FIRST_LAYER_FWD_B)]      = resolve(GraphId::FIRST_LAYER_FWD_B, rank);
-        g[S(GraphSlot::CAST_AND_CHECK)]   = resolve(GraphId::CAST_AND_CHECK, rank);
         g[S(GraphSlot::CAST_MAIN)]        = resolve(GraphId::CAST_MAIN_FP32_TO_FP16, rank);
         g[S(GraphSlot::INF_MAIN_A)]       = resolve(GraphId::INF_MAIN_A, rank);
         g[S(GraphSlot::INF_MAIN_B)]       = resolve(GraphId::INF_MAIN_B, rank);
@@ -918,7 +922,9 @@ float DeepLearningTask::run_train_epoch_gpu() {
                 auto g_zg      = g_tab[S(GraphSlot::ZERO_GRAD)];
                 auto g_dar     = g_tab[S(GraphSlot::DEEP_ALLREDUCE)];
                 auto g_wu      = g_tab[S(GraphSlot::WEIGHT_UPDATE)];
-                auto g_gc      = g_tab[S(GraphSlot::GRAD_CONVERT)];
+                auto g_cdg     = g_tab[S(GraphSlot::CAST_DEEP_GRAD)];
+                auto g_cfg     = g_tab[S(GraphSlot::CAST_FIRST_GRAD)];
+                auto g_ncg     = g_tab[S(GraphSlot::NAN_CHECK_GRAD_SCALE)];
                 auto g_fwd_a   = g_tab[S(GraphSlot::FIRST_LAYER_FWD_A)];
                 auto g_fwd_b   = g_tab[S(GraphSlot::FIRST_LAYER_FWD_B)];
                 auto g_cm      = g_tab[S(GraphSlot::CAST_MAIN)];
@@ -998,17 +1004,25 @@ float DeepLearningTask::run_train_epoch_gpu() {
                     ts->set_buffer_readable(next_buf, false);
                     ts->set_buffer_writeable(next_buf, true);
 
-                    // Phase 3: FIRST_LAYER_BWD_A/B → GRAD_CONVERT → DEEP_ALLREDUCE
+                    // Phase 3: FIRST_LAYER_BWD → CAST_DEEP_GRAD → DEEP_COMM → CAST_FIRST_GRAD
+                    //          → FIRST_COMM → NAN_CHECK_GRAD_SCALE → OPTIMIZER → CAST_MAIN
                     if (!frozen) {
                         auto g_first_cur = from_a ? g_first : g_first_b;
                         if (g_first_cur) cudaGraphLaunch(g_first_cur, s_c1);
                     }
                     sync_comp();
 
-                    if (using_amp && g_gc) { cudaGraphLaunch(g_gc, s_up); sync_up(); }
+                    if (using_amp && g_cdg) { cudaGraphLaunch(g_cdg, s_up); sync_up(); }
 
                     if (g_dar) cudaGraphLaunch(g_dar, s_up);
                     sync_up();
+
+                    if (using_amp && g_cfg) { cudaGraphLaunch(g_cfg, s_up); sync_up(); }
+
+                    if (g_far) cudaGraphLaunch(g_far, s_up);
+                    sync_up();
+
+                    if (using_amp && g_ncg) { cudaGraphLaunch(g_ncg, s_up); sync_up(); }
 
                     lr = fetch_lr_for_batch(batch);
                     if (batch % 100 == 0)
@@ -1016,7 +1030,6 @@ float DeepLearningTask::run_train_epoch_gpu() {
                     *lr_pinned_[rank] = lr;
                     cudaMemcpyAsync(lr_dev_ptr, lr_pinned_[rank], sizeof(float),
                                     cudaMemcpyHostToDevice, s_up);
-                    if (g_far) cudaGraphLaunch(g_far, s_up);
                     if (g_wu) cudaGraphLaunch(g_wu, s_up);
                     sync_up();
                     if (using_amp && g_cm) { cudaGraphLaunch(g_cm, s_up); sync_up(); }
@@ -1050,17 +1063,23 @@ float DeepLearningTask::run_train_epoch_gpu() {
                     }
                     sync_comp();
 
-                    if (using_amp && g_gc) { cudaGraphLaunch(g_gc, s_up); sync_up(); }
+                    if (using_amp && g_cdg) { cudaGraphLaunch(g_cdg, s_up); sync_up(); }
 
                     if (g_dar) cudaGraphLaunch(g_dar, s_up);
                     sync_up();
+
+                    if (using_amp && g_cfg) { cudaGraphLaunch(g_cfg, s_up); sync_up(); }
+
+                    if (g_far) cudaGraphLaunch(g_far, s_up);
+                    sync_up();
+
+                    if (using_amp && g_ncg) { cudaGraphLaunch(g_ncg, s_up); sync_up(); }
 
                     lr = fetch_lr_for_batch(batches - 1);
                     LOG_INFO << "[LR] epoch=" << current_epoch_ << " batch=" << (batches - 1) << " lr=" << lr;
                     *lr_pinned_[rank] = lr;
                     cudaMemcpyAsync(lr_dev_ptr, lr_pinned_[rank], sizeof(float),
                                     cudaMemcpyHostToDevice, s_up);
-                    if (g_far) cudaGraphLaunch(g_far, s_up);
                     if (g_wu) cudaGraphLaunch(g_wu, s_up);
                     sync_up();
                     if (using_amp && g_cm) { cudaGraphLaunch(g_cm, s_up); sync_up(); }
