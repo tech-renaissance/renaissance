@@ -99,6 +99,10 @@ struct FcAmpFwdCache {
     std::shared_ptr<fe::graph::Graph> graph;
     std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, int64_t> tensor_to_id;
     size_t workspace_size;
+    void* clamp_min_gpu = nullptr;
+    void* clamp_max_gpu = nullptr;
+    float clamp_min_val = -65504.0f;
+    float clamp_max_val = 65504.0f;
 };
 
 std::unordered_map<FcAmpFwdCacheKey, FcAmpFwdCache, FcAmpFwdCacheKeyHasher> s_fc_amp_fwd_caches;
@@ -136,13 +140,17 @@ FcAmpFwdCache build_fc_amp_fwd_conv_graph(
     auto conv_attr = Conv_fprop_attributes()
         .set_padding({0, 0})
         .set_stride({1, 1})
-        .set_dilation({1, 1});
+        .set_dilation({1, 1})
+        .set_compute_data_type(DataType_t::FLOAT);
 
     auto conv_out = graph->conv_fprop(X, W, conv_attr);
-    conv_out->set_is_virtual(true);
+    conv_out->set_is_virtual(true)
+            .set_data_type(DataType_t::FLOAT);
 
     std::shared_ptr<Tensor_attributes> Y;
     std::shared_ptr<Tensor_attributes> B;
+
+    std::shared_ptr<Tensor_attributes> pre_clamp = conv_out;
 
     if (has_bias && dt_b != nullptr) {
         B = graph->tensor(Tensor_attributes()
@@ -155,10 +163,36 @@ FcAmpFwdCache build_fc_amp_fwd_conv_graph(
             .set_mode(PointwiseMode_t::ADD)
             .set_compute_data_type(DataType_t::FLOAT);
 
-        Y = graph->pointwise(conv_out, B, add_attr);
-    } else {
-        Y = conv_out;
+        auto add_out = graph->pointwise(conv_out, B, add_attr);
+        add_out->set_is_virtual(true).set_data_type(DataType_t::FLOAT);
+        pre_clamp = add_out;
     }
+
+    auto clamp_min = graph->tensor(Tensor_attributes()
+        .set_name("clamp_min")
+        .set_dim({1, 1, 1, 1})
+        .set_stride({1, 1, 1, 1})
+        .set_data_type(DataType_t::FLOAT));
+
+    auto clamp_max = graph->tensor(Tensor_attributes()
+        .set_name("clamp_max")
+        .set_dim({1, 1, 1, 1})
+        .set_stride({1, 1, 1, 1})
+        .set_data_type(DataType_t::FLOAT));
+
+    auto max_attr = Pointwise_attributes()
+        .set_mode(PointwiseMode_t::MAX)
+        .set_compute_data_type(DataType_t::FLOAT);
+    auto after_max = graph->pointwise(pre_clamp, clamp_min, max_attr);
+    after_max->set_is_virtual(true).set_data_type(DataType_t::FLOAT);
+
+    auto min_attr = Pointwise_attributes()
+        .set_mode(PointwiseMode_t::MIN)
+        .set_compute_data_type(DataType_t::FLOAT);
+    auto after_clamp = graph->pointwise(after_max, clamp_max, min_attr);
+    after_clamp->set_is_virtual(true).set_data_type(DataType_t::FLOAT);
+
+    Y = after_clamp;
 
     Y->set_output(true)
       .set_name("Y")
@@ -177,6 +211,13 @@ FcAmpFwdCache build_fc_amp_fwd_conv_graph(
         cache.tensor_to_id[B] = dt_b->id;
     }
     cache.tensor_to_id[Y] = dt_y.id;
+    cache.tensor_to_id[clamp_min] = -1;
+    cache.tensor_to_id[clamp_max] = -2;
+
+    cudaMalloc(&cache.clamp_min_gpu, sizeof(float));
+    cudaMalloc(&cache.clamp_max_gpu, sizeof(float));
+    cudaMemcpy(cache.clamp_min_gpu, &cache.clamp_min_val, sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(cache.clamp_max_gpu, &cache.clamp_max_val, sizeof(float), cudaMemcpyHostToDevice);
 
     return cache;
 }
@@ -202,6 +243,12 @@ static void launch_fc_amp_fwd_cuda(
     const DTensor& dt_x = mp.get_dtensor(node.input_ids[0]);
     const DTensor& dt_w = mp.get_dtensor(node.input_ids[1]);
     const DTensor& dt_y = mp.get_dtensor(node.output_ids[0]);
+
+    LOG_INFO << "[FC_AMP_FWD] input_ids=[" << node.input_ids[0] << "," << node.input_ids[1]
+             << (node.input_ids.size() > 2 ? ("," + std::to_string(node.input_ids[2])) : "")
+             << "] dt_x shape={" << dt_x.n() << "," << dt_x.c() << "," << dt_x.h() << "," << dt_x.w() << "}"
+             << " dt_w shape={" << dt_w.n() << "," << dt_w.c() << "," << dt_w.h() << "," << dt_w.w() << "}"
+             << " dt_y shape={" << dt_y.n() << "," << dt_y.c() << "," << dt_y.h() << "," << dt_y.w() << "}";
 
     TR_DEBUG_CHECK(dt_x.h() == 1 && dt_x.w() == 1, ShapeError,
                    "FC_AMP_FWD input must have H=1, W=1. Got H=" << dt_x.h()
@@ -238,7 +285,13 @@ static void launch_fc_amp_fwd_cuda(
     // 构建variant pack（指针映射）
     std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> variant_pack;
     for (const auto& [tensor_attr, dt_id] : cache.tensor_to_id) {
-        variant_pack[tensor_attr] = ctx.ptr_at(static_cast<int>(dt_id));
+        if (dt_id == -1) {
+            variant_pack[tensor_attr] = cache.clamp_min_gpu;
+        } else if (dt_id == -2) {
+            variant_pack[tensor_attr] = cache.clamp_max_gpu;
+        } else {
+            variant_pack[tensor_attr] = ctx.ptr_at(static_cast<int>(dt_id));
+        }
     }
 
     // 执行（warmup阶段直接执行，capture阶段被CUDA Graph捕获）
@@ -250,8 +303,16 @@ static void launch_fc_amp_fwd_cuda(
 
 // ===== FC_AMP_BWD CUDA Launch =====
 // 计算顺序：db → dW → (event barrier) → dX
-// inputs:  {dY, W, Y_output, X} (Y_output unused, X always last)
-// outputs: {dX(in-place to X), dW, dB}
+// inputs:  {dY(FP16), W(FP16), Y_output(unused), X(FP16)}
+// outputs: {dX(FP16, in-place to X), dW(FP32), dB(FP32)}
+//
+// ★ AMP 梯度类型策略：
+//   Conv 层的 BWD 受 cuDNN 限制：cuDNN 要求输入类型(dY)与输出类型(dW)相同，
+//   且直接用虚张量 CAST 保存 FP32 梯度会匹配极慢引擎。因此 Conv 必须先产出
+//   FP16 的 dW，再通过 RANGE_CAST_FP16_TO_FP32 批量转换为 FP32。
+//   FC 层的 BWD 使用 cuBLAS 实现，cuBLAS 允许混合精度 GEMM
+//   (输入 FP16 × FP16，累加/输出 FP32)。因此 FC_AMP_BWD 直接输出
+//   FP32 的 dW 和 dB，无需后续 CAST 步骤。
 // bias 决策由 FCParams.bias 确定 —— CUDA Graph 内不存在分支
 
 static void launch_fc_amp_bwd_cuda(
@@ -288,7 +349,7 @@ static void launch_fc_amp_bwd_cuda(
     __half* w  = static_cast<__half*>(ctx.ptr_at(node.input_ids[1]));
     __half* x  = static_cast<__half*>(ctx.ptr_at(node.input_ids[x_idx]));
     __half* dx = static_cast<__half*>(ctx.ptr_at(node.output_ids[0]));
-    __half* dw = static_cast<__half*>(ctx.ptr_at(node.output_ids[1]));
+    float*  dw = static_cast<float*>(ctx.ptr_at(node.output_ids[1]));
     float*  db = has_bias ? static_cast<float*>(ctx.ptr_at(node.output_ids[2])) : nullptr;
 
     int64_t batch        = dt_dy.n();
@@ -355,7 +416,7 @@ static void launch_fc_amp_bwd_cuda(
         x,  CUDA_R_16F, x_ns,
         dy, CUDA_R_16F, dy_ns,
         &beta,
-        dw, CUDA_R_16F, dw_ns,
+        dw, CUDA_R_32F, dw_ns,
         CUBLAS_COMPUTE_32F,
         CUBLAS_GEMM_DEFAULT_TENSOR_OP);
 
@@ -752,10 +813,6 @@ static void launch_fc_fwd_cpu(CpuOpContext* op_ctx) {
 static void launch_fc_bwd_cpu(CpuOpContext* op_ctx) {
     const auto* p = std::get_if<FCParams>(&op_ctx->params.data);
     TR_CHECK(p != nullptr, ValueError, "FC_BWD CPU missing FCParams");
-    // DEBUG: confirm fallback path is taken
-    static int call_cnt = 0;
-    if (++call_cnt <= 4) std::cout << "[DEBUG FC BWD] FALLBACK path called" << std::endl;
-
     bool has_bias = p->bias;  // 从参数读取
     int x_idx = op_ctx->num_inputs - 1;  // X恒在末尾
 

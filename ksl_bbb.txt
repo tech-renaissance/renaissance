@@ -1,0 +1,359 @@
+root@2af6a1cc17a3:~/epfs# /root/epfs/R/renaissance/build/bin/tests/correction/test_h2d_only_epoch --dataset cifar10 --path /root/epfs/dataset/cifar-10 --format raw --lv 0 --mode partial --batch-size 512 --resolution 32 --loaders 1 --preproc 32 --device GPU --gpu-ids "0,1,2,3,4,5,6,7" --epoch 4 --po-train1 CenterCrop --po-val1 CenterCrop --seed 42 --sdmp 1 --cpvs true --reproducible --cpu-bind --amp
+
+=== H2D-Only Epoch Test ===
+Dataset:      cifar10
+Path:         /root/epfs/dataset/cifar-10
+Batch size:   512
+Resolution:   32
+Max res:      32
+AMP:          on
+Device:       GPU
+GPU IDs:      0,1,2,3,4,5,6,7
+[2026-05-24 22:23:43.469] [INFO ] [TR] GlobalRegistry: fixed_reproducibility_insurance set to true
+[2026-05-24 22:23:43.469] [INFO ] [TR] GlobalRegistry: fixed_batch_size set to 512
+Random Seed: 0x000000000000002A
+[2026-05-24 22:23:43.469] [INFO ] [TR] GlobalRegistry: fixed_using_amp set to true
+[2026-05-24 22:23:45.069] [INFO ] [TR] GlobalRegistry: fixed_using_gpu set to true
+[2026-05-24 22:23:45.069] [INFO ] [TR] GlobalRegistry: fixed_gpu_ids set to [0, 1, 2, 3, 4, 5, 6, 7]
+Device: GPU [0, 1, 2, 3, 4, 5, 6, 7]
+[2026-05-24 22:23:45.069] [INFO ] [TR] GlobalRegistry: fixed_max_sample_resolution_ updated to 32
+[2026-05-24 22:23:45.069] [INFO ] [TR] GlobalRegistry: fixed_train_sample_resolution_begin_ and end_ set to 32
+[2026-05-24 22:23:45.069] [INFO ] [TR] GlobalRegistry: fixed_using_progressive_resolution set to false
+[2026-05-24 22:23:45.069] [INFO ] [TR] GlobalRegistry: fixed_val_sample_resolution_ set to 32
+[2026-05-24 22:23:45.069] [INFO ] [TR] GlobalRegistry: fixed_dataset_type set to 3
+[2026-05-24 22:23:45.069] [INFO ] [TR] GlobalRegistry: fixed_num_classes automatically set to 10 based on dataset type 3
+[2026-05-24 22:23:45.069] [INFO ] [TR] GlobalRegistry: fixed_num_load_workers set to 1
+[2026-05-24 22:23:45.069] [INFO ] [TR] GlobalRegistry: fixed_num_preproc_workers set to 32
+[2026-05-24 22:23:45.069] [INFO ] [TR] GlobalRegistry: fixed_shuffle_train set to false
+[2026-05-24 22:23:45.069] [INFO ] [TR] Configuring CifarLoaderRaw
+[2026-05-24 22:23:45.069] [INFO ] [TR]   Preprocessor workers (M): 32
+[2026-05-24 22:23:45.069] [INFO ] [TR]   Train path: /root/epfs/dataset/cifar-10
+[2026-05-24 22:23:45.069] [INFO ] [TR]   Val path: /root/epfs/dataset/cifar-10
+[2026-05-24 22:23:45.069] [INFO ] [TR]   Shuffle train: false
+[2026-05-24 22:23:45.069] [INFO ] [TR]   Shuffle val: false
+[2026-05-24 22:23:45.069] [INFO ] [TR]   Verify files: false
+[2026-05-24 22:23:45.069] [INFO ] [TR] Configuration completed
+[2026-05-24 22:23:45.069] [INFO ] [TR] GlobalRegistry: alterable_train_crop_output_ set to 32
+[2026-05-24 22:23:45.069] [INFO ] [TR] GlobalRegistry: alterable_train_resize_output_ set to 32
+[2026-05-24 22:23:45.069] [INFO ] [TR] GlobalRegistry: alterable_val_crop_output_ set to 32
+[2026-05-24 22:23:45.069] [INFO ] [TR] GlobalRegistry: alterable_val_resize_output_ set to 32
+[2026-05-24 22:23:45.069] [INFO ] [TR] GlobalRegistry: alterable_current_resolution_train_ set to 32
+[2026-05-24 22:23:45.069] [INFO ] [TR] GlobalRegistry: alterable_current_resolution_val_ set to 32
+[2026-05-24 22:23:45.069] [INFO ] [TR] GlobalRegistry: fixed_num_color_channels set to 3
+[2026-05-24 22:23:45.069] [INFO ] [TR] GlobalRegistry: fixed_sdmp_factor set to 1
+[2026-05-24 22:23:45.069] [INFO ] [TR] GlobalRegistry: fixed_using_cpvs set to true
+[2026-05-24 22:23:45.069] [INFO ] [TR] GlobalRegistry: fixed_using_drop_last set to false
+[2026-05-24 22:23:45.069] [INFO ] [TR] Setup: staging buffer = 8 MB per GPU (32x32x3, batch=512, AMP)
+[2026-05-24 22:23:46.483] [INFO ] [TR] StagingBufferPool: allocated 8 blocks of 8 MB each
+[StagingDebug] StagingBufferPool created: blocks=8, per_block=8MB, type=pinned (cudaHostAlloc)
+[StagingDebug]   RANK[0]: GPU=0, NUMA=6, base=0x7a5517200000, size=8394240B
+[StagingDebug]   RANK[1]: GPU=1, NUMA=6, base=0x7a54b3200000, size=8394240B
+[StagingDebug]   RANK[2]: GPU=2, NUMA=2, base=0x7a544d200000, size=8394240B
+[StagingDebug]   RANK[3]: GPU=3, NUMA=2, base=0x7a547d200000, size=8394240B
+[StagingDebug]   RANK[4]: GPU=4, NUMA=20, base=0x7a54cb400000, size=8394240B
+[StagingDebug]   RANK[5]: GPU=5, NUMA=20, base=0x7a5495400000, size=8394240B
+[StagingDebug]   RANK[6]: GPU=6, NUMA=16, base=0x7a54ad200000, size=8394240B
+[StagingDebug]   RANK[7]: GPU=7, NUMA=16, base=0x7a5465200000, size=8394240B
+[2026-05-24 22:23:46.483] [INFO ] [TR] GlobalRegistry: Staging buffer pool created with 8 blocks, 8 MB each
+[2026-05-24 22:23:46.483] [INFO ] [TR] GlobalRegistry: fixed_cpu_binding_map set with 32 entries
+[2026-05-24 22:23:46.483] [INFO ] [TR] GlobalRegistry: fixed_cpu_binding_enabled set to true
+[2026-05-24 22:23:46.483] [INFO ] [TR] GlobalRegistry: fixed_random_erasing_p_ set to 0
+[2026-05-24 22:23:46.483] [INFO ] [TR] GlobalRegistry: fixed_train_with_rhf set to false
+[2026-05-24 22:23:46.483] [INFO ] [TR] GlobalRegistry: fixed_val_with_rhf set to false
+[2026-05-24 22:23:46.483] [INFO ] [TR] Calculated steps_per_epoch: 13 (total_samples: 50000, global_batch_size: 4096)
+[2026-05-24 22:23:46.483] [INFO ] [TR] GlobalRegistry: fixed_s_original_indices_ set with size=1563
+[2026-05-24 22:23:46.484] [INFO ] [TR] [EB#0] Using StagingBufferPool RANK 0: per_zone=4197120, base=0x7a5517200000
+[2026-05-24 22:23:46.484] [INFO ] [TR] [EB#0] Before staging_memory_numa_node call
+[2026-05-24 22:23:46.484] [INFO ] [TR] [EB#0] After staging_memory_numa_node call, numa_node=6
+[StagingDebug] TransferStation configured: engine_id=0, numa_node=6, workers_per_engine=4
+[StagingDebug]   associated_workers=[0, 8, 16, 24]
+[StagingDebug]   Zone A: labels=0x7a5517200000, data=0x7a5517200a00
+[StagingDebug]   Zone B: labels=0x7a5517600b00, data=0x7a5517601500
+[StagingDebug]   transfer_size=4197120B (labels=2560B, data=4194560B)
+[2026-05-24 22:23:46.484] [INFO ] [TR] [EB#0] reset_and_update(): phase=VAL, current_resolution_=32, num_color_channels_=3, current_sample_bytes_=8192
+[2026-05-24 22:23:46.484] [INFO ] [TR] [EB#1] Using StagingBufferPool RANK 1: per_zone=4197120, base=0x7a54b3200000
+[2026-05-24 22:23:46.484] [INFO ] [TR] [EB#1] Before staging_memory_numa_node call
+[2026-05-24 22:23:46.484] [INFO ] [TR] [EB#1] After staging_memory_numa_node call, numa_node=6
+[StagingDebug] TransferStation configured: engine_id=1, numa_node=6, workers_per_engine=4
+[StagingDebug]   associated_workers=[1, 9, 17, 25]
+[StagingDebug]   Zone A: labels=0x7a54b3200000, data=0x7a54b3200a00
+[StagingDebug]   Zone B: labels=0x7a54b3600b00, data=0x7a54b3601500
+[StagingDebug]   transfer_size=4197120B (labels=2560B, data=4194560B)
+[2026-05-24 22:23:46.484] [INFO ] [TR] [EB#1] reset_and_update(): phase=VAL, current_resolution_=32, num_color_channels_=3, current_sample_bytes_=8192
+[2026-05-24 22:23:46.484] [INFO ] [TR] [EB#2] Using StagingBufferPool RANK 2: per_zone=4197120, base=0x7a544d200000
+[2026-05-24 22:23:46.484] [INFO ] [TR] [EB#2] Before staging_memory_numa_node call
+[2026-05-24 22:23:46.484] [INFO ] [TR] [EB#2] After staging_memory_numa_node call, numa_node=2
+[StagingDebug] TransferStation configured: engine_id=2, numa_node=2, workers_per_engine=4
+[StagingDebug]   associated_workers=[2, 10, 18, 26]
+[StagingDebug]   Zone A: labels=0x7a544d200000, data=0x7a544d200a00
+[StagingDebug]   Zone B: labels=0x7a544d600b00, data=0x7a544d601500
+[StagingDebug]   transfer_size=4197120B (labels=2560B, data=4194560B)
+[2026-05-24 22:23:46.484] [INFO ] [TR] [EB#2] reset_and_update(): phase=VAL, current_resolution_=32, num_color_channels_=3, current_sample_bytes_=8192
+[2026-05-24 22:23:46.484] [INFO ] [TR] [EB#3] Using StagingBufferPool RANK 3: per_zone=4197120, base=0x7a547d200000
+[2026-05-24 22:23:46.484] [INFO ] [TR] [EB#3] Before staging_memory_numa_node call
+[2026-05-24 22:23:46.484] [INFO ] [TR] [EB#3] After staging_memory_numa_node call, numa_node=2
+[StagingDebug] TransferStation configured: engine_id=3, numa_node=2, workers_per_engine=4
+[StagingDebug]   associated_workers=[3, 11, 19, 27]
+[StagingDebug]   Zone A: labels=0x7a547d200000, data=0x7a547d200a00
+[StagingDebug]   Zone B: labels=0x7a547d600b00, data=0x7a547d601500
+[StagingDebug]   transfer_size=4197120B (labels=2560B, data=4194560B)
+[2026-05-24 22:23:46.484] [INFO ] [TR] [EB#3] reset_and_update(): phase=VAL, current_resolution_=32, num_color_channels_=3, current_sample_bytes_=8192
+[2026-05-24 22:23:46.484] [INFO ] [TR] [EB#4] Using StagingBufferPool RANK 4: per_zone=4197120, base=0x7a54cb400000
+[2026-05-24 22:23:46.484] [INFO ] [TR] [EB#4] Before staging_memory_numa_node call
+[2026-05-24 22:23:46.484] [INFO ] [TR] [EB#4] After staging_memory_numa_node call, numa_node=20
+[StagingDebug] TransferStation configured: engine_id=4, numa_node=20, workers_per_engine=4
+[StagingDebug]   associated_workers=[4, 12, 20, 28]
+[StagingDebug]   Zone A: labels=0x7a54cb400000, data=0x7a54cb400a00
+[StagingDebug]   Zone B: labels=0x7a54cb800b00, data=0x7a54cb801500
+[StagingDebug]   transfer_size=4197120B (labels=2560B, data=4194560B)
+[2026-05-24 22:23:46.484] [INFO ] [TR] [EB#4] reset_and_update(): phase=VAL, current_resolution_=32, num_color_channels_=3, current_sample_bytes_=8192
+[2026-05-24 22:23:46.485] [INFO ] [TR] [EB#5] Using StagingBufferPool RANK 5: per_zone=4197120, base=0x7a5495400000
+[2026-05-24 22:23:46.485] [INFO ] [TR] [EB#5] Before staging_memory_numa_node call
+[2026-05-24 22:23:46.485] [INFO ] [TR] [EB#5] After staging_memory_numa_node call, numa_node=20
+[StagingDebug] TransferStation configured: engine_id=5, numa_node=20, workers_per_engine=4
+[StagingDebug]   associated_workers=[5, 13, 21, 29]
+[StagingDebug]   Zone A: labels=0x7a5495400000, data=0x7a5495400a00
+[StagingDebug]   Zone B: labels=0x7a5495800b00, data=0x7a5495801500
+[StagingDebug]   transfer_size=4197120B (labels=2560B, data=4194560B)
+[2026-05-24 22:23:46.485] [INFO ] [TR] [EB#5] reset_and_update(): phase=VAL, current_resolution_=32, num_color_channels_=3, current_sample_bytes_=8192
+[2026-05-24 22:23:46.485] [INFO ] [TR] [EB#6] Using StagingBufferPool RANK 6: per_zone=4197120, base=0x7a54ad200000
+[2026-05-24 22:23:46.485] [INFO ] [TR] [EB#6] Before staging_memory_numa_node call
+[2026-05-24 22:23:46.485] [INFO ] [TR] [EB#6] After staging_memory_numa_node call, numa_node=16
+[StagingDebug] TransferStation configured: engine_id=6, numa_node=16, workers_per_engine=4
+[StagingDebug]   associated_workers=[6, 14, 22, 30]
+[StagingDebug]   Zone A: labels=0x7a54ad200000, data=0x7a54ad200a00
+[StagingDebug]   Zone B: labels=0x7a54ad600b00, data=0x7a54ad601500
+[StagingDebug]   transfer_size=4197120B (labels=2560B, data=4194560B)
+[2026-05-24 22:23:46.485] [INFO ] [TR] [EB#6] reset_and_update(): phase=VAL, current_resolution_=32, num_color_channels_=3, current_sample_bytes_=8192
+[2026-05-24 22:23:46.485] [INFO ] [TR] [EB#7] Using StagingBufferPool RANK 7: per_zone=4197120, base=0x7a5465200000
+[2026-05-24 22:23:46.485] [INFO ] [TR] [EB#7] Before staging_memory_numa_node call
+[2026-05-24 22:23:46.485] [INFO ] [TR] [EB#7] After staging_memory_numa_node call, numa_node=16
+[StagingDebug] TransferStation configured: engine_id=7, numa_node=16, workers_per_engine=4
+[StagingDebug]   associated_workers=[7, 15, 23, 31]
+[StagingDebug]   Zone A: labels=0x7a5465200000, data=0x7a5465200a00
+[StagingDebug]   Zone B: labels=0x7a5465600b00, data=0x7a5465601500
+[StagingDebug]   transfer_size=4197120B (labels=2560B, data=4194560B)
+[2026-05-24 22:23:46.485] [INFO ] [TR] [EB#7] reset_and_update(): phase=VAL, current_resolution_=32, num_color_channels_=3, current_sample_bytes_=8192
+[2026-05-24 22:23:46.489] [INFO ] [TR] Preprocessor initialized.
+[2026-05-24 22:23:46.489] [INFO ] [TR] GlobalRegistry: fixed_optimizer_kind set to 1
+[2026-05-24 22:23:46.489] [INFO ] [TR] Compiler::compile - starting five-phase compilation
+[2026-05-24 22:23:46.489] [INFO ] [TR]   ArchPlan: 3 layers
+[2026-05-24 22:23:46.489] [WARN ] [TR] Expected 6 CompileSpec (base + 5 variants), got 1
+[2026-05-24 22:23:46.489] [INFO ] [TR] Compiler: optimizer_kind=1, needs_momentum=1
+[2026-05-24 22:23:46.489] [INFO ] [TR] [COMPILER] BWD l=2 kind=10 grad_id=23 prev_grad_id=23
+[2026-05-24 22:23:46.489] [INFO ] [TR] [COMPILER] BWD l=1 kind=7 grad_id=13 prev_grad_id=13
+[2026-05-24 22:23:46.489] [INFO ] [TR] [COMPILER] BWD l=0 kind=8 grad_id=-1 prev_grad_id=13
+[2026-05-24 22:23:46.489] [INFO ] [TR] [COMPILER] DEEP[0] op=49 in=[13,14,15] out=[16]
+[2026-05-24 22:23:46.489] [INFO ] [TR] [COMPILER] DEEP[1] op=86 in=[16,7,4] out=[8,26,25,24,9,10]
+[2026-05-24 22:23:46.489] [INFO ] [TR] [COMPILER] DEEP[2] op=87 in=[23,24,26,7,4] out=[23]
+[2026-05-24 22:23:46.489] [INFO ] [TR] [COMPILER] DEEP[3] op=50 in=[23,14,16,13] out=[13,17,18]
+[2026-05-24 22:23:46.489] [INFO ] [TR] Compiler::compile - five-phase compilation complete
+[2026-05-24 22:23:46.489] [INFO ] [TR]   Generated 1 variants
+[2026-05-24 22:23:46.513] [INFO ] [backend] DeviceContext 0: created 5 non-blocking streams + per-stream cuDNN + cuBLAS handles
+[2026-05-24 22:23:46.529] [INFO ] [backend] DeviceContext 1: created 5 non-blocking streams + per-stream cuDNN + cuBLAS handles
+[2026-05-24 22:23:46.544] [INFO ] [backend] DeviceContext 2: created 5 non-blocking streams + per-stream cuDNN + cuBLAS handles
+[2026-05-24 22:23:46.557] [INFO ] [backend] DeviceContext 3: created 5 non-blocking streams + per-stream cuDNN + cuBLAS handles
+[2026-05-24 22:23:46.570] [INFO ] [backend] DeviceContext 4: created 5 non-blocking streams + per-stream cuDNN + cuBLAS handles
+[2026-05-24 22:23:46.581] [INFO ] [backend] DeviceContext 5: created 5 non-blocking streams + per-stream cuDNN + cuBLAS handles
+[2026-05-24 22:23:46.591] [INFO ] [backend] DeviceContext 6: created 5 non-blocking streams + per-stream cuDNN + cuBLAS handles
+[2026-05-24 22:23:46.602] [INFO ] [backend] DeviceContext 7: created 5 non-blocking streams + per-stream cuDNN + cuBLAS handles
+[2026-05-24 22:23:47.824] [INFO ] [task] NCCL initialized for 8 GPUs
+[2026-05-24 22:23:47.824] [INFO ] [task] Allocated 8 GPU device context(s), 11.5388 MB each
+[2026-05-24 22:23:47.824] [INFO ] [graph] [B2] cuDNN warmup on rank 0 (GPU 0) for 2 unique graphs
+[2026-05-24 22:23:47.824] [INFO ] [graph] [B2] cuDNN warmup on rank 1 (GPU 1) for 2 unique graphs
+[2026-05-24 22:23:47.824] [INFO ] [graph] [B2] cuDNN warmup on rank 2 (GPU 2) for 2 unique graphs
+[2026-05-24 22:23:47.824] [INFO ] [graph] [B2] cuDNN warmup on rank 3 (GPU 3) for 2 unique graphs
+[2026-05-24 22:23:47.824] [INFO ] [graph] [B2] cuDNN warmup on rank 4 (GPU 4) for 2 unique graphs
+[2026-05-24 22:23:47.824] [INFO ] [graph] [B2] cuDNN warmup on rank 5 (GPU 5) for 2 unique graphs
+[2026-05-24 22:23:47.824] [INFO ] [graph] [B2] cuDNN warmup on rank 6 (GPU 6) for 2 unique graphs
+[2026-05-24 22:23:47.824] [INFO ] [graph] [B2] cuDNN warmup on rank 7 (GPU 7) for 2 unique graphs
+[2026-05-24 22:23:47.824] [INFO ] [graph] [B2] cuDNN warmup completed on all 8 ranks
+[2026-05-24 22:23:47.824] [INFO ] [graph] [B3] Capturing rank 0 in main thread
+[2026-05-24 22:23:47.824] [INFO ] [TR] [CAPTURE-CUDA] gid=0 nodes=1
+[H2D_DEBUG] rank=0 staging_base=0x7a5517200000 per_zone=4197120 label_aligned=2560 block_size=8394240 num_output_ranges=2
+[H2D_DEBUG] range[0] start_region=49 end_region=49 dst_off=496640 dst_size=2560
+[H2D_DEBUG]   -> dst=0x7a54e3279400 src=0x7a5517200000 src_end=0x7a5517200a00 stream=0x577cfdc66480
+[H2D_DEBUG] range[1] start_region=50 end_region=50 dst_off=499200 dst_size=4194560
+[H2D_DEBUG]   -> dst=0x7a54e3279e00 src=0x7a5517200a00 src_end=0x7a5517600b00 stream=0x577cfdc66480
+[2026-05-24 22:23:47.825] [INFO ] [TR] [CAPTURE-CUDA] gid=1 nodes=1
+[H2D_DEBUG] rank=0 staging_base=0x7a5517200000 per_zone=4197120 label_aligned=2560 block_size=8394240 num_output_ranges=2
+[H2D_DEBUG] range[0] start_region=51 end_region=51 dst_off=4693760 dst_size=2560
+[H2D_DEBUG]   -> dst=0x7a54e3679f00 src=0x7a5517600b00 src_end=0x7a5517601500 stream=0x577cfdc66480
+[H2D_DEBUG] range[1] start_region=52 end_region=52 dst_off=4696320 dst_size=4194560
+[H2D_DEBUG]   -> dst=0x7a54e367a900 src=0x7a5517601500 src_end=0x7a5517a01600 stream=0x577cfdc66480
+[2026-05-24 22:23:47.825] [INFO ] [graph] [B3] Capturing ranks 1~7 in parallel threads
+[2026-05-24 22:23:47.825] [INFO ] [TR] [CAPTURE-CUDA] gid=0 nodes=1
+[H2D_DEBUG] rank=1 staging_base=0x7a54b3200000 per_zone=4197120 label_aligned=2560 block_size=8394240 num_output_ranges=2
+[H2D_DEBUG] range[0] start_region=49 end_region=49 dst_off=496640 dst_size=2560
+[H2D_DEBUG]   -> dst=0x7a54e9479400 src=0x7a54b3200000 src_end=0x7a54b3200a00 stream=0x577cfdae5ad0[2026-05-24 22:23:47.825] [INFO ] [TR] [CAPTURE-CUDA] gid=0 nodes=1
+[H2D_DEBUG] rank=2 staging_base=0x7a544d200000[2026-05-24 22:23:47.825] [INFO ] [TR] [CAPTURE-CUDA] gid=0 nodes=1
+[H2D_DEBUG] rank=
+ per_zone=[2026-05-24 22:23:47.825] [INFO ] [TR] [CAPTURE-CUDA] gid=0 nodes=1
+[H2D_DEBUG] rank=4 staging_base=0x7a54cb400000[H2D_DEBUG] range[3 staging_base=0x7a547d200000 per_zone=4197120 label_aligned=2560 block_size=8394240 num_output_ranges=20x400b00 label_aligned=2560 block_size=8394240 num_output_ranges=2
+[H2D_DEBUG] range[0] start_region=
+[H2D_DEBUG] range[0] start_region=49 end_region=49 per_zone=4197120 dst_off=491] start_region=50 end_region=50 dst_off=499200 dst_size=4194560[2026-05-24 22:23:47.826] [INFO ] [TR] [CAPTURE-CUDA] gid=0 nodes=1
+ end_region=
+[H2D_DEBUG] rank=5 staging_base=49 dst_off=496640[H2D_DEBUG]   -> dst=0x7a54e9479e00 src=0x7a54b3200a00 src_end=0x7a54b3600b00 stream=0x577cfdae5ad0
+496640 dst_size=2560 dst_size=0xa00 label_aligned=0xa00 block_size=0x8016000x7a5495400000[2026-05-24 22:23:47.826] [INFO ] [TR] [CAPTURE-CUDA] gid=0 nodes=1
+
+ per_zone=[H2D_DEBUG] rank= num_output_ranges=[H2D_DEBUG]   -> dst=0x7a54fb479400 src=0x7a547d200000
+2
+[H2D_DEBUG] range[ src_end=6 staging_base=0x7a54ad200000 per_zone=4197120 label_aligned=2560 block_size=8394240 num_output_ranges=0x2[2026-05-24 22:23:47.826] [INFO ] [TR] [CAPTURE-CUDA] gid=0 nodes=10x7a547d200a000x400b00
+[H2D_DEBUG] rank=0 stream= label_aligned=2560 block_size=8394240 num_output_ranges=2
+] start_region=49 end_region=70x577cfd81a720[2026-05-24 22:23:47.826] [INFO ] [TR] [CAPTURE-CUDA] gid=1 nodes=1
+
+
+[H2D_DEBUG]   -> dst=0x7a54f5279400 src=0x7a544d200000 src_end=[H2D_DEBUG] rank=1 staging_base=[H2D_DEBUG] range[0] start_region=0x31 end_region=0x31[H2D_DEBUG] range[ staging_base=0x7a5465200000 per_zone=0x400b00 label_aligned=0xa00 block_size=0x80160000x7a544d200a00 stream=0x577cfd80c20049[H2D_DEBUG] range[0x1] start_region=0x32] start_region=0x31 end_region= num_output_ranges= end_region=0x32 dst_off=0x79e00
+ dst_off=0x79400 dst_size=0xa00
+[H2D_DEBUG]   -> dst=0x7a55046794000x31 dst_off=0x794000x7a54b3200000 per_zone=0x2
+[H2D_DEBUG] range[0] start_region=49 dst_off= dst_size=[H2D_DEBUG] range[1] start_region= src=0x7a5495400000 dst_size=2560
+0x400b00496640 dst_size=2560
+[H2D_DEBUG]   -> dst=0x7a5505279400 src=[H2D_DEBUG]   -> dst=0x7a5501279400 end_region=50 src_end=0x7a5495400a000x7a54ad2000004194560
+[H2D_DEBUG]   -> dst=0x7a54fb479e00 src=0x7a547d200a00 src_end=0x7a547d600b00 stream=0x577cfd778f10
+0x31 src_end=0x7a54ad200a00 stream= label_aligned=0xa00 stream=0x577cfd81a720 src=0x7a54cb4000000x577cfd8c9cc0
+ block_size=
+0x801600 num_output_ranges=0x2
+ dst_off=0x79400 dst_size=0xa00
+ src_end=0x7a54cb400a00 stream=0x577cfd949180
+[H2D_DEBUG] range[0x1] start_region=0x32 end_region=[2026-05-24 22:23:47.827] [INFO ] [TR] [CAPTURE-CUDA] gid=1 nodes=1
+0x32[H2D_DEBUG]   -> dst= end_region=0x32[H2D_DEBUG] range[0x1] start_region= dst_off=0x79e00 dst_size=[H2D_DEBUG] range[[H2D_DEBUG] rank=0x3 staging_base=0x32 end_region=0x7a5434079400 src=0x7a5465200000 src_end=0x7a5465200a00 stream=0x577cfd879d80
+0x7a547d200000 per_zone=0x400b00 label_aligned=[H2D_DEBUG] range[0x1]0xa00 block_size=0x32[H2D_DEBUG] range[0x400100
+[H2D_DEBUG]   -> dst= start_region=0] start_region=0x33 end_region= dst_off= dst_off=0x79e000x32 end_region=0x33 dst_off=0x79e000x801600 num_output_ranges=0x1]0x479f00 start_region=0x32 end_region=0x32 dst_off=0x79e00 dst_size=0x400100
+0x7a5505279e00 src=0x7a54ad200a00 src_end=0x2
+0x32 dst_size=0xa00
+[H2D_DEBUG]   -> dst=0x7a54e9879f00 src=0x7a54ad600b00 stream=0x577cfd8c9cc0
+ dst_off=0x79e00 dst_size= dst_size=0x400100
+[H2D_DEBUG]   -> dst=0x7a5504679e00 src=0x7a5495400a000x400100 dst_size=[H2D_DEBUG] range[0] start_region=0x33 end_region=0x33 dst_off=0x479f00[2026-05-24 22:23:47.828] [INFO ] [TR] [CAPTURE-CUDA] gid=1 nodes=1
+
+[H2D_DEBUG] rank=0x6 staging_base=0x7a54ad200000 per_zone=0x400b000x400100 src_end=0x7a5495800b00 stream=0x577cfd778f10
+ label_aligned=0xa00 block_size=0x7a54b3600b00 src_end=0x7a54b3601500 stream=0x577cfdae5ad0
+[H2D_DEBUG]   -> dst=[H2D_DEBUG] range[0x1] start_region= dst_size=0xa00
+[H2D_DEBUG]   -> dst=0x7a54fb879f00 src=0x7a547d600b00 src_end=0x7a547d601500 stream=0x577cfd81a720[2026-05-24 22:23:47.828] [INFO ] [TR] [CAPTURE-CUDA] gid=1 nodes=1
+0x801600
+
+ num_output_ranges=[H2D_DEBUG]   -> dst=0x7a5434079e00 src=0x7a5465200a00 src_end=[H2D_DEBUG] rank=0x2
+[H2D_DEBUG] range[[H2D_DEBUG]   -> dst=0x34 end_region=0x340x7a5501279e000x1] start_region=0x34 end_region=0x7a54f5279e00 src=0x7a544d200a00[H2D_DEBUG] range[0] start_region=0x33 end_region=0x33 dst_off=0x34 src=0x5 dst_off= src_end=0x7a544d600b00 stream=0x577cfd80c200
+0x7a5465600b000x47a900 staging_base=0x7a5495400000 per_zone=0x400b00 label_aligned=0xa00 block_size=0x801600 num_output_ranges=0x2
+[H2D_DEBUG] range[0] start_region=0x33 end_region=0x33 dst_off=0x479f00 dst_size=0xa00
+[H2D_DEBUG]   -> dst=0x7a5504a79f00 src=0x7a5495800b000x479f00 dst_size=0xa00
+[H2D_DEBUG]   -> dst=0x7a5505679f00 src= dst_off=0x47a900 dst_size= src_end=0x7a5495801500 stream=0x577cfd778f10
+0x7a54cb400a00 dst_size=0x400100
+[H2D_DEBUG]   -> dst=0x7a54fb87a900 src=0x7a547d601500 src_end=0x7a547da01600 stream=[H2D_DEBUG] range[0x10x400100
+[H2D_DEBUG]   -> dst=0x7a54e987a900 src= src_end=0x7a54cb800b00 stream=0x7a54ad600b00 src_end=0x7a54ad601500 stream=0x577cfd8c9cc0
+][H2D_DEBUG] range[0x577cfd949180
+ start_region=0x577cfd81a720[2026-05-24 22:23:47.828] [INFO ] [TR] [CAPTURE-CUDA] gid=1 nodes=1
+[H2D_DEBUG] rank=0x2
+0x1] start_region=0x34 end_region=0x34 dst_off=0x47a900 dst_size=0x400100
+[H2D_DEBUG]   -> dst=0x7a550567a900 src=0x7a54ad601500 src_end=[2026-05-24 22:23:47.829] [INFO ] [TR] [CAPTURE-CUDA] gid=1 nodes=1
+ stream=0x7a54ada01600 stream=0x577cfd8c9cc0 staging_base=0x7a544d200000 per_zone=0x400b000x577cfd879d80
+
+[H2D_DEBUG] rank=0x4 staging_base=0x7a54cb4000000x7a54b3601500 src_end=0x7a54b3a01600 stream=0x577cfdae5ad0
+ per_zone=0x400b00 label_aligned=0xa00 label_aligned=0xa00 block_size=0x801600 num_output_ranges=0x2
+[H2D_DEBUG] range[0] block_size=0x801600 num_output_ranges=0x2
+[H2D_DEBUG] range[0] start_region=0x33 end_region=0x33 dst_off=0x479f00 dst_size=0xa00
+[H2D_DEBUG]   -> dst=0x7a5501679f00 src=0x7a54cb800b00 src_end=0x7a54cb801500 stream=0x34 end_region=0x34 dst_off=0x47a900 dst_size=0x400100
+0x577cfd949180
+ start_region=0x33 end_region=0x33 dst_off=0x479f00 dst_size=0xa00
+[H2D_DEBUG]   -> dst=0x7a54f5679f00 src=0x7a544d600b00 src_end=0x7a544d601500 stream=[H2D_DEBUG]   -> dst=[H2D_DEBUG] range[0x1] start_region=0x34 end_region=0x34 dst_off=0x47a9000x577cfd80c200
+[H2D_DEBUG] range[0x1] start_region=0x34 end_region=0x34 dst_off=0x47a900 dst_size=0x400100
+[H2D_DEBUG]   -> dst=0x7a54f567a900 src=0x7a544d601500[2026-05-24 22:23:47.829] [INFO ] [TR] [CAPTURE-CUDA] gid=1 nodes=1
+[H2D_DEBUG] rank=0x7 staging_base=0x7a5465200000 per_zone=0x7a5504a7a900 src=0x7a5495801500 src_end=0x7a5495c01600 stream= src_end=0x7a544da01600 stream=0x577cfd80c200
+0x400b00 label_aligned=0xa00 block_size=0x801600 num_output_ranges=0x2
+[H2D_DEBUG] range[0] start_region=0x33 end_region=0x33 dst_off=0x479f00 dst_size=0x577cfd778f10
+ dst_size=0xa00
+[H2D_DEBUG]   -> dst=0x7a5434479f00 src=0x7a5465600b00 src_end=0x7a5465601500 stream=0x577cfd879d80
+[H2D_DEBUG] range[0x1] start_region=0x34 end_region=0x34 dst_off=0x47a900 dst_size=0x400100
+[H2D_DEBUG]   -> dst=0x7a543447a900 src=0x7a5465601500 src_end=0x7a5465a01600 stream=0x577cfd879d80
+0x400100
+[H2D_DEBUG]   -> dst=0x7a550167a900 src=0x7a54cb801500 src_end=0x7a54cbc01600 stream=0x577cfd949180
+[2026-05-24 22:23:47.830] [INFO ] [graph] [B4] Warmup launching 2 graphs on rank 0
+[2026-05-24 22:23:47.830] [INFO ] [graph] [B4] Warmup launch completed
+[2026-05-24 22:23:47.830] [INFO ] [graph] [PRE_CAPTURE] Summary: 2 slots, 2 captured, 0 reused, 2 unique graphs, 8 ranks
+[2026-05-24 22:23:47.830] [INFO ] [TR] [DEBUG] init_all: dtensors count=27
+[2026-05-24 22:23:47.830] [INFO ] [TR] [DEBUG] dtensor[0] id=0 region=49 shape=[512,1,1,1] init=0
+[2026-05-24 22:23:47.830] [INFO ] [TR] [DEBUG] dtensor[1] id=1 region=50 shape=[512,32,32,4] init=0
+[2026-05-24 22:23:47.830] [INFO ] [TR] [DEBUG] dtensor[2] id=2 region=51 shape=[512,1,1,1] init=0
+[2026-05-24 22:23:47.830] [INFO ] [TR] [DEBUG] dtensor[3] id=3 region=52 shape=[512,32,32,4] init=0
+[2026-05-24 22:23:47.830] [INFO ] [TR] [DEBUG] dtensor[4] id=4 region=64 shape=[512,1,1,1] init=0
+[2026-05-24 22:23:47.830] [INFO ] [TR] [DEBUG] dtensor[5] id=5 region=59 shape=[1,1,1,1] init=0
+[2026-05-24 22:23:47.830] [INFO ] [TR] [DEBUG] dtensor[6] id=6 region=57 shape=[1,1,1,1] init=0
+[2026-05-24 22:23:47.830] [INFO ] [TR] [DEBUG] dtensor[7] id=7 region=57 shape=[1,1,1,1] init=0
+[2026-05-24 22:23:47.830] [INFO ] [TR] [DEBUG] dtensor[8] id=8 region=30 shape=[1,1,1,1] init=0
+[2026-05-24 22:23:47.830] [INFO ] [TR] [DEBUG] dtensor[9] id=9 region=30 shape=[1,1,1,1] init=0
+[2026-05-24 22:23:47.830] [INFO ] [TR] [DEBUG] dtensor[10] id=10 region=30 shape=[1,1,1,1] init=0
+[2026-05-24 22:23:47.830] [INFO ] [TR] [DEBUG] dtensor[11] id=11 region=57 shape=[1,1,1,1] init=0
+[2026-05-24 22:23:47.830] [INFO ] [TR] [DEBUG] dtensor[12] id=12 region=57 shape=[1,1,1,1] init=0
+[2026-05-24 22:23:47.830] [INFO ] [TR] [DEBUG] dtensor[13] id=13 region=55 shape=[512,1,1,3072] init=0
+[2026-05-24 22:23:47.830] [INFO ] [TR] [DEBUG] dtensor[14] id=14 region=9 shape=[10,1,1,3072] init=8
+[2026-05-24 22:23:47.830] [INFO ] [TR] [DEBUG] dtensor[15] id=15 region=8 shape=[1,1,1,10] init=1
+[2026-05-24 22:23:47.830] [INFO ] [TR] [DEBUG] dtensor[16] id=16 region=55 shape=[512,1,1,10] init=0
+[2026-05-24 22:23:47.830] [INFO ] [TR] [DEBUG] dtensor[17] id=17 region=27 shape=[10,1,1,3072] init=0
+[2026-05-24 22:23:47.830] [INFO ] [TR] [DEBUG] dtensor[18] id=18 region=26 shape=[1,1,1,10] init=1
+[2026-05-24 22:23:47.830] [INFO ] [TR] [DEBUG] dtensor[19] id=19 region=21 shape=[10,1,1,3072] init=0
+[2026-05-24 22:23:47.830] [INFO ] [TR] [DEBUG] dtensor[20] id=20 region=31 shape=[10,1,1,3072] init=0
+[2026-05-24 22:23:47.830] [INFO ] [TR] [DEBUG] dtensor[21] id=21 region=37 shape=[10,1,1,3072] init=0
+[2026-05-24 22:23:47.830] [INFO ] [TR] [DEBUG] dtensor[22] id=22 region=36 shape=[1,1,1,10] init=0
+[2026-05-24 22:23:47.830] [INFO ] [TR] [DEBUG] dtensor[23] id=23 region=55 shape=[512,1,1,10] init=0
+[2026-05-24 22:23:47.830] [INFO ] [TR] [DEBUG] dtensor[24] id=24 region=62 shape=[512,1,1,10] init=0
+[2026-05-24 22:23:47.830] [INFO ] [TR] [DEBUG] dtensor[25] id=25 region=66 shape=[512,1,1,1] init=0
+[2026-05-24 22:23:47.830] [INFO ] [TR] [DEBUG] dtensor[26] id=26 region=57 shape=[1,1,1,1] init=0
+[2026-05-24 22:23:48.086] [INFO ] [TR] GlobalRegistry initialized successfully
+[2026-05-24 22:23:48.086] [INFO ] [TR] Beginning epoch 0 (train)
+[2026-05-24 22:23:48.086] [INFO ] [TR] Dataset not loaded, loading now
+[2026-05-24 22:23:48.086] [INFO ] [TR] Loading train set (FULLY mode): /root/epfs/dataset/cifar-10
+[2026-05-24 22:23:48.444] [INFO ] [TR]   Samples: 50000
+[2026-05-24 22:23:48.444] [INFO ] [TR]   Labels: 48.8281 KB
+[2026-05-24 22:23:48.444] [INFO ] [TR]   Images: 146.484 MB
+[2026-05-24 22:23:48.497] [INFO ] [TR] Loading completed in 0.410501 seconds
+[2026-05-24 22:23:48.497] [INFO ] [TR] Average bandwidth: 356.959 MB/s
+[2026-05-24 22:23:48.508] [INFO ] [TR] Registering SampleInfo for train set
+[2026-05-24 22:23:48.509] [INFO ] [TR] SampleInfo registration completed: 50000 samples
+[2026-05-24 22:23:48.509] [INFO ] [TR] Distributing 50000 samples to 32 workers
+[2026-05-24 22:23:48.510] [INFO ] [TR] Distribution completed: total=50000, expected=50000
+[2026-05-24 22:23:48.510] [INFO ] [TR] Epoch 0 began (SampleInfo mode)
+[StagingDebug] PW created: worker_id=0, tid=134505052504064, RANK=0, NUMA=6, CPU=0
+[2026-05-24 22:23:48.511] [INFO ] [TR] [EB#0] reset_and_update(): phase=TRAIN, current_resolution_=32, num_color_channels_=3, current_sample_bytes_=8192
+[StagingDebug] PW created: worker_id=1, tid=134505042018304, RANK=1, NUMA=6, CPU=1
+[2026-05-24 22:23:48.511] [INFO ] [TR] [EB#1] reset_and_update(): phase=TRAIN, current_resolution_=32, num_color_channels_=3, current_sample_bytes_=8192
+[StagingDebug] PW created: worker_id=2, tid=134505031532544, RANK=2, NUMA=2, CPU=2
+[2026-05-24 22:23:48.511] [INFO ] [TR] [EB#2] reset_and_update(): phase=TRAIN, current_resolution_=32, num_color_channels_=3, current_sample_bytes_=8192
+[StagingDebug] PW created: worker_id=3, tid=134504649850880, RANK=3, NUMA=2, CPU=3
+[2026-05-24 22:23:48.511] [INFO ] [TR] [EB#3] reset_and_update(): phase=TRAIN, current_resolution_=32, num_color_channels_=3, current_sample_bytes_=8192
+[StagingDebug] PW created: worker_id=4, tid=134504639365120, RANK=4, NUMA=20, CPU=4
+[2026-05-24 22:23:48.511] [INFO ] [TR] [EB#4] reset_and_update(): phase=TRAIN, current_resolution_=32, num_color_channels_=3, current_sample_bytes_=8192
+[StagingDebug] PW created: worker_id=5, tid=134504628879360, RANK=5, NUMA=20, CPU=5
+[2026-05-24 22:23:48.511] [INFO ] [TR] [EB#5] reset_and_update(): phase=TRAIN, current_resolution_=32, num_color_channels_=3, current_sample_bytes_=8192
+[StagingDebug] PW created: worker_id=6, tid=134504247197696, RANK=6, NUMA=16, CPU=6
+[2026-05-24 22:23:48.512] [INFO ] [TR] [EB#6] reset_and_update(): phase=TRAIN, current_resolution_=32, num_color_channels_=3, current_sample_bytes_=8192
+[StagingDebug] PW created: worker_id=7, tid=134504236711936, RANK=7, NUMA=16, CPU=7
+[2026-05-24 22:23:48.512] [INFO ] [TR] [EB#7] reset_and_update(): phase=TRAIN, current_resolution_=32, num_color_channels_=3, current_sample_bytes_=8192
+[StagingDebug] PW created: worker_id=8, tid=134504226226176, RANK=0, NUMA=6, CPU=8
+[StagingDebug] PW created: worker_id=9, tid=134504146534400, RANK=1, NUMA=6, CPU=9
+[StagingDebug] PW created: worker_id=10, tid=134504136048640, RANK=2, NUMA=2, CPU=10
+[StagingDebug] PW created: worker_id=11, tid=134504125562880, RANK=3, NUMA=2, CPU=11
+[StagingDebug] PW created: worker_id=12, tid=134503743881216, RANK=4, NUMA=20, CPU=12
+[StagingDebug] PW created: worker_id=13, tid=134503733395456, RANK=5, NUMA=20, CPU=13
+[StagingDebug] PW created: worker_id=14, tid=134503722909696, RANK=6, NUMA=16, CPU=14
+[StagingDebug] PW created: worker_id=15, tid=134503341228032, RANK=7, NUMA=16, CPU=15
+[StagingDebug] PW created: worker_id=16, tid=134503330742272, RANK=0, NUMA=6, CPU=16
+[StagingDebug] PW created: worker_id=17, tid=134503320256512, RANK=1, NUMA=6, CPU=17
+[StagingDebug] PW created: worker_id=18, tid=134502938574848, RANK=2, NUMA=2, CPU=18
+[StagingDebug] PW created: worker_id=19, tid=134502928089088, RANK=3, NUMA=2, CPU=19
+[StagingDebug] PW created: worker_id=20, tid=134502917603328, RANK=4, NUMA=20, CPU=20
+[StagingDebug] PW created: worker_id=21, tid=134502535921664, RANK=5, NUMA=20, CPU=21
+[StagingDebug] PW created: worker_id=22, tid=134502525435904, RANK=6, NUMA=16, CPU=22
+[StagingDebug] PW created: worker_id=23, tid=134502514950144, RANK=7, NUMA=16, CPU=23
+[StagingDebug] PW created: worker_id=24, tid=134502133268480, RANK=0, NUMA=6, CPU=24
+[StagingDebug] PW created: worker_id=25, tid=134502122782720, RANK=1, NUMA=6, CPU=25
+[StagingDebug] PW created: worker_id=26, tid=134502112296960, RANK=2, NUMA=2, CPU=26
+[StagingDebug] PW created: worker_id=27, tid=134502066159616, RANK=3, NUMA=2, CPU=27
+[StagingDebug] PW created: worker_id=28, tid=134502055673856, RANK=4, NUMA=20, CPU=28
+[StagingDebug] PW created: worker_id=29, tid=134502045188096, RANK=5, NUMA=20, CPU=29
+[StagingDebug] PW created: worker_id=30, tid=134501999050752, RANK=6, NUMA=16, CPU=30
+[StagingDebug] PW created: worker_id=31, tid=134501988564992, RANK=7, NUMA=16, CPU=31
+[2026-05-24 22:23:48.615] [INFO ] [TR] [DIAG-WORKER] pid=0 wkr=0 lbl=6 fout_ptr=0x7a5517200a00 | raw: first_nz=0 nz=778 [4,209] | norm: first_nz=0 nz=784 [-2.25227e+14,2.14033e+11]
+[2026-05-24 22:23:48.615] [INFO ] [TR] [DIAG-WORKER] pid=0 wkr=3 lbl=0 fout_ptr=0x7a547d200a00 | raw: first_nz=0 nz=784 [214,255] | norm: first_nz=0 nz=784 [-6.48824e+12,9.25103e+14]
+[2026-05-24 22:23:48.615] [INFO ] [TR] [DIAG-WORKER] pid=0 wkr=2 lbl=9 fout_ptr=0x7a544d200a00 | raw: first_nz=0 nz=784 [83,255] | norm: first_nz=0 nz=784 [-1.34119e+11,9.25103e+14]
+[2026-05-24 22:23:48.615] [INFO ] [TR] [DIAG-WORKER] pid=0 wkr=1 lbl=6 fout_ptr=0x7a54b3200a00 | raw: first_nz=0 nz=784 [57,183] | norm: first_nz=0 nz=784 [-1.51754e+13,1.43728e+12]
+[2026-05-24 22:23:48.615] [INFO ] [TR] [DIAG-WORKER] pid=3 wkr=31 lbl=7 fout_ptr=0x7a5465206a00 | raw: first_nz=0 nz=784 [21,115] | norm: first_nz=0 nz=784 [-2.15553e+13,4.31756e+14]
+[2026-05-24 22:23:48.615] [INFO ] [TR] [DIAG-WORKER] pid=3 wkr=29 lbl=0 fout_ptr=0x7a5495406a00 | raw: first_nz=0 nz=784 [5,250] | norm: first_nz=0 nz=784 [-1.12612e+14,9.03476e+13]

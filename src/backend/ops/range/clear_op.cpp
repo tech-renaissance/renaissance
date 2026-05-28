@@ -35,11 +35,14 @@ static void launch_range_clear_cuda(
     state.output_stream_idx = si;
     state.streams[si].has_pending_work = true;
 
-    for (size_t i = 0; i < node.output_ranges.size(); ++i) {
-        auto [off, sz] = mp.resolve_region_bounds(
-            static_cast<Region>(node.output_ranges[i].start_region_id),
-            static_cast<Region>(node.output_ranges[i].end_region_id));
-        if (sz == 0) continue;
+    TR_CHECK(node.output_ranges.size() == 1, RuntimeError,
+             "RANGE_CLEAR: compiler must emit exactly 1 output range, got "
+             << node.output_ranges.size());
+
+    auto [off, sz] = mp.resolve_region_bounds(
+        static_cast<Region>(node.output_ranges[0].start_region_id),
+        static_cast<Region>(node.output_ranges[0].end_region_id));
+    if (sz > 0) {
         void* dst = ArenaKeeper::instance().ptr_at(ctx.rank_for_context(), off);
         cudaError_t err = cudaMemsetAsync(dst, 0, sz, s);
         if (err != cudaSuccess) {
@@ -58,10 +61,12 @@ static void launch_range_clear_cpu(CpuOpContext* op_ctx) {
     const MemoryPlan* mp = ctx.memory_plan();
     if (!mp) return;
 
-    for (int i = 0; i < op_ctx->num_output_ranges; ++i) {
-        uint64_t offset = op_ctx->output_ranges[i].offset;
-        uint64_t size   = op_ctx->output_ranges[i].size;
-        if (size == 0) continue;
+    TR_CHECK(op_ctx->num_output_ranges == 1, RuntimeError,
+             "RANGE_CLEAR CPU: compiler must emit exactly 1 output range");
+
+    uint64_t offset = op_ctx->output_ranges[0].offset;
+    uint64_t size   = op_ctx->output_ranges[0].size;
+    if (size > 0) {
         void* ptr = ArenaKeeper::instance().ptr_at(ctx.rank_for_context(), offset);
         std::memset(ptr, 0, size);
     }

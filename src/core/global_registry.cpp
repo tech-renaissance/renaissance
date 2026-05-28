@@ -2036,6 +2036,68 @@ size_t GlobalRegistry::num_val_samples() const {
     return value;
 }
 
+size_t GlobalRegistry::padded_train_samples() const {
+    size_t total = num_train_samples();
+    int ws = world_size();
+    TR_CHECK(ws > 0, ValueError, "world_size not set");
+    size_t ws_sz = static_cast<size_t>(ws);
+    return ((total + ws_sz - 1) / ws_sz) * ws_sz;
+}
+
+size_t GlobalRegistry::padded_val_samples() const {
+    size_t total = num_val_samples();
+    int ws = world_size();
+    TR_CHECK(ws > 0, ValueError, "world_size not set");
+    size_t ws_sz = static_cast<size_t>(ws);
+    return ((total + ws_sz - 1) / ws_sz) * ws_sz;
+}
+
+size_t GlobalRegistry::train_samples_per_rank() const {
+    return padded_train_samples() / static_cast<size_t>(world_size());
+}
+
+size_t GlobalRegistry::val_samples_per_rank() const {
+    return padded_val_samples() / static_cast<size_t>(world_size());
+}
+
+int GlobalRegistry::get_train_steps() const {
+    size_t per_rank = train_samples_per_rank();
+    int bs = get_local_batch_size();
+    TR_CHECK(bs > 0, ValueError, "local_batch_size not set");
+    if (using_drop_last()) {
+        return static_cast<int>(per_rank / static_cast<size_t>(bs));
+    } else {
+        return static_cast<int>((per_rank + static_cast<size_t>(bs) - 1) / static_cast<size_t>(bs));
+    }
+}
+
+int GlobalRegistry::get_val_steps() const {
+    size_t per_rank = val_samples_per_rank();
+    int bs = get_local_batch_size();
+    TR_CHECK(bs > 0, ValueError, "local_batch_size not set");
+    if (using_drop_last()) {
+        return static_cast<int>(per_rank / static_cast<size_t>(bs));
+    } else {
+        return static_cast<int>((per_rank + static_cast<size_t>(bs) - 1) / static_cast<size_t>(bs));
+    }
+}
+
+int GlobalRegistry::get_last_train_batch_size() const {
+    size_t per_rank = train_samples_per_rank();
+    int bs = get_local_batch_size();
+    TR_CHECK(bs > 0, ValueError, "local_batch_size not set");
+    size_t rem = per_rank % static_cast<size_t>(bs);
+    return (rem == 0) ? bs : static_cast<int>(rem);
+}
+
+int GlobalRegistry::get_last_val_batch_size() const {
+    size_t per_rank = val_samples_per_rank();
+    int bs = get_local_batch_size();
+    TR_CHECK(bs > 0, ValueError, "local_batch_size not set");
+    size_t rem = per_rank % static_cast<size_t>(bs);
+    return (rem == 0) ? bs : static_cast<int>(rem);
+}
+
 // =============================================================================
 // alterable变量：TransferStation指针数组
 // =============================================================================

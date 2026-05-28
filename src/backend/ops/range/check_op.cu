@@ -21,14 +21,14 @@ __global__ void check_nan_kernel(
     for (size_t i = blockIdx.x * blockDim.x + threadIdx.x;
          i < n; i += gridDim.x * blockDim.x) {
         float val = data[i];
-        if (isnan(val)) {
+        if (isnan(val) || isinf(val)) {
             atomicOr(&s_has_nan[0], 1);
         }
     }
     __syncthreads();
 
     if (threadIdx.x == 0 && s_has_nan[0] != 0) {
-        *has_nan_flag = 1;
+        atomicOr((int*)has_nan_flag, 1);
     }
 }
 

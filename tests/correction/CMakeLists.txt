@@ -365,6 +365,14 @@ add_executable(test_dl_full test_dl_full.cpp)
 setup_dl_test(test_dl_full)
 message(STATUS "  - test_dl_full: DeepLearningTask full GPU training test")
 
+add_executable(test_dl_full_gpu test_dl_full_gpu.cpp)
+setup_dl_test(test_dl_full_gpu)
+message(STATUS "  - test_dl_full_gpu: DeepLearningTask fixed GPU (FP32) training test")
+
+add_executable(test_dl_full_amp test_dl_full_amp.cpp)
+setup_dl_test(test_dl_full_amp)
+message(STATUS "  - test_dl_full_amp: DeepLearningTask fixed AMP (FP16) training test")
+
 add_executable(test_h2d_copy_correctness test_h2d_copy_correctness.cpp)
 setup_dl_test(test_h2d_copy_correctness)
 message(STATUS "  - test_h2d_copy_correctness: H2D COPY A/B correctness (preprocessor + fetch)")
@@ -395,3 +403,24 @@ target_include_directories(test_pw_ultimate PRIVATE
     ${CMAKE_SOURCE_DIR}/src/data
 )
 message(STATUS "  - test_pw_ultimate: PW ultimate test")
+
+# ============================================================================
+# FusedNormalization 测试
+# ============================================================================
+
+add_executable(test_fused_normalization test_fused_normalization.cpp)
+target_link_libraries(test_fused_normalization PRIVATE renaissance)
+target_compile_definitions(test_fused_normalization PRIVATE TR_LOG_LEVEL=1)
+if(TR_USE_CUDA)
+    setup_gpu_runtime_env(test_fused_normalization)
+endif()
+set_target_properties(test_fused_normalization PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/correction
+    WIN32_EXECUTABLE FALSE
+)
+if(MSVC)
+    target_compile_options(test_fused_normalization PRIVATE /W4 /utf-8 /wd4244 /wd4505 /wd4458 /wd4127)
+else()
+    target_compile_options(test_fused_normalization PRIVATE -Wall -Wextra -Wpedantic -Wno-unused-function)
+endif()
+message(STATUS "  - test_fused_normalization: FusedNormalization FP32 vs AMP numerical comparison test")

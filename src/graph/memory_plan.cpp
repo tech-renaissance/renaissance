@@ -112,8 +112,9 @@ static std::string region_to_string(Region region) {
         case Region::T_TEMP_INT8:     return "T_TEMP_INT8";
 
         // R-Series: 结果区
-        case Region::R_RESULT:          return "R_RESULT";
-        case Region::R_PREDICTED_LABEL: return "R_PREDICTED_LABEL";
+        case Region::R_RESULT:            return "R_RESULT";
+        case Region::R_PREDICTED_LABEL:   return "R_PREDICTED_LABEL";
+        case Region::R_RESULT_ACCUMULATED: return "R_RESULT_ACCUMULATED";
 
         default:                     return "UNKNOWN_REGION";
     }
@@ -379,7 +380,17 @@ void MemoryPlan::alloc_baseline_dtensors(const Shape& label_shape,
     baseline_.top1 = alloc_impl(scalar_shape, DType::FP32, Region::R_RESULT).id;
     baseline_.top5 = alloc_impl(scalar_shape, DType::FP32, Region::R_RESULT).id;
 
-    // Step 3: 条件分配优化器标量
+    // Step 3: batch_size 标量 (INT32)
+    baseline_.local_batch_size      = alloc_impl(scalar_shape, DType::INT32, Region::S_SCALAR_INT32).id;
+    baseline_.last_train_batch_size = alloc_impl(scalar_shape, DType::INT32, Region::S_SCALAR_INT32).id;
+    baseline_.last_val_batch_size   = alloc_impl(scalar_shape, DType::INT32, Region::S_SCALAR_INT32).id;
+
+    // Step 4: 累积区标量 (FP32)
+    baseline_.accum_loss = alloc_impl(scalar_shape, DType::FP32, Region::R_RESULT_ACCUMULATED).id;
+    baseline_.accum_top1 = alloc_impl(scalar_shape, DType::FP32, Region::R_RESULT_ACCUMULATED).id;
+    baseline_.accum_top5 = alloc_impl(scalar_shape, DType::FP32, Region::R_RESULT_ACCUMULATED).id;
+
+    // Step 5: 条件分配优化器标量
     if (opt != OptimizerKind::SGD) {
         baseline_.beta = alloc_impl(scalar_shape, DType::FP32, Region::S_SCALAR_FP32).id;
         baseline_.wd   = alloc_impl(scalar_shape, DType::FP32, Region::S_SCALAR_FP32).id;

@@ -249,12 +249,13 @@ int main(int argc, char** argv) {
         is_amp ? Region::G_FC_WEIGHT_FP16 : Region::G_FC_WEIGHT);
     DTensor d_db1 = task.alloc(b1_shape, DType::FP32, Region::G_FC_BIAS);
 
+    DTensor d_w1_master, d_w2_master, d_gw1_fp32, d_gw2_fp32, d_has_nan;
     if (is_amp) {
-        DTensor d_w1_master = task.alloc(w1_shape, DType::FP32, Region::W_FC_WEIGHT);
-        DTensor d_w2_master = task.alloc(w2_shape, DType::FP32, Region::W_FC_WEIGHT);
-        DTensor d_gw1_fp32  = task.alloc(w1_shape, DType::FP32, Region::G_FC_WEIGHT);
-        DTensor d_gw2_fp32  = task.alloc(w2_shape, DType::FP32, Region::G_FC_WEIGHT);
-        (void)d_w1_master; (void)d_w2_master; (void)d_gw1_fp32; (void)d_gw2_fp32;
+        d_w1_master = task.alloc(w1_shape, DType::FP32, Region::W_FC_WEIGHT);
+        d_w2_master = task.alloc(w2_shape, DType::FP32, Region::W_FC_WEIGHT);
+        d_gw1_fp32  = task.alloc(w1_shape, DType::FP32, Region::G_FC_WEIGHT);
+        d_gw2_fp32  = task.alloc(w2_shape, DType::FP32, Region::G_FC_WEIGHT);
+        d_has_nan   = task.alloc_scalar(DType::INT32);
     }
     DTensor d_mb1 = task.alloc(b1_shape, DType::FP32, Region::M_FC_BIAS);
     DTensor d_vb1 = task.alloc(b1_shape, DType::FP32, Region::V_FC_BIAS);
@@ -303,24 +304,92 @@ int main(int argc, char** argv) {
 
     task.add_graph("bwd", std::move(g_bwd), StreamKind::COMP_1);
 
+    if (is_amp) {
+        ComputationGraph g_cast_main;
+        {
+            GraphNode node;
+            node.kind = GraphNode::Kind::RANGE;
+            node.range_op = RangeOp::RANGE_CAST_FP32_TO_FP16;
+            node.input_ranges.push_back(
+                {0, 0, static_cast<int32_t>(Region::W_FC_WEIGHT),
+                 static_cast<int32_t>(Region::W_FC_WEIGHT)});
+            node.output_ranges.push_back(
+                {0, 0, static_cast<int32_t>(Region::A_FC_WEIGHT),
+                 static_cast<int32_t>(Region::A_FC_WEIGHT)});
+            g_cast_main.append(std::move(node));
+        }
+        task.add_graph("cast_main", std::move(g_cast_main), StreamKind::UPDATE);
+
+        ComputationGraph g_cast_grads;
+        {
+            GraphNode node1;
+            node1.kind = GraphNode::Kind::RANGE;
+            node1.range_op = RangeOp::RANGE_CAST_FP16_TO_FP32;
+            node1.input_ranges.push_back(
+                {0, 0, static_cast<int32_t>(Region::G_FC_WEIGHT_FP16),
+                 static_cast<int32_t>(Region::G_FC_WEIGHT_FP16)});
+            node1.output_ranges.push_back(
+                {0, 0, static_cast<int32_t>(Region::G_FC_WEIGHT),
+                 static_cast<int32_t>(Region::G_FC_WEIGHT)});
+            g_cast_grads.append(std::move(node1));
+
+            GraphNode node2;
+            node2.kind = GraphNode::Kind::RANGE;
+            node2.range_op = RangeOp::RANGE_CHECK_NAN;
+            node2.input_ranges.push_back(
+                {0, 0, static_cast<int32_t>(Region::G_FC_WEIGHT),
+                 static_cast<int32_t>(Region::G_FC_WEIGHT)});
+            node2.output_ids.push_back(d_has_nan.id);
+            g_cast_grads.append(std::move(node2));
+        }
+        task.add_graph("cast_grads", std::move(g_cast_grads), StreamKind::UPDATE);
+    }
+
     task.compile();
 
     task.print_memory_plan();
 
     task.transfer_to_rank(h_x,   d_x,   0);
-    task.transfer_to_rank(h_w1,  d_w1,  0);
+    if (is_amp) {
+        Tensor h_w1_fp32(h_w1.shape(), DType::FP32);
+        Tensor h_w2_fp32(h_w2.shape(), DType::FP32);
+        {
+            const uint16_t* s1 = h_w1.data<uint16_t>();
+            const uint16_t* s2 = h_w2.data<uint16_t>();
+            float* d1 = h_w1_fp32.data<float>();
+            float* d2 = h_w2_fp32.data<float>();
+            for (int64_t i = 0; i < h_w1.numel(); ++i) d1[i] = fp16_to_f32(s1[i]);
+            for (int64_t i = 0; i < h_w2.numel(); ++i) d2[i] = fp16_to_f32(s2[i]);
+        }
+        task.transfer_to_rank(h_w1_fp32, d_w1_master, 0);
+        task.transfer_to_rank(h_w2_fp32, d_w2_master, 0);
+    } else {
+        task.transfer_to_rank(h_w1,  d_w1,  0);
+        task.transfer_to_rank(h_w2,  d_w2,  0);
+    }
     task.transfer_to_rank(h_b1,  d_b1,  0);
-    task.transfer_to_rank(h_w2,  d_w2,  0);
     task.transfer_to_rank(h_b2,  d_b2,  0);
     task.transfer_to_rank(h_dy2, d_dy2, 0);
     if (num_ranks > 1) {
         task.broadcast_from_rank0(d_x);
-        task.broadcast_from_rank0(d_w1);  task.broadcast_from_rank0(d_b1);
-        task.broadcast_from_rank0(d_w2);  task.broadcast_from_rank0(d_b2);
+        if (is_amp) {
+            task.broadcast_from_rank0(d_w1_master);
+            task.broadcast_from_rank0(d_w2_master);
+        } else {
+            task.broadcast_from_rank0(d_w1);
+            task.broadcast_from_rank0(d_w2);
+        }
+        task.broadcast_from_rank0(d_b1);
+        task.broadcast_from_rank0(d_b2);
         task.broadcast_from_rank0(d_dy2);
     }
 
     std::cout << "\n===== FWD [Flatten+FC1+ReLU+FC2] " << mode_name(cfg.mode) << " =====\n";
+
+    if (is_amp) {
+        task.run("cast_main");
+        std::cout << "  CAST Main (FP32->FP16) done.\n";
+    }
 
     task.run_iter("fwd", cfg.warmup);
     auto t0 = std::chrono::high_resolution_clock::now();
@@ -338,6 +407,20 @@ int main(int argc, char** argv) {
     double bwd_us = std::chrono::duration<double, std::micro>(t3 - t2).count() / cfg.iterations;
 
     bool all_pass = true;
+    bool nan_detected = false;
+    if (is_amp) {
+        task.run("cast_grads");
+        std::cout << "  CAST Grads (FP16->FP32) + Check NaN done.\n";
+
+        Tensor h_has_nan = task.fetch_from_rank(d_has_nan, 0);
+        int has_nan_val = h_has_nan.data<int32_t>()[0];
+        std::cout << "  has_nan = " << has_nan_val << "\n";
+        if (has_nan_val) {
+            nan_detected = true;
+            all_pass = false;
+            std::cout << "  WARNING: NaN detected in gradients!\n";
+        }
+    }
     double max_mse_fp = 0.0;
     const double mse_thr_fp = is_amp ? 1e-3 : 1e-5;
 
@@ -398,6 +481,9 @@ int main(int argc, char** argv) {
               << "  BWD Avg: " << std::fixed << std::setprecision(2)
               << bwd_us << " us/iter\n"
               << "  MaxMSE:  " << std::scientific << max_mse_total << std::endl;
+    if (nan_detected) {
+        std::cout << "  [AMP] NaN detected in gradients!" << std::endl;
+    }
 
     return all_pass ? 0 : 1;
 }

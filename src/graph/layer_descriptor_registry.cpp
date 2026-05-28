@@ -84,13 +84,15 @@ std::vector<TensorDesc> infer_conv_tensors(
     { TensorDesc d; d.name="conv_output"; d.shape=out_shape; d.region=select_feature_region(ctx); d.dtype=feat_dt; descs.push_back(d); }
     // 2: grad_slot
     { TensorDesc d; d.name="conv_grad_slot"; d.shape=input; d.region=select_gradslot_region(ctx); d.dtype=feat_dt; descs.push_back(d); }
-    // 3: weight_grad
+    // 3: weight_grad — Conv BWD (cuDNN) 先输出 FP16 到 amp_grad_fp16，
+    //   再通过 RANGE_CAST_FP16_TO_FP32 转 FP32 到此区域。详见 fc_op.cpp 策略注释。
     { TensorDesc d; d.name="conv_weight_grad"; d.shape=w_shape; d.region=g_region; d.dtype=DType::FP32; descs.push_back(d); }
-    // 4: amp_weight_fp16
+    // 4: amp_weight_fp16 — AMP 前向使用的 FP16 工作权重
     { descs.push_back(ctx.enable_amp
         ? TensorDesc{"conv_amp_w_fp16", w_shape, a_region, DType::FP16}
         : make_placeholder("conv_amp_w_fp16", a_region, DType::FP16)); }
-    // 5: amp_grad_fp16
+    // 5: amp_grad_fp16 — Conv BWD 受 cuDNN 限制必须先产出 FP16 梯度，
+    //   后续由 compiler 插入 RANGE_CAST_FP16_TO_FP32 批量转 FP32。
     { descs.push_back(ctx.enable_amp
         ? TensorDesc{"conv_amp_g_fp16", w_shape, g16_reg, DType::FP16}
         : make_placeholder("conv_amp_g_fp16", g16_reg, DType::FP16)); }
@@ -268,17 +270,18 @@ std::vector<TensorDesc> infer_fc_tensors(
         : make_placeholder("fc_bias", Region::W_FC_BIAS)); }
     // 2: output
     { TensorDesc d; d.name="fc_output"; d.shape=out_shape; d.region=select_feature_region(ctx); d.dtype=feat_dt; descs.push_back(d); }
-    // 3: weight_grad
+    // 3: weight_grad — FC BWD (cuBLAS) 直接输出 FP32，无需后续 CAST
     { TensorDesc d; d.name="fc_weight_grad"; d.shape=w_shape; d.region=Region::G_FC_WEIGHT; d.dtype=DType::FP32; descs.push_back(d); }
-    // 4: bias_grad (placeholder if no bias)
+    // 4: bias_grad (placeholder if no bias) — 同样直接输出 FP32
     { descs.push_back(fp.bias
         ? TensorDesc{"fc_bias_grad", b_shape, Region::G_FC_BIAS, DType::FP32}
         : make_placeholder("fc_bias_grad", Region::G_FC_BIAS)); }
-    // 5: amp_weight_fp16
+    // 5: amp_weight_fp16 — AMP 前向使用的 FP16 工作权重
     { descs.push_back(ctx.enable_amp
         ? TensorDesc{"fc_amp_w_fp16", w_shape, Region::A_FC_WEIGHT, DType::FP16}
         : make_placeholder("fc_amp_w_fp16", Region::A_FC_WEIGHT, DType::FP16)); }
-    // 6: amp_grad_fp16
+    // 6: amp_grad_fp16 — 注意：FC_AMP_BWD 直接写 FP32 到 G_FC_WEIGHT，
+    //   此区域在当前 cuBLAS 实现中不被 BWD 填充。保留以兼容未来 cuDNN 路径。
     { descs.push_back(ctx.enable_amp
         ? TensorDesc{"fc_amp_g_fp16", w_shape, Region::G_FC_WEIGHT_FP16, DType::FP16}
         : make_placeholder("fc_amp_g_fp16", Region::G_FC_WEIGHT_FP16, DType::FP16)); }
@@ -290,8 +293,9 @@ SubgraphPattern build_fc_forward(const OpParams&, const std::vector<TensorDesc>&
     SubgraphPattern p;
     if (descs.size() < 7) return p;
     SubgraphPattern::Node n;
-    n.op = GlobalRegistry::instance().using_amp() ? ComputeOp::FC_AMP_FWD : ComputeOp::FC_FP32_FWD;
-    n.input_indices  = {0, 1};   // weight, bias
+    bool amp = GlobalRegistry::instance().using_amp();
+    n.op = amp ? ComputeOp::FC_AMP_FWD : ComputeOp::FC_FP32_FWD;
+    n.input_indices  = amp ? std::vector<size_t>{5, 1} : std::vector<size_t>{0, 1};   // AMP: fp16_weight, fp32_bias
     n.output_indices = {2};      // output
     p.nodes.push_back(n);
     return p;
@@ -301,9 +305,10 @@ SubgraphPattern build_fc_backward(const OpParams&, const std::vector<TensorDesc>
     SubgraphPattern p;
     if (descs.size() < 7) return p;
     SubgraphPattern::Node n;
-    n.op = GlobalRegistry::instance().using_amp() ? ComputeOp::FC_AMP_BWD : ComputeOp::FC_FP32_BWD;
-    n.input_indices  = {0, 2};   // weight, output
-    n.output_indices = {3, 4};   // dW, db (dX in-place to X via Phase 4)
+    bool amp = GlobalRegistry::instance().using_amp();
+    n.op = amp ? ComputeOp::FC_AMP_BWD : ComputeOp::FC_FP32_BWD;
+    n.input_indices  = amp ? std::vector<size_t>{5, 2} : std::vector<size_t>{0, 2};   // AMP: fp16_weight, output
+    n.output_indices = amp ? std::vector<size_t>{3, 4} : std::vector<size_t>{3, 4};   // AMP/FP32: dW, db both FP32
     p.nodes.push_back(n);
     return p;
 }
@@ -597,7 +602,7 @@ SubgraphPattern build_tanh_forward(const OpParams&, const std::vector<TensorDesc
     SubgraphPattern p;
     if (descs.empty()) return p;
     SubgraphPattern::Node n;
-    n.op = ComputeOp::TANH_FP32_FWD;
+    n.op = GlobalRegistry::instance().using_amp() ? ComputeOp::TANH_AMP_FWD : ComputeOp::TANH_FP32_FWD;
     n.output_indices = {0};
     p.nodes.push_back(n);
     return p;
@@ -606,7 +611,7 @@ SubgraphPattern build_tanh_forward(const OpParams&, const std::vector<TensorDesc
 SubgraphPattern build_tanh_backward(const OpParams&, const std::vector<TensorDesc>&) {
     SubgraphPattern p;
     SubgraphPattern::Node n;
-    n.op = ComputeOp::TANH_FP32_BWD;     // 使用正确的TANH_BWD算子
+    n.op = GlobalRegistry::instance().using_amp() ? ComputeOp::TANH_AMP_BWD : ComputeOp::TANH_FP32_BWD;
     n.input_indices  = {0};         // tanh_output (用于计算 1 - Y^2)
     n.output_indices = {0};         // dX in-place 到 output
     p.nodes.push_back(n);

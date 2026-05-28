@@ -1,0 +1,2 @@
+﻿[NAN-CHECK] >>> NaN/INF DETECTED AT VAL-feat-fc3-logits (non-fatal, continuing)
+ <<<

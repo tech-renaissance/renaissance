@@ -22,6 +22,7 @@
 #include "renaissance/graph/memory_plan.h"
 #include "renaissance/graph/layer_descriptor.h"
 #include "renaissance/core/initializer.h"
+#include "renaissance/core/global_config.h"
 #include "renaissance/core/logger.h"
 #include "renaissance/core/tr_exception.h"
 
@@ -735,7 +736,11 @@ void Compiler::create_memory_plans(
 
         // 输入缓冲区维度
         bool amp = GlobalRegistry::instance().using_amp();
-        int input_channels = amp ? 4 : specs[s].num_color_channels;
+        // Shape 必须存逻辑通道数（如 MNIST 的 1），padding 由 DTensor 根据
+        // dtype+region 自动计算（FP16+I_A_DATA 时 padded_c=4）。若此处硬编码 4，
+        // 会导致 Flatten 等算子把 padding 当作有效数据展平，产生每 4 个值仅 1 个
+        // 有效的错误输出。
+        int input_channels = specs[s].num_color_channels;
         Shape input_shape{specs[s].batch_size, specs[s].max_sample_resolution,
                          specs[s].max_sample_resolution, input_channels};
         Shape label_shape{specs[s].batch_size, 1, 1, 1};
@@ -745,8 +750,18 @@ void Compiler::create_memory_plans(
         auto opt = GlobalRegistry::instance().optimizer_kind();
         memory_plans[s]->alloc_baseline_dtensors(label_shape, input_shape, input_dtype, opt);
 
+        float init_scaling = amp ? TR_AMP_INITIAL_SCALING : 1.0f;
+        LOG_INFO << "[COMPILER] amp=" << amp << " TR_AMP_INITIAL_SCALING=" << TR_AMP_INITIAL_SCALING << " init_scaling=" << init_scaling;
         memory_plans[s]->set_init_config(
-            memory_plans[s]->baseline().scaling, kInitConstant(1.0f));
+            memory_plans[s]->baseline().scaling, kInitConstant(init_scaling));
+        memory_plans[s]->set_init_config(
+            memory_plans[s]->baseline().has_nan, kInitZeros);
+        memory_plans[s]->set_init_config(
+            memory_plans[s]->baseline().loss, kInitZeros);
+        memory_plans[s]->set_init_config(
+            memory_plans[s]->baseline().top1, kInitZeros);
+        memory_plans[s]->set_init_config(
+            memory_plans[s]->baseline().top5, kInitZeros);
 
         if (s == 0) {
             const auto& b = memory_plans[s]->baseline();
@@ -757,6 +772,8 @@ void Compiler::create_memory_plans(
             scalar_ids.tc    = b.tc;
             scalar_ids.wd    = b.wd;
             scalar_ids.eps   = b.eps;
+            scalar_ids.has_nan = b.has_nan;
+            scalar_ids.scaling = b.scaling;
         }
 
         size_t num_layers = all_shapes[s].size();
@@ -1062,6 +1079,24 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
                 gn.input_ids.insert(gn.input_ids.begin(), prev_output_id);
             }
 
+            if (layer.is_first_layer && gn.compute_op == ComputeOp::FC_AMP_FWD) {
+                LOG_INFO << "[COMPILER-DEBUG] FIRST layer FC_AMP_FWD l=" << l
+                         << " prev_output_id=" << prev_output_id
+                         << " input_ids count=" << gn.input_ids.size();
+                for (size_t ii = 0; ii < gn.input_ids.size(); ++ii) {
+                    int32_t tid = gn.input_ids[ii];
+                    if (tid >= 0) {
+                        const auto& dt = memory_plan.get_dtensor(tid);
+                        LOG_INFO << "  input[" << ii << "] id=" << tid
+                                 << " shape={" << dt.n() << "," << dt.c()
+                                 << "," << dt.h() << "," << dt.w() << "}"
+                                 << " dtype=" << static_cast<int>(dt.dtype);
+                    } else {
+                        LOG_INFO << "  input[" << ii << "] id=" << tid << " (INVALID)";
+                    }
+                }
+            }
+
             // SoftmaxCE FWD: 注入基线 ID（scaling + labels → loss + top1 + top5）
             if (gn.compute_op == ComputeOp::SOFTMAX_CE_FP32_FWD ||
                 gn.compute_op == ComputeOp::SOFTMAX_CE_AMP_FWD  ||
@@ -1069,6 +1104,7 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
                 gn.compute_op == ComputeOp::SOFTMAX_CE_AMP_INF) {
                 const auto& b = memory_plan.baseline();
                 gn.input_ids.push_back(b.scaling);
+                gn.input_ids.push_back(b.local_batch_size);
                 gn.input_ids.push_back(b.label_smce);
                 gn.output_ids.insert(gn.output_ids.begin(), b.loss);
                 gn.output_ids.push_back(b.top1);
@@ -1087,26 +1123,13 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
         if (out_id >= 0) prev_output_id = out_id;
     }
 
-    // Phase 1.5: ZERO_GRAD — 在 backward 开始前清零梯度（新：RANGE_CLEAR 代替 RANGE_ZERO_GRAD）
     {
-        std::vector<Region> zero_regions = {
-            Region::G_BN_BIAS, Region::G_BN_WEIGHT,
-            Region::G_FC_BIAS, Region::G_FC_WEIGHT,
-            Region::G_FIRST_CONV, Region::G_DEEP_CONV,
-            Region::G_DEEP_CONV_FP16
-        };
-
         GraphNode zg_node;
         zg_node.kind = GraphNode::Kind::RANGE;
         zg_node.range_op = RangeOp::RANGE_CLEAR;
-        for (auto r : zero_regions) {
-            if (memory_plan.is_region_populated(r)) {
-                zg_node.output_ranges.push_back(memory_plan.region_range(r));
-            }
-        }
-        if (!zg_node.output_ranges.empty()) {
-            train_cg.append(GraphId::ZERO_GRAD, zg_node);
-        }
+        zg_node.output_ranges.push_back(
+            memory_plan.region_range(Region::G_BN_BIAS, Region::G_DEEP_CONV_FP16));
+        train_cg.append(GraphId::ZERO_GRAD, zg_node);
     }
 
     // Phase 2: 逆向遍历构建反向图（添加跨层梯度链）
@@ -1343,9 +1366,12 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
 
             // SoftmaxCE inference: 注入基线 ID（scaling + labels → loss + inv_scaling + pred + probs + top1 + top5）
             if (gn.compute_op == ComputeOp::SOFTMAX_CE_FP32_FWD ||
-                gn.compute_op == ComputeOp::SOFTMAX_CE_FP32_INF) {
+                gn.compute_op == ComputeOp::SOFTMAX_CE_AMP_FWD  ||
+                gn.compute_op == ComputeOp::SOFTMAX_CE_FP32_INF ||
+                gn.compute_op == ComputeOp::SOFTMAX_CE_AMP_INF) {
                 const auto& b = memory_plan.baseline();
                 gn.input_ids.push_back(b.scaling);
+                gn.input_ids.push_back(b.local_batch_size);
                 gn.input_ids.push_back(b.label_smce);
                 gn.output_ids.insert(gn.output_ids.begin(), b.loss);
                 gn.output_ids.push_back(b.top1);
@@ -1364,6 +1390,17 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
     }
 
     LOG_DEBUG << "Phase 4 complete: ComputationGraph construction finished";
+
+    {
+        MemRange r_accum = memory_plan.region_range(
+            Region::R_RESULT_ACCUMULATED, Region::R_RESULT_ACCUMULATED);
+        GraphNode node;
+        node.kind = GraphNode::Kind::RANGE;
+        node.range_op = RangeOp::RANGE_SUM_ALLREDUCE;
+        node.input_ranges.push_back(r_accum);
+        node.output_ranges.push_back(r_accum);
+        infer_cg.append(GraphId::VAL_RESULT_COMM, node);
+    }
 }
 
 // ============================================================================
@@ -1576,6 +1613,8 @@ void Compiler::build_auxiliary_graphs(ComputationGraph& train_cg, const MemoryPl
                 node.input_ids.push_back(scalar_ids.beta2);
                 node.input_ids.push_back(scalar_ids.eps);
             }
+            node.input_ids.push_back(scalar_ids.scaling);
+            node.input_ids.push_back(scalar_ids.has_nan);
 
             train_cg.append(GraphId::OPTIMIZER, node);
         }
@@ -1635,9 +1674,26 @@ void Compiler::build_auxiliary_graphs(ComputationGraph& train_cg, const MemoryPl
                 node.input_ids.push_back(scalar_ids.beta2);
                 node.input_ids.push_back(scalar_ids.eps);
             }
+            node.input_ids.push_back(scalar_ids.scaling);
+            node.input_ids.push_back(scalar_ids.has_nan);
 
             train_cg.append(GraphId::OPTIMIZER, node);
         }
+    }
+
+    // 6-2. CAST_MAIN_FP32_TO_FP16 图：主模型 FP32 权重 → FP16 权重
+    //       用于 AMP 模式，在每次优化器更新后将 FP32 master weights 同步到 FP16 working weights
+    if (amp_on) {
+        MemRange in_mr = memory_plan.region_range(
+            Region::W_FC_WEIGHT, Region::W_DEEP_CONV);
+        MemRange out_mr = memory_plan.region_range(
+            Region::A_FC_WEIGHT, Region::A_DEEP_CONV);
+        GraphNode node;
+        node.kind = GraphNode::Kind::RANGE;
+        node.range_op = RangeOp::RANGE_CAST_FP32_TO_FP16;
+        node.input_ranges.push_back(in_mr);
+        node.output_ranges.push_back(out_mr);
+        train_cg.append(GraphId::CAST_MAIN_FP32_TO_FP16, node);
     }
 
     // 7. EMA_UPDATE 图：EMA 参数更新（RANGE_EMA_PARAM_UPDATE，Region 范围直接指定）
@@ -1651,7 +1707,9 @@ void Compiler::build_auxiliary_graphs(ComputationGraph& train_cg, const MemoryPl
     }
 
     // 8-10. CAST_AND_CHECK 图：AMP 梯度 FP16→FP32 转换 + NaN 检查（仅 AMP 需要）
-    // 新：RANGE_CAST_FP16_TO_FP32 统一代替 3 个旧枚举，Region 直接指定
+    // ★ 只覆盖 Conv 层（G_FIRST_CONV / G_DEEP_CONV），不覆盖 FC 层：
+    //   FC_AMP_BWD 直接由 cuBLAS GEMM 产出 FP32 的 dW 和 dB，
+    //   无需后续 FP16→FP32 CAST。详见 fc_op.cpp 中 FC_AMP_BWD 注释。
     if (amp_on) {
         auto append_cast_fp16_to_fp32 = [&](Region from_region, Region to_region) {
             if (!memory_plan.is_region_populated(from_region) && !memory_plan.is_region_populated(to_region)) return;
@@ -1664,35 +1722,29 @@ void Compiler::build_auxiliary_graphs(ComputationGraph& train_cg, const MemoryPl
             node.output_ranges.push_back(out_mr);
             train_cg.append(GraphId::CAST_AND_CHECK, node);
         };
-        append_cast_fp16_to_fp32(Region::G_FC_WEIGHT_FP16, Region::G_FC_WEIGHT);
         append_cast_fp16_to_fp32(Region::G_FIRST_CONV_FP16, Region::G_FIRST_CONV);
         append_cast_fp16_to_fp32(Region::G_DEEP_CONV_FP16, Region::G_DEEP_CONV);
     }
 
-    // 11. RANGE_CHECK_NAN - 梯度NaN检查（新枚举代替 RANGE_NAN_CHECK_ALL_G）
     {
         if (nan_flag_id >= 0) {
             GraphNode node;
             node.kind = GraphNode::Kind::RANGE;
             node.range_op = RangeOp::RANGE_CHECK_NAN;
-
-            std::vector<Region> nan_regions = {
-                Region::G_BN_BIAS, Region::G_BN_WEIGHT,
-                Region::G_FC_BIAS, Region::G_FC_WEIGHT,
-                Region::G_FIRST_CONV, Region::G_DEEP_CONV
-            };
-            bool has_input = false;
-            for (auto r : nan_regions) {
-                if (memory_plan.is_region_populated(r)) {
-                    node.input_ranges.push_back(memory_plan.region_range(r));
-                    has_input = true;
-                }
-            }
-            if (has_input) {
-                node.output_ids.push_back(nan_flag_id);
-                train_cg.append(GraphId::CAST_AND_CHECK, node);
-            }
+            node.input_ranges.push_back(
+                memory_plan.region_range(Region::G_BN_BIAS, Region::G_DEEP_CONV));
+            node.output_ids.push_back(nan_flag_id);
+            train_cg.append(GraphId::CAST_AND_CHECK, node);
         }
+    }
+
+    if (amp_on && nan_flag_id >= 0 && scalar_ids.scaling >= 0) {
+        GraphNode node;
+        node.kind = GraphNode::Kind::RANGE;
+        node.range_op = RangeOp::RANGE_GRAD_SCALING;
+        node.input_ids.push_back(nan_flag_id);
+        node.input_ids.push_back(scalar_ids.scaling);
+        train_cg.append(GraphId::CAST_AND_CHECK, node);
     }
 
     // 12-13. RANGE_D2D_COPY - BN统计量复制（新枚举代替 RANGE_BN_STATS_COPY）
@@ -1744,6 +1796,44 @@ void Compiler::build_auxiliary_graphs(ComputationGraph& train_cg, const MemoryPl
     }
 
     LOG_DEBUG << "Auxiliary graphs created: " << train_cg.total_node_count() << " total nodes";
+
+    const auto& b = memory_plan.baseline();
+
+    {
+        GraphNode node;
+        node.kind = GraphNode::Kind::RANGE;
+        node.range_op = RangeOp::RANGE_CLEAR;
+        node.output_ranges.push_back(
+            memory_plan.region_range(Region::R_RESULT_ACCUMULATED, Region::R_RESULT_ACCUMULATED));
+        train_cg.append(GraphId::CLEAR_METRICS, node);
+    }
+
+    {
+        GraphNode node;
+        node.kind = GraphNode::Kind::RANGE;
+        node.range_op = RangeOp::RANGE_ACCUM_METRICS;
+        node.input_ids = { b.local_batch_size, b.loss, b.top1, b.top5 };
+        node.output_ids = { b.accum_loss, b.accum_top1, b.accum_top5 };
+        train_cg.append(GraphId::ACCUM_METRICS, node);
+    }
+
+    {
+        GraphNode node;
+        node.kind = GraphNode::Kind::RANGE;
+        node.range_op = RangeOp::RANGE_ACCUM_METRICS;
+        node.input_ids = { b.last_train_batch_size, b.loss, b.top1, b.top5 };
+        node.output_ids = { b.accum_loss, b.accum_top1, b.accum_top5 };
+        train_cg.append(GraphId::ACCUM_METRICS_TRAIN_LAST, node);
+    }
+
+    {
+        GraphNode node;
+        node.kind = GraphNode::Kind::RANGE;
+        node.range_op = RangeOp::RANGE_ACCUM_METRICS;
+        node.input_ids = { b.last_val_batch_size, b.loss, b.top1, b.top5 };
+        node.output_ids = { b.accum_loss, b.accum_top1, b.accum_top5 };
+        train_cg.append(GraphId::ACCUM_METRICS_VAL_LAST, node);
+    }
 }
 
 // ============================================================================

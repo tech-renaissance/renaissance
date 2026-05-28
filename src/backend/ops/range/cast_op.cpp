@@ -42,7 +42,7 @@ static void launch_cast_kernel(
     MultiStreamCaptureState& state,
     bool to_fp16)
 {
-    cudaStream_t s = static_cast<cudaStream_t>(ctx.stream(StreamKind::COMP_1));
+    cudaStream_t s = static_cast<cudaStream_t>(ctx.stream(StreamKind::UPDATE));
     int si = state.get_or_register(s);
     state.output_stream_idx = si;
     state.streams[si].has_pending_work = true;

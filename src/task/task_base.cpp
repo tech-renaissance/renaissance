@@ -234,17 +234,6 @@ void TaskBase::compile_impl(bool debug_mode) {
         // 直接对每个命名图独立捕获（保持 GraphEntry.stream 语义）
         compile_capture_simple();
     } else {
-        #ifdef TR_USE_CUDA
-        if (GlobalRegistry::instance().using_gpu()) {
-            for (int rank = 0; rank < num_gpus_; ++rank) {
-                cudaSetDevice(backend_->contexts[rank]->device_id());
-                cudaMemset(ArenaKeeper::instance().ptr_at(rank, 0), 0,
-                           active_memory_plan_->total_bytes());
-                cudaDeviceSynchronize();
-            }
-        }
-        #endif
-
         if (auto* dl = dynamic_cast<DeepLearningTask*>(this)) {
 
             GraphAtlas atlas = dl->build_graph_atlas();
@@ -279,10 +268,59 @@ void TaskBase::compile_impl(bool debug_mode) {
     compile_mark_compiled();
 
     if (auto* dl = dynamic_cast<DeepLearningTask*>(this)) {
+        #ifdef TR_USE_CUDA
+        if (GlobalRegistry::instance().using_gpu()) {
+            // ===== 关键：init_all() 之前全局清零 Arena，清除 warmup 残留 =====
+            for (int rank = 0; rank < num_gpus_; ++rank) {
+                cudaSetDevice(backend_->contexts[rank]->device_id());
+                cudaMemset(ArenaKeeper::instance().ptr_at(rank, 0), 0,
+                           active_memory_plan_->total_bytes());
+                cudaDeviceSynchronize();
+            }
+            // ================================================================
+        }
+        #endif
+
         init_all();
 
         #ifdef TR_USE_CUDA
         if (GlobalRegistry::instance().using_gpu()) {
+            // ===== init_all() 之后：写入运行时标量（batch_size 等）=====
+            const auto& b = dl->active_memory_plan_->baseline();
+            auto& registry = GlobalRegistry::instance();
+            for (int rank = 0; rank < num_gpus_; ++rank) {
+                DeviceContext& ctx = context(rank);
+                cudaSetDevice(ctx.device_id());
+
+                int32_t bs = registry.get_local_batch_size();
+                cudaMemcpy(ctx.ptr_at(b.local_batch_size), &bs, sizeof(int32_t),
+                           cudaMemcpyHostToDevice);
+
+                int32_t last_bs = registry.get_last_train_batch_size();
+                cudaMemcpy(ctx.ptr_at(b.last_train_batch_size), &last_bs, sizeof(int32_t),
+                           cudaMemcpyHostToDevice);
+
+                int32_t val_last_bs = registry.get_last_val_batch_size();
+                cudaMemcpy(ctx.ptr_at(b.last_val_batch_size), &val_last_bs, sizeof(int32_t),
+                           cudaMemcpyHostToDevice);
+            }
+            // =========================================================
+
+            // ========== 诊断：init_all() 后立即读取 scaling / lr ==========
+            for (int rank = 0; rank < num_gpus_; ++rank) {
+                DeviceContext& ctx = context(rank);
+                float scaling_val = 0.0f, lr_val = 0.0f;
+                cudaSetDevice(ctx.device_id());
+                cudaMemcpy(&scaling_val, ctx.ptr_at(b.scaling), sizeof(float), cudaMemcpyDeviceToHost);
+                cudaMemcpy(&lr_val, ctx.ptr_at(b.lr), sizeof(float), cudaMemcpyDeviceToHost);
+                fprintf(stderr, "[INIT-CHECK] rank=%d scaling=%f (id=%d, offset=%llu, ptr=%p) lr=%f (id=%d)\n",
+                       rank, scaling_val, b.scaling,
+                       (unsigned long long)active_memory_plan_->get_dtensor(b.scaling).offset(),
+                       (void*)ctx.ptr_at(b.scaling),
+                       lr_val, b.lr);
+                fflush(stderr);
+            }
+            // ==============================================================
             dl->lr_pinned_.resize(num_gpus_);
             for (int rank = 0; rank < num_gpus_; ++rank) {
                 cudaError_t err = cudaMallocHost(&dl->lr_pinned_[rank], sizeof(float));

@@ -77,11 +77,15 @@ list(APPEND RENAISSANCE_SOURCES
     backend/ops/dtensor/conv_op_impl.cpp
     backend/ops/range/h2d_op.cpp
     backend/ops/range/clear_op.cpp
+    backend/ops/range/accum_op.cpp
+    backend/ops/range/accum_op.cu
     backend/ops/range/copy_op.cpp
     backend/ops/range/cast_op.cpp
     backend/ops/range/cast_op.cu
     backend/ops/range/check_op.cpp
     backend/ops/range/check_op.cu
+    backend/ops/range/grad_scaling_op.cpp
+    backend/ops/range/grad_scaling_op.cu
     backend/ops/range/allreduce_op.cpp
     backend/ops/range/optimizer_op.cpp
     backend/ops/range/optimizer_op.cu

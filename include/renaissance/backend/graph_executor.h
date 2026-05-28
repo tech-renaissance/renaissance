@@ -19,12 +19,17 @@
 namespace tr {
 
 struct OptimizerScalarIds {
-    int32_t lr    = -1;
-    int32_t beta  = -1;
-    int32_t beta2 = -1;
-    int32_t tc    = -1;
-    int32_t wd    = -1;
-    int32_t eps   = -1;
+    int32_t lr      = -1;
+    int32_t beta    = -1;
+    int32_t beta2   = -1;
+    int32_t tc      = -1;
+    int32_t wd      = -1;
+    int32_t eps     = -1;
+    int32_t has_nan = -1;
+    int32_t scaling = -1;
+    int32_t local_batch_size      = -1;
+    int32_t last_train_batch_size = -1;
+    int32_t last_val_batch_size   = -1;
 };
 
 StreamKind gid_to_stream_kind(GraphId gid) noexcept;
