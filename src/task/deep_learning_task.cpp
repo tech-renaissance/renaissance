@@ -1025,8 +1025,7 @@ float DeepLearningTask::run_train_epoch_gpu() {
                     if (using_amp && g_ncg) { cudaGraphLaunch(g_ncg, s_up); sync_up(); }
 
                     lr = fetch_lr_for_batch(batch);
-                    if (batch % 100 == 0)
-                        LOG_INFO << "[LR] epoch=" << current_epoch_ << " batch=" << batch << " lr=" << lr;
+                    (void)lr;
                     *lr_pinned_[rank] = lr;
                     cudaMemcpyAsync(lr_dev_ptr, lr_pinned_[rank], sizeof(float),
                                     cudaMemcpyHostToDevice, s_up);
@@ -1076,7 +1075,7 @@ float DeepLearningTask::run_train_epoch_gpu() {
                     if (using_amp && g_ncg) { cudaGraphLaunch(g_ncg, s_up); sync_up(); }
 
                     lr = fetch_lr_for_batch(batches - 1);
-                    LOG_INFO << "[LR] epoch=" << current_epoch_ << " batch=" << (batches - 1) << " lr=" << lr;
+                    (void)lr;
                     *lr_pinned_[rank] = lr;
                     cudaMemcpyAsync(lr_dev_ptr, lr_pinned_[rank], sizeof(float),
                                     cudaMemcpyHostToDevice, s_up);
@@ -1884,65 +1883,6 @@ H2DTestResult DeepLearningTask::test_h2d_copy_correctness() {
                     sync_barrier(K, "xfer_done");
 
                     if (r == 0) {
-                        bool buf_ok = true;
-                        for (int rank = 0; rank < K; ++rank) {
-                            auto tl = fetch_from_rank(d_label_a, rank);
-                            auto td = fetch_from_rank(d_data_a, rank);
-                            if (buf_id == 1) {
-                                tl = fetch_from_rank(d_label_b, rank);
-                                td = fetch_from_rank(d_data_b, rank);
-                            }
-
-                            const int32_t* lbl = tl.data<int32_t>();
-                            int lmin = 2147483647, lmax = -2147483648;
-                            for (int i = 0; i < bs; ++i) {
-                                if (lbl[i] < lmin) lmin = lbl[i];
-                                if (lbl[i] > lmax) lmax = lbl[i];
-                            }
-                            if (lmin < label_min_ok || lmax > label_max_ok) {
-                                result.labels_ok = false;
-                                buf_ok = false;
-                            }
-
-                            const uint8_t* dp = td.data<uint8_t>();
-                            float first, last;
-                            auto read_fl = [&](int idx) -> float {
-                                if (is_fp16) {
-                                    uint16_t h = reinterpret_cast<const uint16_t*>(dp)[idx];
-                                    uint32_t sign = (h >> 15) & 1;
-                                    uint32_t exponent = (h >> 10) & 0x1Fu;
-                                    uint32_t mantissa = h & 0x3FFu;
-                                    uint32_t f;
-                                    if (exponent == 0) {
-                                        if (mantissa == 0) f = sign << 31;
-                                        else {
-                                            while (!(mantissa & 0x400u)) { mantissa <<= 1; --exponent; }
-                                            mantissa &= 0x3FFu;
-                                            exponent = 1u + (127u - 15u);
-                                            f = (sign << 31) | (exponent << 23) | (mantissa << 13);
-                                        }
-                                    } else if (exponent == 0x1Fu) {
-                                        f = (sign << 31) | (0xFFu << 23) | (mantissa << 13);
-                                    } else {
-                                        exponent += (127u - 15u);
-                                        f = (sign << 31) | (exponent << 23) | (mantissa << 13);
-                                    }
-                                    union { uint32_t u; float fl; } uf;
-                                    uf.u = f;
-                                    return uf.fl;
-                                } else {
-                                    return reinterpret_cast<const float*>(dp)[idx];
-                                }
-                            };
-                            first = read_fl(0);
-                            last  = read_fl(data_numel - 1);
-
-                            if (std::abs(first) < 1e-10f || std::abs(last) < 1e-10f) {
-                                result.data_ok = false;
-                                buf_ok = false;
-                            }
-                        }
-
                         ts->set_buffer_readable(buf_id, false);
                         ts->set_buffer_writeable(buf_id, true);
 

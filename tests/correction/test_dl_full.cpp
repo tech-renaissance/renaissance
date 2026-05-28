@@ -86,7 +86,7 @@ int main(int argc, char** argv) {
         .total_epochs(3)
         .optimizer(SGD().momentum(0.9f).weight_decay(0.0f).nesterov(false).dampening(0.0f))
         .scheduler(StepLR().base_lr(0.1f).step_by_epoch())
-        .validate_every(1, 1)
+        .validate_every(1, 0)
         .early_stop_by_top1(0.999f)
         .metrics(Metric::TRAIN_LOSS | Metric::VAL_LOSS | Metric::VAL_TOP1);
 
