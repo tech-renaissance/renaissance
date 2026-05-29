@@ -85,7 +85,6 @@ private:
     friend Layer conv_bn_relu(int, int, int, int);
     friend Layer cbrp(int, int, int, int, int, int, int);
     friend Layer gap_fc(int, bool);
-    friend Layer fc_relu(int, bool);
 
     friend Layer block(int, int, BlockStyle);
     friend Layer block(int, BlockStyle);
@@ -102,7 +101,7 @@ enum class NodeKind {
     BN, ReLU, TanhAct, Dropout, Flatten,
     MaxPool, GAP, FC, Identity,
     Sequential, Add2, Repeat,
-    CBR, CBRP, GapFC, FCReLU,
+    CBR, CBRP, GapFC,
     Block
 };
 
@@ -126,7 +125,6 @@ struct RepeatParam      { Layer body; int times; };
 struct CBRParam         { int out_ch; int k; int s; int p; };
 struct CBRPParam        { int out_ch; int conv_k; int conv_s; int conv_p; int pool_k; int pool_s; int pool_p; };
 struct GapFCParam       { int out_features; bool bias; };
-struct FCReLUParam      { int out_features; bool bias; };
 struct BlockParam       { BlockStyle style; int mid_ch; int out_ch; int stride; int expand_ratio; };
 
 using Payload = std::variant<
@@ -134,7 +132,7 @@ using Payload = std::variant<
     BNParam, ReLUParam, TanhActParam, DropoutParam, FlattenParam,
     MaxPoolParam, GAPParam, FCParam, IdentityParam,
     SequentialParam, Add2Param, RepeatParam,
-    CBRParam, CBRPParam, GapFCParam, FCReLUParam, BlockParam
+    CBRParam, CBRPParam, GapFCParam, BlockParam
 >;
 
 } // namespace detail
@@ -252,10 +250,6 @@ inline Layer cbrp(int out_ch, int conv_k, int conv_s, int conv_p, int pool_k, in
 inline Layer gap_fc(int out_features, bool bias) {
     return Layer(std::make_shared<Layer::Node>(
         detail::NodeKind::GapFC, detail::GapFCParam{out_features, bias}));
-}
-inline Layer fc_relu(int out_features, bool bias) {
-    return Layer(std::make_shared<Layer::Node>(
-        detail::NodeKind::FCReLU, detail::FCReLUParam{out_features, bias}));
 }
 
 // =============================================================================

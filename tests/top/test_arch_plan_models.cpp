@@ -318,8 +318,8 @@ void test_vgg16bn() {
         vgg_block(256, 3),
         vgg_block(512, 3),
         vgg_block(512, 3),
-        tr::fc_relu(4096, true), tr::dropout(0.5f),
-        tr::fc_relu(4096, true), tr::dropout(0.5f),
+        tr::fc(4096, true), tr::relu(), tr::dropout(0.5f),
+        tr::fc(4096, true), tr::relu(), tr::dropout(0.5f),
         tr::fc(1000, true)
     );
 

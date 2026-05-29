@@ -76,9 +76,6 @@ std::string compute_op_to_string(ComputeOp op) {
         case ComputeOp::FC_FP32_BWD:           return "FC_FP32_BWD";
         case ComputeOp::FC_AMP_FWD:            return "FC_AMP_FWD";
         case ComputeOp::FC_AMP_BWD:            return "FC_AMP_BWD";
-        case ComputeOp::FC_RELU_AMP_FWD:       return "FC_RELU_AMP_FWD";
-        case ComputeOp::FC_RELU_AMP_BWD:       return "FC_RELU_AMP_BWD";
-
         // === 形状变换（类型多态）===
         case ComputeOp::FLATTEN_FP32_FWD:         return "FLATTEN_FP32_FWD";
         case ComputeOp::FLATTEN_FP32_BWD:         return "FLATTEN_FP32_BWD";
@@ -259,8 +256,6 @@ std::string format_params(ComputeOp op, const OpParams& p) {
         case ComputeOp::FC_FP32_BWD:
         case ComputeOp::FC_AMP_FWD:
         case ComputeOp::FC_AMP_BWD:
-        case ComputeOp::FC_RELU_AMP_FWD:
-        case ComputeOp::FC_RELU_AMP_BWD:
         case ComputeOp::FC_BN_RELU_AMP_FWD:
         case ComputeOp::FC_BN_RELU_AMP_BWD: {
             if (auto* fp = std::get_if<FCParams>(&p.data)) {

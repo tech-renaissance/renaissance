@@ -99,10 +99,6 @@ void ArchPlan::recompute_shapes_from(size_t start_idx) {
             cur = {1, oh, ow, p.out_ch};
             break;
         }
-        case LayerKind::FCReLU: {
-            cur = {1, 1, 1, std::get<FRLayerParams>(layer.params).out_features};
-            break;
-        }
         case LayerKind::GapFC: {
             cur = {1, 1, 1, std::get<GapFCLayerParams>(layer.params).out_features};
             break;

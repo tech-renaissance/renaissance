@@ -103,13 +103,6 @@ static void expand_primitive_impl(const Layer::Node& node, std::vector<ArchLayer
         current_c = p.out_features;
         break;
     }
-    case NodeKind::FCReLU: {
-        auto& p = std::get<FCReLUParam>(node.payload);
-        out.push_back({LayerKind::FC, tr::FCLayerParams{p.out_features, p.bias}, "fc_fcrelu", {}, {}, false, false, src_id});
-        out.push_back({LayerKind::ReLU, EmptyParams{}, "relu_fcrelu", {}, {}, false, false, src_id});
-        current_c = p.out_features;
-        break;
-    }
     default:
         TR_VALUE_ERROR("expand_primitive_impl: unexpected node kind");
     }
@@ -386,7 +379,6 @@ void ArchPlan::expand_tree(const Layer& root, std::vector<ArchLayer>& out,
     case NodeKind::CBR:
     case NodeKind::CBRP:
     case NodeKind::GapFC:
-    case NodeKind::FCReLU:
         expand_primitive_impl(node, out, current_c, src_id, fuse);
         break;
     case NodeKind::Block:

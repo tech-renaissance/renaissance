@@ -28,7 +28,6 @@ static bool is_fusion_layer(tr::LayerKind kind) {
         case tr::LayerKind::ConvBN:
         case tr::LayerKind::BNReLU:
         case tr::LayerKind::ConvReLU:
-        case tr::LayerKind::FCReLU:
         case tr::LayerKind::GapFC:
             return true;
         default:

@@ -336,9 +336,6 @@ void ArchPlan::step10_merge_binary_and_mark() {
         auto& cp = std::get<ConvLayerParams>(conv.params);
         return CRLayerParams{cp.out_ch, cp.k, cp.s, cp.p};
     };
-    auto build_fr = [](const ArchLayer& fc, const ArchLayer&) -> LayerParam {
-        return FRLayerParams{std::get<FCLayerParams>(fc.params).out_features, std::get<FCLayerParams>(fc.params).bias};
-    };
     auto build_empty = [](const ArchLayer&, const ArchLayer&) -> LayerParam {
         return EmptyParams{};
     };
@@ -349,8 +346,11 @@ void ArchPlan::step10_merge_binary_and_mark() {
         LayerKind::ConvBN, build_cb);
     merge_pattern_binary(LayerKind::Conv, LayerKind::ReLU,
         LayerKind::ConvReLU, build_cr);
-    merge_pattern_binary(LayerKind::FC, LayerKind::ReLU,
-        LayerKind::FCReLU, build_fr);
+    // FC+ReLU fusion permanently disabled — FCReLU only has AMP kernels (no FP32),
+    // which causes training failure in FP32 mode. Keep FC and ReLU separate.
+    // // FCReLU 融合算子的 launch_cuda 未注册，暂时禁用
+    // merge_pattern_binary(LayerKind::FC, LayerKind::ReLU,
+    //     LayerKind::FCReLU, build_fr);
     merge_pattern_binary(LayerKind::Bn2d, LayerKind::ReLU,
         LayerKind::BNReLU, build_empty);
     merge_pattern_binary(LayerKind::Bn1d, LayerKind::ReLU,

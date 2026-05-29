@@ -42,7 +42,6 @@ static LayerKind kind_from_name(const std::string& name) {
     if (name == "ConvBN") return LayerKind::ConvBN;
     if (name == "BNReLU") return LayerKind::BNReLU;
     if (name == "ConvReLU") return LayerKind::ConvReLU;
-    if (name == "FCReLU") return LayerKind::FCReLU;
     if (name == "GapFC") return LayerKind::GapFC;
     TR_VALUE_ERROR("kind_from_name: unknown kind: " + name);
     return LayerKind::Conv;
@@ -154,11 +153,6 @@ std::string ArchPlan::to_yaml() const {
         case LayerKind::ConvReLU: {
             auto& p = std::get<CRLayerParams>(l.params);
             pnode["out_ch"] = p.out_ch; pnode["k"] = p.k; pnode["s"] = p.s; pnode["p"] = p.p;
-            break;
-        }
-        case LayerKind::FCReLU: {
-            auto& p = std::get<FRLayerParams>(l.params);
-            pnode["out_features"] = p.out_features; pnode["bias"] = p.bias;
             break;
         }
         case LayerKind::GapFC: {
@@ -289,11 +283,6 @@ ArchPlan ArchPlan::from_yaml(const std::string& yaml) {
                 layer.params = CRLayerParams{
                     pnode["out_ch"].get_value<int>(), pnode["k"].get_value<int>(),
                     pnode["s"].get_value<int>(), pnode["p"].get_value<int>()};
-                break;
-            case LayerKind::FCReLU:
-                layer.params = FRLayerParams{
-                    pnode["out_features"].get_value<int>(),
-                    pnode.contains("bias") ? pnode["bias"].get_value<bool>() : true};
                 break;
             case LayerKind::GapFC:
                 layer.params = GapFCLayerParams{

@@ -35,11 +35,19 @@ else:
 print(f"Mode: {mode}  Device: {device}")
 
 # ------------------------------------------------------------------
+# TF32（与 Renaissance .use_tf32(true) 对齐）
+# ------------------------------------------------------------------
+if device.type == "cuda":
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+    torch.set_float32_matmul_precision('high')
+
+# ------------------------------------------------------------------
 # 超参数（与 Renaissance test_dl_full 对齐）
 # ------------------------------------------------------------------
 torch.manual_seed(42)
 batch_size = 128
-epochs = 3
+epochs = 4
 lr = 0.1
 momentum = 0.9
 
@@ -54,8 +62,9 @@ transform = transforms.Compose([
 train_set = datasets.MNIST("T:/dataset/mnist", train=True, download=False, transform=transform)
 val_set   = datasets.MNIST("T:/dataset/mnist", train=False, download=False, transform=transform)
 
-train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True)
-val_loader   = DataLoader(val_set,   batch_size=batch_size, shuffle=False)
+pin_mem = (device.type == "cuda")
+train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True,  pin_memory=pin_mem)
+val_loader   = DataLoader(val_set,   batch_size=batch_size, shuffle=False, pin_memory=pin_mem)
 
 # ------------------------------------------------------------------
 # 模型定义
@@ -64,9 +73,9 @@ class MLP(nn.Module):
     def __init__(self):
         super().__init__()
         self.fc1 = nn.Linear(784, 512, bias=True)
-        self.tanh1 = nn.Tanh()
+        self.relu1 = nn.ReLU()
         self.fc2 = nn.Linear(512, 256, bias=True)
-        self.tanh2 = nn.Tanh()
+        self.relu2 = nn.ReLU()
         self.fc3 = nn.Linear(256, 10, bias=True)
 
         nn.init.zeros_(self.fc1.bias)
@@ -75,8 +84,8 @@ class MLP(nn.Module):
 
     def forward(self, x):
         x = x.view(x.size(0), -1)
-        x = self.tanh1(self.fc1(x))
-        x = self.tanh2(self.fc2(x))
+        x = self.relu1(self.fc1(x))
+        x = self.relu2(self.fc2(x))
         x = self.fc3(x)
         return x
 
@@ -85,8 +94,8 @@ model = MLP().to(device)
 # torch.compile 加速（PyTorch 2.0+）
 # CPU 模式下 Windows 常因缺少 omp.h 导致编译失败，故仅在 GPU 启用
 if hasattr(torch, "compile") and device.type == "cuda":
-    print("Using torch.compile ...")
-    model = torch.compile(model)
+    print("Using torch.compile (max-autotune) ...")
+    model = torch.compile(model, mode="max-autotune")
 
 criterion = nn.CrossEntropyLoss()
 optimizer = optim.SGD(model.parameters(), lr=lr, momentum=momentum,

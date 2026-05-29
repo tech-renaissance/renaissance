@@ -54,7 +54,7 @@ static bool is_weight_bearing(LayerKind k) {
         case LayerKind::FC:
         case LayerKind::ConvBNReLU: case LayerKind::ConvBN: case LayerKind::ConvReLU:
         case LayerKind::ConvBNReLUMaxPool:
-        case LayerKind::FCBNReLU: case LayerKind::FCReLU: case LayerKind::GapFC:
+        case LayerKind::FCBNReLU: case LayerKind::GapFC:
         case LayerKind::BNReLU:
         case LayerKind::BottleneckProjection:
         case LayerKind::BottleneckIdentity:
@@ -256,7 +256,6 @@ private:
                 compile_fc(layer);
                 compile_bn(layer, idx);
                 break;
-            case LayerKind::FCReLU:
             case LayerKind::GapFC:
                 compile_fc(layer);
                 break;
@@ -460,7 +459,6 @@ private:
         auto& p = layer.params;
         if (std::holds_alternative<FCLayerParams>(p)) return std::get<FCLayerParams>(p);
         if (std::holds_alternative<FBRLayerParams>(p)) { auto& fp=std::get<FBRLayerParams>(p); return {fp.out_features, fp.bias}; }
-        if (std::holds_alternative<FRLayerParams>(p))  { auto& fp=std::get<FRLayerParams>(p);  return {fp.out_features, fp.bias}; }
         if (std::holds_alternative<GapFCLayerParams>(p)){ auto& fp=std::get<GapFCLayerParams>(p); return {fp.out_features, fp.bias}; }
         FCLayerParams fp;
         fp.out_features = layer.out_shape.c();
@@ -522,10 +520,6 @@ namespace {
         }
         if (std::holds_alternative<FBRLayerParams>(lp)) {
             auto& p = std::get<FBRLayerParams>(lp);
-            return OpParams{FCParams{p.out_features, p.bias}};
-        }
-        if (std::holds_alternative<FRLayerParams>(lp)) {
-            auto& p = std::get<FRLayerParams>(lp);
             return OpParams{FCParams{p.out_features, p.bias}};
         }
         if (std::holds_alternative<GapFCLayerParams>(lp)) {
@@ -948,7 +942,6 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
             case LayerKind::ConvBNReLUMaxPool:  idx = 17; break;
             case LayerKind::ConvReLU:           idx = 1; break;
             case LayerKind::FCBNReLU:           idx = 9; break;  // bn_output (FC7+2=9)
-            case LayerKind::FCReLU:             idx = 2; break;
             case LayerKind::GapFC:              idx = 3; break;
             case LayerKind::BNReLU:             idx = 2; break;
             case LayerKind::BottleneckProjection: idx = 61; break;
@@ -983,7 +976,6 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
             case LayerKind::ConvBNReLUMaxPool:  idx = 2; break;
             case LayerKind::ConvReLU:           idx = 2; break;  // grad_slot
             case LayerKind::FCBNReLU:           idx = -1; break; // dX in-place to X
-            case LayerKind::FCReLU:             idx = -1; break; // dX in-place to X
             case LayerKind::GapFC:              idx = -1; break; // dX in-place to X
             case LayerKind::BNReLU:             idx = 2; break;  // dX inplace to bn_output
             case LayerKind::BottleneckProjection: idx = 70; break;  // branch_grad_slot
@@ -1197,7 +1189,6 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
             }
 
             if (gn.compute_op == ComputeOp::FC_AMP_BWD || gn.compute_op == ComputeOp::FC_FP32_BWD ||
-                gn.compute_op == ComputeOp::FC_RELU_AMP_BWD ||
                 gn.compute_op == ComputeOp::GAP_FC_AMP_BWD) {
                 auto it = layer_input_ids.find(l);
                 if (it != layer_input_ids.end() && it->second >= 0) {
@@ -1253,7 +1244,7 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
         // 使用独立的get_grad_output_id而非前向输出ID
         int32_t grad_id = get_grad_output_id(layer.kind, tensor_ids);
         // FC dX in-place：梯度直接写入X张量（前一层输出），追踪该张量ID
-        if (grad_id < 0 && (layer.kind == LayerKind::FC || layer.kind == LayerKind::FCReLU ||
+        if (grad_id < 0 && (layer.kind == LayerKind::FC ||
             layer.kind == LayerKind::FCBNReLU || layer.kind == LayerKind::GapFC ||
             layer.kind == LayerKind::Tanh || layer.kind == LayerKind::ReLU)) {
             auto it = layer_input_ids.find(l);

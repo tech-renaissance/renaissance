@@ -68,7 +68,11 @@ int main(int argc, char** argv) {
         .use_tf32(true);
 
     PREPROCESSOR_SETTING
+#ifdef _WIN32
         .dataset("mnist", "T:\\dataset\\mnist")
+#else
+        .dataset("mnist", "/root/epfs/dataset/mnist")
+#endif
         .color_channels(1)
         .load_workers(1)
         .preprocess_workers(4)
@@ -78,7 +82,7 @@ int main(int argc, char** argv) {
         .val_transforms(DoNothing())
         .commit();
 
-    BluePrint mlp = seq(fc(512, true), tanh_act(), fc(256, true), tanh_act(), fc(10, true));
+    BluePrint mlp = seq(fc(512, true), relu(), fc(256, true), relu(), fc(10, true));
 
     DeepLearningTask task;
     task.model(mlp)

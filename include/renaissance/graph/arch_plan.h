@@ -44,7 +44,7 @@ enum class LayerKind : uint16_t {
     ConvBNReLU, FCBNReLU,
 
     // 二元融合
-    ConvBN, BNReLU, ConvReLU, FCReLU, GapFC,
+    ConvBN, BNReLU, ConvReLU, GapFC,
 };
 
 // 参数结构体
@@ -114,11 +114,6 @@ struct CRLayerParams {
     int out_ch, k, s, p;
     bool operator==(const CRLayerParams& o) const { return out_ch == o.out_ch && k == o.k && s == o.s && p == o.p; }
 };
-struct FRLayerParams {
-    int out_features;
-    bool bias = true;
-    bool operator==(const FRLayerParams& o) const { return out_features == o.out_features && bias == o.bias; }
-};
 struct GapFCLayerParams {
     int out_features;
     bool bias = true;
@@ -136,7 +131,7 @@ using LayerParam = std::variant<
     BasicBlockIdentityLayerParams, BasicBlockProjectionLayerParams,
     InvResidualLayerParams,
     CBRPLayerParams, CBRLayerParams, FBRLayerParams,
-    CBLayerParams, CRLayerParams, FRLayerParams, GapFCLayerParams,
+    CBLayerParams, CRLayerParams, GapFCLayerParams,
     EmptyParams
 >;
 

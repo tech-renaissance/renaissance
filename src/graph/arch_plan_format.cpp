@@ -41,7 +41,6 @@ const char* kind_name(LayerKind k) {
     case LayerKind::ConvBN: return "ConvBN";
     case LayerKind::BNReLU: return "BNReLU";
     case LayerKind::ConvReLU: return "ConvReLU";
-    case LayerKind::FCReLU: return "FCReLU";
     case LayerKind::GapFC: return "GapFC";
     default: return "Unknown";
     }
@@ -126,11 +125,6 @@ static std::string params_str(const ArchLayer& l) {
     case LayerKind::ConvReLU: {
         auto& p = std::get<CRLayerParams>(l.params);
         snprintf(buf, sizeof(buf), "out=%d k=%d s=%d p=%d", p.out_ch, p.k, p.s, p.p);
-        break;
-    }
-    case LayerKind::FCReLU: {
-        auto& p = std::get<FRLayerParams>(l.params);
-        snprintf(buf, sizeof(buf), "out=%d bias=%d", p.out_features, p.bias);
         break;
     }
     case LayerKind::GapFC: {

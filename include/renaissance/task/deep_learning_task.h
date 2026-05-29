@@ -267,7 +267,6 @@ protected:
                 case LayerKind::ConvBNReLUMaxPool:
                 case LayerKind::BNReLU:
                 case LayerKind::ConvReLU:
-                case LayerKind::FCReLU:
                 case LayerKind::FCBNReLU:
                 case LayerKind::BottleneckProjection:
                 case LayerKind::BottleneckIdentity:
@@ -399,7 +398,6 @@ protected:
     static bool has_relu_layers(const ArchPlan& plan) {
         for (const auto& l : plan.layers()) {
             if (l.kind == LayerKind::ReLU ||
-                l.kind == LayerKind::FCReLU ||
                 l.kind == LayerKind::ConvBNReLU ||
                 l.kind == LayerKind::ConvReLU ||
                 l.kind == LayerKind::BasicBlockProjection ||

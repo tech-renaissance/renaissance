@@ -980,64 +980,6 @@ SubgraphPattern build_fcbnrelu_inference(const OpParams&, const std::vector<Tens
 }
 
 // ============================================================================
-// FCReLU — FC(7) + ReLU mask(1) = 8张量
-// ============================================================================
-
-std::vector<TensorDesc> infer_fcrelu_tensors(
-    const Shape& input, const OpParams& params, const InferContext& ctx)
-{
-    std::vector<TensorDesc> descs;
-    if (!std::holds_alternative<FCParams>(params.data)) {
-        LOG_WARN << "infer_fcrelu_tensors: params is not FCParams";
-        return descs;
-    }
-    const auto& fp = std::get<FCParams>(params.data);
-
-    OpParams fc_op{FCParams{fp}};
-    auto fc_d = infer_fc_tensors(input, fc_op, ctx);
-    descs.insert(descs.end(), fc_d.begin(), fc_d.end());
-
-    DType feat_dt = ctx.enable_amp ? DType::FP16 : DType::FP32;
-    Shape fc_out = fc_d[2].shape;
-    descs.push_back(TensorDesc{"relu_mask", fc_out, Region::S_MASK, DType::INT8});
-
-    return descs;
-}
-
-SubgraphPattern build_fcrelu_forward(const OpParams&, const std::vector<TensorDesc>& descs) {
-    SubgraphPattern p;
-    if (descs.size() < 8) return p;  // FC(7) + mask(1) = 8张量
-    SubgraphPattern::Node n;
-    n.op = ComputeOp::FC_RELU_AMP_FWD;
-    n.input_indices  = {0, 1};
-    n.output_indices = {2, 7};   // fc_output, relu_mask
-    p.nodes.push_back(n);
-    return p;
-}
-
-SubgraphPattern build_fcrelu_backward(const OpParams&, const std::vector<TensorDesc>& descs) {
-    SubgraphPattern p;
-    if (descs.size() < 8) return p;  // FC(7) + mask(1) = 8张量
-    SubgraphPattern::Node n;
-    n.op = ComputeOp::FC_RELU_AMP_BWD;
-    n.input_indices  = {0, 2, 7};   // fc_weight, fc_output, relu_mask
-    n.output_indices = {3, 4};      // dW, db (dX in-place via Phase 4)
-    p.nodes.push_back(n);
-    return p;
-}
-
-SubgraphPattern build_fcrelu_inference(const OpParams&, const std::vector<TensorDesc>& descs) {
-    SubgraphPattern p;
-    if (descs.size() < 8) return p;
-    SubgraphPattern::Node n;
-    n.op = ComputeOp::FC_RELU_AMP_FWD;
-    n.input_indices  = {0, 1};
-    n.output_indices = {2};
-    p.nodes.push_back(n);
-    return p;
-}
-
-// ============================================================================
 // GapFC — GAP(1) + FC(7) = 8张量
 //   GAP output = FC input, kept as intermediate per fusion rule
 // ============================================================================
@@ -1860,7 +1802,6 @@ Shape get_output_shape(LayerKind kind, const std::vector<TensorDesc>& descs)
         case LayerKind::ConvBNReLUMaxPool: return find(17); // pool output
         case LayerKind::ConvReLU:      return find(1);   // conv output
         case LayerKind::FCBNReLU:      return find(9);   // BN output (FC7+2=9)
-        case LayerKind::FCReLU:        return find(2);   // fc output
         case LayerKind::GapFC:         return find(3);   // fc output (gap[0] + fc_weight[1] + fc_bias[2] + fc_output[3])
         // Block fusions: output is the last sub-layer's BN output
         case LayerKind::BottleneckProjection: return find(61); // conv3_bn_out (53+6+2)
@@ -1895,7 +1836,6 @@ const LayerDescriptor& get_layer_descriptor(LayerKind kind) {
     static const LayerDescriptor cbrp_desc   = { infer_convbnrelump_tensors, build_convbnrelump_forward, build_convbnrelump_backward, build_convbnrelump_inference };
     static const LayerDescriptor cr_desc     = { infer_convrelu_tensors,   build_convrelu_forward,   build_convrelu_backward,   build_convrelu_inference };
     static const LayerDescriptor fbr_desc    = { infer_fcbnrelu_tensors,   build_fcbnrelu_forward,   build_fcbnrelu_backward,   build_fcbnrelu_inference };
-    static const LayerDescriptor fr_desc     = { infer_fcrelu_tensors,     build_fcrelu_forward,     build_fcrelu_backward,     build_fcrelu_inference };
     static const LayerDescriptor gapfc_desc  = { infer_gapfc_tensors,      build_gapfc_forward,      build_gapfc_backward,      build_gapfc_inference };
     static const LayerDescriptor bnr_desc    = { infer_bnrelu_tensors,     build_bnrelu_forward,     build_bnrelu_backward,     build_bnrelu_inference };
 
@@ -1931,7 +1871,6 @@ const LayerDescriptor& get_layer_descriptor(LayerKind kind) {
         case LayerKind::ConvBNReLUMaxPool:    return cbrp_desc;
         case LayerKind::ConvReLU:             return cr_desc;
         case LayerKind::FCBNReLU:             return fbr_desc;
-        case LayerKind::FCReLU:               return fr_desc;
         case LayerKind::GapFC:                return gapfc_desc;
         case LayerKind::BottleneckProjection: return bproj_desc;
         case LayerKind::BottleneckIdentity:   return bid_desc;
