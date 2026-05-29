@@ -1,8 +1,0 @@
-CapturedGraph封装——Captured.md
-单卡预热，多卡并行捕获——Warmup.md
-并行运行指南——Parallel.md
-多流捕获指南——MultiSteam.md
-Graph去重——Simplify.md
-CPU上的Graph的实现——CpuGraph.md
-算子的实现——Operator.md
-本质的需求——Guide.md
