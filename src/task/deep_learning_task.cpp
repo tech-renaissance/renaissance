@@ -860,6 +860,7 @@ TrainingResult DeepLearningTask::run_gpu() {
             catch (...) { prep_exc = std::current_exception(); }
         });
         float train_loss = run_train_epoch_gpu();
+        LOG_INFO << "[TRAIN] loss=" << std::fixed << std::setprecision(6) << train_loss;
         prep_thread.join();
         if (prep_exc) std::rethrow_exception(prep_exc);
 
@@ -1262,6 +1263,7 @@ TrainingResult DeepLearningTask::run_cpu() {
             catch (...) { prep_exc = std::current_exception(); }
         });
         float train_loss = run_train_epoch_cpu();
+        LOG_INFO << "[TRAIN-CPU] loss=" << std::fixed << std::setprecision(6) << train_loss;
         prep_thread.join();
         if (prep_exc) std::rethrow_exception(prep_exc);
 
@@ -1637,7 +1639,7 @@ std::tuple<float, float, float> DeepLearningTask::run_val_epoch_gpu(bool validat
         }
     }
 
-    LOG_INFO << "[VAL] loss=" << avg_loss << " top1=" << avg_top1 * 100.0f
+    LOG_INFO << "[VAL] loss=" << std::fixed << std::setprecision(6) << avg_loss << " top1=" << avg_top1 * 100.0f
              << "% top5=" << avg_top5 * 100.0f << "%";
 
     return {avg_loss, avg_top1, avg_top5};
@@ -1669,6 +1671,9 @@ std::tuple<float, float, float> DeepLearningTask::run_val_epoch_cpu(bool validat
     int32_t idx_inf_b_vb = idx_for(GraphId::INF_MAIN_B, 4);
     int32_t idx_inf_a_vl = idx_for(GraphId::INF_MAIN_A, 5);
     int32_t idx_inf_b_vl = idx_for(GraphId::INF_MAIN_B, 5);
+    int32_t idx_clear    = idx_for(GraphId::CLEAR_METRICS, 4);
+    int32_t idx_accum_vb = idx_for(GraphId::ACCUM_METRICS, 4);
+    int32_t idx_accum_vl = idx_for(GraphId::ACCUM_METRICS_VAL_LAST, 4);
 
     const auto& bl = active_memory_plan_->baseline();
     int32_t loss_id = bl.loss;
@@ -1680,6 +1685,16 @@ std::tuple<float, float, float> DeepLearningTask::run_val_epoch_cpu(bool validat
     void* top1_ptr = top1_id >= 0 ? ctx.ptr_at(top1_id) : nullptr;
     void* top5_ptr = top5_id >= 0 ? ctx.ptr_at(top5_id) : nullptr;
 
+    // CPU 路径未走 init_variant_scalars，需手动写入 batch-size scalar
+    if (bl.local_batch_size >= 0) {
+        int32_t* bs_ptr = static_cast<int32_t*>(ctx.ptr_at(bl.local_batch_size));
+        *bs_ptr = registry.get_local_batch_size();
+    }
+    if (bl.last_val_batch_size >= 0) {
+        int32_t* last_bs_ptr = static_cast<int32_t*>(ctx.ptr_at(bl.last_val_batch_size));
+        *last_bs_ptr = registry.get_last_val_batch_size();
+    }
+
     TransferStation* ts = nullptr;
     for (int w = 0; w < 200; ++w) {
         ts = static_cast<TransferStation*>(registry.transfer_station_ptr(0));
@@ -1688,9 +1703,7 @@ std::tuple<float, float, float> DeepLearningTask::run_val_epoch_cpu(bool validat
     }
     if (!ts) TR_DEVICE_ERROR("TransferStation not ready for CPU val path");
 
-    double acc_loss = 0.0;
-    double acc_top1 = 0.0;
-    double acc_top5 = 0.0;
+    if (idx_clear >= 0) launch(idx_clear);
 
     for (int batch = 0; batch < val_batches; ++batch) {
         int buf = batch % 2;
@@ -1711,15 +1724,8 @@ std::tuple<float, float, float> DeepLearningTask::run_val_epoch_cpu(bool validat
             ? (is_last ? idx_inf_a_vl : idx_inf_a_vb)
             : (is_last ? idx_inf_b_vl : idx_inf_b_vb));
 
-        int bs = is_last ? registry.get_last_val_batch_size()
-                         : registry.get_local_batch_size();
-        float b_loss = loss_ptr ? *static_cast<float*>(loss_ptr) : 0.0f;
-        float b_top1 = top1_ptr ? *static_cast<float*>(top1_ptr) : 0.0f;
-        float b_top5 = top5_ptr ? *static_cast<float*>(top5_ptr) : 0.0f;
-
-        acc_loss += b_loss * static_cast<double>(bs);
-        acc_top1 += b_top1 * static_cast<double>(bs);
-        acc_top5 += b_top5 * static_cast<double>(bs);
+        int32_t idx_accum = is_last ? idx_accum_vl : idx_accum_vb;
+        if (idx_accum >= 0) launch(idx_accum);
 
         ts->set_buffer_readable(buf, false);
         ts->set_buffer_writeable(buf, true);
@@ -1729,12 +1735,25 @@ std::tuple<float, float, float> DeepLearningTask::run_val_epoch_cpu(bool validat
         }
     }
 
+    float avg_loss = 0.0f, avg_top1 = 0.0f, avg_top5 = 0.0f;
     size_t total_val = registry.num_val_samples();
-    float avg_loss = (total_val > 0) ? static_cast<float>(acc_loss / static_cast<double>(total_val)) : 0.0f;
-    float avg_top1 = (total_val > 0) ? static_cast<float>(static_cast<int64_t>(std::round(acc_top1))) / static_cast<float>(total_val) : 0.0f;
-    float avg_top5 = (total_val > 0) ? static_cast<float>(static_cast<int64_t>(std::round(acc_top5))) / static_cast<float>(total_val) : 0.0f;
+    if (bl.accum_loss >= 0 && total_val > 0) {
+        Tensor h = fetch_from_rank(active_memory_plan_->get_dtensor(bl.accum_loss), 0);
+        float val = h.data<float>()[0];
+        avg_loss = val / static_cast<float>(total_val);
+    }
+    if (bl.accum_top1 >= 0 && total_val > 0) {
+        Tensor h = fetch_from_rank(active_memory_plan_->get_dtensor(bl.accum_top1), 0);
+        float val = h.data<float>()[0];
+        avg_top1 = std::round(val) / static_cast<float>(total_val);
+    }
+    if (bl.accum_top5 >= 0 && total_val > 0) {
+        Tensor h = fetch_from_rank(active_memory_plan_->get_dtensor(bl.accum_top5), 0);
+        float val = h.data<float>()[0];
+        avg_top5 = std::round(val) / static_cast<float>(total_val);
+    }
 
-    LOG_INFO << "[VAL-CPU] loss=" << avg_loss << " top1=" << avg_top1 * 100.0f
+    LOG_INFO << "[VAL-CPU] loss=" << std::fixed << std::setprecision(6) << avg_loss << " top1=" << avg_top1 * 100.0f
              << "% top5=" << avg_top5 * 100.0f << "%";
 
     return {avg_loss, avg_top1, avg_top5};
@@ -1818,10 +1837,10 @@ void DeepLearningTask::log_epoch_results(float train_loss, float val_loss,
     oss << std::setw(6) << (current_epoch_ + 1) << " | ";
 
     if (has_metric(metrics_, Metric::TRAIN_LOSS)) {
-        oss << std::setw(10) << std::fixed << std::setprecision(4) << train_loss << " | ";
+        oss << std::setw(10) << std::fixed << std::setprecision(6) << train_loss << " | ";
     }
     if (has_metric(metrics_, Metric::VAL_LOSS)) {
-        oss << std::setw(10) << std::fixed << std::setprecision(4) << val_loss << " | ";
+        oss << std::setw(10) << std::fixed << std::setprecision(6) << val_loss << " | ";
     }
     if (has_metric(metrics_, Metric::VAL_TOP1)) {
         oss << std::setw(9) << std::fixed << std::setprecision(2) << (top1 * 100.0f) << "% | ";

@@ -109,6 +109,24 @@ endif()
 
 message(STATUS "  - test_softmax_ce_inf: SOFTMAX_CE INF correction test")
 
+# SoftmaxCE FWD vs INF loss 差异测试
+add_executable(test_softmax_ce_loss test_softmax_ce_loss.cpp)
+target_link_libraries(test_softmax_ce_loss PRIVATE renaissance)
+target_compile_definitions(test_softmax_ce_loss PRIVATE TR_LOG_LEVEL=1)
+if(TR_USE_CUDA)
+    setup_gpu_runtime_env(test_softmax_ce_loss)
+endif()
+set_target_properties(test_softmax_ce_loss PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/correction
+    WIN32_EXECUTABLE FALSE
+)
+if(MSVC)
+    target_compile_options(test_softmax_ce_loss PRIVATE /W4 /utf-8 /wd4244 /wd4505 /wd4458 /wd4127)
+else()
+    target_compile_options(test_softmax_ce_loss PRIVATE -Wall -Wextra -Wpedantic -Wno-unused-function)
+endif()
+message(STATUS "  - test_softmax_ce_loss: SOFTMAX_CE FWD vs INF loss diff test")
+
 # RANGE_CLEAR 数学正确性测试
 add_executable(test_clear test_clear.cpp)
 target_link_libraries(test_clear PRIVATE renaissance)

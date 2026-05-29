@@ -61,7 +61,7 @@ int main(int argc, char** argv) {
             break;
     }
     GLOBAL_SETTING
-        .manual_seed(42)
+        .manual_seed(123)
         .local_batch_size(128)
         .train_resolution(28)
         .val_resolution(28)
@@ -84,7 +84,7 @@ int main(int argc, char** argv) {
     task.model(mlp)
         .loss(CrossEntropyLoss())
         .initializer(Initializer().fc(InitKind::KAIMING_UNIFORM).nonlinearity(std::sqrt(5.0f)))
-        .total_epochs(3)
+        .total_epochs(4)
         .optimizer(SGD().momentum(0.9f).weight_decay(0.0f).nesterov(false).dampening(0.0f))
         .scheduler(StepLR().base_lr(0.1f).step_by_epoch())
         .validate_every(1, 0)
