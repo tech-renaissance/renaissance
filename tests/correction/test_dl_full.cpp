@@ -62,9 +62,10 @@ int main(int argc, char** argv) {
     }
     GLOBAL_SETTING
         .manual_seed(42)
-        .local_batch_size(199)
+        .local_batch_size(128)
         .train_resolution(28)
-        .val_resolution(28);
+        .val_resolution(28)
+        .use_tf32(true);
 
     PREPROCESSOR_SETTING
         .dataset("mnist", "T:\\dataset\\mnist")

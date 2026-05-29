@@ -363,15 +363,7 @@ message(STATUS "  - perf_dl_xfer_ab: AB transfer bandwidth test")
 
 add_executable(test_dl_full test_dl_full.cpp)
 setup_dl_test(test_dl_full)
-message(STATUS "  - test_dl_full: DeepLearningTask full GPU training test")
-
-add_executable(test_dl_full_gpu test_dl_full_gpu.cpp)
-setup_dl_test(test_dl_full_gpu)
-message(STATUS "  - test_dl_full_gpu: DeepLearningTask fixed GPU (FP32) training test")
-
-add_executable(test_dl_full_amp test_dl_full_amp.cpp)
-setup_dl_test(test_dl_full_amp)
-message(STATUS "  - test_dl_full_amp: DeepLearningTask fixed AMP (FP16) training test")
+message(STATUS "  - test_dl_full: DeepLearningTask full training test (CPU/GPU/AMP)")
 
 add_executable(test_h2d_copy_correctness test_h2d_copy_correctness.cpp)
 setup_dl_test(test_h2d_copy_correctness)

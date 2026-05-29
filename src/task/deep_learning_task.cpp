@@ -599,6 +599,42 @@ float DeepLearningTask::fetch_lr_for_batch(int batch_id) const {
     }, sched_cfg_);
 }
 
+void DeepLearningTask::init_variant_scalars() {
+#ifdef TR_USE_CUDA
+    if (!GlobalRegistry::instance().using_gpu()) return;
+
+    auto& registry = GlobalRegistry::instance();
+    int32_t bs = registry.get_local_batch_size();
+    int32_t last_bs = registry.get_last_train_batch_size();
+    int32_t val_last_bs = registry.get_last_val_batch_size();
+
+    const auto& b = active_memory_plan_->baseline();
+
+    for (int rank = 0; rank < num_gpus_; ++rank) {
+        DeviceContext& ctx = context(rank);
+        cudaSetDevice(ctx.device_id());
+        const MemoryPlan* old_mp = ctx.memory_plan();
+
+        for (size_t v = 0; v < GraphAtlas::kMaxVariants; ++v) {
+            if (!variant_memory_plans_[v]) continue;
+            ctx.set_memory_plan(variant_memory_plans_[v].get());
+
+            if (b.local_batch_size >= 0)
+                cudaMemcpy(ctx.ptr_at(b.local_batch_size), &bs, sizeof(int32_t),
+                           cudaMemcpyHostToDevice);
+            if (b.last_train_batch_size >= 0)
+                cudaMemcpy(ctx.ptr_at(b.last_train_batch_size), &last_bs, sizeof(int32_t),
+                           cudaMemcpyHostToDevice);
+            if (b.last_val_batch_size >= 0)
+                cudaMemcpy(ctx.ptr_at(b.last_val_batch_size), &val_last_bs, sizeof(int32_t),
+                           cudaMemcpyHostToDevice);
+        }
+
+        ctx.set_memory_plan(old_mp);
+    }
+#endif
+}
+
 void DeepLearningTask::build_exec_table() {
 #ifdef TR_USE_CUDA
     if (!GlobalRegistry::instance().using_gpu()) return;
@@ -1061,7 +1097,6 @@ float DeepLearningTask::run_train_epoch_gpu() {
                     if (using_amp && n_ncg) { cudaGraphLaunch(n_ncg, s_up); sync_up(); }
 
                     lr = fetch_lr_for_batch(batch);
-                    (void)lr;
                     *lr_pinned_[rank] = lr;
                     cudaMemcpyAsync(lr_dev_ptr, lr_pinned_[rank], sizeof(float),
                                     cudaMemcpyHostToDevice, s_up);
@@ -1105,7 +1140,6 @@ float DeepLearningTask::run_train_epoch_gpu() {
                     if (using_amp && n_ncg) { cudaGraphLaunch(n_ncg, s_up); sync_up(); }
 
                     lr = fetch_lr_for_batch(batches - 1);
-                    (void)lr;
                     *lr_pinned_[rank] = lr;
                     cudaMemcpyAsync(lr_dev_ptr, lr_pinned_[rank], sizeof(float),
                                     cudaMemcpyHostToDevice, s_up);

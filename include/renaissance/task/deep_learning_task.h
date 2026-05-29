@@ -541,6 +541,9 @@ public:
     /// @brief 只运行 H2D 传输图（联动 Preprocessor/TransferStation，支持多 epoch + val）
     H2DRunResult run_h2d_only();
 
+    /// @brief 为所有 variant 的 MemoryPlan 初始化运行时标量（batch_size 等）
+    void init_variant_scalars();
+
 private:
 
     H2DTestResult run_h2d_only_train_epoch();

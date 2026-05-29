@@ -1494,12 +1494,11 @@ def search_in_vcpkg(name: str, config: Dict, is_win: bool) -> Dict:
         return {"found": False}
 
     # 根据系统架构确定triplet
+    import platform
+    machine = platform.machine().lower()
     if is_win:
         triplet = "x64-windows"
     else:
-        # 检测系统架构
-        import platform
-        machine = platform.machine().lower()
         if machine == "x86_64":
             # x64平台：默认使用 x64-linux
             triplet = "x64-linux"

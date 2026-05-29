@@ -290,28 +290,12 @@ void TaskBase::compile_impl(bool debug_mode) {
 
         #ifdef TR_USE_CUDA
         if (GlobalRegistry::instance().using_gpu()) {
-            // ===== init_all() 之后：写入运行时标量（batch_size 等）=====
-            const auto& b = dl->active_memory_plan_->baseline();
-            auto& registry = GlobalRegistry::instance();
-            for (int rank = 0; rank < num_gpus_; ++rank) {
-                DeviceContext& ctx = context(rank);
-                cudaSetDevice(ctx.device_id());
-
-                int32_t bs = registry.get_local_batch_size();
-                cudaMemcpy(ctx.ptr_at(b.local_batch_size), &bs, sizeof(int32_t),
-                           cudaMemcpyHostToDevice);
-
-                int32_t last_bs = registry.get_last_train_batch_size();
-                cudaMemcpy(ctx.ptr_at(b.last_train_batch_size), &last_bs, sizeof(int32_t),
-                           cudaMemcpyHostToDevice);
-
-                int32_t val_last_bs = registry.get_last_val_batch_size();
-                cudaMemcpy(ctx.ptr_at(b.last_val_batch_size), &val_last_bs, sizeof(int32_t),
-                           cudaMemcpyHostToDevice);
-            }
+            // ===== init_all() 之后：为所有 variant 写入运行时标量（batch_size 等）=====
+            dl->init_variant_scalars();
             // =========================================================
 
             // ========== 诊断：init_all() 后立即读取 scaling / lr ==========
+            const auto& b = dl->active_memory_plan_->baseline();
             for (int rank = 0; rank < num_gpus_; ++rank) {
                 DeviceContext& ctx = context(rank);
                 float scaling_val = 0.0f, lr_val = 0.0f;
