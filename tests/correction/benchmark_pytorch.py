@@ -82,7 +82,7 @@ if __name__ == '__main__':
 
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.SGD(model.parameters(), lr=lr, momentum=momentum,
-                          weight_decay=0.0, nesterov=False, dampening=0.0)
+                          weight_decay=0.0, nesterov=True)
 
     scaler = torch.amp.GradScaler("cuda") if use_amp else None
 

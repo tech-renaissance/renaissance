@@ -71,13 +71,11 @@ struct SGDConfig : public OptimizerConfig {
     float momentum      = 0.9f;    ///< 动量系数
     float weight_decay  = 0.0f;    ///< L2 权重衰减
     bool  nesterov      = false;   ///< 是否使用 Nesterov 动量
-    float dampening     = 0.0f;    ///< 动量阻尼（标准 SGD 用，通常保持 0）
 
     // 参数设置标记（用于验证必填项）
     bool momentum_set      = false;
     bool weight_decay_set  = false;
     bool nesterov_set      = false;
-    bool dampening_set     = false;
 
     SGDConfig() = default;
 
@@ -300,12 +298,6 @@ public:
      * @param v true=启用 Nesterov
      */
     SGD& nesterov(bool v);
-
-    /**
-     * @brief 设置动量阻尼（通常保持默认 0）
-     * @param v 阻尼系数，必须 >= 0
-     */
-    SGD& dampening(float v);
 
     /**
      * @brief 根据当前参数推断具体的 OptimizerKind 变体

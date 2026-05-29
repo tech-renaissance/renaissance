@@ -42,7 +42,6 @@ std::string SGDConfig::to_string() const {
     oss << "SGDConfig{momentum=" << momentum
         << ", weight_decay=" << weight_decay
         << ", nesterov=" << (nesterov ? "true" : "false")
-        << ", dampening=" << dampening
         << "}";
     return oss.str();
 }
@@ -166,14 +165,6 @@ SGD& SGD::weight_decay(float v) {
 SGD& SGD::nesterov(bool v) {
     config_.nesterov = v;
     config_.nesterov_set = true;
-    return *this;
-}
-
-SGD& SGD::dampening(float v) {
-    TR_CHECK(v >= 0.0f, ValueError,
-             "SGD dampening must be non-negative, got " << v);
-    config_.dampening = v;
-    config_.dampening_set = true;
     return *this;
 }
 

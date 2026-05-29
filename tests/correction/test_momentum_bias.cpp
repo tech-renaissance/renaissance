@@ -42,8 +42,10 @@ int main(int argc, char* argv[]) {
     DTensor d_m_a = task.alloc(shape_a, DType::FP32, Region::M_FC_BIAS);
     DTensor d_m_b = task.alloc(shape_b, DType::FP32, Region::M_FC_BIAS);
 
-    DTensor d_lr   = task.alloc_scalar(DType::FP32);
-    DTensor d_beta = task.alloc_scalar(DType::FP32);
+    DTensor d_lr      = task.alloc_scalar(DType::FP32);
+    DTensor d_beta    = task.alloc_scalar(DType::FP32);
+    DTensor d_scaling = task.alloc_scalar(DType::FP32);
+    DTensor d_has_nan = task.alloc_scalar(DType::INT32);
 
     task.finalize_memory();
     const auto& mp = task.memory_plan();
@@ -61,22 +63,30 @@ int main(int argc, char* argv[]) {
         node.output_ranges = {
             mp.region_range(Region::W_FC_BIAS),
         };
-        node.input_ids = {d_lr.id, d_beta.id};
+        node.input_ids = {d_lr.id, d_beta.id, d_scaling.id, d_has_nan.id};
         g.append(std::move(node));
     }
     task.add_graph("momentum_bias", std::move(g), StreamKind::UPDATE);
     task.compile();
 
-    float lr_val   = 0.01f;
-    float beta_val = 0.9f;
+    float lr_val       = 0.01f;
+    float beta_val     = 0.9f;
+    float scaling_val  = 0.0f;
+    int32_t has_nan_val = 0;
 
-    Tensor h_lr   = Tensor::fill({1}, DType::FP32, lr_val);
-    Tensor h_beta = Tensor::fill({1}, DType::FP32, beta_val);
-    task.transfer_to_rank(h_lr,   d_lr,   0);
-    task.transfer_to_rank(h_beta, d_beta, 0);
+    Tensor h_lr      = Tensor::fill({1}, DType::FP32, lr_val);
+    Tensor h_beta    = Tensor::fill({1}, DType::FP32, beta_val);
+    Tensor h_scaling = Tensor::fill({1}, DType::FP32, scaling_val);
+    Tensor h_has_nan = Tensor::fill({1}, DType::INT32, has_nan_val);
+    task.transfer_to_rank(h_lr,      d_lr,      0);
+    task.transfer_to_rank(h_beta,    d_beta,    0);
+    task.transfer_to_rank(h_scaling, d_scaling, 0);
+    task.transfer_to_rank(h_has_nan, d_has_nan, 0);
     if (num_ranks > 1) {
         task.broadcast_from_rank0(d_lr);
         task.broadcast_from_rank0(d_beta);
+        task.broadcast_from_rank0(d_scaling);
+        task.broadcast_from_rank0(d_has_nan);
     }
 
     Tensor h_w_a = Tensor::fill(shape_a, DType::FP32, 0.8f);

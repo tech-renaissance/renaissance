@@ -152,14 +152,12 @@ int main(int argc, char* argv[]) {
                 break;
             case 1:  // SGD_MOMENTUM
                 task.optimizer(SGD()
-                    .momentum(0.9f)
-                    .dampening(0.0f));
+                    .momentum(0.9f));
                 break;
             case 2:  // SGD_NESTEROV
                 task.optimizer(SGD()
                     .momentum(0.9f)
-                    .nesterov(true)
-                    .dampening(0.0f));
+                    .nesterov(true));
                 break;
             case 3:  // LARS
                 task.optimizer(LARS()
