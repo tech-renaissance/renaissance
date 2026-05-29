@@ -8,6 +8,7 @@
  */
 
 #include "renaissance/backend/op_registry.h"
+#include "renaissance/backend/op_stream_policy.h"
 #include "renaissance/backend/device_context.h"
 #include "renaissance/graph/capture_multi_stream.h"
 #include "renaissance/graph/memory_plan.h"
@@ -18,6 +19,7 @@
 
 #include <cstdint>
 #include <algorithm>
+#include <functional>
 #include <unordered_map>
 
 #ifdef TR_USE_CUDA
@@ -55,39 +57,114 @@ extern cudaError_t launch_relu_bwd_kernel(
 extern cudaError_t launch_relu_inf_fp32_kernel(
     const float* x, float* y, int64_t n, cudaStream_t stream);
 
-// ===== AMP FP16 cuDNN Frontend Graph 缂撳瓨 =====
+// ===== AMP FP16 cuDNN Frontend Graph 缓存键和缓存结构 =====
+
+struct AmpReluFwdCacheKey {
+    uint64_t handle_bits;
+    int64_t N, H, W, C;
+    int64_t n_stride, h_stride, w_stride;
+    int64_t mask_n_stride, mask_h_stride, mask_w_stride;
+
+    bool operator==(const AmpReluFwdCacheKey& other) const {
+        return handle_bits == other.handle_bits &&
+               N == other.N && H == other.H && W == other.W && C == other.C &&
+               n_stride == other.n_stride && h_stride == other.h_stride && w_stride == other.w_stride &&
+               mask_n_stride == other.mask_n_stride && mask_h_stride == other.mask_h_stride && mask_w_stride == other.mask_w_stride;
+    }
+};
+
+struct AmpReluFwdCacheKeyHasher {
+    size_t operator()(const AmpReluFwdCacheKey& k) const {
+        size_t h = std::hash<uint64_t>()(k.handle_bits);
+        h ^= std::hash<int64_t>()(k.N) << 1;
+        h ^= std::hash<int64_t>()(k.H) << 2;
+        h ^= std::hash<int64_t>()(k.W) << 3;
+        h ^= std::hash<int64_t>()(k.C) << 4;
+        h ^= std::hash<int64_t>()(k.n_stride) << 5;
+        h ^= std::hash<int64_t>()(k.h_stride) << 6;
+        h ^= std::hash<int64_t>()(k.w_stride) << 7;
+        h ^= std::hash<int64_t>()(k.mask_n_stride) << 8;
+        h ^= std::hash<int64_t>()(k.mask_h_stride) << 9;
+        h ^= std::hash<int64_t>()(k.mask_w_stride) << 10;
+        return h;
+    }
+};
+
+struct AmpReluBwdCacheKey {
+    uint64_t handle_bits;
+    int64_t N, H, W, C;
+    int64_t n_stride, h_stride, w_stride;
+    int64_t mask_n_stride, mask_h_stride, mask_w_stride;
+
+    bool operator==(const AmpReluBwdCacheKey& other) const {
+        return handle_bits == other.handle_bits &&
+               N == other.N && H == other.H && W == other.W && C == other.C &&
+               n_stride == other.n_stride && h_stride == other.h_stride && w_stride == other.w_stride &&
+               mask_n_stride == other.mask_n_stride && mask_h_stride == other.mask_h_stride && mask_w_stride == other.mask_w_stride;
+    }
+};
+
+struct AmpReluBwdCacheKeyHasher {
+    size_t operator()(const AmpReluBwdCacheKey& k) const {
+        size_t h = std::hash<uint64_t>()(k.handle_bits);
+        h ^= std::hash<int64_t>()(k.N) << 1;
+        h ^= std::hash<int64_t>()(k.H) << 2;
+        h ^= std::hash<int64_t>()(k.W) << 3;
+        h ^= std::hash<int64_t>()(k.C) << 4;
+        h ^= std::hash<int64_t>()(k.n_stride) << 5;
+        h ^= std::hash<int64_t>()(k.h_stride) << 6;
+        h ^= std::hash<int64_t>()(k.w_stride) << 7;
+        h ^= std::hash<int64_t>()(k.mask_n_stride) << 8;
+        h ^= std::hash<int64_t>()(k.mask_h_stride) << 9;
+        h ^= std::hash<int64_t>()(k.mask_w_stride) << 10;
+        return h;
+    }
+};
+
+struct AmpReluInfCacheKey {
+    uint64_t handle_bits;
+    int64_t N, H, W, C;
+    int64_t n_stride, h_stride, w_stride;
+
+    bool operator==(const AmpReluInfCacheKey& other) const {
+        return handle_bits == other.handle_bits &&
+               N == other.N && H == other.H && W == other.W && C == other.C &&
+               n_stride == other.n_stride && h_stride == other.h_stride && w_stride == other.w_stride;
+    }
+};
+
+struct AmpReluInfCacheKeyHasher {
+    size_t operator()(const AmpReluInfCacheKey& k) const {
+        size_t h = std::hash<uint64_t>()(k.handle_bits);
+        h ^= std::hash<int64_t>()(k.N) << 1;
+        h ^= std::hash<int64_t>()(k.H) << 2;
+        h ^= std::hash<int64_t>()(k.W) << 3;
+        h ^= std::hash<int64_t>()(k.C) << 4;
+        h ^= std::hash<int64_t>()(k.n_stride) << 5;
+        h ^= std::hash<int64_t>()(k.h_stride) << 6;
+        h ^= std::hash<int64_t>()(k.w_stride) << 7;
+        return h;
+    }
+};
 
 struct AmpReluFwdCache {
-    cudnnHandle_t handle = nullptr;
-    int64_t N = -1, H = -1, W = -1, C = -1;
-    int64_t n_stride = -1, h_stride = -1, w_stride = -1;
-    int64_t mask_n_stride = -1, mask_h_stride = -1, mask_w_stride = -1;
     std::shared_ptr<feg::Graph> graph;
     std::shared_ptr<feg::Tensor_attributes> x_attr, y_attr, mask_attr;
 };
 
 struct AmpReluBwdCache {
-    cudnnHandle_t handle = nullptr;
-    int64_t N = -1, H = -1, W = -1, C = -1;
-    int64_t n_stride = -1, h_stride = -1, w_stride = -1;
-    int64_t mask_n_stride = -1, mask_h_stride = -1, mask_w_stride = -1;
     std::shared_ptr<feg::Graph> graph;
     std::shared_ptr<feg::Tensor_attributes> dy_attr, mask_attr, dx_attr;
 };
 
-static std::unordered_map<cudnnHandle_t, std::unique_ptr<AmpReluFwdCache>> s_amp_fwd_caches;
-static std::unordered_map<cudnnHandle_t, std::unique_ptr<AmpReluBwdCache>> s_amp_bwd_caches;
-
-// 鎺ㄧ悊鐗堟湰缂撳瓨缁撴瀯锛堟洿绠€鍗曪紝涓嶉渶瑕乵ask灞炴€э級
 struct AmpReluInfCache {
-    cudnnHandle_t handle = nullptr;
-    int64_t N = -1, H = -1, W = -1, C = -1;
-    int64_t n_stride = -1, h_stride = -1, w_stride = -1;
     std::shared_ptr<feg::Graph> graph;
     std::shared_ptr<feg::Tensor_attributes> x_attr, y_attr;
 };
 
-static std::unordered_map<cudnnHandle_t, std::unique_ptr<AmpReluInfCache>> s_amp_inf_caches;
+static std::unordered_map<AmpReluFwdCacheKey, std::unique_ptr<AmpReluFwdCache>, AmpReluFwdCacheKeyHasher> s_amp_fwd_caches;
+static std::unordered_map<AmpReluBwdCacheKey, std::unique_ptr<AmpReluBwdCache>, AmpReluBwdCacheKeyHasher> s_amp_bwd_caches;
+static std::unordered_map<AmpReluInfCacheKey, std::unique_ptr<AmpReluInfCache>, AmpReluInfCacheKeyHasher> s_amp_inf_caches;
 
 static std::shared_ptr<feg::Graph> build_amp_fwd_graph(
     cudnnHandle_t handle,
@@ -240,8 +317,17 @@ static void launch_relu_fp32_fwd_cuda(
 
     int64_t n = dt_x.numel();
 
-    cudaStream_t s = static_cast<cudaStream_t>(ctx.stream(StreamKind::COMP_1));
+    cudaStream_t s = static_cast<cudaStream_t>(ctx.stream(StreamKind::COMP_3));
     int si = state.get_or_register(s);
+
+    int out_idx = state.output_stream_idx;
+    if (out_idx >= 0) {
+        cudaStream_t prev_s = state.streams[out_idx].stream;
+        if (prev_s != s) {
+            cudaStreamWaitEvent(s, state.streams[out_idx].last_done_event, 0);
+        }
+    }
+
     state.output_stream_idx = si;
     state.streams[si].has_pending_work = true;
 
@@ -272,8 +358,17 @@ static void launch_relu_fp32_bwd_cuda(
 
     int64_t n = dt_dY.numel();
 
-    cudaStream_t s = static_cast<cudaStream_t>(ctx.stream(StreamKind::COMP_1));
+    cudaStream_t s = static_cast<cudaStream_t>(ctx.stream(StreamKind::COMP_3));
     int si = state.get_or_register(s);
+
+    int out_idx = state.output_stream_idx;
+    if (out_idx >= 0) {
+        cudaStream_t prev_s = state.streams[out_idx].stream;
+        if (prev_s != s) {
+            cudaStreamWaitEvent(s, state.streams[out_idx].last_done_event, 0);
+        }
+    }
+
     state.output_stream_idx = si;
     state.streams[si].has_pending_work = true;
 
@@ -305,8 +400,17 @@ static void launch_relu_fp32_inf_cuda(
 
     int64_t n = dt_x.numel();
 
-    cudaStream_t s = static_cast<cudaStream_t>(ctx.stream(StreamKind::COMP_1));
+    cudaStream_t s = static_cast<cudaStream_t>(ctx.stream(StreamKind::COMP_3));
     int si = state.get_or_register(s);
+
+    int out_idx = state.output_stream_idx;
+    if (out_idx >= 0) {
+        cudaStream_t prev_s = state.streams[out_idx].stream;
+        if (prev_s != s) {
+            cudaStreamWaitEvent(s, state.streams[out_idx].last_done_event, 0);
+        }
+    }
+
     state.output_stream_idx = si;
     state.streams[si].has_pending_work = true;
 
@@ -335,30 +439,26 @@ static void launch_relu_amp_fwd_cuda(
     __half*  y = static_cast<__half*>(ctx.ptr_at(node.output_ids[0]));
     int8_t*  m = static_cast<int8_t*>(ctx.ptr_at(node.output_ids[1]));
 
-    cudaStream_t s = static_cast<cudaStream_t>(ctx.stream(StreamKind::COMP_1));
+    StreamKind sk = get_op_default_stream(node.compute_op);
+    cudaStream_t s = static_cast<cudaStream_t>(ctx.stream(sk));
     int si = state.get_or_register(s);
     state.output_stream_idx = si;
     state.streams[si].has_pending_work = true;
 
-    cudnnHandle_t handle = static_cast<cudnnHandle_t>(
-        ctx.cudnn_handle(StreamKind::COMP_1));
+    cudnnHandle_t handle = static_cast<cudnnHandle_t>(ctx.cudnn_handle(sk));
 
     int64_t N = dt_x.n(), H = dt_x.h(), W = dt_x.w(), C = dt_x.padded_c();
     int64_t n_s = dt_x.n_stride_cuda(), h_s = dt_x.h_stride_cuda(), w_s = dt_x.w_stride_cuda();
     int64_t mn_s = dt_mask.n_stride_cuda(), mh_s = dt_mask.h_stride_cuda(), mw_s = dt_mask.w_stride_cuda();
 
-    auto it_fwd = s_amp_fwd_caches.find(handle);
-    bool rebuild = (it_fwd == s_amp_fwd_caches.end())
-        || it_fwd->second->N != N || it_fwd->second->H != H
-        || it_fwd->second->W != W || it_fwd->second->C != C
-        || it_fwd->second->n_stride != n_s
-        || it_fwd->second->h_stride != h_s
-        || it_fwd->second->w_stride != w_s
-        || it_fwd->second->mask_n_stride != mn_s
-        || it_fwd->second->mask_h_stride != mh_s
-        || it_fwd->second->mask_w_stride != mw_s;
+    AmpReluFwdCacheKey key;
+    key.handle_bits = reinterpret_cast<uint64_t>(handle);
+    key.N = N; key.H = H; key.W = W; key.C = C;
+    key.n_stride = n_s; key.h_stride = h_s; key.w_stride = w_s;
+    key.mask_n_stride = mn_s; key.mask_h_stride = mh_s; key.mask_w_stride = mw_s;
 
-    if (rebuild) {
+    auto it_fwd = s_amp_fwd_caches.find(key);
+    if (it_fwd == s_amp_fwd_caches.end()) {
 #ifndef NDEBUG
         {
             cudaStreamCaptureStatus cap_status;
@@ -372,17 +472,14 @@ static void launch_relu_amp_fwd_cuda(
         }
 #endif
         auto cache = std::make_unique<AmpReluFwdCache>();
-        cache->handle = handle;
-        cache->N = N; cache->H = H; cache->W = W; cache->C = C;
-        cache->n_stride = n_s; cache->h_stride = h_s; cache->w_stride = w_s;
-        cache->mask_n_stride = mn_s; cache->mask_h_stride = mh_s; cache->mask_w_stride = mw_s;
         cache->graph = build_amp_fwd_graph(
             handle, N, H, W, C, n_s, h_s, w_s, mn_s, mh_s, mw_s,
             cache->x_attr, cache->y_attr, cache->mask_attr);
-        s_amp_fwd_caches[handle] = std::move(cache);
+        s_amp_fwd_caches[key] = std::move(cache);
+        it_fwd = s_amp_fwd_caches.find(key);
     }
 
-    auto& fwd_cache = *s_amp_fwd_caches[handle];
+    auto& fwd_cache = *it_fwd->second;
     std::unordered_map<std::shared_ptr<feg::Tensor_attributes>, void*> vp = {
         {fwd_cache.x_attr,    static_cast<void*>(x)},
         {fwd_cache.y_attr,    static_cast<void*>(y)},
@@ -409,29 +506,29 @@ static void launch_relu_amp_inf_cuda(
 
     __half* x = static_cast<__half*>(ctx.ptr_at(node.input_ids[0]));
     __half* y = static_cast<__half*>(ctx.ptr_at(node.output_ids[0]));
-    // 娉ㄦ剰锛氭帹鐞嗙畻瀛愯櫧鐒舵帴鍙梞ask鎸囬拡锛屼絾涓嶉渶瑕佸線閲岄潰鍐欎笢瑗?    // 鎺ュ彛淇濇寔涓€鑷达紝浣哻uDNN Frontend鍥句腑涓嶈mask涓鸿緭鍑猴紝鑺傜渷璁＄畻
+    // 注意：推理算子虽然接收mask指针，但不需要往里面写东西
+    // 接口保持一致，让cuDNN Frontend图中不设mask为输出，节省计算
     const int8_t* unused_mask = static_cast<const int8_t*>(ctx.ptr_at(node.output_ids[1]));
+    (void)unused_mask;  // 明确标记未使用
 
-    cudaStream_t s = static_cast<cudaStream_t>(ctx.stream(StreamKind::COMP_1));
+    StreamKind sk = get_op_default_stream(node.compute_op);
+    cudaStream_t s = static_cast<cudaStream_t>(ctx.stream(sk));
     int si = state.get_or_register(s);
     state.output_stream_idx = si;
     state.streams[si].has_pending_work = true;
 
-    cudnnHandle_t handle = static_cast<cudnnHandle_t>(
-        ctx.cudnn_handle(StreamKind::COMP_1));
+    cudnnHandle_t handle = static_cast<cudnnHandle_t>(ctx.cudnn_handle(sk));
 
     int64_t N = dt_x.n(), H = dt_x.h(), W = dt_x.w(), C = dt_x.padded_c();
     int64_t n_s = dt_x.n_stride_cuda(), h_s = dt_x.h_stride_cuda(), w_s = dt_x.w_stride_cuda();
 
-    auto it_inf = s_amp_inf_caches.find(handle);
-    bool rebuild = (it_inf == s_amp_inf_caches.end())
-        || it_inf->second->N != N || it_inf->second->H != H
-        || it_inf->second->W != W || it_inf->second->C != C
-        || it_inf->second->n_stride != n_s
-        || it_inf->second->h_stride != h_s
-        || it_inf->second->w_stride != w_s;
+    AmpReluInfCacheKey key;
+    key.handle_bits = reinterpret_cast<uint64_t>(handle);
+    key.N = N; key.H = H; key.W = W; key.C = C;
+    key.n_stride = n_s; key.h_stride = h_s; key.w_stride = w_s;
 
-    if (rebuild) {
+    auto it_inf = s_amp_inf_caches.find(key);
+    if (it_inf == s_amp_inf_caches.end()) {
 #ifndef NDEBUG
         {
             cudaStreamCaptureStatus cap_status;
@@ -445,16 +542,14 @@ static void launch_relu_amp_inf_cuda(
         }
 #endif
         auto cache = std::make_unique<AmpReluInfCache>();
-        cache->handle = handle;
-        cache->N = N; cache->H = H; cache->W = W; cache->C = C;
-        cache->n_stride = n_s; cache->h_stride = h_s; cache->w_stride = w_s;
         cache->graph = build_amp_inf_graph(
             handle, N, H, W, C, n_s, h_s, w_s,
             cache->x_attr, cache->y_attr);
-        s_amp_inf_caches[handle] = std::move(cache);
+        s_amp_inf_caches[key] = std::move(cache);
+        it_inf = s_amp_inf_caches.find(key);
     }
 
-    auto& inf_cache = *s_amp_inf_caches[handle];
+    auto& inf_cache = *it_inf->second;
     std::unordered_map<std::shared_ptr<feg::Tensor_attributes>, void*> vp = {
         {inf_cache.x_attr, static_cast<void*>(x)},
         {inf_cache.y_attr, static_cast<void*>(y)}
@@ -484,30 +579,26 @@ static void launch_relu_amp_bwd_cuda(
     const int8_t* mask = static_cast<const int8_t*>(ctx.ptr_at(node.input_ids[1]));
     __half* dX = static_cast<__half*>(ctx.ptr_at(node.output_ids[0]));
 
-    cudaStream_t s = static_cast<cudaStream_t>(ctx.stream(StreamKind::COMP_1));
+    StreamKind sk = get_op_default_stream(node.compute_op);
+    cudaStream_t s = static_cast<cudaStream_t>(ctx.stream(sk));
     int si = state.get_or_register(s);
     state.output_stream_idx = si;
     state.streams[si].has_pending_work = true;
 
-    cudnnHandle_t handle = static_cast<cudnnHandle_t>(
-        ctx.cudnn_handle(StreamKind::COMP_1));
+    cudnnHandle_t handle = static_cast<cudnnHandle_t>(ctx.cudnn_handle(sk));
 
     int64_t N = dt_dY.n(), H = dt_dY.h(), W = dt_dY.w(), C = dt_dY.padded_c();
     int64_t n_s = dt_dY.n_stride_cuda(), h_s = dt_dY.h_stride_cuda(), w_s = dt_dY.w_stride_cuda();
     int64_t mn_s = dt_mask.n_stride_cuda(), mh_s = dt_mask.h_stride_cuda(), mw_s = dt_mask.w_stride_cuda();
 
-    auto it_bwd = s_amp_bwd_caches.find(handle);
-    bool rebuild = (it_bwd == s_amp_bwd_caches.end())
-        || it_bwd->second->N != N || it_bwd->second->H != H
-        || it_bwd->second->W != W || it_bwd->second->C != C
-        || it_bwd->second->n_stride != n_s
-        || it_bwd->second->h_stride != h_s
-        || it_bwd->second->w_stride != w_s
-        || it_bwd->second->mask_n_stride != mn_s
-        || it_bwd->second->mask_h_stride != mh_s
-        || it_bwd->second->mask_w_stride != mw_s;
+    AmpReluBwdCacheKey key;
+    key.handle_bits = reinterpret_cast<uint64_t>(handle);
+    key.N = N; key.H = H; key.W = W; key.C = C;
+    key.n_stride = n_s; key.h_stride = h_s; key.w_stride = w_s;
+    key.mask_n_stride = mn_s; key.mask_h_stride = mh_s; key.mask_w_stride = mw_s;
 
-    if (rebuild) {
+    auto it_bwd = s_amp_bwd_caches.find(key);
+    if (it_bwd == s_amp_bwd_caches.end()) {
 #ifndef NDEBUG
         {
             cudaStreamCaptureStatus cap_status;
@@ -521,17 +612,14 @@ static void launch_relu_amp_bwd_cuda(
         }
 #endif
         auto cache = std::make_unique<AmpReluBwdCache>();
-        cache->handle = handle;
-        cache->N = N; cache->H = H; cache->W = W; cache->C = C;
-        cache->n_stride = n_s; cache->h_stride = h_s; cache->w_stride = w_s;
-        cache->mask_n_stride = mn_s; cache->mask_h_stride = mh_s; cache->mask_w_stride = mw_s;
         cache->graph = build_amp_bwd_graph(
             handle, N, H, W, C, n_s, h_s, w_s, mn_s, mh_s, mw_s,
             cache->dy_attr, cache->mask_attr, cache->dx_attr);
-        s_amp_bwd_caches[handle] = std::move(cache);
+        s_amp_bwd_caches[key] = std::move(cache);
+        it_bwd = s_amp_bwd_caches.find(key);
     }
 
-    auto& bwd_cache = *s_amp_bwd_caches[handle];
+    auto& bwd_cache = *it_bwd->second;
     std::unordered_map<std::shared_ptr<feg::Tensor_attributes>, void*> vp = {
         {bwd_cache.dy_attr,   static_cast<void*>(dY)},
         {bwd_cache.mask_attr, static_cast<void*>(const_cast<int8_t*>(mask))},
