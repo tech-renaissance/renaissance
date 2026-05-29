@@ -84,7 +84,6 @@ int main(int argc, char* argv[]) {
         float expected = expected_values[rank];
         double diff = static_cast<double>(fetched) -
                       static_cast<double>(expected);
-        double mse = diff * diff;
 
         std::cout << "  Rank " << rank
                   << " fetched=" << std::fixed << fetched

@@ -420,6 +420,7 @@ int main(int argc, char* argv[]) {
         std::cerr << "Supported: imagenet, cifar10\n";
         return 1;
     }
+    (void)dataset_type;
 
     NormMode norm = parse_norm_mode(normalization_mode);
     if (norm == NormMode::NO_NORM && normalization_mode != "no_norm" && !normalization_mode.empty()) {

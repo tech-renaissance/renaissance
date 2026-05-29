@@ -72,6 +72,10 @@ int main(int argc, char* argv[]) {
     DTensor d_a_data_unused  = task.alloc(nhwc_shape, dtype, Region::I_A_DATA);
     DTensor d_label = task.alloc(label_shape, DType::INT32, Region::I_B_LABEL);
     DTensor d_data  = task.alloc(nhwc_shape, dtype, Region::I_B_DATA);
+    (void)d_a_label_unused;
+    (void)d_a_data_unused;
+    (void)d_label;
+    (void)d_data;
 
     task.finalize_memory();
     const auto& mp = task.memory_plan();

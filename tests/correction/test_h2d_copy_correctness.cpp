@@ -38,6 +38,7 @@ int main(int argc, char* argv[]) {
         else if (arg == "--dataset" && i + 1 < argc) dataset = argv[++i];
         else if (arg == "--bs" && i + 1 < argc) custom_bs = std::stoi(argv[++i]);
     }
+    (void)use_partial;
 
     int resolution = (dataset == "imagenet") ? 224 : 32;
     int channels = 3;

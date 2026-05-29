@@ -60,6 +60,7 @@ int main(int argc, char* argv[]) {
 
     task.finalize_memory();
     const auto& mp = task.memory_plan();
+    (void)mp;
 
     // 构造ComputationGraph（4个COMPUTE节点：2个trust_ratio + 2个update）
     ComputationGraph g;

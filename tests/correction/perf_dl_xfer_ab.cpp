@@ -47,10 +47,10 @@ int main() {
     SimpleTask task;
     Shape ls{bs, 1, 1, 1};
     Shape ds{bs, res, res, ch};
-    task.alloc(ls, DType::INT32, Region::I_A_LABEL);
-    task.alloc(ds, DType::FP32, Region::I_A_DATA);
-    task.alloc(ls, DType::INT32, Region::I_B_LABEL);
-    task.alloc(ds, DType::FP32, Region::I_B_DATA);
+    (void)task.alloc(ls, DType::INT32, Region::I_A_LABEL);
+    (void)task.alloc(ds, DType::FP32, Region::I_A_DATA);
+    (void)task.alloc(ls, DType::INT32, Region::I_B_LABEL);
+    (void)task.alloc(ds, DType::FP32, Region::I_B_DATA);
     task.finalize_memory();
     const auto& mp = task.memory_plan();
 

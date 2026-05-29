@@ -204,12 +204,8 @@ endif()
 # endif()
 
 # ============================================================================
-# 单元测试（V4.20.3 新增）
+# 单元测试（V4.20.3 新增，已移除）
 # ============================================================================
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/unit_tests AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/unit_tests)
-    add_subdirectory(unit_tests)
-    message(STATUS "Including unit tests")
-endif()
 
 # ============================================================================
 # correction 子目录（算子数学正确性验证）

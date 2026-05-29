@@ -478,7 +478,7 @@ enum class ExperienceStatus {
             }
         }
     }
-    #pragma message("Mode C disabled: Unsupported platform, will fallback to Heuristic B")
+    // Mode C disabled: Unsupported platform, will fallback to Heuristic B
 #endif
 
 /**

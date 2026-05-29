@@ -1832,6 +1832,7 @@ void DeepLearningTask::log_epoch_results(float train_loss, float val_loss,
                             float top1, float top5,
                             float ema_top1, float ema_top5,
                             float lr, double epoch_time_sec) {
+    (void)ema_top5;
     // 对齐全票通过测试样例的日志格式
     std::ostringstream oss;
     oss << std::setw(6) << (current_epoch_ + 1) << " | ";
@@ -1899,6 +1900,9 @@ H2DTestResult DeepLearningTask::test_h2d_copy_correctness() {
     const int K = num_gpus_;
     const bool use_amp = registry.using_amp();
     const int channels = registry.num_color_channels();
+    (void)bs;
+    (void)use_amp;
+    (void)channels;
 
     if (steps < 2) {
         LOG_ERROR << "Not enough batches (" << steps << ") for correctness test";
@@ -1951,6 +1955,10 @@ H2DTestResult DeepLearningTask::test_h2d_copy_correctness() {
 
     int label_min_ok = 0;
     int label_max_ok = (registry.num_classes() > 100) ? 999 : 9;
+    (void)data_numel;
+    (void)is_fp16;
+    (void)label_min_ok;
+    (void)label_max_ok;
 
     std::vector<std::exception_ptr> rank_exc(K);
     std::vector<std::thread> threads;
@@ -1963,6 +1971,7 @@ H2DTestResult DeepLearningTask::test_h2d_copy_correctness() {
     int buf_id = -1;
     bool new_buf_ready = false;
     bool test_complete = false;
+    (void)test_complete;
 
     for (int r = 0; r < K; ++r) {
         threads.emplace_back([&, r]() {
@@ -1976,6 +1985,7 @@ H2DTestResult DeepLearningTask::test_h2d_copy_correctness() {
                 cudaStream_t st = static_cast<cudaStream_t>(ctx.stream(StreamKind::TRANS));
 
                 auto sync_barrier = [&](int total, const char* phase) {
+                    (void)phase;
                     std::unique_lock<std::mutex> lk(mtx);
                     ++barrier_count;
                     if (barrier_count == total) {
@@ -2062,7 +2072,7 @@ H2DTestResult DeepLearningTask::test_h2d_copy_correctness() {
 }
 
 H2DTestResult DeepLearningTask::test_h2d_copy_bandwidth() {
-    H2DTestResult r;
+    H2DTestResult result;
 
 #ifdef TR_USE_CUDA
     auto& prep = Preprocessor::instance();
@@ -2086,8 +2096,8 @@ H2DTestResult DeepLearningTask::test_h2d_copy_bandwidth() {
         LOG_ERROR << "TransferStation not created within timeout";
         prep_thread.join();
         if (prep_exc) std::rethrow_exception(prep_exc);
-        r.batches = 0;
-        return r;
+        result.batches = 0;
+        return result;
     }
 
     size_t per_zone_bytes = 0;
@@ -2107,6 +2117,7 @@ H2DTestResult DeepLearningTask::test_h2d_copy_bandwidth() {
     bool new_buf_ready = false;
     int consumed = 0;
     double total_us = 0.0;
+    (void)total_us;
     std::vector<double> latencies;
     latencies.reserve(steps);
 
@@ -2193,33 +2204,33 @@ H2DTestResult DeepLearningTask::test_h2d_copy_bandwidth() {
     for (int r = 0; r < K; ++r)
         if (rank_exc[r]) std::rethrow_exception(rank_exc[r]);
 
-    r.elapsed_us = static_cast<double>(
+    result.elapsed_us = static_cast<double>(
         std::chrono::duration_cast<std::chrono::microseconds>(
             t1_global - t0_global).count());
-    r.batches = consumed;
-    r.total_bytes = per_zone_bytes * static_cast<size_t>(consumed);
+    result.batches = consumed;
+    result.total_bytes = per_zone_bytes * static_cast<size_t>(consumed);
 
-    if (consumed > 0 && r.elapsed_us > 0.0) {
-        double bw = static_cast<double>(r.total_bytes) / (r.elapsed_us / 1e6);
-        r.bandwidth_gbps = bw / (1024.0 * 1024.0 * 1024.0);
+    if (consumed > 0 && result.elapsed_us > 0.0) {
+        double bw = static_cast<double>(result.total_bytes) / (result.elapsed_us / 1e6);
+        result.bandwidth_gbps = bw / (1024.0 * 1024.0 * 1024.0);
     }
 
     if (!latencies.empty()) {
         double s = 0.0;
-        r.min_lat_us = 1e18;
-        r.max_lat_us = 0.0;
+        result.min_lat_us = 1e18;
+        result.max_lat_us = 0.0;
         for (double l : latencies) {
             s += l;
-            if (l < r.min_lat_us) r.min_lat_us = l;
-            if (l > r.max_lat_us) r.max_lat_us = l;
+            if (l < result.min_lat_us) result.min_lat_us = l;
+            if (l > result.max_lat_us) result.max_lat_us = l;
         }
-        r.avg_lat_us = s / static_cast<double>(latencies.size());
+        result.avg_lat_us = s / static_cast<double>(latencies.size());
     }
 #else
     LOG_ERROR << "test_h2d_copy_bandwidth: CUDA not available";
 #endif
 
-    return r;
+    return result;
 }
 
 void DeepLearningTask::compile_h2d_only() {

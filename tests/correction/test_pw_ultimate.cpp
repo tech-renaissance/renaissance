@@ -517,6 +517,7 @@ int main(int argc, char* argv[]) {
         std::cerr << "Supported: imagenet, mnist, cifar10, cifar100\n";
         return 1;
     }
+    (void)dataset_type;
 
     // 验证format参数
     std::transform(format_arg.begin(), format_arg.end(), format_arg.begin(),

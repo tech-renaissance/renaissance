@@ -79,6 +79,8 @@ int main(int argc, char* argv[]) {
     DTensor d_a_label_unused = task.alloc(Shape{batch_size, 1, 1, 1}, DType::INT32, Region::I_A_LABEL);
     DTensor d_a_data_unused  = task.alloc(Shape{batch_size, resolution, resolution, effective_c},
                                   data_dtype, Region::I_A_DATA);
+    (void)d_a_label_unused;
+    (void)d_a_data_unused;
     DTensor d_label = task.alloc(Shape{batch_size, 1, 1, 1}, DType::INT32, Region::I_B_LABEL);
     DTensor d_data  = task.alloc(Shape{batch_size, resolution, resolution, effective_c},
                                   data_dtype, Region::I_B_DATA);
