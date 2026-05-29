@@ -1,0 +1,9 @@
+Mode: AMP  Device: cuda
+Using torch.compile (max-autotune) ...
+Epoch 1: train_loss=0.2506  val_loss=0.1181  val_acc=96.52%
+Epoch 2: train_loss=0.0905  val_loss=0.1054  val_acc=96.85%
+Epoch 3: train_loss=0.0640  val_loss=0.0994  val_acc=97.19%
+Epoch 4: train_loss=0.0507  val_loss=0.1009  val_acc=97.26%
+
+Final Val Accuracy: 97.26%
+Training time (4 epochs): 16.108s

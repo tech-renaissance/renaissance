@@ -1,0 +1,370 @@
+﻿python.exe : Traceback (most recent call last):
+所在位置 R:\renaissance\tests\correction\run_relu_bench.ps1:71 字符: 9
++         & $Python $PyScript $mode *>&1 | Out-File -FilePath $outFile  ...
++         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: (Traceback (most recent call last) 
+   ::String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+  File "<string>", line 1, in <module>
+    from multiprocessing.spawn import spawn_main; spawn_main(parent_pid=31068, 
+pipe_handle=1392)
+                                                  ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^
+  File "B:\Softwares\miniconda3\envs\py313\Lib\multiprocessing\spawn.py", line 
+122, in spawn_main
+    exitcode = _main(fd, parent_sentinel)
+  File "B:\Softwares\miniconda3\envs\py313\Lib\multiprocessing\spawn.py", line 
+131, in _main
+    prepare(preparation_data)
+    ~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "B:\Softwares\miniconda3\envs\py313\Lib\multiprocessing\spawn.py", line 
+246, in prepare
+    _fixup_main_from_path(data['init_main_from_path'])
+    ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "B:\Softwares\miniconda3\envs\py313\Lib\multiprocessing\spawn.py", line 
+297, in _fixup_main_from_path
+    main_content = runpy.run_path(main_path,
+                                  run_name="__mp_main__")
+  File "<frozen runpy>", line 287, in run_path
+  File "<frozen runpy>", line 98, in _run_module_code
+  File "<frozen runpy>", line 88, in _run_code
+  File "R:\renaissance\tests\correction\benchmark_pytorch.py", line 107, in <mo
+dule>
+    for batch_idx, (data, target) in enumerate(train_loader):
+                                     ~~~~~~~~~^^^^^^^^^^^^^^
+  File "B:\Softwares\miniconda3\envs\py313\Lib\site-packages\torch\utils\data\d
+ataloader.py", line 495, in __iter__
+    self._iterator = self._get_iterator()
+                     ~~~~~~~~~~~~~~~~~~^^
+  File "B:\Softwares\miniconda3\envs\py313\Lib\site-packages\torch\utils\data\d
+ataloader.py", line 433, in _get_iterator
+    return _MultiProcessingDataLoaderIter(self)
+  File "B:\Softwares\miniconda3\envs\py313\Lib\site-packages\torch\utils\data\d
+ataloader.py", line 1192, in __init__
+    w.start()
+    ~~~~~~~^^
+  File "B:\Softwares\miniconda3\envs\py313\Lib\multiprocessing\process.py", lin
+e 121, in start
+    self._popen = self._Popen(self)
+                  ~~~~~~~~~~~^^^^^^
+  File "B:\Softwares\miniconda3\envs\py313\Lib\multiprocessing\context.py", lin
+e 230, in _Popen
+    return _default_context.get_context().Process._Popen(process_obj)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "B:\Softwares\miniconda3\envs\py313\Lib\multiprocessing\context.py", lin
+e 343, in _Popen
+    return Popen(process_obj)
+  File "B:\Softwares\miniconda3\envs\py313\Lib\multiprocessing\popen_spawn_win3
+2.py", line 47, in __init__
+    prep_data = spawn.get_preparation_data(process_obj._name)
+  File "B:\Softwares\miniconda3\envs\py313\Lib\multiprocessing\spawn.py", line 
+164, in get_preparation_data
+    _check_not_importing_main()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "B:\Softwares\miniconda3\envs\py313\Lib\multiprocessing\spawn.py", line 
+140, in _check_not_importing_main
+    raise RuntimeError('''
+    ...<16 lines>...
+    ''')
+RuntimeError: 
+        An attempt has been made to start a new process before the
+        current process has finished its bootstrapping phase.
+
+        This probably means that you are not using fork to start your
+        child processes and you have forgotten to use the proper idiom
+        in the main module:
+
+            if __name__ == '__main__':
+                freeze_support()
+                ...
+
+        The "freeze_support()" line can be omitted if the program
+        is not going to be frozen to produce an executable.
+
+        To fix this issue, refer to the "Safe importing of main module"
+        section in https://docs.python.org/3/library/multiprocessing.html
+        
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    from multiprocessing.spawn import spawn_main; spawn_main(parent_pid=31068, 
+pipe_handle=1432)
+                                                  ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^
+  File "B:\Softwares\miniconda3\envs\py313\Lib\multiprocessing\spawn.py", line 
+122, in spawn_main
+    exitcode = _main(fd, parent_sentinel)
+  File "B:\Softwares\miniconda3\envs\py313\Lib\multiprocessing\spawn.py", line 
+131, in _main
+    prepare(preparation_data)
+    ~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "B:\Softwares\miniconda3\envs\py313\Lib\multiprocessing\spawn.py", line 
+246, in prepare
+    _fixup_main_from_path(data['init_main_from_path'])
+    ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "B:\Softwares\miniconda3\envs\py313\Lib\multiprocessing\spawn.py", line 
+297, in _fixup_main_from_path
+    main_content = runpy.run_path(main_path,
+                                  run_name="__mp_main__")
+  File "<frozen runpy>", line 287, in run_path
+  File "<frozen runpy>", line 98, in _run_module_code
+  File "<frozen runpy>", line 88, in _run_code
+  File "R:\renaissance\tests\correction\benchmark_pytorch.py", line 107, in <mo
+dule>
+    for batch_idx, (data, target) in enumerate(train_loader):
+                                     ~~~~~~~~~^^^^^^^^^^^^^^
+  File "B:\Softwares\miniconda3\envs\py313\Lib\site-packages\torch\utils\data\d
+ataloader.py", line 495, in __iter__
+    self._iterator = self._get_iterator()
+                     ~~~~~~~~~~~~~~~~~~^^
+  File "B:\Softwares\miniconda3\envs\py313\Lib\site-packages\torch\utils\data\d
+ataloader.py", line 433, in _get_iterator
+    return _MultiProcessingDataLoaderIter(self)
+  File "B:\Softwares\miniconda3\envs\py313\Lib\site-packages\torch\utils\data\d
+ataloader.py", line 1192, in __init__
+    w.start()
+    ~~~~~~~^^
+  File "B:\Softwares\miniconda3\envs\py313\Lib\multiprocessing\process.py", lin
+e 121, in start
+    self._popen = self._Popen(self)
+                  ~~~~~~~~~~~^^^^^^
+  File "B:\Softwares\miniconda3\envs\py313\Lib\multiprocessing\context.py", lin
+e 230, in _Popen
+    return _default_context.get_context().Process._Popen(process_obj)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "B:\Softwares\miniconda3\envs\py313\Lib\multiprocessing\context.py", lin
+e 343, in _Popen
+    return Popen(process_obj)
+  File "B:\Softwares\miniconda3\envs\py313\Lib\multiprocessing\popen_spawn_win3
+2.py", line 47, in __init__
+    prep_data = spawn.get_preparation_data(process_obj._name)
+  File "B:\Softwares\miniconda3\envs\py313\Lib\multiprocessing\spawn.py", line 
+164, in get_preparation_data
+    _check_not_importing_main()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "B:\Softwares\miniconda3\envs\py313\Lib\multiprocessing\spawn.py", line 
+140, in _check_not_importing_main
+    raise RuntimeError('''
+    ...<16 lines>...
+    ''')
+RuntimeError: 
+        An attempt has been made to start a new process before the
+        current process has finished its bootstrapping phase.
+
+        This probably means that you are not using fork to start your
+        child processes and you have forgotten to use the proper idiom
+        in the main module:
+
+            if __name__ == '__main__':
+                freeze_support()
+                ...
+
+        The "freeze_support()" line can be omitted if the program
+        is not going to be frozen to produce an executable.
+
+        To fix this issue, refer to the "Safe importing of main module"
+        section in https://docs.python.org/3/library/multiprocessing.html
+        
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    from multiprocessing.spawn import spawn_main; spawn_main(parent_pid=31068, 
+pipe_handle=1320)
+                                                  ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^
+  File "B:\Softwares\miniconda3\envs\py313\Lib\multiprocessing\spawn.py", line 
+122, in spawn_main
+    exitcode = _main(fd, parent_sentinel)
+  File "B:\Softwares\miniconda3\envs\py313\Lib\multiprocessing\spawn.py", line 
+131, in _main
+    prepare(preparation_data)
+    ~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "B:\Softwares\miniconda3\envs\py313\Lib\multiprocessing\spawn.py", line 
+246, in prepare
+    _fixup_main_from_path(data['init_main_from_path'])
+    ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "B:\Softwares\miniconda3\envs\py313\Lib\multiprocessing\spawn.py", line 
+297, in _fixup_main_from_path
+    main_content = runpy.run_path(main_path,
+                                  run_name="__mp_main__")
+  File "<frozen runpy>", line 287, in run_path
+  File "<frozen runpy>", line 98, in _run_module_code
+  File "<frozen runpy>", line 88, in _run_code
+  File "R:\renaissance\tests\correction\benchmark_pytorch.py", line 107, in <mo
+dule>
+    for batch_idx, (data, target) in enumerate(train_loader):
+                                     ~~~~~~~~~^^^^^^^^^^^^^^
+  File "B:\Softwares\miniconda3\envs\py313\Lib\site-packages\torch\utils\data\d
+ataloader.py", line 495, in __iter__
+    self._iterator = self._get_iterator()
+                     ~~~~~~~~~~~~~~~~~~^^
+  File "B:\Softwares\miniconda3\envs\py313\Lib\site-packages\torch\utils\data\d
+ataloader.py", line 433, in _get_iterator
+    return _MultiProcessingDataLoaderIter(self)
+  File "B:\Softwares\miniconda3\envs\py313\Lib\site-packages\torch\utils\data\d
+ataloader.py", line 1192, in __init__
+    w.start()
+    ~~~~~~~^^
+  File "B:\Softwares\miniconda3\envs\py313\Lib\multiprocessing\process.py", lin
+e 121, in start
+    self._popen = self._Popen(self)
+                  ~~~~~~~~~~~^^^^^^
+  File "B:\Softwares\miniconda3\envs\py313\Lib\multiprocessing\context.py", lin
+e 230, in _Popen
+    return _default_context.get_context().Process._Popen(process_obj)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "B:\Softwares\miniconda3\envs\py313\Lib\multiprocessing\context.py", lin
+e 343, in _Popen
+    return Popen(process_obj)
+  File "B:\Softwares\miniconda3\envs\py313\Lib\multiprocessing\popen_spawn_win3
+2.py", line 47, in __init__
+    prep_data = spawn.get_preparation_data(process_obj._name)
+  File "B:\Softwares\miniconda3\envs\py313\Lib\multiprocessing\spawn.py", line 
+164, in get_preparation_data
+    _check_not_importing_main()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "B:\Softwares\miniconda3\envs\py313\Lib\multiprocessing\spawn.py", line 
+140, in _check_not_importing_main
+    raise RuntimeError('''
+    ...<16 lines>...
+    ''')
+RuntimeError: 
+        An attempt has been made to start a new process before the
+        current process has finished its bootstrapping phase.
+
+        This probably means that you are not using fork to start your
+        child processes and you have forgotten to use the proper idiom
+        in the main module:
+
+            if __name__ == '__main__':
+                freeze_support()
+                ...
+
+        The "freeze_support()" line can be omitted if the program
+        is not going to be frozen to produce an executable.
+
+        To fix this issue, refer to the "Safe importing of main module"
+        section in https://docs.python.org/3/library/multiprocessing.html
+        
+Mode: AMP  Device: cuda
+Using torch.compile ...
+Mode: AMP  Device: cuda
+Using torch.compile ...
+Mode: AMP  Device: cuda
+Using torch.compile ...
+Traceback (most recent call last):
+  File "<string>", line 1, in <module>
+    from multiprocessing.spawn import spawn_main; spawn_main(parent_pid=31068, 
+pipe_handle=1472)
+                                                  ~~~~~~~~~~^^^^^^^^^^^^^^^^^^^
+^^^^^^^^^^^^^^^^^
+  File "B:\Softwares\miniconda3\envs\py313\Lib\multiprocessing\spawn.py", line 
+122, in spawn_main
+    exitcode = _main(fd, parent_sentinel)
+  File "B:\Softwares\miniconda3\envs\py313\Lib\multiprocessing\spawn.py", line 
+131, in _main
+    prepare(preparation_data)
+    ~~~~~~~^^^^^^^^^^^^^^^^^^
+  File "B:\Softwares\miniconda3\envs\py313\Lib\multiprocessing\spawn.py", line 
+246, in prepare
+    _fixup_main_from_path(data['init_main_from_path'])
+    ~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "B:\Softwares\miniconda3\envs\py313\Lib\multiprocessing\spawn.py", line 
+297, in _fixup_main_from_path
+    main_content = runpy.run_path(main_path,
+                                  run_name="__mp_main__")
+  File "<frozen runpy>", line 287, in run_path
+  File "<frozen runpy>", line 98, in _run_module_code
+  File "<frozen runpy>", line 88, in _run_code
+  File "R:\renaissance\tests\correction\benchmark_pytorch.py", line 107, in <mo
+dule>
+    for batch_idx, (data, target) in enumerate(train_loader):
+                                     ~~~~~~~~~^^^^^^^^^^^^^^
+  File "B:\Softwares\miniconda3\envs\py313\Lib\site-packages\torch\utils\data\d
+ataloader.py", line 495, in __iter__
+    self._iterator = self._get_iterator()
+                     ~~~~~~~~~~~~~~~~~~^^
+  File "B:\Softwares\miniconda3\envs\py313\Lib\site-packages\torch\utils\data\d
+ataloader.py", line 433, in _get_iterator
+    return _MultiProcessingDataLoaderIter(self)
+  File "B:\Softwares\miniconda3\envs\py313\Lib\site-packages\torch\utils\data\d
+ataloader.py", line 1192, in __init__
+    w.start()
+    ~~~~~~~^^
+  File "B:\Softwares\miniconda3\envs\py313\Lib\multiprocessing\process.py", lin
+e 121, in start
+    self._popen = self._Popen(self)
+                  ~~~~~~~~~~~^^^^^^
+  File "B:\Softwares\miniconda3\envs\py313\Lib\multiprocessing\context.py", lin
+e 230, in _Popen
+    return _default_context.get_context().Process._Popen(process_obj)
+           ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^
+  File "B:\Softwares\miniconda3\envs\py313\Lib\multiprocessing\context.py", lin
+e 343, in _Popen
+    return Popen(process_obj)
+  File "B:\Softwares\miniconda3\envs\py313\Lib\multiprocessing\popen_spawn_win3
+2.py", line 47, in __init__
+    prep_data = spawn.get_preparation_data(process_obj._name)
+  File "B:\Softwares\miniconda3\envs\py313\Lib\multiprocessing\spawn.py", line 
+164, in get_preparation_data
+    _check_not_importing_main()
+    ~~~~~~~~~~~~~~~~~~~~~~~~~^^
+  File "B:\Softwares\miniconda3\envs\py313\Lib\multiprocessing\spawn.py", line 
+140, in _check_not_importing_main
+    raise RuntimeError('''
+    ...<16 lines>...
+    ''')
+RuntimeError: 
+        An attempt has been made to start a new process before the
+        current process has finished its bootstrapping phase.
+
+        This probably means that you are not using fork to start your
+        child processes and you have forgotten to use the proper idiom
+        in the main module:
+
+            if __name__ == '__main__':
+                freeze_support()
+                ...
+
+        The "freeze_support()" line can be omitted if the program
+        is not going to be frozen to produce an executable.
+
+        To fix this issue, refer to the "Safe importing of main module"
+        section in https://docs.python.org/3/library/multiprocessing.html
+        
+Mode: AMP  Device: cuda
+Using torch.compile ...
+Mode: AMP  Device: cuda
+Using torch.compile ...
+Traceback (most recent call last):
+  File "B:\Softwares\miniconda3\envs\py313\Lib\site-packages\torch\utils\data\d
+ataloader.py", line 1310, in _try_get_data
+    data = self._data_queue.get(timeout=timeout)
+  File "B:\Softwares\miniconda3\envs\py313\Lib\queue.py", line 209, in get
+    raise Empty
+_queue.Empty
+
+The above exception was the direct cause of the following exception:
+
+Traceback (most recent call last):
+  File "R:\renaissance\tests\correction\benchmark_pytorch.py", line 107, in <mo
+dule>
+    for batch_idx, (data, target) in enumerate(train_loader):
+                                     ~~~~~~~~~^^^^^^^^^^^^^^
+  File "B:\Softwares\miniconda3\envs\py313\Lib\site-packages\torch\utils\data\d
+ataloader.py", line 741, in __next__
+    data = self._next_data()
+  File "B:\Softwares\miniconda3\envs\py313\Lib\site-packages\torch\utils\data\d
+ataloader.py", line 1524, in _next_data
+    idx, data = self._get_data()
+                ~~~~~~~~~~~~~~^^
+  File "B:\Softwares\miniconda3\envs\py313\Lib\site-packages\torch\utils\data\d
+ataloader.py", line 1473, in _get_data
+    success, data = self._try_get_data()
+                    ~~~~~~~~~~~~~~~~~~^^
+  File "B:\Softwares\miniconda3\envs\py313\Lib\site-packages\torch\utils\data\d
+ataloader.py", line 1323, in _try_get_data
+    raise RuntimeError(
+        f"DataLoader worker (pid(s) {pids_str}) exited unexpectedly"
+    ) from e
+RuntimeError: DataLoader worker (pid(s) 22540, 15436, 22944, 33256) exited unex
+pectedly

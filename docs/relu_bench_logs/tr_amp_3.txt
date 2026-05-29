@@ -1,0 +1,868 @@
+﻿[2026-05-29 22:27:12.476] [INFO ] [TR] GlobalRegistry: fixed_using_gpu set to true
+[2026-05-29 22:27:12.476] [INFO ] [TR] GlobalRegistry: fixed_gpu_ids set to [0]
+Device: GPU [0]
+[2026-05-29 22:27:12.476] [INFO ] [TR] GlobalRegistry: fixed_using_amp set to true
+[2026-05-29 22:27:12.476] [INFO ] [TR] GlobalRegistry: fixed_reproducibility_insurance set to true
+Random Seed: 0x000000000000007B
+[2026-05-29 22:27:12.476] [INFO ] [TR] GlobalRegistry: fixed_batch_size set to 128
+[2026-05-29 22:27:12.476] [INFO ] [TR] GlobalRegistry: fixed_max_sample_resolution_ updated to 28
+[2026-05-29 22:27:12.476] [INFO ] [TR] GlobalRegistry: fixed_train_sample_resolution_begin_ and end_ set to 28
+[2026-05-29 22:27:12.476] [INFO ] [TR] GlobalRegistry: fixed_using_progressive_resolution set to false
+[2026-05-29 22:27:12.476] [INFO ] [TR] GlobalRegistry: fixed_val_sample_resolution_ set to 28
+[2026-05-29 22:27:12.476] [INFO ] [TR] GlobalRegistry: fixed_dataset_type set to 2
+[2026-05-29 22:27:12.476] [INFO ] [TR] GlobalRegistry: fixed_num_classes automatically set to 10 based on dataset type 2
+[2026-05-29 22:27:12.476] [INFO ] [TR] GlobalRegistry: fixed_num_load_workers set to 1
+[2026-05-29 22:27:12.476] [INFO ] [TR] GlobalRegistry: fixed_num_preproc_workers set to 4
+[2026-05-29 22:27:12.476] [INFO ] [TR] GlobalRegistry: fixed_shuffle_train set to true
+[2026-05-29 22:27:12.476] [INFO ] [TR] Configuring MnistLoaderRaw
+[2026-05-29 22:27:12.476] [INFO ] [TR]   Preprocessor workers (M): 4
+[2026-05-29 22:27:12.476] [INFO ] [TR]   Train path: T:\dataset\mnist
+[2026-05-29 22:27:12.476] [INFO ] [TR]   Val path: T:\dataset\mnist
+[2026-05-29 22:27:12.476] [INFO ] [TR]   Shuffle train: true
+[2026-05-29 22:27:12.476] [INFO ] [TR]   Shuffle val: false
+[2026-05-29 22:27:12.476] [INFO ] [TR]   Verify files: false
+[2026-05-29 22:27:12.476] [INFO ] [TR] Configuration completed
+[2026-05-29 22:27:12.476] [INFO ] [TR] GlobalRegistry: alterable_train_crop_output_ set to 28
+[2026-05-29 22:27:12.476] [INFO ] [TR] GlobalRegistry: alterable_train_resize_output_ set to 28
+[2026-05-29 22:27:12.476] [INFO ] [TR] GlobalRegistry: alterable_val_crop_output_ set to 28
+[2026-05-29 22:27:12.476] [INFO ] [TR] GlobalRegistry: alterable_val_resize_output_ set to 28
+[2026-05-29 22:27:12.476] [INFO ] [TR] GlobalRegistry: alterable_current_resolution_train_ set to 28
+[2026-05-29 22:27:12.476] [INFO ] [TR] GlobalRegistry: alterable_current_resolution_val_ set to 28
+[2026-05-29 22:27:12.476] [INFO ] [TR] GlobalRegistry: fixed_num_color_channels set to 1
+[2026-05-29 22:27:12.476] [INFO ] [TR] GlobalRegistry: fixed_sdmp_factor set to 1
+[2026-05-29 22:27:12.476] [INFO ] [TR] GlobalRegistry: fixed_using_cpvs set to false
+[2026-05-29 22:27:12.476] [INFO ] [TR] GlobalRegistry: fixed_using_drop_last set to false
+[2026-05-29 22:27:12.476] [INFO ] [TR] Setup: staging buffer = 1 MB per GPU (28x28x1, batch=128, AMP)
+[2026-05-29 22:27:12.477] [INFO ] [TR] StagingBufferPool: allocated 1608192 bytes for GPU 0 using standard malloc (PC_CUDA mode)
+[2026-05-29 22:27:12.478] [INFO ] [TR] StagingBufferPool: allocated 1 blocks of 1 MB each
+[StagingDebug] StagingBufferPool created: blocks=1, per_block=1MB, type=normal (malloc, PC_CUDA)
+[StagingDebug]   RANK[0]: GPU=0, NUMA=-1, base=0000026CA2040000, size=1608192B
+[2026-05-29 22:27:12.478] [INFO ] [TR] GlobalRegistry: Staging buffer pool created with 1 blocks, 1 MB each
+[2026-05-29 22:27:12.478] [INFO ] [TR] GlobalRegistry: fixed_cpu_binding_enabled set to false
+[2026-05-29 22:27:12.478] [INFO ] [TR] GlobalRegistry: fixed_random_erasing_p_ set to 0
+[2026-05-29 22:27:12.478] [INFO ] [TR] GlobalRegistry: fixed_train_with_rhf set to false
+[2026-05-29 22:27:12.478] [INFO ] [TR] GlobalRegistry: fixed_val_with_rhf set to false
+[2026-05-29 22:27:12.478] [INFO ] [TR] Calculated steps_per_epoch: 469 (total_samples: 60000, global_batch_size: 128)
+[2026-05-29 22:27:12.478] [INFO ] [TR] GlobalRegistry: fixed_s_original_indices_ set with size=15000
+[2026-05-29 22:27:12.478] [INFO ] [TR] [EB#0] Using StagingBufferPool RANK 0: per_zone=804096, base=0000026CA2040000
+[2026-05-29 22:27:12.478] [INFO ] [TR] [EB#0] Before staging_memory_numa_node call
+[2026-05-29 22:27:12.478] [INFO ] [TR] [EB#0] After staging_memory_numa_node call, numa_node=-1
+[StagingDebug] TransferStation configured: engine_id=0, numa_node=-1, workers_per_engine=4
+[StagingDebug]   associated_workers=[0, 1, 2, 3]
+[StagingDebug]   Zone A: labels=0000026CA2040000, data=0000026CA2040400
+[StagingDebug]   Zone B: labels=0000026CA2104500, data=0000026CA2104900
+[StagingDebug]   transfer_size=804096B (labels=1024B, data=803072B)
+[2026-05-29 22:27:12.478] [INFO ] [TR] [EB#0] reset_and_update(): phase=VAL, current_resolution_=28, num_color_channels_=1, current_sample_bytes_=6272
+[2026-05-29 22:27:12.478] [INFO ] [TR] Preprocessor initialized.
+[2026-05-29 22:27:12.478] [INFO ] [TR] GlobalRegistry: fixed_optimizer_kind set to 1
+
+=====================================
+ Mode: AMP  [FP16]
+=====================================
+[2026-05-29 22:27:12.478] [INFO ] [TR] Compiler::compile - starting five-phase compilation
+[2026-05-29 22:27:12.478] [INFO ] [TR]   ArchPlan: 7 layers
+[2026-05-29 22:27:12.478] [INFO ] [TR] Compiler: optimizer_kind=1, needs_momentum=1
+[2026-05-29 22:27:12.478] [INFO ] [TR] [COMPILER] amp=1 TR_AMP_INITIAL_SCALING=128 init_scaling=128
+[2026-05-29 22:27:12.478] [INFO ] [TR] [COMPILER] amp=1 TR_AMP_INITIAL_SCALING=128 init_scaling=128
+[2026-05-29 22:27:12.478] [INFO ] [TR] [COMPILER] amp=1 TR_AMP_INITIAL_SCALING=128 init_scaling=128
+[2026-05-29 22:27:12.478] [INFO ] [TR] [COMPILER] amp=1 TR_AMP_INITIAL_SCALING=128 init_scaling=128
+[2026-05-29 22:27:12.478] [INFO ] [TR] [COMPILER] amp=1 TR_AMP_INITIAL_SCALING=128 init_scaling=128
+[2026-05-29 22:27:12.478] [INFO ] [TR] [COMPILER] amp=1 TR_AMP_INITIAL_SCALING=128 init_scaling=128
+[2026-05-29 22:27:12.478] [INFO ] [TR] [COMPILER] BWD l=6 kind=10 grad_id=51 prev_grad_id=51
+[2026-05-29 22:27:12.478] [INFO ] [TR] [COMPILER] BWD l=5 kind=7 grad_id=40 prev_grad_id=40
+[2026-05-29 22:27:12.478] [INFO ] [TR] [COMPILER] BWD l=4 kind=3 grad_id=33 prev_grad_id=33
+[2026-05-29 22:27:12.478] [INFO ] [TR] [COMPILER] BWD l=3 kind=7 grad_id=29 prev_grad_id=29
+[2026-05-29 22:27:12.478] [INFO ] [TR] [COMPILER] BWD l=2 kind=3 grad_id=22 prev_grad_id=22
+[2026-05-29 22:27:12.478] [INFO ] [TR] [COMPILER] BWD l=1 kind=7 grad_id=19 prev_grad_id=19
+[2026-05-29 22:27:12.478] [INFO ] [TR] [COMPILER] BWD l=0 kind=8 grad_id=-1 prev_grad_id=19
+[2026-05-29 22:27:12.478] [INFO ] [TR] [COMPILER] DEEP[0] op=49 in=[19,25,21] out=[22]
+[2026-05-29 22:27:12.478] [INFO ] [TR] [COMPILER] DEEP[1] op=8 in=[22] out=[29,30]
+[2026-05-29 22:27:12.478] [INFO ] [TR] [COMPILER] DEEP[2] op=49 in=[29,36,32] out=[33]
+[2026-05-29 22:27:12.478] [INFO ] [TR] [COMPILER] DEEP[3] op=8 in=[33] out=[40,41]
+[2026-05-29 22:27:12.478] [INFO ] [TR] [COMPILER] DEEP[4] op=49 in=[40,47,43] out=[44]
+[2026-05-29 22:27:12.478] [INFO ] [TR] [COMPILER] DEEP[5] op=84 in=[44,7,11,4] out=[8,54,53,52,9,10]
+[2026-05-29 22:27:12.478] [INFO ] [TR] [COMPILER] DEEP[6] op=85 in=[51,52,54,7,4] out=[51]
+[2026-05-29 22:27:12.478] [INFO ] [TR] [COMPILER] DEEP[7] op=50 in=[51,47,44,40] out=[40,45,46]
+[2026-05-29 22:27:12.478] [INFO ] [TR] [COMPILER] DEEP[8] op=9 in=[40,41] out=[33]
+[2026-05-29 22:27:12.478] [INFO ] [TR] [COMPILER] DEEP[9] op=50 in=[33,36,33,29] out=[29,34,35]
+[2026-05-29 22:27:12.478] [INFO ] [TR] [COMPILER] DEEP[10] op=9 in=[29,30] out=[22]
+[2026-05-29 22:27:12.478] [INFO ] [TR] [COMPILER] DEEP[11] op=50 in=[22,25,22,19] out=[19,23,24]
+[2026-05-29 22:27:12.478] [INFO ] [TR] Compiler::compile - five-phase compilation complete
+[2026-05-29 22:27:12.478] [INFO ] [TR]   Generated 6 variants
+[2026-05-29 22:27:12.519] [INFO ] [backend] DeviceContext 0: created 5 non-blocking streams + per-stream cuDNN + cuBLAS handles
+[2026-05-29 22:27:12.519] [INFO ] [task] Allocated 1 GPU device context(s), 10.4016 MB each
+[2026-05-29 22:27:12.519] [INFO ] [graph] [B2] cuDNN warmup on rank 0 (GPU 0) for 28 unique graphs
+[2026-05-29 22:27:12.519] [INFO ] [graph] [B2-DBG] warmup k=4 gid=4 node=0 op=49
+[2026-05-29 22:27:12.519] [INFO ] [TR] [FC_AMP_FWD] input_ids=[19,25,21] dt_x shape={128,784,1,1} dt_w shape={512,784,1,1} dt_y shape={128,512,1,1}
+[2026-05-29 22:27:12.632] [INFO ] [graph] [B2-DBG] warmup k=4 gid=4 node=1 op=8
+[2026-05-29 22:27:12.632] [INFO ] [graph] [B2-DBG] warmup k=4 gid=4 node=2 op=49
+[2026-05-29 22:27:12.632] [INFO ] [TR] [FC_AMP_FWD] input_ids=[29,36,32] dt_x shape={128,512,1,1} dt_w shape={256,512,1,1} dt_y shape={128,256,1,1}
+[2026-05-29 22:27:12.711] [INFO ] [graph] [B2-DBG] warmup k=4 gid=4 node=3 op=8
+[2026-05-29 22:27:12.711] [INFO ] [graph] [B2-DBG] warmup k=4 gid=4 node=4 op=49
+[2026-05-29 22:27:12.711] [INFO ] [TR] [FC_AMP_FWD] input_ids=[40,47,43] dt_x shape={128,256,1,1} dt_w shape={10,256,1,1} dt_y shape={128,10,1,1}
+[2026-05-29 22:27:12.739] [INFO ] [graph] [B2-DBG] warmup k=4 gid=4 node=5 op=84
+[2026-05-29 22:27:12.740] [INFO ] [graph] [B2-DBG] warmup k=4 gid=4 node=6 op=85
+[2026-05-29 22:27:12.740] [INFO ] [graph] [B2-DBG] warmup k=4 gid=4 node=7 op=50
+[2026-05-29 22:27:12.823] [INFO ] [graph] [B2-DBG] warmup k=4 gid=4 node=8 op=9
+[2026-05-29 22:27:12.823] [INFO ] [graph] [B2-DBG] warmup k=4 gid=4 node=9 op=50
+[2026-05-29 22:27:12.824] [INFO ] [graph] [B2-DBG] warmup k=4 gid=4 node=10 op=9
+[2026-05-29 22:27:12.824] [INFO ] [graph] [B2-DBG] warmup k=4 gid=4 node=11 op=50
+[2026-05-29 22:27:12.824] [INFO ] [graph] [B2-DBG] warmup k=19 gid=4 node=0 op=49
+[2026-05-29 22:27:12.824] [INFO ] [TR] [FC_AMP_FWD] input_ids=[19,25,21] dt_x shape={96,784,1,1} dt_w shape={512,784,1,1} dt_y shape={96,512,1,1}
+[2026-05-29 22:27:12.901] [INFO ] [graph] [B2-DBG] warmup k=19 gid=4 node=1 op=8
+[2026-05-29 22:27:12.901] [INFO ] [graph] [B2-DBG] warmup k=19 gid=4 node=2 op=49
+[2026-05-29 22:27:12.901] [INFO ] [TR] [FC_AMP_FWD] input_ids=[29,36,32] dt_x shape={96,512,1,1} dt_w shape={256,512,1,1} dt_y shape={96,256,1,1}
+[2026-05-29 22:27:12.980] [INFO ] [graph] [B2-DBG] warmup k=19 gid=4 node=3 op=8
+[2026-05-29 22:27:12.980] [INFO ] [graph] [B2-DBG] warmup k=19 gid=4 node=4 op=49
+[2026-05-29 22:27:12.980] [INFO ] [TR] [FC_AMP_FWD] input_ids=[40,47,43] dt_x shape={96,256,1,1} dt_w shape={10,256,1,1} dt_y shape={96,10,1,1}
+[2026-05-29 22:27:13.007] [INFO ] [graph] [B2-DBG] warmup k=19 gid=4 node=5 op=84
+[2026-05-29 22:27:13.007] [INFO ] [graph] [B2-DBG] warmup k=19 gid=4 node=6 op=85
+[2026-05-29 22:27:13.007] [INFO ] [graph] [B2-DBG] warmup k=19 gid=4 node=7 op=50
+[2026-05-29 22:27:13.007] [INFO ] [graph] [B2-DBG] warmup k=19 gid=4 node=8 op=9
+[2026-05-29 22:27:13.007] [INFO ] [graph] [B2-DBG] warmup k=19 gid=4 node=9 op=50
+[2026-05-29 22:27:13.008] [INFO ] [graph] [B2-DBG] warmup k=19 gid=4 node=10 op=9
+[2026-05-29 22:27:13.008] [INFO ] [graph] [B2-DBG] warmup k=19 gid=4 node=11 op=50
+[2026-05-29 22:27:13.008] [INFO ] [graph] [B2-DBG] warmup k=23 gid=16 node=2 op=49
+[2026-05-29 22:27:13.008] [INFO ] [TR] [FC_AMP_FWD] input_ids=[19,25,21] dt_x shape={128,784,1,1} dt_w shape={512,784,1,1} dt_y shape={128,512,1,1}
+[2026-05-29 22:27:13.008] [INFO ] [graph] [B2-DBG] warmup k=23 gid=16 node=3 op=10
+[2026-05-29 22:27:13.008] [INFO ] [graph] [B2-DBG] warmup k=23 gid=16 node=4 op=49
+[2026-05-29 22:27:13.008] [INFO ] [TR] [FC_AMP_FWD] input_ids=[29,36,32] dt_x shape={128,512,1,1} dt_w shape={256,512,1,1} dt_y shape={128,256,1,1}
+[2026-05-29 22:27:13.008] [INFO ] [graph] [B2-DBG] warmup k=23 gid=16 node=5 op=10
+[2026-05-29 22:27:13.008] [INFO ] [graph] [B2-DBG] warmup k=23 gid=16 node=6 op=49
+[2026-05-29 22:27:13.008] [INFO ] [TR] [FC_AMP_FWD] input_ids=[40,47,43] dt_x shape={128,256,1,1} dt_w shape={10,256,1,1} dt_y shape={128,10,1,1}
+[2026-05-29 22:27:13.008] [INFO ] [graph] [B2-DBG] warmup k=23 gid=16 node=7 op=87
+[2026-05-29 22:27:13.009] [INFO ] [graph] [B2-DBG] warmup k=24 gid=17 node=2 op=49
+[2026-05-29 22:27:13.009] [INFO ] [TR] [FC_AMP_FWD] input_ids=[19,25,21] dt_x shape={128,784,1,1} dt_w shape={512,784,1,1} dt_y shape={128,512,1,1}
+[2026-05-29 22:27:13.009] [INFO ] [graph] [B2-DBG] warmup k=24 gid=17 node=3 op=10
+[2026-05-29 22:27:13.009] [INFO ] [graph] [B2-DBG] warmup k=24 gid=17 node=4 op=49
+[2026-05-29 22:27:13.009] [INFO ] [TR] [FC_AMP_FWD] input_ids=[29,36,32] dt_x shape={128,512,1,1} dt_w shape={256,512,1,1} dt_y shape={128,256,1,1}
+[2026-05-29 22:27:13.009] [INFO ] [graph] [B2-DBG] warmup k=24 gid=17 node=5 op=10
+[2026-05-29 22:27:13.009] [INFO ] [graph] [B2-DBG] warmup k=24 gid=17 node=6 op=49
+[2026-05-29 22:27:13.009] [INFO ] [TR] [FC_AMP_FWD] input_ids=[40,47,43] dt_x shape={128,256,1,1} dt_w shape={10,256,1,1} dt_y shape={128,10,1,1}
+[2026-05-29 22:27:13.009] [INFO ] [graph] [B2-DBG] warmup k=24 gid=17 node=7 op=87
+[2026-05-29 22:27:13.009] [INFO ] [graph] [B2-DBG] warmup k=26 gid=16 node=2 op=49
+[2026-05-29 22:27:13.009] [INFO ] [TR] [FC_AMP_FWD] input_ids=[19,25,21] dt_x shape={16,784,1,1} dt_w shape={512,784,1,1} dt_y shape={16,512,1,1}
+[2026-05-29 22:27:13.086] [INFO ] [graph] [B2-DBG] warmup k=26 gid=16 node=3 op=10
+[2026-05-29 22:27:13.086] [INFO ] [graph] [B2-DBG] warmup k=26 gid=16 node=4 op=49
+[2026-05-29 22:27:13.086] [INFO ] [TR] [FC_AMP_FWD] input_ids=[29,36,32] dt_x shape={16,512,1,1} dt_w shape={256,512,1,1} dt_y shape={16,256,1,1}
+[2026-05-29 22:27:13.164] [INFO ] [graph] [B2-DBG] warmup k=26 gid=16 node=5 op=10
+[2026-05-29 22:27:13.164] [INFO ] [graph] [B2-DBG] warmup k=26 gid=16 node=6 op=49
+[2026-05-29 22:27:13.164] [INFO ] [TR] [FC_AMP_FWD] input_ids=[40,47,43] dt_x shape={16,256,1,1} dt_w shape={10,256,1,1} dt_y shape={16,10,1,1}
+[2026-05-29 22:27:13.189] [INFO ] [graph] [B2-DBG] warmup k=26 gid=16 node=7 op=87
+[2026-05-29 22:27:13.189] [INFO ] [graph] [B2-DBG] warmup k=27 gid=17 node=2 op=49
+[2026-05-29 22:27:13.189] [INFO ] [TR] [FC_AMP_FWD] input_ids=[19,25,21] dt_x shape={16,784,1,1} dt_w shape={512,784,1,1} dt_y shape={16,512,1,1}
+[2026-05-29 22:27:13.190] [INFO ] [graph] [B2-DBG] warmup k=27 gid=17 node=3 op=10
+[2026-05-29 22:27:13.190] [INFO ] [graph] [B2-DBG] warmup k=27 gid=17 node=4 op=49
+[2026-05-29 22:27:13.190] [INFO ] [TR] [FC_AMP_FWD] input_ids=[29,36,32] dt_x shape={16,512,1,1} dt_w shape={256,512,1,1} dt_y shape={16,256,1,1}
+[2026-05-29 22:27:13.190] [INFO ] [graph] [B2-DBG] warmup k=27 gid=17 node=5 op=10
+[2026-05-29 22:27:13.190] [INFO ] [graph] [B2-DBG] warmup k=27 gid=17 node=6 op=49
+[2026-05-29 22:27:13.190] [INFO ] [TR] [FC_AMP_FWD] input_ids=[40,47,43] dt_x shape={16,256,1,1} dt_w shape={10,256,1,1} dt_y shape={16,10,1,1}
+[2026-05-29 22:27:13.190] [INFO ] [graph] [B2-DBG] warmup k=27 gid=17 node=7 op=87
+[2026-05-29 22:27:13.190] [INFO ] [graph] [B2] cuDNN warmup completed on all 1 ranks
+[2026-05-29 22:27:13.190] [INFO ] [graph] [B3] Capturing rank 0 in main thread
+[2026-05-29 22:27:13.190] [INFO ] [TR] [CAPTURE-CUDA] gid=0 nodes=1
+test_dl_full.exe : [H2D_DEBUG] rank=0 staging_base=0000026CA2040000 per_zone=80
+4096 label_aligned=1024 block_size=1608192 num_output_ranges=2
+所在位置 R:\renaissance\tests\correction\run_relu_bench.ps1:34 字符: 9
++         & $TestExe $mode *>&1 | Out-File -FilePath $outFile -Encoding ...
++         ~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([H2D_DEBUG] ran...output_ranges=2 
+   :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+[H2D_DEBUG] range[0] start_region=49 end_region=49 dst_off=8582144 dst_size=102
+4
+[H2D_DEBUG]   -> dst=0000000B0602F400 src=0000026CA2040000 src_end=0000026CA204
+0400 stream=00000226495DCFF0
+[H2D_DEBUG] range[1] start_region=50 end_region=50 dst_off=8583168 dst_size=803
+072
+[H2D_DEBUG]   -> dst=0000000B0602F800 src=0000026CA2040400 src_end=0000026CA210
+4500 stream=00000226495DCFF0
+[2026-05-29 22:27:13.190] [INFO ] [TR] [CAPTURE-CUDA] gid=1 nodes=1
+[H2D_DEBUG] rank=0 staging_base=0000026CA2040000 per_zone=804096 label_aligned=
+1024 block_size=1608192 num_output_ranges=2
+[H2D_DEBUG] range[0] start_region=51 end_region=51 dst_off=9386240 dst_size=102
+4
+[H2D_DEBUG]   -> dst=0000000B060F3900 src=0000026CA2104500 src_end=0000026CA210
+4900 stream=00000226495DCFF0
+[H2D_DEBUG] range[1] start_region=52 end_region=52 dst_off=9387264 dst_size=803
+072
+[H2D_DEBUG]   -> dst=0000000B060F3D00 src=0000026CA2104900 src_end=0000026CA21C
+8A00 stream=00000226495DCFF0
+[2026-05-29 22:27:13.191] [INFO ] [TR] [CAPTURE-CUDA] gid=2 nodes=2
+[2026-05-29 22:27:13.191] [INFO ] [TR] [CAPTURE-CUDA]   node[0] COMPUTE op=100 has_launch=1
+[2026-05-29 22:27:13.191] [INFO ] [TR] [CAPTURE-CUDA]   node[1] COMPUTE op=53 has_launch=1
+[2026-05-29 22:27:13.191] [INFO ] [TR] [CAPTURE-CUDA] gid=3 nodes=2
+[2026-05-29 22:27:13.191] [INFO ] [TR] [CAPTURE-CUDA]   node[0] COMPUTE op=100 has_launch=1
+[2026-05-29 22:27:13.191] [INFO ] [TR] [CAPTURE-CUDA]   node[1] COMPUTE op=53 has_launch=1
+[2026-05-29 22:27:13.191] [INFO ] [TR] [CAPTURE-CUDA] gid=4 nodes=12
+[2026-05-29 22:27:13.191] [INFO ] [TR] [CAPTURE-CUDA]   node[0] COMPUTE op=49 has_launch=1
+[2026-05-29 22:27:13.191] [INFO ] [TR] [FC_AMP_FWD] input_ids=[19,25,21] dt_x shape={128,784,1,1} dt_w shape={512,784,1,1} dt_y shape={128,512,1,1}
+[2026-05-29 22:27:13.191] [INFO ] [TR] [CAPTURE-CUDA]   node[1] COMPUTE op=8 has_launch=1
+[2026-05-29 22:27:13.191] [INFO ] [TR] [CAPTURE-CUDA]   node[2] COMPUTE op=49 has_launch=1
+[2026-05-29 22:27:13.191] [INFO ] [TR] [FC_AMP_FWD] input_ids=[29,36,32] dt_x shape={128,512,1,1} dt_w shape={256,512,1,1} dt_y shape={128,256,1,1}
+[2026-05-29 22:27:13.191] [INFO ] [TR] [CAPTURE-CUDA]   node[3] COMPUTE op=8 has_launch=1
+[2026-05-29 22:27:13.191] [INFO ] [TR] [CAPTURE-CUDA]   node[4] COMPUTE op=49 has_launch=1
+[2026-05-29 22:27:13.191] [INFO ] [TR] [FC_AMP_FWD] input_ids=[40,47,43] dt_x shape={128,256,1,1} dt_w shape={10,256,1,1} dt_y shape={128,10,1,1}
+[2026-05-29 22:27:13.191] [INFO ] [TR] [CAPTURE-CUDA]   node[5] COMPUTE op=84 has_launch=1
+[2026-05-29 22:27:13.191] [INFO ] [TR] [CAPTURE-CUDA]   node[6] COMPUTE op=85 has_launch=1
+[2026-05-29 22:27:13.191] [INFO ] [TR] [CAPTURE-CUDA]   node[7] COMPUTE op=50 has_launch=1
+[2026-05-29 22:27:13.191] [INFO ] [TR] [CAPTURE-CUDA]   node[8] COMPUTE op=9 has_launch=1
+[2026-05-29 22:27:13.191] [INFO ] [TR] [CAPTURE-CUDA]   node[9] COMPUTE op=50 has_launch=1
+[2026-05-29 22:27:13.191] [INFO ] [TR] [CAPTURE-CUDA]   node[10] COMPUTE op=9 has_launch=1
+[2026-05-29 22:27:13.191] [INFO ] [TR] [CAPTURE-CUDA]   node[11] COMPUTE op=50 has_launch=1
+[2026-05-29 22:27:13.191] [INFO ] [TR] [CAPTURE-CUDA] gid=5 nodes=1
+[2026-05-29 22:27:13.191] [INFO ] [TR] [CAPTURE-CUDA] gid=6 nodes=1
+[2026-05-29 22:27:13.191] [INFO ] [TR] [CAPTURE-CUDA]   node[0] COMPUTE op=54 has_launch=1
+[2026-05-29 22:27:13.191] [INFO ] [TR] [CAPTURE-CUDA] gid=7 nodes=1
+[2026-05-29 22:27:13.191] [INFO ] [TR] [CAPTURE-CUDA]   node[0] COMPUTE op=54 has_launch=1
+[2026-05-29 22:27:13.191] [INFO ] [TR] [CAPTURE-CUDA] gid=8 nodes=1
+[2026-05-29 22:27:13.191] [INFO ] [TR] [CAPTURE-CUDA] gid=9 nodes=1
+[2026-05-29 22:27:13.191] [INFO ] [TR] [CAPTURE-CUDA] gid=12 nodes=2
+[2026-05-29 22:27:13.192] [INFO ] [TR] [CAPTURE-CUDA] gid=14 nodes=2
+[2026-05-29 22:27:13.192] [INFO ] [TR] [CAPTURE-CUDA] gid=20 nodes=1
+[2026-05-29 22:27:13.192] [INFO ] [TR] [CAPTURE-CUDA] gid=22 nodes=1
+[2026-05-29 22:27:13.192] [INFO ] [TR] [CAPTURE-CUDA] gid=23 nodes=1
+[2026-05-29 22:27:13.192] [INFO ] [TR] [CAPTURE-CUDA] gid=24 nodes=1
+[2026-05-29 22:27:13.192] [INFO ] [TR] [CAPTURE-CUDA] gid=26 nodes=1
+[2026-05-29 22:27:13.192] [INFO ] [TR] [CAPTURE-CUDA] gid=2 nodes=2
+[2026-05-29 22:27:13.192] [INFO ] [TR] [CAPTURE-CUDA]   node[0] COMPUTE op=100 has_launch=1
+[2026-05-29 22:27:13.192] [INFO ] [TR] [CAPTURE-CUDA]   node[1] COMPUTE op=53 has_launch=1
+[2026-05-29 22:27:13.192] [INFO ] [TR] [CAPTURE-CUDA] gid=3 nodes=2
+[2026-05-29 22:27:13.192] [INFO ] [TR] [CAPTURE-CUDA]   node[0] COMPUTE op=100 has_launch=1
+[2026-05-29 22:27:13.192] [INFO ] [TR] [CAPTURE-CUDA]   node[1] COMPUTE op=53 has_launch=1
+[2026-05-29 22:27:13.192] [INFO ] [TR] [CAPTURE-CUDA] gid=4 nodes=12
+[2026-05-29 22:27:13.192] [INFO ] [TR] [CAPTURE-CUDA]   node[0] COMPUTE op=49 has_launch=1
+[2026-05-29 22:27:13.192] [INFO ] [TR] [FC_AMP_FWD] input_ids=[19,25,21] dt_x shape={96,784,1,1} dt_w shape={512,784,1,1} dt_y shape={96,512,1,1}
+[2026-05-29 22:27:13.192] [INFO ] [TR] [CAPTURE-CUDA]   node[1] COMPUTE op=8 has_launch=1
+[2026-05-29 22:27:13.192] [INFO ] [TR] [CAPTURE-CUDA]   node[2] COMPUTE op=49 has_launch=1
+[2026-05-29 22:27:13.192] [INFO ] [TR] [FC_AMP_FWD] input_ids=[29,36,32] dt_x shape={96,512,1,1} dt_w shape={256,512,1,1} dt_y shape={96,256,1,1}
+[2026-05-29 22:27:13.192] [INFO ] [TR] [CAPTURE-CUDA]   node[3] COMPUTE op=8 has_launch=1
+[2026-05-29 22:27:13.192] [INFO ] [TR] [CAPTURE-CUDA]   node[4] COMPUTE op=49 has_launch=1
+[2026-05-29 22:27:13.192] [INFO ] [TR] [FC_AMP_FWD] input_ids=[40,47,43] dt_x shape={96,256,1,1} dt_w shape={10,256,1,1} dt_y shape={96,10,1,1}
+[2026-05-29 22:27:13.192] [INFO ] [TR] [CAPTURE-CUDA]   node[5] COMPUTE op=84 has_launch=1
+[2026-05-29 22:27:13.192] [INFO ] [TR] [CAPTURE-CUDA]   node[6] COMPUTE op=85 has_launch=1
+[2026-05-29 22:27:13.192] [INFO ] [TR] [CAPTURE-CUDA]   node[7] COMPUTE op=50 has_launch=1
+[2026-05-29 22:27:13.192] [INFO ] [TR] [CAPTURE-CUDA]   node[8] COMPUTE op=9 has_launch=1
+[2026-05-29 22:27:13.192] [INFO ] [TR] [CAPTURE-CUDA]   node[9] COMPUTE op=50 has_launch=1
+[2026-05-29 22:27:13.192] [INFO ] [TR] [CAPTURE-CUDA]   node[10] COMPUTE op=9 has_launch=1
+[2026-05-29 22:27:13.192] [INFO ] [TR] [CAPTURE-CUDA]   node[11] COMPUTE op=50 has_launch=1
+[2026-05-29 22:27:13.192] [INFO ] [TR] [CAPTURE-CUDA] gid=6 nodes=1
+[2026-05-29 22:27:13.192] [INFO ] [TR] [CAPTURE-CUDA]   node[0] COMPUTE op=54 has_launch=1
+[2026-05-29 22:27:13.192] [INFO ] [TR] [CAPTURE-CUDA] gid=7 nodes=1
+[2026-05-29 22:27:13.192] [INFO ] [TR] [CAPTURE-CUDA]   node[0] COMPUTE op=54 has_launch=1
+[2026-05-29 22:27:13.192] [INFO ] [TR] [CAPTURE-CUDA] gid=14 nodes=2
+[2026-05-29 22:27:13.192] [INFO ] [TR] [CAPTURE-CUDA] gid=16 nodes=8
+[2026-05-29 22:27:13.192] [INFO ] [TR] [CAPTURE-CUDA]   node[0] COMPUTE op=100 has_launch=1
+[2026-05-29 22:27:13.192] [INFO ] [TR] [CAPTURE-CUDA]   node[1] COMPUTE op=53 has_launch=1
+[2026-05-29 22:27:13.192] [INFO ] [TR] [CAPTURE-CUDA]   node[2] COMPUTE op=49 has_launch=1
+[2026-05-29 22:27:13.192] [INFO ] [TR] [FC_AMP_FWD] input_ids=[19,25,21] dt_x shape={128,784,1,1} dt_w shape={512,784,1,1} dt_y shape={128,512,1,1}
+[2026-05-29 22:27:13.192] [INFO ] [TR] [CAPTURE-CUDA]   node[3] COMPUTE op=10 has_launch=1
+[2026-05-29 22:27:13.192] [INFO ] [TR] [CAPTURE-CUDA]   node[4] COMPUTE op=49 has_launch=1
+[2026-05-29 22:27:13.192] [INFO ] [TR] [FC_AMP_FWD] input_ids=[29,36,32] dt_x shape={128,512,1,1} dt_w shape={256,512,1,1} dt_y shape={128,256,1,1}
+[2026-05-29 22:27:13.192] [INFO ] [TR] [CAPTURE-CUDA]   node[5] COMPUTE op=10 has_launch=1
+[2026-05-29 22:27:13.192] [INFO ] [TR] [CAPTURE-CUDA]   node[6] COMPUTE op=49 has_launch=1
+[2026-05-29 22:27:13.192] [INFO ] [TR] [FC_AMP_FWD] input_ids=[40,47,43] dt_x shape={128,256,1,1} dt_w shape={10,256,1,1} dt_y shape={128,10,1,1}
+[2026-05-29 22:27:13.193] [INFO ] [TR] [CAPTURE-CUDA]   node[7] COMPUTE op=87 has_launch=1
+[2026-05-29 22:27:13.193] [INFO ] [TR] [CAPTURE-CUDA] gid=17 nodes=8
+[2026-05-29 22:27:13.193] [INFO ] [TR] [CAPTURE-CUDA]   node[0] COMPUTE op=100 has_launch=1
+[2026-05-29 22:27:13.193] [INFO ] [TR] [CAPTURE-CUDA]   node[1] COMPUTE op=53 has_launch=1
+[2026-05-29 22:27:13.193] [INFO ] [TR] [CAPTURE-CUDA]   node[2] COMPUTE op=49 has_launch=1
+[2026-05-29 22:27:13.193] [INFO ] [TR] [FC_AMP_FWD] input_ids=[19,25,21] dt_x shape={128,784,1,1} dt_w shape={512,784,1,1} dt_y shape={128,512,1,1}
+[2026-05-29 22:27:13.193] [INFO ] [TR] [CAPTURE-CUDA]   node[3] COMPUTE op=10 has_launch=1
+[2026-05-29 22:27:13.193] [INFO ] [TR] [CAPTURE-CUDA]   node[4] COMPUTE op=49 has_launch=1
+[2026-05-29 22:27:13.193] [INFO ] [TR] [FC_AMP_FWD] input_ids=[29,36,32] dt_x shape={128,512,1,1} dt_w shape={256,512,1,1} dt_y shape={128,256,1,1}
+[2026-05-29 22:27:13.193] [INFO ] [TR] [CAPTURE-CUDA]   node[5] COMPUTE op=10 has_launch=1
+[2026-05-29 22:27:13.193] [INFO ] [TR] [CAPTURE-CUDA]   node[6] COMPUTE op=49 has_launch=1
+[2026-05-29 22:27:13.193] [INFO ] [TR] [FC_AMP_FWD] input_ids=[40,47,43] dt_x shape={128,256,1,1} dt_w shape={10,256,1,1} dt_y shape={128,10,1,1}
+[2026-05-29 22:27:13.193] [INFO ] [TR] [CAPTURE-CUDA]   node[7] COMPUTE op=87 has_launch=1
+[2026-05-29 22:27:13.193] [INFO ] [TR] [CAPTURE-CUDA] gid=14 nodes=2
+[2026-05-29 22:27:13.193] [INFO ] [TR] [CAPTURE-CUDA] gid=16 nodes=8
+[2026-05-29 22:27:13.193] [INFO ] [TR] [CAPTURE-CUDA]   node[0] COMPUTE op=100 has_launch=1
+[2026-05-29 22:27:13.193] [INFO ] [TR] [CAPTURE-CUDA]   node[1] COMPUTE op=53 has_launch=1
+[2026-05-29 22:27:13.193] [INFO ] [TR] [CAPTURE-CUDA]   node[2] COMPUTE op=49 has_launch=1
+[2026-05-29 22:27:13.193] [INFO ] [TR] [FC_AMP_FWD] input_ids=[19,25,21] dt_x shape={16,784,1,1} dt_w shape={512,784,1,1} dt_y shape={16,512,1,1}
+[2026-05-29 22:27:13.193] [INFO ] [TR] [CAPTURE-CUDA]   node[3] COMPUTE op=10 has_launch=1
+[2026-05-29 22:27:13.193] [INFO ] [TR] [CAPTURE-CUDA]   node[4] COMPUTE op=49 has_launch=1
+[2026-05-29 22:27:13.193] [INFO ] [TR] [FC_AMP_FWD] input_ids=[29,36,32] dt_x shape={16,512,1,1} dt_w shape={256,512,1,1} dt_y shape={16,256,1,1}
+[2026-05-29 22:27:13.193] [INFO ] [TR] [CAPTURE-CUDA]   node[5] COMPUTE op=10 has_launch=1
+[2026-05-29 22:27:13.193] [INFO ] [TR] [CAPTURE-CUDA]   node[6] COMPUTE op=49 has_launch=1
+[2026-05-29 22:27:13.193] [INFO ] [TR] [FC_AMP_FWD] input_ids=[40,47,43] dt_x shape={16,256,1,1} dt_w shape={10,256,1,1} dt_y shape={16,10,1,1}
+[2026-05-29 22:27:13.193] [INFO ] [TR] [CAPTURE-CUDA]   node[7] COMPUTE op=87 has_launch=1
+[2026-05-29 22:27:13.193] [INFO ] [TR] [CAPTURE-CUDA] gid=17 nodes=8
+[2026-05-29 22:27:13.193] [INFO ] [TR] [CAPTURE-CUDA]   node[0] COMPUTE op=100 has_launch=1
+[2026-05-29 22:27:13.193] [INFO ] [TR] [CAPTURE-CUDA]   node[1] COMPUTE op=53 has_launch=1
+[2026-05-29 22:27:13.193] [INFO ] [TR] [CAPTURE-CUDA]   node[2] COMPUTE op=49 has_launch=1
+[2026-05-29 22:27:13.193] [INFO ] [TR] [FC_AMP_FWD] input_ids=[19,25,21] dt_x shape={16,784,1,1} dt_w shape={512,784,1,1} dt_y shape={16,512,1,1}
+[2026-05-29 22:27:13.193] [INFO ] [TR] [CAPTURE-CUDA]   node[3] COMPUTE op=10 has_launch=1
+[2026-05-29 22:27:13.193] [INFO ] [TR] [CAPTURE-CUDA]   node[4] COMPUTE op=49 has_launch=1
+[2026-05-29 22:27:13.193] [INFO ] [TR] [FC_AMP_FWD] input_ids=[29,36,32] dt_x shape={16,512,1,1} dt_w shape={256,512,1,1} dt_y shape={16,256,1,1}
+[2026-05-29 22:27:13.193] [INFO ] [TR] [CAPTURE-CUDA]   node[5] COMPUTE op=10 has_launch=1
+[2026-05-29 22:27:13.193] [INFO ] [TR] [CAPTURE-CUDA]   node[6] COMPUTE op=49 has_launch=1
+[2026-05-29 22:27:13.193] [INFO ] [TR] [FC_AMP_FWD] input_ids=[40,47,43] dt_x shape={16,256,1,1} dt_w shape={10,256,1,1} dt_y shape={16,10,1,1}
+[2026-05-29 22:27:13.193] [INFO ] [TR] [CAPTURE-CUDA]   node[7] COMPUTE op=87 has_launch=1
+[2026-05-29 22:27:13.193] [INFO ] [graph] [B4] Warmup launching 28 graphs on rank 0
+[2026-05-29 22:27:13.193] [INFO ] [graph] [B4] Warmup launch completed
+[2026-05-29 22:27:13.193] [INFO ] [graph] [PRE_CAPTURE] Summary: 96 slots, 28 captured, 68 reused, 28 unique graphs, 1 ranks
+[2026-05-29 22:27:13.193] [INFO ] [TR] [EXEC-TABLE] v=0 rank=0 DEEP=OK ZG=OK BWD_A=OK BWD_B=OK FWD_A=OK FWD_B=OK OPT=OK XFER_A=OK XFER_B=OK INF_A=NULL INF_B=NULL
+[2026-05-29 22:27:13.193] [INFO ] [TR] [ATLAS] v=0 gid=0 atlas_idx=0
+[2026-05-29 22:27:13.193] [INFO ] [TR] [ATLAS] v=0 gid=1 atlas_idx=1
+[2026-05-29 22:27:13.193] [INFO ] [TR] [ATLAS] v=0 gid=2 atlas_idx=2
+[2026-05-29 22:27:13.193] [INFO ] [TR] [ATLAS] v=0 gid=3 atlas_idx=3
+[2026-05-29 22:27:13.193] [INFO ] [TR] [ATLAS] v=0 gid=4 atlas_idx=4
+[2026-05-29 22:27:13.193] [INFO ] [TR] [ATLAS] v=0 gid=5 atlas_idx=5
+[2026-05-29 22:27:13.193] [INFO ] [TR] [ATLAS] v=0 gid=6 atlas_idx=6
+[2026-05-29 22:27:13.193] [INFO ] [TR] [ATLAS] v=0 gid=7 atlas_idx=7
+[2026-05-29 22:27:13.193] [INFO ] [TR] [ATLAS] v=0 gid=8 atlas_idx=8
+[2026-05-29 22:27:13.193] [INFO ] [TR] [ATLAS] v=0 gid=9 atlas_idx=9
+[2026-05-29 22:27:13.193] [INFO ] [TR] [ATLAS] v=0 gid=12 atlas_idx=10
+[2026-05-29 22:27:13.193] [INFO ] [TR] [ATLAS] v=0 gid=14 atlas_idx=11
+[2026-05-29 22:27:13.193] [INFO ] [TR] [ATLAS] v=0 gid=20 atlas_idx=12
+[2026-05-29 22:27:13.193] [INFO ] [TR] [ATLAS] v=0 gid=22 atlas_idx=13
+[2026-05-29 22:27:13.193] [INFO ] [TR] [ATLAS] v=0 gid=23 atlas_idx=14
+[2026-05-29 22:27:13.193] [INFO ] [TR] [ATLAS] v=0 gid=24 atlas_idx=15
+[2026-05-29 22:27:13.193] [INFO ] [TR] [ATLAS] v=0 gid=26 atlas_idx=16
+[2026-05-29 22:27:13.193] [INFO ] [TR] [EXEC-TABLE] v=1 rank=0 DEEP=OK ZG=OK BWD_A=OK BWD_B=OK FWD_A=OK FWD_B=OK OPT=OK XFER_A=OK XFER_B=OK INF_A=NULL INF_B=NULL
+[2026-05-29 22:27:13.193] [INFO ] [TR] [ATLAS] v=1 gid=0 atlas_idx=0
+[2026-05-29 22:27:13.193] [INFO ] [TR] [ATLAS] v=1 gid=1 atlas_idx=1
+[2026-05-29 22:27:13.193] [INFO ] [TR] [ATLAS] v=1 gid=2 atlas_idx=17
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=1 gid=3 atlas_idx=18
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=1 gid=4 atlas_idx=19
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=1 gid=5 atlas_idx=5
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=1 gid=6 atlas_idx=20
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=1 gid=7 atlas_idx=21
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=1 gid=8 atlas_idx=8
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=1 gid=9 atlas_idx=9
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=1 gid=12 atlas_idx=10
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=1 gid=14 atlas_idx=22
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=1 gid=20 atlas_idx=12
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=1 gid=22 atlas_idx=13
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=1 gid=23 atlas_idx=14
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=1 gid=24 atlas_idx=15
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=1 gid=26 atlas_idx=16
+[2026-05-29 22:27:13.194] [INFO ] [TR] [EXEC-TABLE] v=2 rank=0 DEEP=OK ZG=OK BWD_A=OK BWD_B=OK FWD_A=OK FWD_B=OK OPT=OK XFER_A=OK XFER_B=OK INF_A=NULL INF_B=NULL
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=2 gid=0 atlas_idx=0
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=2 gid=1 atlas_idx=1
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=2 gid=2 atlas_idx=2
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=2 gid=3 atlas_idx=3
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=2 gid=4 atlas_idx=4
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=2 gid=5 atlas_idx=5
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=2 gid=6 atlas_idx=6
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=2 gid=7 atlas_idx=7
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=2 gid=8 atlas_idx=8
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=2 gid=9 atlas_idx=9
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=2 gid=12 atlas_idx=10
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=2 gid=14 atlas_idx=11
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=2 gid=20 atlas_idx=12
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=2 gid=22 atlas_idx=13
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=2 gid=23 atlas_idx=14
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=2 gid=24 atlas_idx=15
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=2 gid=26 atlas_idx=16
+[2026-05-29 22:27:13.194] [INFO ] [TR] [EXEC-TABLE] v=3 rank=0 DEEP=OK ZG=OK BWD_A=OK BWD_B=OK FWD_A=OK FWD_B=OK OPT=OK XFER_A=OK XFER_B=OK INF_A=NULL INF_B=NULL
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=3 gid=0 atlas_idx=0
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=3 gid=1 atlas_idx=1
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=3 gid=2 atlas_idx=17
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=3 gid=3 atlas_idx=18
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=3 gid=4 atlas_idx=19
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=3 gid=5 atlas_idx=5
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=3 gid=6 atlas_idx=20
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=3 gid=7 atlas_idx=21
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=3 gid=8 atlas_idx=8
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=3 gid=9 atlas_idx=9
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=3 gid=12 atlas_idx=10
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=3 gid=14 atlas_idx=22
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=3 gid=20 atlas_idx=12
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=3 gid=22 atlas_idx=13
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=3 gid=23 atlas_idx=14
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=3 gid=24 atlas_idx=15
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=3 gid=26 atlas_idx=16
+[2026-05-29 22:27:13.194] [INFO ] [TR] [EXEC-TABLE] v=4 rank=0 DEEP=NULL ZG=NULL BWD_A=NULL BWD_B=NULL FWD_A=NULL FWD_B=NULL OPT=NULL XFER_A=OK XFER_B=OK INF_A=OK INF_B=OK
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=4 gid=0 atlas_idx=0
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=4 gid=1 atlas_idx=1
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=4 gid=5 atlas_idx=5
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=4 gid=8 atlas_idx=8
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=4 gid=9 atlas_idx=9
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=4 gid=12 atlas_idx=10
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=4 gid=14 atlas_idx=11
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=4 gid=16 atlas_idx=23
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=4 gid=17 atlas_idx=24
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=4 gid=20 atlas_idx=12
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=4 gid=22 atlas_idx=13
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=4 gid=23 atlas_idx=14
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=4 gid=24 atlas_idx=15
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=4 gid=26 atlas_idx=16
+[2026-05-29 22:27:13.194] [INFO ] [TR] [EXEC-TABLE] v=5 rank=0 DEEP=NULL ZG=NULL BWD_A=NULL BWD_B=NULL FWD_A=NULL FWD_B=NULL OPT=NULL XFER_A=OK XFER_B=OK INF_A=OK INF_B=OK
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=5 gid=0 atlas_idx=0
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=5 gid=1 atlas_idx=1
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=5 gid=5 atlas_idx=5
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=5 gid=8 atlas_idx=8
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=5 gid=9 atlas_idx=9
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=5 gid=12 atlas_idx=10
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=5 gid=14 atlas_idx=25
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=5 gid=16 atlas_idx=26
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=5 gid=17 atlas_idx=27
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=5 gid=20 atlas_idx=12
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=5 gid=22 atlas_idx=13
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=5 gid=23 atlas_idx=14
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=5 gid=24 atlas_idx=15
+[2026-05-29 22:27:13.194] [INFO ] [TR] [ATLAS] v=5 gid=26 atlas_idx=16
+[2026-05-29 22:27:13.194] [INFO ] [TR] [DEBUG] init_all: dtensors count=55
+[2026-05-29 22:27:13.194] [INFO ] [TR] [DEBUG] dtensor[0] id=0 region=49 shape=[128,1,1,1] init=0
+[2026-05-29 22:27:13.194] [INFO ] [TR] [DEBUG] dtensor[1] id=1 region=50 shape=[128,28,28,1] init=0
+[2026-05-29 22:27:13.194] [INFO ] [TR] [DEBUG] dtensor[2] id=2 region=51 shape=[128,1,1,1] init=0
+[2026-05-29 22:27:13.194] [INFO ] [TR] [DEBUG] dtensor[3] id=3 region=52 shape=[128,28,28,1] init=0
+[2026-05-29 22:27:13.194] [INFO ] [TR] [DEBUG] dtensor[4] id=4 region=64 shape=[128,1,1,1] init=0
+[2026-05-29 22:27:13.194] [INFO ] [TR] [DEBUG] dtensor[5] id=5 region=59 shape=[1,1,1,1] init=1
+[2026-05-29 22:27:13.194] [INFO ] [TR] [DEBUG] dtensor[6] id=6 region=57 shape=[1,1,1,1] init=0
+[2026-05-29 22:27:13.195] [INFO ] [TR] [DEBUG] dtensor[7] id=7 region=57 shape=[1,1,1,1] init=2
+[2026-05-29 22:27:13.195] [INFO ] [TR] [DEBUG] dtensor[8] id=8 region=30 shape=[1,1,1,1] init=1
+[2026-05-29 22:27:13.195] [INFO ] [TR] [DEBUG] dtensor[9] id=9 region=30 shape=[1,1,1,1] init=1
+[2026-05-29 22:27:13.195] [INFO ] [TR] [DEBUG] dtensor[10] id=10 region=30 shape=[1,1,1,1] init=1
+[2026-05-29 22:27:13.195] [INFO ] [TR] [DEBUG] dtensor[11] id=11 region=59 shape=[1,1,1,1] init=0
+[2026-05-29 22:27:13.195] [INFO ] [TR] [DEBUG] dtensor[12] id=12 region=59 shape=[1,1,1,1] init=0
+[2026-05-29 22:27:13.195] [INFO ] [TR] [DEBUG] dtensor[13] id=13 region=59 shape=[1,1,1,1] init=0
+[2026-05-29 22:27:13.195] [INFO ] [TR] [DEBUG] dtensor[14] id=14 region=67 shape=[1,1,1,1] init=0
+[2026-05-29 22:27:13.195] [INFO ] [TR] [DEBUG] dtensor[15] id=15 region=67 shape=[1,1,1,1] init=0
+[2026-05-29 22:27:13.195] [INFO ] [TR] [DEBUG] dtensor[16] id=16 region=67 shape=[1,1,1,1] init=0
+[2026-05-29 22:27:13.195] [INFO ] [TR] [DEBUG] dtensor[17] id=17 region=57 shape=[1,1,1,1] init=2
+[2026-05-29 22:27:13.195] [INFO ] [TR] [DEBUG] dtensor[18] id=18 region=57 shape=[1,1,1,1] init=2
+[2026-05-29 22:27:13.195] [INFO ] [TR] [DEBUG] dtensor[19] id=19 region=55 shape=[128,1,1,784] init=0
+[2026-05-29 22:27:13.195] [INFO ] [TR] [DEBUG] dtensor[20] id=20 region=9 shape=[512,1,1,784] init=4
+[2026-05-29 22:27:13.195] [INFO ] [TR] [DEBUG] dtensor[21] id=21 region=8 shape=[1,1,1,512] init=1
+[2026-05-29 22:27:13.195] [INFO ] [TR] [DEBUG] dtensor[22] id=22 region=55 shape=[128,1,1,512] init=0
+[2026-05-29 22:27:13.195] [INFO ] [TR] [DEBUG] dtensor[23] id=23 region=27 shape=[512,1,1,784] init=0
+[2026-05-29 22:27:13.195] [INFO ] [TR] [DEBUG] dtensor[24] id=24 region=26 shape=[1,1,1,512] init=1
+[2026-05-29 22:27:13.195] [INFO ] [TR] [DEBUG] dtensor[25] id=25 region=21 shape=[512,1,1,784] init=0
+[2026-05-29 22:27:13.195] [INFO ] [TR] [DEBUG] dtensor[26] id=26 region=31 shape=[512,1,1,784] init=0
+[2026-05-29 22:27:13.195] [INFO ] [TR] [DEBUG] dtensor[27] id=27 region=37 shape=[512,1,1,784] init=0
+[2026-05-29 22:27:13.195] [INFO ] [TR] [DEBUG] dtensor[28] id=28 region=36 shape=[1,1,1,512] init=0
+[2026-05-29 22:27:13.195] [INFO ] [TR] [DEBUG] dtensor[29] id=29 region=55 shape=[128,1,1,512] init=0
+[2026-05-29 22:27:13.195] [INFO ] [TR] [DEBUG] dtensor[30] id=30 region=61 shape=[128,1,1,512] init=0
+[2026-05-29 22:27:13.195] [INFO ] [TR] [DEBUG] dtensor[31] id=31 region=9 shape=[256,1,1,512] init=4
+[2026-05-29 22:27:13.195] [INFO ] [TR] [DEBUG] dtensor[32] id=32 region=8 shape=[1,1,1,256] init=1
+[2026-05-29 22:27:13.195] [INFO ] [TR] [DEBUG] dtensor[33] id=33 region=55 shape=[128,1,1,256] init=0
+[2026-05-29 22:27:13.195] [INFO ] [TR] [DEBUG] dtensor[34] id=34 region=27 shape=[256,1,1,512] init=0
+[2026-05-29 22:27:13.195] [INFO ] [TR] [DEBUG] dtensor[35] id=35 region=26 shape=[1,1,1,256] init=1
+[2026-05-29 22:27:13.195] [INFO ] [TR] [DEBUG] dtensor[36] id=36 region=21 shape=[256,1,1,512] init=0
+[2026-05-29 22:27:13.195] [INFO ] [TR] [DEBUG] dtensor[37] id=37 region=31 shape=[256,1,1,512] init=0
+[2026-05-29 22:27:13.195] [INFO ] [TR] [DEBUG] dtensor[38] id=38 region=37 shape=[256,1,1,512] init=0
+[2026-05-29 22:27:13.195] [INFO ] [TR] [DEBUG] dtensor[39] id=39 region=36 shape=[1,1,1,256] init=0
+[2026-05-29 22:27:13.195] [INFO ] [TR] [DEBUG] dtensor[40] id=40 region=55 shape=[128,1,1,256] init=0
+[2026-05-29 22:27:13.195] [INFO ] [TR] [DEBUG] dtensor[41] id=41 region=61 shape=[128,1,1,256] init=0
+[2026-05-29 22:27:13.195] [INFO ] [TR] [DEBUG] dtensor[42] id=42 region=9 shape=[10,1,1,256] init=4
+[2026-05-29 22:27:13.195] [INFO ] [TR] [DEBUG] dtensor[43] id=43 region=8 shape=[1,1,1,10] init=1
+[2026-05-29 22:27:13.195] [INFO ] [TR] [DEBUG] dtensor[44] id=44 region=55 shape=[128,1,1,10] init=0
+[2026-05-29 22:27:13.195] [INFO ] [TR] [DEBUG] dtensor[45] id=45 region=27 shape=[10,1,1,256] init=0
+[2026-05-29 22:27:13.195] [INFO ] [TR] [DEBUG] dtensor[46] id=46 region=26 shape=[1,1,1,10] init=1
+[2026-05-29 22:27:13.195] [INFO ] [TR] [DEBUG] dtensor[47] id=47 region=21 shape=[10,1,1,256] init=0
+[2026-05-29 22:27:13.195] [INFO ] [TR] [DEBUG] dtensor[48] id=48 region=31 shape=[10,1,1,256] init=0
+[2026-05-29 22:27:13.195] [INFO ] [TR] [DEBUG] dtensor[49] id=49 region=37 shape=[10,1,1,256] init=0
+[2026-05-29 22:27:13.195] [INFO ] [TR] [DEBUG] dtensor[50] id=50 region=36 shape=[1,1,1,10] init=0
+[2026-05-29 22:27:13.195] [INFO ] [TR] [DEBUG] dtensor[51] id=51 region=55 shape=[128,1,1,10] init=0
+[2026-05-29 22:27:13.195] [INFO ] [TR] [DEBUG] dtensor[52] id=52 region=62 shape=[128,1,1,10] init=0
+[2026-05-29 22:27:13.195] [INFO ] [TR] [DEBUG] dtensor[53] id=53 region=66 shape=[128,1,1,1] init=0
+[2026-05-29 22:27:13.195] [INFO ] [TR] [DEBUG] dtensor[54] id=54 region=57 shape=[1,1,1,1] init=0
+[INIT-CHECK] rank=0 scaling=128.000000 (id=7, offset=10794752, ptr=0000000B0624
+B700) lr=0.000000 (id=6)
+[2026-05-29 22:27:13.201] [INFO ] [TR] 
+========== COMPILE DIAGNOSTICS ==========
+[2026-05-29 22:27:13.201] [INFO ] [TR] --- ArchPlan ---
+[2026-05-29 22:27:13.201] [INFO ] [TR] ArchPlan: 7 layers, first_layer_index=0
+Input: [1, 28, 28, 1]
+----------------------------------------------------------
+   0  Flatten                  [1, 28, 28, 1]         [1, 1, 1, 784]         [FIRST] 
+   1  FC                       [1, 1, 1, 784]         [1, 1, 1, 512]          out=512 bias=1
+   2  ReLU                     [1, 1, 1, 512]         [1, 1, 1, 512]          
+   3  FC                       [1, 1, 1, 512]         [1, 1, 1, 256]          out=256 bias=1
+   4  ReLU                     [1, 1, 1, 256]         [1, 1, 1, 256]          
+   5  FC                       [1, 1, 1, 256]         [1, 1, 1, 10]           out=10 bias=1
+   6  SoftmaxCE                [1, 1, 1, 10]          [1, 1, 1, 10]           classes=10
+
+[2026-05-29 22:27:13.201] [INFO ] [TR] --- MemoryPlan ---
+[2026-05-29 22:27:13.201] [INFO ] [TR] MemoryPlan Layout (total_bytes=10906880)
+===============================================
+Region [W_FC_BIAS]  ID=8  offset=0  bytes=4608
+-----------------------------------------------
+  Tensor[id=21]: offset=0,  bytes=2560,  dtype=FP32,  shape=[1,1,1,512]
+  Tensor[id=32]: offset=2560,  bytes=1536,  dtype=FP32,  shape=[1,1,1,256]
+  Tensor[id=43]: offset=4096,  bytes=512,  dtype=FP32,  shape=[1,1,1,10]
+-----------------------------------------------
+===============================================
+Region [W_FC_WEIGHT]  ID=9  offset=4608  bytes=2141696
+-----------------------------------------------
+  Tensor[id=20]: offset=4608,  bytes=1606144,  dtype=FP32,  shape=[512,1,1,784]
+  Tensor[id=31]: offset=1610752,  bytes=524800,  dtype=FP32,  shape=[256,1,1,512]
+  Tensor[id=42]: offset=2135552,  bytes=10752,  dtype=FP32,  shape=[10,1,1,256]
+-----------------------------------------------
+===============================================
+Region [A_FC_WEIGHT]  ID=21  offset=2146304  bytes=1070848
+-----------------------------------------------
+  Tensor[id=25]: offset=2146304,  bytes=803072,  dtype=FP16,  shape=[512,1,1,784]
+  Tensor[id=36]: offset=2949376,  bytes=262400,  dtype=FP16,  shape=[256,1,1,512]
+  Tensor[id=47]: offset=3211776,  bytes=5376,  dtype=FP16,  shape=[10,1,1,256]
+-----------------------------------------------
+===============================================
+Region [G_FC_BIAS]  ID=26  offset=3217152  bytes=4608
+-----------------------------------------------
+  Tensor[id=24]: offset=3217152,  bytes=2560,  dtype=FP32,  shape=[1,1,1,512]
+  Tensor[id=35]: offset=3219712,  bytes=1536,  dtype=FP32,  shape=[1,1,1,256]
+  Tensor[id=46]: offset=3221248,  bytes=512,  dtype=FP32,  shape=[1,1,1,10]
+-----------------------------------------------
+===============================================
+Region [G_FC_WEIGHT]  ID=27  offset=3221760  bytes=2141696
+-----------------------------------------------
+  Tensor[id=23]: offset=3221760,  bytes=1606144,  dtype=FP32,  shape=[512,1,1,784]
+  Tensor[id=34]: offset=4827904,  bytes=524800,  dtype=FP32,  shape=[256,1,1,512]
+  Tensor[id=45]: offset=5352704,  bytes=10752,  dtype=FP32,  shape=[10,1,1,256]
+-----------------------------------------------
+===============================================
+Region [R_RESULT]  ID=30  offset=5363456  bytes=1536
+-----------------------------------------------
+  Tensor[id=8]: offset=5363456,  bytes=512,  dtype=FP32,  shape=[1,1,1,1]
+  Tensor[id=9]: offset=5363968,  bytes=512,  dtype=FP32,  shape=[1,1,1,1]
+  Tensor[id=10]: offset=5364480,  bytes=512,  dtype=FP32,  shape=[1,1,1,1]
+-----------------------------------------------
+===============================================
+Region [G_FC_WEIGHT_FP16]  ID=31  offset=5364992  bytes=1070848
+-----------------------------------------------
+  Tensor[id=26]: offset=5364992,  bytes=803072,  dtype=FP16,  shape=[512,1,1,784]
+  Tensor[id=37]: offset=6168064,  bytes=262400,  dtype=FP16,  shape=[256,1,1,512]
+  Tensor[id=48]: offset=6430464,  bytes=5376,  dtype=FP16,  shape=[10,1,1,256]
+-----------------------------------------------
+===============================================
+Region [M_FC_BIAS]  ID=36  offset=6435840  bytes=4608
+-----------------------------------------------
+  Tensor[id=28]: offset=6435840,  bytes=2560,  dtype=FP32,  shape=[1,1,1,512]
+  Tensor[id=39]: offset=6438400,  bytes=1536,  dtype=FP32,  shape=[1,1,1,256]
+  Tensor[id=50]: offset=6439936,  bytes=512,  dtype=FP32,  shape=[1,1,1,10]
+-----------------------------------------------
+===============================================
+Region [M_FC_WEIGHT]  ID=37  offset=6440448  bytes=2141696
+-----------------------------------------------
+  Tensor[id=27]: offset=6440448,  bytes=1606144,  dtype=FP32,  shape=[512,1,1,784]
+  Tensor[id=38]: offset=8046592,  bytes=524800,  dtype=FP32,  shape=[256,1,1,512]
+  Tensor[id=49]: offset=8571392,  bytes=10752,  dtype=FP32,  shape=[10,1,1,256]
+-----------------------------------------------
+===============================================
+Region [I_A_LABEL]  ID=49  offset=8582144  bytes=1024
+-----------------------------------------------
+  Tensor[id=0]: offset=8582144,  bytes=1024,  dtype=INT32,  shape=[128,1,1,1]
+-----------------------------------------------
+===============================================
+Region [I_A_DATA]  ID=50  offset=8583168  bytes=803072
+-----------------------------------------------
+  Tensor[id=1]: offset=8583168,  bytes=803072,  dtype=FP16,  shape=[128,28,28,1]
+-----------------------------------------------
+===============================================
+Region [I_B_LABEL]  ID=51  offset=9386240  bytes=1024
+-----------------------------------------------
+  Tensor[id=2]: offset=9386240,  bytes=1024,  dtype=INT32,  shape=[128,1,1,1]
+-----------------------------------------------
+===============================================
+Region [I_B_DATA]  ID=52  offset=9387264  bytes=803072
+-----------------------------------------------
+  Tensor[id=3]: offset=9387264,  bytes=803072,  dtype=FP16,  shape=[128,28,28,1]
+-----------------------------------------------
+===============================================
+Region [F_FEATURE_FP16]  ID=55  offset=10190336  bytes=603904
+-----------------------------------------------
+  Tensor[id=19]: offset=10190336,  bytes=200960,  dtype=FP16,  shape=[128,1,1,784]
+  Tensor[id=22]: offset=10391296,  bytes=131328,  dtype=FP16,  shape=[128,1,1,512]
+  Tensor[id=29]: offset=10522624,  bytes=131328,  dtype=FP16,  shape=[128,1,1,512]
+  Tensor[id=33]: offset=10653952,  bytes=65792,  dtype=FP16,  shape=[128,1,1,256]
+  Tensor[id=40]: offset=10719744,  bytes=65792,  dtype=FP16,  shape=[128,1,1,256]
+  Tensor[id=44]: offset=10785536,  bytes=4352,  dtype=FP16,  shape=[128,1,1,10]
+  Tensor[id=51]: offset=10789888,  bytes=4352,  dtype=FP16,  shape=[128,1,1,10]
+-----------------------------------------------
+===============================================
+Region [S_SCALAR_FP32]  ID=57  offset=10794240  bytes=2560
+-----------------------------------------------
+  Tensor[id=6]: offset=10794240,  bytes=512,  dtype=FP32,  shape=[1,1,1,1]
+  Tensor[id=7]: offset=10794752,  bytes=512,  dtype=FP32,  shape=[1,1,1,1]
+  Tensor[id=17]: offset=10795264,  bytes=512,  dtype=FP32,  shape=[1,1,1,1]
+  Tensor[id=18]: offset=10795776,  bytes=512,  dtype=FP32,  shape=[1,1,1,1]
+  Tensor[id=54]: offset=10796288,  bytes=512,  dtype=FP32,  shape=[1,1,1,1]
+-----------------------------------------------
+===============================================
+Region [S_SCALAR_INT32]  ID=59  offset=10796800  bytes=2048
+-----------------------------------------------
+  Tensor[id=5]: offset=10796800,  bytes=512,  dtype=INT32,  shape=[1,1,1,1]
+  Tensor[id=11]: offset=10797312,  bytes=512,  dtype=INT32,  shape=[1,1,1,1]
+  Tensor[id=12]: offset=10797824,  bytes=512,  dtype=INT32,  shape=[1,1,1,1]
+  Tensor[id=13]: offset=10798336,  bytes=512,  dtype=INT32,  shape=[1,1,1,1]
+-----------------------------------------------
+===============================================
+Region [S_MASK]  ID=61  offset=10798848  bytes=98816
+-----------------------------------------------
+  Tensor[id=30]: offset=10798848,  bytes=65792,  dtype=INT8,  shape=[128,1,1,512]
+  Tensor[id=41]: offset=10864640,  bytes=33024,  dtype=INT8,  shape=[128,1,1,256]
+-----------------------------------------------
+===============================================
+Region [T_TEMP_FP32]  ID=62  offset=10897664  bytes=5632
+-----------------------------------------------
+  Tensor[id=52]: offset=10897664,  bytes=5632,  dtype=FP32,  shape=[128,1,1,10]
+-----------------------------------------------
+===============================================
+Region [T_TEMP_INT32]  ID=64  offset=10903296  bytes=1024
+-----------------------------------------------
+  Tensor[id=4]: offset=10903296,  bytes=1024,  dtype=INT32,  shape=[128,1,1,1]
+-----------------------------------------------
+===============================================
+Region [R_PREDICTED_LABEL]  ID=66  offset=10904320  bytes=1024
+-----------------------------------------------
+  Tensor[id=53]: offset=10904320,  bytes=1024,  dtype=INT32,  shape=[128,1,1,1]
+-----------------------------------------------
+===============================================
+Region [R_RESULT_ACCUMULATED]  ID=67  offset=10905344  bytes=1536
+-----------------------------------------------
+  Tensor[id=14]: offset=10905344,  bytes=512,  dtype=FP32,  shape=[1,1,1,1]
+  Tensor[id=15]: offset=10905856,  bytes=512,  dtype=FP32,  shape=[1,1,1,1]
+  Tensor[id=16]: offset=10906368,  bytes=512,  dtype=FP32,  shape=[1,1,1,1]
+-----------------------------------------------
+===============================================
+
+[2026-05-29 22:27:13.201] [INFO ] [TR] --- Train ComputationGraph ---
+[2026-05-29 22:27:13.201] [INFO ] [TR] === ComputationGraph Debug Dump ===
+[GraphId 0 / TRANSFER_A] 1 nodes:
+  RANGE_H2D_COPY_A outputs=[R49], [R50]
+[GraphId 1 / TRANSFER_B] 1 nodes:
+  RANGE_H2D_COPY_B outputs=[R51], [R52]
+[GraphId 2 / FIRST_LAYER_FWD_A] 2 nodes:
+  UNKNOWN inputs=[0] outputs=[4]
+  FLATTEN_AMP_FWD inputs=[1] outputs=[19]
+[GraphId 3 / FIRST_LAYER_FWD_B] 2 nodes:
+  UNKNOWN inputs=[2] outputs=[4]
+  FLATTEN_AMP_FWD inputs=[3] outputs=[19]
+[GraphId 4 / DEEP_FWD_BWD] 12 nodes:
+  FC_AMP_FWD inputs=[19, 25, 21] outputs=[22]
+  RELU_AMP_FWD inputs=[22] outputs=[29, 30]
+  FC_AMP_FWD inputs=[29, 36, 32] outputs=[33]
+  RELU_AMP_FWD inputs=[33] outputs=[40, 41]
+  FC_AMP_FWD inputs=[40, 47, 43] outputs=[44]
+  SOFTMAX_CE_AMP_FWD inputs=[44, 7, 11, 4] outputs=[8, 54, 53, 52, 9, 10]
+  SOFTMAX_CE_AMP_BWD inputs=[51, 52, 54, 7, 4] outputs=[51]
+  FC_AMP_BWD inputs=[51, 47, 44, 40] outputs=[40, 45, 46]
+  RELU_AMP_BWD inputs=[40, 41] outputs=[33]
+  FC_AMP_BWD inputs=[33, 36, 33, 29] outputs=[29, 34, 35]
+  RELU_AMP_BWD inputs=[29, 30] outputs=[22]
+  FC_AMP_BWD inputs=[22, 25, 22, 19] outputs=[19, 23, 24]
+[GraphId 5 / ZERO_GRAD] 1 nodes:
+  RANGE_CLEAR outputs=[R24 - R33]
+[GraphId 6 / FIRST_LAYER_BWD_A] 1 nodes:
+  FLATTEN_AMP_BWD inputs=[19] outputs=[1]
+[GraphId 7 / FIRST_LAYER_BWD_B] 1 nodes:
+  FLATTEN_AMP_BWD inputs=[19] outputs=[3]
+[GraphId 8 / FIRST_COMM] 1 nodes:
+  RANGE_SUM_ALLREDUCE inputs=[R24 - R28] outputs=[R24 - R28]
+[GraphId 9 / DEEP_COMM] 1 nodes:
+  RANGE_SUM_ALLREDUCE inputs=[R29 - R30] outputs=[R29 - R30]
+[GraphId 12 / NAN_CHECK_AND_GRAD_SCALING] 2 nodes:
+  RANGE_CHECK_NAN inputs=[R24 - R29] outputs=[5]
+  RANGE_GRAD_SCALING outputs=
+[GraphId 14 / OPTIMIZER] 2 nodes:
+  RANGE_UPDATE_WEIGHT_MOMENTUM inputs=[R9 - R11], [R27 - R29], [R37 - R39] outputs=[R9 - R11], [R37 - R39]
+  RANGE_UPDATE_BIAS_MOMENTUM inputs=[R6 - R8], [R24 - R26], [R34 - R36] outputs=[R6 - R8], [R34 - R36]
+[GraphId 20 / CAST_MAIN_FP32_TO_FP16] 1 nodes:
+  RANGE_CAST_FP32_TO_FP16 inputs=[R9 - R11] outputs=[R21 - R23]
+[GraphId 22 / ACCUM_METRICS] 1 nodes:
+  RANGE_ACCUM_METRICS outputs=[14, 15, 16]
+[GraphId 23 / ACCUM_METRICS_TRAIN_LAST] 1 nodes:
+  RANGE_ACCUM_METRICS outputs=[14, 15, 16]
+[GraphId 24 / ACCUM_METRICS_VAL_LAST] 1 nodes:
+  RANGE_ACCUM_METRICS outputs=[14, 15, 16]
+[GraphId 26 / CLEAR_METRICS] 1 nodes:
+  RANGE_CLEAR outputs=[R67]
+
+[2026-05-29 22:27:13.201] [INFO ] [TR] --- Inference ComputationGraph ---
+[2026-05-29 22:27:13.201] [INFO ] [TR] === ComputationGraph Debug Dump ===
+[GraphId 16 / INF_MAIN_A] 8 nodes:
+  UNKNOWN inputs=[0] outputs=[4]
+  FLATTEN_AMP_FWD inputs=[1] outputs=[19]
+  FC_AMP_FWD inputs=[19, 25, 21] outputs=[22]
+  RELU_AMP_INF inputs=[22] outputs=[29, 30]
+  FC_AMP_FWD inputs=[29, 36, 32] outputs=[33]
+  RELU_AMP_INF inputs=[33] outputs=[40, 41]
+  FC_AMP_FWD inputs=[40, 47, 43] outputs=[44]
+  SOFTMAX_CE_AMP_INF inputs=[44, 7, 11, 4] outputs=[8, 54, 53, 52, 9, 10]
+[GraphId 17 / INF_MAIN_B] 8 nodes:
+  UNKNOWN inputs=[2] outputs=[4]
+  FLATTEN_AMP_FWD inputs=[3] outputs=[19]
+  FC_AMP_FWD inputs=[19, 25, 21] outputs=[22]
+  RELU_AMP_INF inputs=[22] outputs=[29, 30]
+  FC_AMP_FWD inputs=[29, 36, 32] outputs=[33]
+  RELU_AMP_INF inputs=[33] outputs=[40, 41]
+  FC_AMP_FWD inputs=[40, 47, 43] outputs=[44]
+  SOFTMAX_CE_AMP_INF inputs=[44, 7, 11, 4] outputs=[8, 54, 53, 52, 9, 10]
+[GraphId 25 / VAL_RESULT_COMM] 1 nodes:
+  RANGE_SUM_ALLREDUCE inputs=[R67] outputs=[R67]
+
+[2026-05-29 22:27:13.201] [INFO ] [TR] =========================================
+
+[2026-05-29 22:27:13.201] [INFO ] [TR] ==================================================
+[2026-05-29 22:27:13.201] [INFO ] [TR]  Tech-Renaissance Training Started
+[2026-05-29 22:27:13.201] [INFO ] [TR] --------------------------------------------------
+[2026-05-29 22:27:13.201] [INFO ] [TR]  GPU IDs: [0]
+[2026-05-29 22:27:13.201] [INFO ] [TR]  Local batch size: 128
+[2026-05-29 22:27:13.201] [INFO ] [TR]  World size: 1
+[2026-05-29 22:27:13.201] [INFO ] [TR]  Total batch size: 128
+[2026-05-29 22:27:13.201] [INFO ] [TR]  Total epochs: 4
+[2026-05-29 22:27:13.201] [INFO ] [TR]  AMP: enabled
+[2026-05-29 22:27:13.201] [INFO ] [TR]  SEMA: disabled
+[2026-05-29 22:27:13.201] [INFO ] [TR]  Validate every: 1 epochs, offset: 0
+[2026-05-29 22:27:13.201] [INFO ] [TR]  Early stop by Top-1: 0.999
+[2026-05-29 22:27:13.201] [INFO ] [TR] ==================================================
+[2026-05-29 22:27:13.201] [INFO ] [TR] GlobalRegistry initialized successfully
+[2026-05-29 22:27:13.201] [INFO ] [TR] Beginning epoch 0 (train)
+[2026-05-29 22:27:13.201] [INFO ] [TR] Dataset not loaded, loading now
+[2026-05-29 22:27:13.201] [INFO ] [TR] Loading train set (RAW format): T:\dataset\mnist
+[2026-05-29 22:27:13.201] [INFO ] [TR]   Image file: T:\dataset\mnist/train-images-idx3-ubyte
+[2026-05-29 22:27:13.201] [INFO ] [TR]   Label file: T:\dataset\mnist/train-labels-idx1-ubyte
+[2026-05-29 22:27:13.201] [INFO ] [TR]   Label file magic: 2049
+[2026-05-29 22:27:13.201] [INFO ] [TR]   Number of labels: 60000
+[2026-05-29 22:27:13.201] [INFO ] [TR]   Image file magic: 2051
+[2026-05-29 22:27:13.201] [INFO ] [TR]   Image size: 28x28
+[2026-05-29 22:27:13.230] [INFO ] [TR]   Samples: 60000
+[2026-05-29 22:27:13.230] [INFO ] [TR]   Labels: 58.5938 KB
+[2026-05-29 22:27:13.230] [INFO ] [TR]   Images: 44.8608 MB
+[2026-05-29 22:27:13.236] [INFO ] [TR] Loading completed in 0.0349181 seconds
+[2026-05-29 22:27:13.236] [INFO ] [TR] Average bandwidth: 1286.38 MB/s
+[2026-05-29 22:27:13.236] [INFO ] [TR] Registering SampleInfo for train set
+[2026-05-29 22:27:13.237] [INFO ] [TR] SampleInfo registration completed: 60000 samples
+[2026-05-29 22:27:13.237] [INFO ] [TR] Performing global shuffle with seed: 0
+[2026-05-29 22:27:13.238] [INFO ] [TR] Global shuffle completed
+[2026-05-29 22:27:13.238] [INFO ] [TR] Distributing 60000 samples to 4 workers
+[2026-05-29 22:27:13.239] [INFO ] [TR] Distribution completed: total=60000, expected=60000
+[2026-05-29 22:27:13.239] [INFO ] [TR] Epoch 0 began (SampleInfo mode)
+[2026-05-29 22:27:13.239] [INFO ] [TR] [EB#0] reset_and_update(): phase=TRAIN, current_resolution_=28, num_color_channels_=1, current_sample_bytes_=6272
+[2026-05-29 22:27:13.344] [INFO ] [TR] [DIAG-WORKER] pid=1 wkr=1 lbl=9 fout_ptr=0000026CA2041C80 | raw: first_nz=211 nz=126 [5,255] | norm: first_nz=0 nz=784 [0,6.55724e-41]
+[2026-05-29 22:27:13.344] [INFO ] [TR] [DIAG-WORKER] pid=1 wkr=1 lbl=0 fout_ptr=0000026CA2047E80 | raw: first_nz=127 nz=224 [2,255] | norm: first_nz=0 nz=784 [0,6.55724e-41]
+[2026-05-29 22:27:13.344] [INFO ] [TR] [DIAG-WORKER] pid=1 wkr=1 lbl=0 fout_ptr=0000026CA204E080 | raw: first_nz=100 nz=233 [1,255] | norm: first_nz=0 nz=784 [0,6.55724e-41]
+[2026-05-29 22:27:13.344] [INFO ] [TR] [DIAG-WORKER] pid=1 wkr=1 lbl=6 fout_ptr=0000026CA2054280 | raw: first_nz=68 nz=152 [10,255] | norm: first_nz=0 nz=784 [0,6.55724e-41]
+[2026-05-29 22:27:13.344] [INFO ] [TR] [DIAG-WORKER] pid=1 wkr=1 lbl=1 fout_ptr=0000026CA205A480 | raw: first_nz=125 nz=64 [9,255] | norm: first_nz=0 nz=784 [0,6.55724e-41]
+[2026-05-29 22:27:13.470] [INFO ] [TR] Preprocessor completed: 60000 total samples
+[2026-05-29 22:27:13.470] [INFO ] [TR] Total buffers processed: 1
+[2026-05-29 22:27:13.470] [INFO ] [TR] Total epoch time: 0.231538 seconds
+[2026-05-29 22:27:13.470] [INFO ] [TR] Ending epoch 0
+[2026-05-29 22:27:13.470] [INFO ] [TR] Epoch ended
+[2026-05-29 22:27:13.471] [INFO ] [TR] [TRAIN] loss=0.249817
+[2026-05-29 22:27:13.471] [INFO ] [TR] Beginning epoch 0 (val)
+[2026-05-29 22:27:13.471] [INFO ] [TR] Dataset not loaded, loading now
+[2026-05-29 22:27:13.471] [INFO ] [TR] Loading val set (RAW format): T:\dataset\mnist
+[2026-05-29 22:27:13.471] [INFO ] [TR]   Image file: T:\dataset\mnist/t10k-images-idx3-ubyte
+[2026-05-29 22:27:13.471] [INFO ] [TR]   Label file: T:\dataset\mnist/t10k-labels-idx1-ubyte
+[2026-05-29 22:27:13.471] [INFO ] [TR]   Label file magic: 2049
+[2026-05-29 22:27:13.471] [INFO ] [TR]   Number of labels: 10000
+[2026-05-29 22:27:13.471] [INFO ] [TR]   Image file magic: 2051
+[2026-05-29 22:27:13.471] [INFO ] [TR]   Image size: 28x28
+[2026-05-29 22:27:13.476] [INFO ] [TR]   Samples: 10000
+[2026-05-29 22:27:13.476] [INFO ] [TR]   Labels: 9.76562 KB
+[2026-05-29 22:27:13.476] [INFO ] [TR]   Images: 7.47681 MB
+[2026-05-29 22:27:13.477] [INFO ] [TR] Loading completed in 0.0058526 seconds
+[2026-05-29 22:27:13.477] [INFO ] [TR] Average bandwidth: 1279.15 MB/s
+[2026-05-29 22:27:13.477] [INFO ] [TR] Registering SampleInfo for val set
+[2026-05-29 22:27:13.477] [INFO ] [TR] SampleInfo registration completed: 10000 samples
+[2026-05-29 22:27:13.477] [INFO ] [TR] Distributing 10000 samples to 4 workers
+[2026-05-29 22:27:13.477] [INFO ] [TR] Distribution completed: total=10000, expected=10000
+[2026-05-29 22:27:13.477] [INFO ] [TR] Epoch 0 began (SampleInfo mode)
+[2026-05-29 22:27:13.477] [INFO ] [TR] [EB#0] reset_and_update(): phase=VAL, current_resolution_=28, num_color_channels_=1, current_sample_bytes_=6272
+[2026-05-29 22:27:13.628] [INFO ] [TR] Preprocessor completed: 10000 total samples
+[2026-05-29 22:27:13.628] [INFO ] [TR] Total buffers processed: 1
+[2026-05-29 22:27:13.628] [INFO ] [TR] Total epoch time: 0.151159 seconds
+[2026-05-29 22:27:13.628] [INFO ] [TR] Ending epoch 0
+[2026-05-29 22:27:13.628] [INFO ] [TR] Epoch ended
+[2026-05-29 22:27:13.630] [INFO ] [TR] [VAL] loss=0.117301 top1=96.550003% top5=99.889999%
+[2026-05-29 22:27:13.630] [INFO ] [TR]      1 |   0.249817 |   0.117301 |     96.55% |     0.100000 |     0.4s
+[2026-05-29 22:27:13.630] [INFO ] [TR] Beginning epoch 1 (train)
+[2026-05-29 22:27:13.630] [INFO ] [TR] Performing global shuffle with seed: 1
+[2026-05-29 22:27:13.632] [INFO ] [TR] Global shuffle completed
+[2026-05-29 22:27:13.632] [INFO ] [TR] Distributing 60000 samples to 4 workers
+[2026-05-29 22:27:13.632] [INFO ] [TR] Distribution completed: total=60000, expected=60000
+[2026-05-29 22:27:13.632] [INFO ] [TR] Epoch 1 began (SampleInfo mode)
+[2026-05-29 22:27:13.633] [INFO ] [TR] [EB#0] reset_and_update(): phase=TRAIN, current_resolution_=28, num_color_channels_=1, current_sample_bytes_=6272
+[2026-05-29 22:27:13.874] [INFO ] [TR] Preprocessor completed: 60000 total samples
+[2026-05-29 22:27:13.874] [INFO ] [TR] Total buffers processed: 1
+[2026-05-29 22:27:13.874] [INFO ] [TR] Total epoch time: 0.241182 seconds
+[2026-05-29 22:27:13.874] [INFO ] [TR] Ending epoch 1
+[2026-05-29 22:27:13.874] [INFO ] [TR] Epoch ended
+[2026-05-29 22:27:13.874] [INFO ] [TR] [TRAIN] loss=0.092440
+[2026-05-29 22:27:13.874] [INFO ] [TR] Beginning epoch 1 (val)
+[2026-05-29 22:27:13.875] [INFO ] [TR] Distributing 10000 samples to 4 workers
+[2026-05-29 22:27:13.875] [INFO ] [TR] Distribution completed: total=10000, expected=10000
+[2026-05-29 22:27:13.875] [INFO ] [TR] Epoch 1 began (SampleInfo mode)
+[2026-05-29 22:27:13.875] [INFO ] [TR] [EB#0] reset_and_update(): phase=VAL, current_resolution_=28, num_color_channels_=1, current_sample_bytes_=6272
+[2026-05-29 22:27:14.023] [INFO ] [TR] Preprocessor completed: 10000 total samples
+[2026-05-29 22:27:14.023] [INFO ] [TR] Total buffers processed: 1
+[2026-05-29 22:27:14.023] [INFO ] [TR] Total epoch time: 0.148768 seconds
+[2026-05-29 22:27:14.023] [INFO ] [TR] Ending epoch 1
+[2026-05-29 22:27:14.023] [INFO ] [TR] Epoch ended
+[2026-05-29 22:27:14.024] [INFO ] [TR] [VAL] loss=0.089865 top1=97.519997% top5=99.889999%
+[2026-05-29 22:27:14.024] [INFO ] [TR]      2 |   0.092440 |   0.089865 |     97.52% |     0.100000 |     0.4s
+[2026-05-29 22:27:14.024] [INFO ] [TR] Beginning epoch 2 (train)
+[2026-05-29 22:27:14.024] [INFO ] [TR] Performing global shuffle with seed: 2
+[2026-05-29 22:27:14.026] [INFO ] [TR] Global shuffle completed
+[2026-05-29 22:27:14.026] [INFO ] [TR] Distributing 60000 samples to 4 workers
+[2026-05-29 22:27:14.027] [INFO ] [TR] Distribution completed: total=60000, expected=60000
+[2026-05-29 22:27:14.027] [INFO ] [TR] Epoch 2 began (SampleInfo mode)
+[2026-05-29 22:27:14.027] [INFO ] [TR] [EB#0] reset_and_update(): phase=TRAIN, current_resolution_=28, num_color_channels_=1, current_sample_bytes_=6272
+[2026-05-29 22:27:14.273] [INFO ] [TR] Preprocessor completed: 60000 total samples
+[2026-05-29 22:27:14.274] [INFO ] [TR] Total buffers processed: 1
+[2026-05-29 22:27:14.274] [INFO ] [TR] Total epoch time: 0.246807 seconds
+[2026-05-29 22:27:14.274] [INFO ] [TR] Ending epoch 2
+[2026-05-29 22:27:14.274] [INFO ] [TR] Epoch ended
+[2026-05-29 22:27:14.275] [INFO ] [TR] [TRAIN] loss=0.064926
+[2026-05-29 22:27:14.275] [INFO ] [TR] Beginning epoch 2 (val)
+[2026-05-29 22:27:14.275] [INFO ] [TR] Distributing 10000 samples to 4 workers
+[2026-05-29 22:27:14.275] [INFO ] [TR] Distribution completed: total=10000, expected=10000
+[2026-05-29 22:27:14.275] [INFO ] [TR] Epoch 2 began (SampleInfo mode)
+[2026-05-29 22:27:14.276] [INFO ] [TR] [EB#0] reset_and_update(): phase=VAL, current_resolution_=28, num_color_channels_=1, current_sample_bytes_=6272
+[2026-05-29 22:27:14.423] [INFO ] [TR] Preprocessor completed: 10000 total samples
+[2026-05-29 22:27:14.423] [INFO ] [TR] Total buffers processed: 1
+[2026-05-29 22:27:14.424] [INFO ] [TR] Total epoch time: 0.148471 seconds
+[2026-05-29 22:27:14.424] [INFO ] [TR] Ending epoch 2
+[2026-05-29 22:27:14.424] [INFO ] [TR] Epoch ended
+[2026-05-29 22:27:14.424] [INFO ] [TR] [VAL] loss=0.080370 top1=97.639999% top5=99.919998%
+[2026-05-29 22:27:14.434] [INFO ] [TR]      3 |   0.064926 |   0.080370 |     97.64% |     0.100000 |     0.4s
+[2026-05-29 22:27:14.434] [INFO ] [TR] Beginning epoch 3 (train)
+[2026-05-29 22:27:14.434] [INFO ] [TR] Performing global shuffle with seed: 3
+[2026-05-29 22:27:14.438] [INFO ] [TR] Global shuffle completed
+[2026-05-29 22:27:14.438] [INFO ] [TR] Distributing 60000 samples to 4 workers
+[2026-05-29 22:27:14.439] [INFO ] [TR] Distribution completed: total=60000, expected=60000
+[2026-05-29 22:27:14.439] [INFO ] [TR] Epoch 3 began (SampleInfo mode)
+[2026-05-29 22:27:14.439] [INFO ] [TR] [EB#0] reset_and_update(): phase=TRAIN, current_resolution_=28, num_color_channels_=1, current_sample_bytes_=6272
+[2026-05-29 22:27:14.673] [INFO ] [TR] Preprocessor completed: 60000 total samples
+[2026-05-29 22:27:14.673] [INFO ] [TR] Total buffers processed: 1
+[2026-05-29 22:27:14.673] [INFO ] [TR] Total epoch time: 0.23433 seconds
+[2026-05-29 22:27:14.673] [INFO ] [TR] Ending epoch 3
+[2026-05-29 22:27:14.673] [INFO ] [TR] Epoch ended
+[2026-05-29 22:27:14.674] [INFO ] [TR] [TRAIN] loss=0.048264
+[2026-05-29 22:27:14.674] [INFO ] [TR] Beginning epoch 3 (val)
+[2026-05-29 22:27:14.674] [INFO ] [TR] Distributing 10000 samples to 4 workers
+[2026-05-29 22:27:14.674] [INFO ] [TR] Distribution completed: total=10000, expected=10000
+[2026-05-29 22:27:14.674] [INFO ] [TR] Epoch 3 began (SampleInfo mode)
+[2026-05-29 22:27:14.674] [INFO ] [TR] [EB#0] reset_and_update(): phase=VAL, current_resolution_=28, num_color_channels_=1, current_sample_bytes_=6272
+[2026-05-29 22:27:14.828] [INFO ] [TR] Preprocessor completed: 10000 total samples
+[2026-05-29 22:27:14.828] [INFO ] [TR] Total buffers processed: 1
+[2026-05-29 22:27:14.828] [INFO ] [TR] Total epoch time: 0.154368 seconds
+[2026-05-29 22:27:14.828] [INFO ] [TR] Ending epoch 3
+[2026-05-29 22:27:14.828] [INFO ] [TR] Epoch ended
+[2026-05-29 22:27:14.829] [INFO ] [TR] [VAL] loss=0.095572 top1=97.509995% top5=99.959999%
+[2026-05-29 22:27:14.829] [INFO ] [TR]      4 |   0.048264 |   0.095572 |     97.51% |     0.100000 |     0.4s
+[2026-05-29 22:27:14.829] [INFO ] [TR] ==================================================
+[2026-05-29 22:27:14.829] [INFO ] [TR]  Training Complete
+[2026-05-29 22:27:14.829] [INFO ] [TR] --------------------------------------------------
+[2026-05-29 22:27:14.829] [INFO ] [TR]  Best Val Top-1: 97.64%
+[2026-05-29 22:27:14.829] [INFO ] [TR]  Best Epoch: 3
+[2026-05-29 22:27:14.829] [INFO ] [TR]  Total Time: 0h 0m 1s
+[2026-05-29 22:27:14.829] [INFO ] [TR] ==================================================
+
+=====================================
+ Mode: AMP  [FP16]
+ Best Top-1: 97.64%
+ Best Epoch: 3
+ Time: 1.63 s
+=====================================
+PASS
+[2026-05-29 22:27:14.831] [INFO ] [TR] MnistLoaderRaw destroying...
+[2026-05-29 22:27:14.831] [INFO ] [TR] Freeing dataset: train
+[2026-05-29 22:27:14.834] [INFO ] [TR] Freeing dataset: val
+[2026-05-29 22:27:14.834] [INFO ] [TR] MnistLoaderRaw destroyed

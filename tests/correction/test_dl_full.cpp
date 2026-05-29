@@ -82,7 +82,7 @@ int main(int argc, char** argv) {
         .val_transforms(DoNothing())
         .commit();
 
-    BluePrint mlp = seq(fc(512, true), relu(), fc(256, true), relu(), fc(10, true));
+    BluePrint mlp = seq(fc(512, true), tanh_act(), fc(256, true), tanh_act(), fc(10, true));
 
     DeepLearningTask task;
     task.model(mlp)

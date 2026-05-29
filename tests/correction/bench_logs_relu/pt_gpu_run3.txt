@@ -1,0 +1,9 @@
+Mode: GPU  Device: cuda
+Using torch.compile (max-autotune) ...
+Epoch 1: train_loss=0.2521  val_loss=0.1111  val_acc=96.71%
+Epoch 2: train_loss=0.0935  val_loss=0.1077  val_acc=96.70%
+Epoch 3: train_loss=0.0645  val_loss=0.1051  val_acc=97.03%
+Epoch 4: train_loss=0.0480  val_loss=0.0922  val_acc=97.34%
+
+Final Val Accuracy: 97.34%
+Training time (4 epochs): 10.647s
