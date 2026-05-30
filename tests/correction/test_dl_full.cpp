@@ -61,7 +61,7 @@ int main(int argc, char** argv) {
             break;
     }
     GLOBAL_SETTING
-        .manual_seed(123)
+        .manual_seed(42)
         .local_batch_size(128)
         .train_resolution(28)
         .val_resolution(28)
@@ -74,8 +74,8 @@ int main(int argc, char** argv) {
         .dataset("mnist", "/root/epfs/dataset/mnist")
 #endif
         .color_channels(1)
-        .load_workers(1)
-        .preprocess_workers(4)
+        .load_workers(8)
+        .preprocess_workers(8)
         .cpu_binding(true)
         .normalization(NormMode::MNIST)
         .train_transforms(DoNothing())

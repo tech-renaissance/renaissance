@@ -67,4 +67,4 @@ enum class LoadMode {
 #define TR_CIFAR_10      tr::DatasetType::cifar_10
 #define TR_CIFAR_100      tr::DatasetType::cifar_100
 
-#define TR_AMP_INITIAL_SCALING  128.0f
+#define TR_AMP_INITIAL_SCALING  8192.0f

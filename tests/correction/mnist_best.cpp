@@ -82,7 +82,7 @@ int main(int argc, char** argv) {
     }
 
     GLOBAL_SETTING
-        .manual_seed(42)           // 固定随机种子，确保可复现
+        .manual_seed(123)           // 固定随机种子，确保可复现
         .local_batch_size(128)     // 标准batch size
         .train_resolution(28)      // MNIST标准分辨率
         .val_resolution(28)
@@ -95,8 +95,8 @@ int main(int argc, char** argv) {
         .dataset("mnist", "/root/epfs/dataset/mnist")
 #endif
         .color_channels(1)
-        .load_workers(4)           // 数据加载线程数
-        .preprocess_workers(4)     // 预处理线程数
+        .load_workers(8)           // 数据加载线程数
+        .preprocess_workers(8)     // 预处理线程数
         .cpu_binding(true)        // CPU核心绑定
         .normalization(NormMode::MNIST)
 
@@ -187,16 +187,16 @@ int main(int argc, char** argv) {
 
     // 根据准确率给出评价
     if (result.best_top1 >= 0.985f) {
-        std::cout << "✅ EXCELLENT! Accuracy >= 98.5%\n";
+        std::cout << "EXCELLENT! Accuracy >= 98.5%\n";
         std::cout << "Target achieved: Goal met!\n";
     } else if (result.best_top1 >= 0.980f) {
-        std::cout << "✅ GOOD! Accuracy >= 98.0%\n";
+        std::cout << "GOOD! Accuracy >= 98.0%\n";
         std::cout << "Performance: Above baseline\n";
     } else if (result.best_top1 >= 0.975f) {
-        std::cout << "⚠️  ACCEPTABLE. Accuracy >= 97.5%\n";
+        std::cout << "ACCEPTABLE. Accuracy >= 97.5%\n";
         std::cout << "Consider: Increasing epochs or adjusting hyperparameters\n";
     } else {
-        std::cout << "❌ NEEDS IMPROVEMENT. Accuracy < 97.5%\n";
+        std::cout << "NEEDS IMPROVEMENT. Accuracy < 97.5%\n";
         std::cout << "Recommendations:\n";
         std::cout << "  1. Increase training epochs to 150+\n";
         std::cout << "  2. Adjust weight_decay (try 5e-4 or 5e-5)\n";

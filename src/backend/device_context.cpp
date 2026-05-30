@@ -43,10 +43,21 @@ size_t DeviceContext::stream_index(StreamKind kind) noexcept {
 DeviceContext::DeviceContext(int device_id) : device_id_(device_id) {
     if (device_id_ < 0) {
 #ifdef TR_USE_EIGEN
-#ifdef _OPENMP
-        Eigen::setNbThreads(1);
-        TR_LOG_INFO("backend") << "DeviceContext CPU: Eigen OpenMP disabled (setNbThreads=1)";
-#endif
+        // Previously we forced Eigen to single-thread to avoid oversubscription
+        // with OpenMP. However, this cripples CPU GEMM performance — PyTorch's
+        // multi-threaded BLAS easily outruns us. Eigen's internal scheduler
+        // already skips threading for matrices too small to benefit, so let it
+        // auto-detect the optimal core count (usually = physical cores).
+        //
+        // OLD CODE (kept for reference):
+        // #ifdef _OPENMP
+        //     Eigen::setNbThreads(1);
+        //     TR_LOG_INFO("backend") << "DeviceContext CPU: Eigen OpenMP disabled (setNbThreads=1)";
+        // #endif
+        // Auto-detect caused oversubscription (too many threads vs DataLoader workers).
+        // Fix to 4 threads — enough for GEMM speedup, low enough to avoid contention.
+        Eigen::setNbThreads(4);
+        TR_LOG_INFO("backend") << "DeviceContext CPU: Eigen fixed threads=4";
 #endif
         return;
     }

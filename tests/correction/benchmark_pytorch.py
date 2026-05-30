@@ -74,8 +74,8 @@ if __name__ == '__main__':
     val_set   = datasets.MNIST("T:/dataset/mnist", train=False, download=False, transform=transform)
 
     pin_mem = (device.type == "cuda")
-    train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True,  pin_memory=pin_mem, num_workers=4, persistent_workers=True)
-    val_loader   = DataLoader(val_set,   batch_size=batch_size, shuffle=False, pin_memory=pin_mem, num_workers=4, persistent_workers=True)
+    train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True,  pin_memory=pin_mem, num_workers=8, persistent_workers=True)
+    val_loader   = DataLoader(val_set,   batch_size=batch_size, shuffle=False, pin_memory=pin_mem, num_workers=8, persistent_workers=True)
 
     model = MLP().to(device)
 
