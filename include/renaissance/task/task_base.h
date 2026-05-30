@@ -164,7 +164,7 @@ public:
     // ---------------------------------------------------------------------
     /**
      * @brief 配置学习率调度器（模板方法，支持任意派生类）
-     * @param sched 任意调度器派生类实例（PolynomialLR/CosineAnnealingLR/StepLR）
+     * @param sched 任意调度器派生类实例（PolynomialLR/CosineAnnealingLR/StepLR/ConstantLR）
      * @return *this，支持链式调用
      *
      * @example

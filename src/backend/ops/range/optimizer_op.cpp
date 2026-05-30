@@ -326,12 +326,12 @@ static void adam_update_cpu(float* w, const float* g, float* m, float* v, size_t
     float bc1 = (bias_corr1 != 0.0f) ? bias_corr1 : 1.0f;
     float bc2 = (bias_corr2 != 0.0f) ? bias_corr2 : 1.0f;
     for (size_t i = 0; i < n; ++i) {
-        float g_i = g[i] * inv_scaling;
+        float g_i = g[i] * inv_scaling + wd * w[i];
         m[i] = m[i] * b1 + (1.0f - b1) * g_i;
         v[i] = v[i] * b2 + (1.0f - b2) * g_i * g_i;
         float m_hat = m[i] * bc1;
         float v_hat = v[i] * bc2;
-        w[i] = w[i] * (1.0f - lr * wd) - lr * m_hat / (std::sqrt(v_hat) + eps);
+        w[i] = w[i] - lr * m_hat / (std::sqrt(v_hat) + eps);
     }
 }
 

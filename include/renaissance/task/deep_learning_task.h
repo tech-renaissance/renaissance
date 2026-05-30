@@ -116,6 +116,9 @@ public:
     /** @brief 设置学习率调度器（StepLR） */
     DeepLearningTask& scheduler(const StepLR& sched);
 
+    /** @brief 设置学习率调度器（ConstantLR） */
+    DeepLearningTask& scheduler(const ConstantLR& sched);
+
     /** @brief 设置总训练 epoch 数 */
     DeepLearningTask& total_epochs(int n);
 
@@ -423,7 +426,7 @@ private:
     bool has_optimizer_ = false;
 
     // 调度器配置
-    std::variant<std::monostate, PolynomialLR, CosineAnnealingLR, StepLR> sched_cfg_;
+    std::variant<std::monostate, PolynomialLR, CosineAnnealingLR, StepLR, ConstantLR> sched_cfg_;
     bool has_scheduler_ = false;
 
     // 初始化器显式配置标志（DeepLearningTask 特有兜底逻辑使用）

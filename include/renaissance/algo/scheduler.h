@@ -1,6 +1,6 @@
 /**
  * @file scheduler.h
- * @brief 学习率调度器基类及派生类：PolynomialLR / CosineAnnealingLR / StepLR
+ * @brief 学习率调度器基类及派生类：PolynomialLR / CosineAnnealingLR / StepLR / ConstantLR
  * @version 4.20.2
  * @date 2026-05-14
  * @author 技术觉醒团队
@@ -205,6 +205,40 @@ protected:
 private:
     int   step_size_ = 10;
     float gamma_     = 0.1f;
+};
+
+// ============================================================================
+// ConstantLR
+// ============================================================================
+
+class ConstantLR final : public LRScheduler {
+public:
+    ConstantLR() = default;
+
+    ConstantLR& base_lr(float lr) {
+        LRScheduler::base_lr(lr); return *this;
+    }
+    ConstantLR& warmup(int epochs) {
+        LRScheduler::warmup(epochs); return *this;
+    }
+    ConstantLR& warmup_start_factor(float factor) {
+        LRScheduler::warmup_start_factor(factor); return *this;
+    }
+    ConstantLR& step_by_batch(bool v = true) {
+        LRScheduler::step_by_batch(v); return *this;
+    }
+    ConstantLR& step_by_epoch() {
+        LRScheduler::step_by_epoch(); return *this;
+    }
+
+protected:
+    float compute_decay_lr(int /*decay_step*/, int /*total_decay*/) const override {
+        return base_lr_;  // 恒定学习率
+    }
+    void  validate_config() const override {
+        // ConstantLR 无需验证配置
+    }
+    const char* name() const override { return "ConstantLR"; }
 };
 
 } // namespace tr

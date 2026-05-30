@@ -86,8 +86,10 @@ __global__ void update_nesterov_kernel(
 }
 
 // ============================================================================
-// 4. Adam：m = m*b1 + (1-b1)*g;  v = v*b2 + (1-b2)*g^2;
-//          w = w*(1-lr*wd) - lr * m_hat / (sqrt(v_hat) + eps)
+// 4. Adam（L2 正则化）：g_eff = g + wd*w;  m = m*b1 + (1-b1)*g_eff;
+//                        v = v*b2 + (1-b2)*g_eff^2;
+//                        w = w - lr * m_hat / (sqrt(v_hat) + eps)
+//     weight_decay 加在梯度上，影响 m 和 v 的更新
 // ============================================================================
 OPTIMIZER_LAUNCH_BOUNDS
 __global__ void update_adam_kernel(
@@ -111,13 +113,12 @@ __global__ void update_adam_kernel(
     float _bc2 = bias_corr2 ? *bias_corr2 : 1.0f;
     for (size_t i = blockIdx.x * blockDim.x + threadIdx.x;
          i < n; i += gridDim.x * blockDim.x) {
-        float g_i = g[i] * _inv_scaling;
+        float g_i = g[i] * _inv_scaling + _wd * w[i];
         m[i] = m[i] * _b1 + (1.0f - _b1) * g_i;
         v[i] = v[i] * _b2 + (1.0f - _b2) * g_i * g_i;
         float m_hat = m[i] * _bc1;
         float v_hat = v[i] * _bc2;
-        w[i] = w[i] * (1.0f - _lr * _wd)
-             - _lr * m_hat / (sqrtf(v_hat) + _eps);
+        w[i] = w[i] - _lr * m_hat / (sqrtf(v_hat) + _eps);
     }
 }
 

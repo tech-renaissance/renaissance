@@ -1,8 +1,0 @@
-Mode: CPU  Device: cpu
-Epoch 1: train_loss=0.2474  val_loss=0.1419  val_acc=95.55%
-Epoch 2: train_loss=0.0994  val_loss=0.1127  val_acc=96.57%
-Epoch 3: train_loss=0.0618  val_loss=0.0844  val_acc=97.35%
-Epoch 4: train_loss=0.0446  val_loss=0.0931  val_acc=97.36%
-
-Final Val Accuracy: 97.36%
-Training time (4 epochs): 18.443s

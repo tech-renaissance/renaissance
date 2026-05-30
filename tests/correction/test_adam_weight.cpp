@@ -83,7 +83,7 @@ int main(int argc, char* argv[]) {
     task.compile();
 
     float lr_val  = 0.001f;
-    float wd_val  = 0.0f;
+    float wd_val  = 0.01f;
     float b1_val  = 0.9f;
     float b2_val  = 0.999f;
     float eps_val = 1e-8f;
@@ -151,19 +151,18 @@ int main(int argc, char* argv[]) {
 
     task.run("adam_weight");
 
-    float decay = 1.0f - lr_val * wd_val;
     auto expected = [&](const Tensor& w, const Tensor& g,
                         const Tensor& m_in, const Tensor& v_in) -> Tensor {
         float bc1 = 1.0f / (1.0f - std::pow(b1_val, 1.0f));
         float bc2 = 1.0f / (1.0f - std::pow(b2_val, 1.0f));
         Tensor e_w(w.shape(), DType::FP32);
         for (int64_t i = 0; i < w.numel(); ++i) {
-            float g_i = g.data<float>()[i];
+            float g_i = g.data<float>()[i] + wd_val * w.data<float>()[i];
             float m_i = m_in.data<float>()[i] * b1_val + (1.0f - b1_val) * g_i;
             float v_i = v_in.data<float>()[i] * b2_val + (1.0f - b2_val) * g_i * g_i;
             float m_hat = m_i * bc1;
             float v_hat = v_i * bc2;
-            e_w.data<float>()[i] = w.data<float>()[i] * decay
+            e_w.data<float>()[i] = w.data<float>()[i]
                                  - lr_val * m_hat / (std::sqrt(v_hat) + eps_val);
         }
         return e_w;
