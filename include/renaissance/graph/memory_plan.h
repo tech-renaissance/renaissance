@@ -169,6 +169,9 @@ public:
         int32_t accum_loss = -1;
         int32_t accum_top1 = -1;
         int32_t accum_top5 = -1;
+        int32_t step       = -1;
+        int32_t bias_corr1 = -1;
+        int32_t bias_corr2 = -1;
     };
 
     void alloc_baseline_dtensors(const Shape& label_shape,
@@ -204,6 +207,9 @@ public:
     int32_t local_batch_size_id()      const noexcept { return baseline_.local_batch_size; }
     int32_t last_train_batch_size_id() const noexcept { return baseline_.last_train_batch_size; }
     int32_t last_val_batch_size_id()   const noexcept { return baseline_.last_val_batch_size; }
+    int32_t step_id()                 const noexcept { return baseline_.step; }
+    int32_t bias_corr1_id()           const noexcept { return baseline_.bias_corr1; }
+    int32_t bias_corr2_id()           const noexcept { return baseline_.bias_corr2; }
     int32_t accum_loss_id()            const noexcept { return baseline_.accum_loss; }
     int32_t accum_top1_id()            const noexcept { return baseline_.accum_top1; }
     int32_t accum_top5_id()            const noexcept { return baseline_.accum_top5; }

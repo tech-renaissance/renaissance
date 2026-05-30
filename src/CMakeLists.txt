@@ -92,6 +92,8 @@ list(APPEND RENAISSANCE_SOURCES
     backend/ops/dtensor/lars_op.cpp
     backend/ops/dtensor/lars_op.cu
     backend/ops/dtensor/dtensor_copy_op.cpp
+    backend/ops/dtensor/adam_bc_op.cpp
+    backend/ops/dtensor/adam_bc_op.cu
     backend/infra_kernels.cpp
     backend/infra_kernels.cu
 )

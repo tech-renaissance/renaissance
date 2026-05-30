@@ -32,8 +32,8 @@ struct MemRangeInfo {
 
 struct CpuOpContext {
     const DeviceContext* ctx = nullptr;
-    int32_t input_ids[8] = {};
-    int32_t output_ids[8] = {};
+    int32_t input_ids[12] = {};
+    int32_t output_ids[12] = {};
     int num_inputs = 0;
     int num_outputs = 0;
     int64_t total_elements = 0;
@@ -49,8 +49,8 @@ struct CpuOpContext {
     int64_t c_stride = 0;
 
     // RangeOp 专用字段（V4.21 新增）
-    MemRangeInfo input_ranges[8];
-    MemRangeInfo output_ranges[8];
+    MemRangeInfo input_ranges[12];
+    MemRangeInfo output_ranges[12];
     int num_input_ranges = 0;
     int num_output_ranges = 0;
 };
@@ -116,5 +116,6 @@ void register_op_lars();
 void register_op_dtensor_copy();
 void register_op_range_grad_scaling();
 void register_op_range_accum_metrics();
+void register_op_adam_bc();
 
 } // namespace tr

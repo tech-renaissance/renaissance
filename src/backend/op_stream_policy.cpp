@@ -60,6 +60,11 @@ StreamKind get_op_default_stream(ComputeOp op) noexcept {
         case ComputeOp::SOFTMAX_CE_AMP_INF:
             return StreamKind::COMP_1;
 
+        // ===== Adam Bias Correction 标量算子 → UPDATE =====
+        case ComputeOp::SCALAR_INCREMENT:
+        case ComputeOp::ADAM_BIAS_CORRECTION:
+            return StreamKind::UPDATE;
+
         default:
             return StreamKind::COMP_1;
     }

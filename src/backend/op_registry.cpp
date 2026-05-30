@@ -56,6 +56,7 @@ void register_default_ops() {
     register_op_dtensor_copy();
     register_op_range_grad_scaling();
     register_op_range_accum_metrics();
+    register_op_adam_bc();
 }
 
 #ifdef TR_USE_CUDA

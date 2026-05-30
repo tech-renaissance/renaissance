@@ -269,6 +269,7 @@ set(OPT_WEIGHT_TESTS
     test_adam_weight
     test_adamw_weight
     test_adam_bias
+    test_adamw_bias
 )
 foreach(test_name IN LISTS OPT_WEIGHT_TESTS)
     add_executable(${test_name} ${test_name}.cpp)

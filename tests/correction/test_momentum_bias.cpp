@@ -62,6 +62,7 @@ int main(int argc, char* argv[]) {
         };
         node.output_ranges = {
             mp.region_range(Region::W_FC_BIAS),
+            mp.region_range(Region::M_FC_BIAS),
         };
         node.input_ids = {d_lr.id, d_beta.id, d_scaling.id, d_has_nan.id};
         g.append(std::move(node));

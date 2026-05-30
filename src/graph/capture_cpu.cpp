@@ -37,10 +37,10 @@ void capture_cpu(const ComputationGraph& cg,
             op_ctx->num_inputs = 0;
             op_ctx->num_outputs = 0;
 
-            for (size_t i = 0; i < node.input_ids.size() && i < 8; ++i) {
+            for (size_t i = 0; i < node.input_ids.size() && i < 12; ++i) {
                 op_ctx->input_ids[op_ctx->num_inputs++] = node.input_ids[i];
             }
-            for (size_t i = 0; i < node.output_ids.size() && i < 8; ++i) {
+            for (size_t i = 0; i < node.output_ids.size() && i < 12; ++i) {
                 op_ctx->output_ids[op_ctx->num_outputs++] = node.output_ids[i];
             }
             op_ctx->params = node.params;
@@ -74,7 +74,7 @@ void capture_cpu(const ComputationGraph& cg,
             op_ctx->range_op = node.range_op;
             op_ctx->params = node.params;
 
-            for (size_t i = 0; i < node.input_ranges.size() && i < 8; ++i) {
+            for (size_t i = 0; i < node.input_ranges.size() && i < 12; ++i) {
                 auto [off, sz] = mp.resolve_region_bounds(
                     static_cast<Region>(node.input_ranges[i].start_region_id),
                     static_cast<Region>(node.input_ranges[i].end_region_id));
@@ -82,7 +82,7 @@ void capture_cpu(const ComputationGraph& cg,
                     node.input_ranges[i].start_region_id,
                     node.input_ranges[i].end_region_id};
             }
-            for (size_t i = 0; i < node.output_ranges.size() && i < 8; ++i) {
+            for (size_t i = 0; i < node.output_ranges.size() && i < 12; ++i) {
                 auto [off, sz] = mp.resolve_region_bounds(
                     static_cast<Region>(node.output_ranges[i].start_region_id),
                     static_cast<Region>(node.output_ranges[i].end_region_id));
@@ -93,10 +93,10 @@ void capture_cpu(const ComputationGraph& cg,
             op_ctx->num_input_ranges  = static_cast<int>(node.input_ranges.size());
             op_ctx->num_output_ranges = static_cast<int>(node.output_ranges.size());
 
-            for (size_t i = 0; i < node.input_ids.size() && i < 8; ++i) {
+            for (size_t i = 0; i < node.input_ids.size() && i < 12; ++i) {
                 op_ctx->input_ids[i] = node.input_ids[i];
             }
-            for (size_t i = 0; i < node.output_ids.size() && i < 8; ++i) {
+            for (size_t i = 0; i < node.output_ids.size() && i < 12; ++i) {
                 op_ctx->output_ids[i] = node.output_ids[i];
             }
             op_ctx->num_inputs  = static_cast<int>(node.input_ids.size());

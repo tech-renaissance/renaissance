@@ -51,6 +51,10 @@ int main(int argc, char* argv[]) {
     DTensor d_b1  = task.alloc_scalar(DType::FP32);
     DTensor d_b2  = task.alloc_scalar(DType::FP32);
     DTensor d_eps = task.alloc_scalar(DType::FP32);
+    DTensor d_scaling = task.alloc_scalar(DType::FP32);
+    DTensor d_has_nan = task.alloc_scalar(DType::INT32);
+    DTensor d_bc1 = task.alloc_scalar(DType::FP32);
+    DTensor d_bc2 = task.alloc_scalar(DType::FP32);
 
     task.finalize_memory();
     const auto& mp = task.memory_plan();
@@ -68,8 +72,11 @@ int main(int argc, char* argv[]) {
         };
         node.output_ranges = {
             mp.region_range(Region::W_FC_WEIGHT),
+            mp.region_range(Region::M_FC_WEIGHT),
+            mp.region_range(Region::V_FC_WEIGHT),
         };
-        node.input_ids = {d_lr.id, d_wd.id, d_b1.id, d_b2.id, d_eps.id};
+        node.input_ids = {d_lr.id, d_wd.id, d_b1.id, d_b2.id, d_eps.id,
+                          d_scaling.id, d_bc1.id, d_bc2.id, d_has_nan.id};
         g.append(std::move(node));
     }
     task.add_graph("adam_weight", std::move(g), StreamKind::UPDATE);
@@ -80,23 +87,39 @@ int main(int argc, char* argv[]) {
     float b1_val  = 0.9f;
     float b2_val  = 0.999f;
     float eps_val = 1e-8f;
+    float scaling_val = 1.0f;
+    int32_t has_nan_val = 0;
+    float bc1_val = 1.0f / (1.0f - std::pow(b1_val, 1.0f));
+    float bc2_val = 1.0f / (1.0f - std::pow(b2_val, 1.0f));
 
     Tensor h_lr  = Tensor::fill({1}, DType::FP32, lr_val);
     Tensor h_wd  = Tensor::fill({1}, DType::FP32, wd_val);
     Tensor h_b1  = Tensor::fill({1}, DType::FP32, b1_val);
     Tensor h_b2  = Tensor::fill({1}, DType::FP32, b2_val);
     Tensor h_eps = Tensor::fill({1}, DType::FP32, eps_val);
+    Tensor h_scaling = Tensor::fill({1}, DType::FP32, scaling_val);
+    Tensor h_has_nan = Tensor::fill({1}, DType::INT32, has_nan_val);
+    Tensor h_bc1 = Tensor::fill({1}, DType::FP32, bc1_val);
+    Tensor h_bc2 = Tensor::fill({1}, DType::FP32, bc2_val);
     task.transfer_to_rank(h_lr,  d_lr,  0);
     task.transfer_to_rank(h_wd,  d_wd,  0);
     task.transfer_to_rank(h_b1,  d_b1,  0);
     task.transfer_to_rank(h_b2,  d_b2,  0);
     task.transfer_to_rank(h_eps, d_eps, 0);
+    task.transfer_to_rank(h_scaling, d_scaling, 0);
+    task.transfer_to_rank(h_has_nan, d_has_nan, 0);
+    task.transfer_to_rank(h_bc1, d_bc1, 0);
+    task.transfer_to_rank(h_bc2, d_bc2, 0);
     if (num_ranks > 1) {
         task.broadcast_from_rank0(d_lr);
         task.broadcast_from_rank0(d_wd);
         task.broadcast_from_rank0(d_b1);
         task.broadcast_from_rank0(d_b2);
         task.broadcast_from_rank0(d_eps);
+        task.broadcast_from_rank0(d_scaling);
+        task.broadcast_from_rank0(d_has_nan);
+        task.broadcast_from_rank0(d_bc1);
+        task.broadcast_from_rank0(d_bc2);
     }
 
     Tensor h_w_a = Tensor::fill(shape_a, DType::FP32, 0.5f);
@@ -131,13 +154,17 @@ int main(int argc, char* argv[]) {
     float decay = 1.0f - lr_val * wd_val;
     auto expected = [&](const Tensor& w, const Tensor& g,
                         const Tensor& m_in, const Tensor& v_in) -> Tensor {
+        float bc1 = 1.0f / (1.0f - std::pow(b1_val, 1.0f));
+        float bc2 = 1.0f / (1.0f - std::pow(b2_val, 1.0f));
         Tensor e_w(w.shape(), DType::FP32);
         for (int64_t i = 0; i < w.numel(); ++i) {
             float g_i = g.data<float>()[i];
             float m_i = m_in.data<float>()[i] * b1_val + (1.0f - b1_val) * g_i;
             float v_i = v_in.data<float>()[i] * b2_val + (1.0f - b2_val) * g_i * g_i;
+            float m_hat = m_i * bc1;
+            float v_hat = v_i * bc2;
             e_w.data<float>()[i] = w.data<float>()[i] * decay
-                                 - lr_val * m_i / (std::sqrt(v_i) + eps_val);
+                                 - lr_val * m_hat / (std::sqrt(v_hat) + eps_val);
         }
         return e_w;
     };

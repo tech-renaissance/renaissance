@@ -136,6 +136,8 @@ std::string compute_op_to_string(ComputeOp op) {
         case ComputeOp::ADAM_UPDATE:           return "ADAM_UPDATE";
         case ComputeOp::ADAMW_UPDATE:          return "ADAMW_UPDATE";
         case ComputeOp::EMA_UPDATE:            return "EMA_UPDATE";
+        case ComputeOp::SCALAR_INCREMENT:      return "SCALAR_INCREMENT";
+        case ComputeOp::ADAM_BIAS_CORRECTION:  return "ADAM_BIAS_CORRECTION";
 
         default:                               return "UNKNOWN";
     }

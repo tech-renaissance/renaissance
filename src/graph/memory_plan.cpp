@@ -398,6 +398,9 @@ void MemoryPlan::alloc_baseline_dtensors(const Shape& label_shape,
     if (opt == OptimizerKind::ADAM || opt == OptimizerKind::ADAMW) {
         baseline_.beta2 = alloc_impl(scalar_shape, DType::FP32, Region::S_SCALAR_FP32).id;
         baseline_.eps   = alloc_impl(scalar_shape, DType::FP32, Region::S_SCALAR_FP32).id;
+        baseline_.step       = alloc_impl(scalar_shape, DType::INT32, Region::S_SCALAR_INT32).id;
+        baseline_.bias_corr1 = alloc_impl(scalar_shape, DType::FP32,  Region::S_SCALAR_FP32).id;
+        baseline_.bias_corr2 = alloc_impl(scalar_shape, DType::FP32,  Region::S_SCALAR_FP32).id;
     }
     if (opt == OptimizerKind::LARS || opt == OptimizerKind::LARS_NESTEROV) {
         baseline_.tc  = alloc_impl(scalar_shape, DType::FP32, Region::S_SCALAR_FP32).id;
@@ -456,6 +459,9 @@ void MemoryPlan::alloc_baseline_dtensors(
     if (opt == OptimizerKind::ADAM || opt == OptimizerKind::ADAMW) {
         baseline_.beta2 = alloc_impl(scalar_shape, DType::FP32, Region::S_SCALAR_FP32).id;
         baseline_.eps   = alloc_impl(scalar_shape, DType::FP32, Region::S_SCALAR_FP32).id;
+        baseline_.step       = alloc_impl(scalar_shape, DType::INT32, Region::S_SCALAR_INT32).id;
+        baseline_.bias_corr1 = alloc_impl(scalar_shape, DType::FP32,  Region::S_SCALAR_FP32).id;
+        baseline_.bias_corr2 = alloc_impl(scalar_shape, DType::FP32,  Region::S_SCALAR_FP32).id;
     }
     if (opt == OptimizerKind::LARS || opt == OptimizerKind::LARS_NESTEROV) {
         baseline_.tc  = alloc_impl(scalar_shape, DType::FP32, Region::S_SCALAR_FP32).id;

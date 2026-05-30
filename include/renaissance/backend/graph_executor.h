@@ -30,6 +30,9 @@ struct OptimizerScalarIds {
     int32_t local_batch_size      = -1;
     int32_t last_train_batch_size = -1;
     int32_t last_val_batch_size   = -1;
+    int32_t step       = -1;  // INT32, GPU 算子自增
+    int32_t bias_corr1 = -1;  // FP32, 1/(1-beta1^step)
+    int32_t bias_corr2 = -1;  // FP32, 1/(1-beta2^step)
 };
 
 StreamKind gid_to_stream_kind(GraphId gid) noexcept;

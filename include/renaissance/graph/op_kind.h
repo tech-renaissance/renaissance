@@ -240,6 +240,10 @@ enum class ComputeOp : uint16_t {
 
     DTENSOR_COPY,       ///< 通用 DTensor 级 D2D 拷贝（标签双缓冲专用）
 
+    // === Adam Bias Correction 标量算子 ===
+    SCALAR_INCREMENT,       // GPU 端 step += 1
+    ADAM_BIAS_CORRECTION,   // bc1=1/(1-beta1^step), bc2=1/(1-beta2^step)
+
     COUNT,              ///< 算子类型总数（哨兵值，用于数组大小计算）
     UNKNOWN = 0xFFFF
 };

@@ -1,16 +1,14 @@
 /**
- * @file test_adamw_weight.cpp
- * @brief RANGE_UPDATE_WEIGHT_ADAMW 数学正确性测试
+ * @file test_adamw_bias.cpp
+ * @brief RANGE_UPDATE_BIAS_ADAM 数学正确性测试（AdamW Bias = Adam Bias）
  * @version 1.0.0
- * @date 2026-05-21
+ * @date 2026-05-30
  * @author 技术觉醒团队
  *
  * 设计意图：
- *   验证 AdamW Weight 更新算子的数值正确性。
- *   更新公式：w = w * (1 - lr * wd)
- *            m = m * b1 + (1 - b1) * g
- *            v = v * b2 + (1 - b2) * g^2
- *            w = w - lr * m / (sqrt(v) + eps)
+ *   验证 AdamW Bias 更新算子的数值正确性。
+ *   注意：Bias 的 Adam 和 AdamW 公式等价（无 weight decay），
+ *        因此使用 RangeOp::RANGE_UPDATE_BIAS_ADAM。
  */
 
 #include "renaissance.h"
@@ -35,20 +33,19 @@ int main(int argc, char* argv[]) {
 
     SimpleTask task;
 
-    Shape shape_a{4, 4, 6, 4};
-    Shape shape_b{4, 6, 4, 4};
+    Shape shape_a{2, 8, 4, 4};
+    Shape shape_b{4, 4, 8, 4};
 
-    DTensor d_w_a = task.alloc(shape_a, DType::FP32, Region::W_FC_WEIGHT);
-    DTensor d_w_b = task.alloc(shape_b, DType::FP32, Region::W_FC_WEIGHT);
-    DTensor d_g_a = task.alloc(shape_a, DType::FP32, Region::G_FC_WEIGHT);
-    DTensor d_g_b = task.alloc(shape_b, DType::FP32, Region::G_FC_WEIGHT);
-    DTensor d_m_a = task.alloc(shape_a, DType::FP32, Region::M_FC_WEIGHT);
-    DTensor d_m_b = task.alloc(shape_b, DType::FP32, Region::M_FC_WEIGHT);
-    DTensor d_v_a = task.alloc(shape_a, DType::FP32, Region::V_FC_WEIGHT);
-    DTensor d_v_b = task.alloc(shape_b, DType::FP32, Region::V_FC_WEIGHT);
+    DTensor d_w_a = task.alloc(shape_a, DType::FP32, Region::W_FC_BIAS);
+    DTensor d_w_b = task.alloc(shape_b, DType::FP32, Region::W_FC_BIAS);
+    DTensor d_g_a = task.alloc(shape_a, DType::FP32, Region::G_FC_BIAS);
+    DTensor d_g_b = task.alloc(shape_b, DType::FP32, Region::G_FC_BIAS);
+    DTensor d_m_a = task.alloc(shape_a, DType::FP32, Region::M_FC_BIAS);
+    DTensor d_m_b = task.alloc(shape_b, DType::FP32, Region::M_FC_BIAS);
+    DTensor d_v_a = task.alloc(shape_a, DType::FP32, Region::V_FC_BIAS);
+    DTensor d_v_b = task.alloc(shape_b, DType::FP32, Region::V_FC_BIAS);
 
     DTensor d_lr  = task.alloc_scalar(DType::FP32);
-    DTensor d_wd  = task.alloc_scalar(DType::FP32);
     DTensor d_b1  = task.alloc_scalar(DType::FP32);
     DTensor d_b2  = task.alloc_scalar(DType::FP32);
     DTensor d_eps = task.alloc_scalar(DType::FP32);
@@ -64,27 +61,26 @@ int main(int argc, char* argv[]) {
     {
         GraphNode node;
         node.kind = GraphNode::Kind::RANGE;
-        node.range_op = RangeOp::RANGE_UPDATE_WEIGHT_ADAMW;
+        node.range_op = RangeOp::RANGE_UPDATE_BIAS_ADAM;  // AdamW Bias = Adam Bias
         node.input_ranges = {
-            mp.region_range(Region::W_FC_WEIGHT),
-            mp.region_range(Region::G_FC_WEIGHT),
-            mp.region_range(Region::M_FC_WEIGHT),
-            mp.region_range(Region::V_FC_WEIGHT),
+            mp.region_range(Region::W_FC_BIAS),
+            mp.region_range(Region::G_FC_BIAS),
+            mp.region_range(Region::M_FC_BIAS),
+            mp.region_range(Region::V_FC_BIAS),
         };
         node.output_ranges = {
-            mp.region_range(Region::W_FC_WEIGHT),
-            mp.region_range(Region::M_FC_WEIGHT),
-            mp.region_range(Region::V_FC_WEIGHT),
+            mp.region_range(Region::W_FC_BIAS),
+            mp.region_range(Region::M_FC_BIAS),
+            mp.region_range(Region::V_FC_BIAS),
         };
-        node.input_ids = {d_lr.id, d_wd.id, d_b1.id, d_b2.id, d_eps.id,
+        node.input_ids = {d_lr.id, d_b1.id, d_b2.id, d_eps.id,
                           d_scaling.id, d_bc1.id, d_bc2.id, d_has_nan.id};
         g.append(std::move(node));
     }
-    task.add_graph("adamw_weight", std::move(g), StreamKind::UPDATE);
+    task.add_graph("adamw_bias", std::move(g), StreamKind::UPDATE);
     task.compile();
 
     float lr_val  = 0.001f;
-    float wd_val  = 0.01f;
     float b1_val  = 0.9f;
     float b2_val  = 0.999f;
     float eps_val = 1e-8f;
@@ -94,7 +90,6 @@ int main(int argc, char* argv[]) {
     float bc2_val = 1.0f / (1.0f - std::pow(b2_val, 1.0f));
 
     Tensor h_lr  = Tensor::fill({1}, DType::FP32, lr_val);
-    Tensor h_wd  = Tensor::fill({1}, DType::FP32, wd_val);
     Tensor h_b1  = Tensor::fill({1}, DType::FP32, b1_val);
     Tensor h_b2  = Tensor::fill({1}, DType::FP32, b2_val);
     Tensor h_eps = Tensor::fill({1}, DType::FP32, eps_val);
@@ -103,7 +98,6 @@ int main(int argc, char* argv[]) {
     Tensor h_bc1 = Tensor::fill({1}, DType::FP32, bc1_val);
     Tensor h_bc2 = Tensor::fill({1}, DType::FP32, bc2_val);
     task.transfer_to_rank(h_lr,  d_lr,  0);
-    task.transfer_to_rank(h_wd,  d_wd,  0);
     task.transfer_to_rank(h_b1,  d_b1,  0);
     task.transfer_to_rank(h_b2,  d_b2,  0);
     task.transfer_to_rank(h_eps, d_eps, 0);
@@ -113,7 +107,6 @@ int main(int argc, char* argv[]) {
     task.transfer_to_rank(h_bc2, d_bc2, 0);
     if (num_ranks > 1) {
         task.broadcast_from_rank0(d_lr);
-        task.broadcast_from_rank0(d_wd);
         task.broadcast_from_rank0(d_b1);
         task.broadcast_from_rank0(d_b2);
         task.broadcast_from_rank0(d_eps);
@@ -123,14 +116,15 @@ int main(int argc, char* argv[]) {
         task.broadcast_from_rank0(d_bc2);
     }
 
-    Tensor h_w_a = Tensor::fill(shape_a, DType::FP32, 0.6f);
-    Tensor h_w_b = Tensor::fill(shape_b, DType::FP32, -0.4f);
-    Tensor h_g_a = Tensor::fill(shape_a, DType::FP32, 0.1f);
-    Tensor h_g_b = Tensor::fill(shape_b, DType::FP32, -0.12f);
-    Tensor h_m_a = Tensor::fill(shape_a, DType::FP32, 0.0f);
-    Tensor h_m_b = Tensor::fill(shape_b, DType::FP32, 0.0f);
-    Tensor h_v_a = Tensor::fill(shape_a, DType::FP32, 0.0f);
-    Tensor h_v_b = Tensor::fill(shape_b, DType::FP32, 0.0f);
+    Tensor h_w_a = Tensor::fill(shape_a, DType::FP32, 0.1f);
+    Tensor h_w_b = Tensor::fill(shape_b, DType::FP32, -0.1f);
+    Tensor h_g_a = Tensor::fill(shape_a, DType::FP32, 0.05f);
+    Tensor h_g_b = Tensor::fill(shape_b, DType::FP32, -0.04f);
+    Tensor h_m_a = Tensor::fill(shape_a, DType::FP32, 0.008f);
+    Tensor h_m_b = Tensor::fill(shape_b, DType::FP32, -0.006f);
+    Tensor h_v_a = Tensor::fill(shape_a, DType::FP32, 0.015f);
+    Tensor h_v_b = Tensor::fill(shape_b, DType::FP32, 0.012f);
+
     task.transfer_to_rank(h_w_a, d_w_a, 0);
     task.transfer_to_rank(h_w_b, d_w_b, 0);
     task.transfer_to_rank(h_g_a, d_g_a, 0);
@@ -150,9 +144,8 @@ int main(int argc, char* argv[]) {
         task.broadcast_from_rank0(d_v_b);
     }
 
-    task.run("adamw_weight");
+    task.run("adamw_bias");
 
-    float wd_decay = 1.0f - lr_val * wd_val;
     auto expected = [&](const Tensor& w, const Tensor& g,
                         const Tensor& m_in, const Tensor& v_in) -> Tensor {
         float bc1 = 1.0f / (1.0f - std::pow(b1_val, 1.0f));
@@ -164,7 +157,7 @@ int main(int argc, char* argv[]) {
             float v_i = v_in.data<float>()[i] * b2_val + (1.0f - b2_val) * g_i * g_i;
             float m_hat = m_i * bc1;
             float v_hat = v_i * bc2;
-            e_w.data<float>()[i] = w.data<float>()[i] * wd_decay
+            e_w.data<float>()[i] = w.data<float>()[i]
                                  - lr_val * m_hat / (std::sqrt(v_hat) + eps_val);
         }
         return e_w;
@@ -180,14 +173,14 @@ int main(int argc, char* argv[]) {
 
         double md_a = 0.0, md_b = 0.0;
         double mse_a = 0.0, mse_b = 0.0;
-        for (int64_t i = 0; i < shape_a.numel(); ++i) {
+        for (int64_t i = 0; i < h_out_a.numel(); ++i) {
             double diff = static_cast<double>(h_out_a.data<float>()[i])
                         - static_cast<double>(h_exp_a.data<float>()[i]);
             double ad = std::abs(diff);
             if (ad > md_a) md_a = ad;
             mse_a += diff * diff;
         }
-        for (int64_t i = 0; i < shape_b.numel(); ++i) {
+        for (int64_t i = 0; i < h_out_b.numel(); ++i) {
             double diff = static_cast<double>(h_out_b.data<float>()[i])
                         - static_cast<double>(h_exp_b.data<float>()[i]);
             double ad = std::abs(diff);
@@ -197,17 +190,19 @@ int main(int argc, char* argv[]) {
         mse_a /= static_cast<double>(shape_a.numel());
         mse_b /= static_cast<double>(shape_b.numel());
 
-        std::cout << "  Rank " << rank << " dt_a (" << shape_a.numel() << " elts) max|diff| = "
-                  << std::scientific << md_a << "  MSE = " << mse_a;
-        if (md_a > 1e-5) { std::cout << "  FAIL"; all_pass = false; }
-        std::cout << std::endl;
+        bool pass_a = md_a < 1e-5;
+        bool pass_b = md_b < 1e-5;
+        if (!pass_a || !pass_b) all_pass = false;
 
-        std::cout << "  Rank " << rank << " dt_b (" << shape_b.numel() << " elts) max|diff| = "
-                  << std::scientific << md_b << "  MSE = " << mse_b;
-        if (md_b > 1e-5) { std::cout << "  FAIL"; all_pass = false; }
-        std::cout << std::endl;
+        if (rank == 0 || !pass_a || !pass_b) {
+            std::cout << "Rank " << rank << ": "
+                      << (pass_a ? "PASS" : "FAIL") << " (max_diff=" << md_a << "), "
+                      << (pass_b ? "PASS" : "FAIL") << " (max_diff=" << md_b << ")";
+            if (!pass_a || !pass_b) std::cout << " ❌";
+            std::cout << std::endl;
+        }
     }
 
-    std::cout << "\nRANGE_UPDATE_WEIGHT_ADAMW: " << (all_pass ? "PASS" : "FAIL") << std::endl;
+    std::cout << "AdamW Bias Test: " << (all_pass ? "✅ ALL PASS" : "❌ SOME FAIL") << std::endl;
     return all_pass ? 0 : 1;
 }

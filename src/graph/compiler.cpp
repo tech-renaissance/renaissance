@@ -724,6 +724,12 @@ void Compiler::create_memory_plans(
     scalar_ids.tc = -1;
     scalar_ids.wd = -1;
     scalar_ids.eps = -1;
+    scalar_ids.step       = -1;
+    scalar_ids.bias_corr1 = -1;
+    scalar_ids.bias_corr2 = -1;
+    scalar_ids.local_batch_size      = -1;
+    scalar_ids.last_train_batch_size = -1;
+    scalar_ids.last_val_batch_size   = -1;
 
     int64_t max_batch = 0;
     int max_resolution = 0;
@@ -772,6 +778,12 @@ void Compiler::create_memory_plans(
         memory_plans[s]->set_init_config(
             memory_plans[s]->baseline().top5, kInitZeros);
 
+        // 仅 Adam/AdamW 需要 step 标量
+        if (opt == OptimizerKind::ADAM || opt == OptimizerKind::ADAMW) {
+            memory_plans[s]->set_init_config(
+                memory_plans[s]->baseline().step, kInitZeros);
+        }
+
         if (s == 0) {
             const auto& b = memory_plans[s]->baseline();
             nan_flag_id     = b.has_nan;
@@ -783,6 +795,12 @@ void Compiler::create_memory_plans(
             scalar_ids.eps   = b.eps;
             scalar_ids.has_nan = b.has_nan;
             scalar_ids.scaling = b.scaling;
+            scalar_ids.step       = b.step;
+            scalar_ids.bias_corr1 = b.bias_corr1;
+            scalar_ids.bias_corr2 = b.bias_corr2;
+            scalar_ids.local_batch_size      = b.local_batch_size;
+            scalar_ids.last_train_batch_size = b.last_train_batch_size;
+            scalar_ids.last_val_batch_size   = b.last_val_batch_size;
         }
 
         size_t num_layers = all_shapes[s].size();
@@ -1585,6 +1603,31 @@ void Compiler::build_auxiliary_graphs(ComputationGraph& train_cg, const MemoryPl
                     TR_CHECK(false, ValueError, "Unknown optimizer kind");
             }
 
+            // === 插入 COMPUTE 节点（仅 Adam/AdamW） ===
+            if (opt == OptimizerKind::ADAM || opt == OptimizerKind::ADAMW) {
+                // Node 1: step += 1
+                {
+                    GraphNode inc_node;
+                    inc_node.kind = GraphNode::Kind::COMPUTE;
+                    inc_node.compute_op = ComputeOp::SCALAR_INCREMENT;
+                    inc_node.input_ids  = {scalar_ids.step};
+                    inc_node.output_ids = {scalar_ids.step};
+                    train_cg.append(GraphId::OPTIMIZER, inc_node);
+                }
+                // Node 2: bc1, bc2 = f(step, beta1, beta2)
+                {
+                    GraphNode bc_node;
+                    bc_node.kind = GraphNode::Kind::COMPUTE;
+                    bc_node.compute_op = ComputeOp::ADAM_BIAS_CORRECTION;
+                    bc_node.input_ids  = {scalar_ids.step,
+                                          scalar_ids.beta,
+                                          scalar_ids.beta2};
+                    bc_node.output_ids = {scalar_ids.bias_corr1,
+                                          scalar_ids.bias_corr2};
+                    train_cg.append(GraphId::OPTIMIZER, bc_node);
+                }
+            }
+
             // 2. 从 MemoryPlan 直接查询 Region 范围，替代 get_range_op_range()
             MemRange w_range = memory_plan.region_range(
                 Region::W_FC_WEIGHT, Region::W_DEEP_CONV);
@@ -1620,6 +1663,10 @@ void Compiler::build_auxiliary_graphs(ComputationGraph& train_cg, const MemoryPl
                 node.input_ids.push_back(scalar_ids.eps);
             }
             node.input_ids.push_back(scalar_ids.scaling);
+            if (opt == OptimizerKind::ADAM || opt == OptimizerKind::ADAMW) {
+                node.input_ids.push_back(scalar_ids.bias_corr1);
+                node.input_ids.push_back(scalar_ids.bias_corr2);
+            }
             node.input_ids.push_back(scalar_ids.has_nan);
 
             train_cg.append(GraphId::OPTIMIZER, node);
@@ -1681,6 +1728,10 @@ void Compiler::build_auxiliary_graphs(ComputationGraph& train_cg, const MemoryPl
                 node.input_ids.push_back(scalar_ids.eps);
             }
             node.input_ids.push_back(scalar_ids.scaling);
+            if (opt == OptimizerKind::ADAM || opt == OptimizerKind::ADAMW) {
+                node.input_ids.push_back(scalar_ids.bias_corr1);
+                node.input_ids.push_back(scalar_ids.bias_corr2);
+            }
             node.input_ids.push_back(scalar_ids.has_nan);
 
             train_cg.append(GraphId::OPTIMIZER, node);

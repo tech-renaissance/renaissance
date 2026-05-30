@@ -24,12 +24,12 @@ namespace optimizer_cuda {
 void launch_sgd_weight_cuda(float*, const float*, size_t, const float*, const float*, const int32_t*, const float*, cudaStream_t);
 void launch_momentum_weight_cuda(float*, const float*, float*, size_t, const float*, const float*, const float*, const int32_t*, const float*, cudaStream_t);
 void launch_nesterov_weight_cuda(float*, const float*, float*, size_t, const float*, const float*, const float*, const int32_t*, const float*, cudaStream_t);
-void launch_adam_weight_cuda(float*, const float*, float*, float*, size_t, const float*, const float*, const float*, const float*, const float*, const int32_t*, const float*, cudaStream_t);
-void launch_adamw_weight_cuda(float*, const float*, float*, float*, size_t, const float*, const float*, const float*, const float*, const float*, const int32_t*, const float*, cudaStream_t);
+void launch_adam_weight_cuda(float*, const float*, float*, float*, size_t, const float*, const float*, const float*, const float*, const float*, const int32_t*, const float*, const float*, const float*, cudaStream_t);
+void launch_adamw_weight_cuda(float*, const float*, float*, float*, size_t, const float*, const float*, const float*, const float*, const float*, const int32_t*, const float*, const float*, const float*, cudaStream_t);
 void launch_sgd_bias_cuda(float*, const float*, size_t, const float*, const int32_t*, const float*, cudaStream_t);
 void launch_momentum_bias_cuda(float*, const float*, float*, size_t, const float*, const float*, const int32_t*, const float*, cudaStream_t);
 void launch_nesterov_bias_cuda(float*, const float*, float*, size_t, const float*, const float*, const int32_t*, const float*, cudaStream_t);
-void launch_adam_bias_cuda(float*, const float*, float*, float*, size_t, const float*, const float*, const float*, const float*, const int32_t*, const float*, cudaStream_t);
+void launch_adam_bias_cuda(float*, const float*, float*, float*, size_t, const float*, const float*, const float*, const float*, const int32_t*, const float*, const float*, const float*, cudaStream_t);
 } // namespace optimizer_cuda
 } // namespace tr
 #endif // TR_USE_CUDA
@@ -153,16 +153,18 @@ static void launch_opt_weight_adam_cuda(
     const float* g = OPT_RANGE_PTR(g);
     float* m = OPT_RANGE_PTR(m);
     float* v = OPT_RANGE_PTR(v);
-    const float* lr = scalar_ptr<0>(mp, node.input_ids.data(), ctx.rank_for_context());
-    const float* wd = scalar_ptr<1>(mp, node.input_ids.data(), ctx.rank_for_context());
-    const float* b1 = scalar_ptr<2>(mp, node.input_ids.data(), ctx.rank_for_context());
-    const float* b2 = scalar_ptr<3>(mp, node.input_ids.data(), ctx.rank_for_context());
+    const float* lr  = scalar_ptr<0>(mp, node.input_ids.data(), ctx.rank_for_context());
+    const float* wd  = scalar_ptr<1>(mp, node.input_ids.data(), ctx.rank_for_context());
+    const float* b1  = scalar_ptr<2>(mp, node.input_ids.data(), ctx.rank_for_context());
+    const float* b2  = scalar_ptr<3>(mp, node.input_ids.data(), ctx.rank_for_context());
     const float* eps = scalar_ptr<4>(mp, node.input_ids.data(), ctx.rank_for_context());
     const float* scaling = scalar_ptr<5>(mp, node.input_ids.data(), ctx.rank_for_context());
+    const float* bc1 = scalar_ptr<6>(mp, node.input_ids.data(), ctx.rank_for_context());
+    const float* bc2 = scalar_ptr<7>(mp, node.input_ids.data(), ctx.rank_for_context());
     const int32_t* has_nan = static_cast<const int32_t*>(
         ArenaKeeper::instance().ptr_at(ctx.rank_for_context(),
                                        mp.get_dtensor(node.input_ids.back()).offset()));
-    optimizer_cuda::launch_adam_weight_cuda(w, g, m, v, r_w_sz / sizeof(float), lr, wd, b1, b2, eps, has_nan, scaling, s);
+    optimizer_cuda::launch_adam_weight_cuda(w, g, m, v, r_w_sz / sizeof(float), lr, wd, b1, b2, eps, has_nan, scaling, bc1, bc2, s);
     OPT_CUDA_TAIL()
 }
 
@@ -177,16 +179,18 @@ static void launch_opt_weight_adamw_cuda(
     const float* g = OPT_RANGE_PTR(g);
     float* m = OPT_RANGE_PTR(m);
     float* v = OPT_RANGE_PTR(v);
-    const float* lr = scalar_ptr<0>(mp, node.input_ids.data(), ctx.rank_for_context());
-    const float* wd = scalar_ptr<1>(mp, node.input_ids.data(), ctx.rank_for_context());
-    const float* b1 = scalar_ptr<2>(mp, node.input_ids.data(), ctx.rank_for_context());
-    const float* b2 = scalar_ptr<3>(mp, node.input_ids.data(), ctx.rank_for_context());
+    const float* lr  = scalar_ptr<0>(mp, node.input_ids.data(), ctx.rank_for_context());
+    const float* wd  = scalar_ptr<1>(mp, node.input_ids.data(), ctx.rank_for_context());
+    const float* b1  = scalar_ptr<2>(mp, node.input_ids.data(), ctx.rank_for_context());
+    const float* b2  = scalar_ptr<3>(mp, node.input_ids.data(), ctx.rank_for_context());
     const float* eps = scalar_ptr<4>(mp, node.input_ids.data(), ctx.rank_for_context());
     const float* scaling = scalar_ptr<5>(mp, node.input_ids.data(), ctx.rank_for_context());
+    const float* bc1 = scalar_ptr<6>(mp, node.input_ids.data(), ctx.rank_for_context());
+    const float* bc2 = scalar_ptr<7>(mp, node.input_ids.data(), ctx.rank_for_context());
     const int32_t* has_nan = static_cast<const int32_t*>(
         ArenaKeeper::instance().ptr_at(ctx.rank_for_context(),
                                        mp.get_dtensor(node.input_ids.back()).offset()));
-    optimizer_cuda::launch_adamw_weight_cuda(w, g, m, v, r_w_sz / sizeof(float), lr, wd, b1, b2, eps, has_nan, scaling, s);
+    optimizer_cuda::launch_adamw_weight_cuda(w, g, m, v, r_w_sz / sizeof(float), lr, wd, b1, b2, eps, has_nan, scaling, bc1, bc2, s);
     OPT_CUDA_TAIL()
 }
 
@@ -261,15 +265,17 @@ static void launch_opt_bias_adam_cuda(
     const float* g = OPT_RANGE_PTR(g);
     float* m = OPT_RANGE_PTR(m);
     float* v = OPT_RANGE_PTR(v);
-    const float* lr = scalar_ptr<0>(mp, node.input_ids.data(), ctx.rank_for_context());
-    const float* b1 = scalar_ptr<1>(mp, node.input_ids.data(), ctx.rank_for_context());
-    const float* b2 = scalar_ptr<2>(mp, node.input_ids.data(), ctx.rank_for_context());
+    const float* lr  = scalar_ptr<0>(mp, node.input_ids.data(), ctx.rank_for_context());
+    const float* b1  = scalar_ptr<1>(mp, node.input_ids.data(), ctx.rank_for_context());
+    const float* b2  = scalar_ptr<2>(mp, node.input_ids.data(), ctx.rank_for_context());
     const float* eps = scalar_ptr<3>(mp, node.input_ids.data(), ctx.rank_for_context());
     const float* scaling = scalar_ptr<4>(mp, node.input_ids.data(), ctx.rank_for_context());
+    const float* bc1 = scalar_ptr<5>(mp, node.input_ids.data(), ctx.rank_for_context());
+    const float* bc2 = scalar_ptr<6>(mp, node.input_ids.data(), ctx.rank_for_context());
     const int32_t* has_nan = static_cast<const int32_t*>(
         ArenaKeeper::instance().ptr_at(ctx.rank_for_context(),
                                        mp.get_dtensor(node.input_ids.back()).offset()));
-    optimizer_cuda::launch_adam_bias_cuda(w, g, m, v, r_w_sz / sizeof(float), lr, b1, b2, eps, has_nan, scaling, s);
+    optimizer_cuda::launch_adam_bias_cuda(w, g, m, v, r_w_sz / sizeof(float), lr, b1, b2, eps, has_nan, scaling, bc1, bc2, s);
     OPT_CUDA_TAIL()
 }
 
@@ -315,25 +321,33 @@ static void nesterov_update_cpu(float* w, const float* g, float* m, size_t n, fl
 }
 
 [[maybe_unused]]
-static void adam_update_cpu(float* w, const float* g, float* m, float* v, size_t n, float lr, float wd, float b1, float b2, float eps, float scaling) {
+static void adam_update_cpu(float* w, const float* g, float* m, float* v, size_t n, float lr, float wd, float b1, float b2, float eps, float scaling, float bias_corr1, float bias_corr2) {
     float inv_scaling = (scaling != 0.0f) ? (1.0f / scaling) : 1.0f;
+    float bc1 = (bias_corr1 != 0.0f) ? bias_corr1 : 1.0f;
+    float bc2 = (bias_corr2 != 0.0f) ? bias_corr2 : 1.0f;
     for (size_t i = 0; i < n; ++i) {
         float g_i = g[i] * inv_scaling;
         m[i] = m[i] * b1 + (1.0f - b1) * g_i;
         v[i] = v[i] * b2 + (1.0f - b2) * g_i * g_i;
-        w[i] = w[i] * (1.0f - lr * wd) - lr * m[i] / (std::sqrt(v[i]) + eps);
+        float m_hat = m[i] * bc1;
+        float v_hat = v[i] * bc2;
+        w[i] = w[i] * (1.0f - lr * wd) - lr * m_hat / (std::sqrt(v_hat) + eps);
     }
 }
 
 [[maybe_unused]]
-static void adamw_update_cpu(float* w, const float* g, float* m, float* v, size_t n, float lr, float wd, float b1, float b2, float eps, float scaling) {
+static void adamw_update_cpu(float* w, const float* g, float* m, float* v, size_t n, float lr, float wd, float b1, float b2, float eps, float scaling, float bias_corr1, float bias_corr2) {
     float inv_scaling = (scaling != 0.0f) ? (1.0f / scaling) : 1.0f;
+    float bc1 = (bias_corr1 != 0.0f) ? bias_corr1 : 1.0f;
+    float bc2 = (bias_corr2 != 0.0f) ? bias_corr2 : 1.0f;
     for (size_t i = 0; i < n; ++i) {
         float g_i = g[i] * inv_scaling;
         w[i] = w[i] * (1.0f - lr * wd);
         m[i] = m[i] * b1 + (1.0f - b1) * g_i;
         v[i] = v[i] * b2 + (1.0f - b2) * g_i * g_i;
-        w[i] = w[i] - lr * m[i] / (std::sqrt(v[i]) + eps);
+        float m_hat = m[i] * bc1;
+        float v_hat = v[i] * bc2;
+        w[i] = w[i] - lr * m_hat / (std::sqrt(v_hat) + eps);
     }
 }
 
@@ -399,26 +413,28 @@ static void launch_opt_weight_nesterov_cpu(CpuOpContext* op_ctx) {
 
 static void launch_opt_weight_adam_cpu(CpuOpContext* op_ctx) {
     const DeviceContext& ctx = *op_ctx->ctx; const MemoryPlan* mp = ctx.memory_plan();
-    if (!mp || op_ctx->num_input_ranges < 4 || op_ctx->num_inputs < 7) return;
+    if (!mp || op_ctx->num_input_ranges < 4 || op_ctx->num_inputs < 9) return;
     const int32_t* has_nan = static_cast<const int32_t*>(
         ArenaKeeper::instance().ptr_at(ctx.rank_for_context(),
                                        mp->get_dtensor(op_ctx->input_ids[op_ctx->num_inputs - 1]).offset()));
     if (*has_nan != 0) return;
     OPT_CPU_RESOLVE(0) OPT_CPU_GRAD(1) OPT_CPU_M(2) OPT_CPU_V(3) if (sz == 0) return;
     float lr = OPT_CPU_SCALAR(0), wd = OPT_CPU_SCALAR(1), b1 = OPT_CPU_SCALAR(2), b2 = OPT_CPU_SCALAR(3), eps = OPT_CPU_SCALAR(4), scaling = OPT_CPU_SCALAR(5);
-    adam_update_cpu(wp, gp, mp_ptr, vp, OPT_CPU_N, lr, wd, b1, b2, eps, scaling);
+    float bc1 = OPT_CPU_SCALAR(6), bc2 = OPT_CPU_SCALAR(7);
+    adam_update_cpu(wp, gp, mp_ptr, vp, OPT_CPU_N, lr, wd, b1, b2, eps, scaling, bc1, bc2);
 }
 
 static void launch_opt_weight_adamw_cpu(CpuOpContext* op_ctx) {
     const DeviceContext& ctx = *op_ctx->ctx; const MemoryPlan* mp = ctx.memory_plan();
-    if (!mp || op_ctx->num_input_ranges < 4 || op_ctx->num_inputs < 7) return;
+    if (!mp || op_ctx->num_input_ranges < 4 || op_ctx->num_inputs < 9) return;
     const int32_t* has_nan = static_cast<const int32_t*>(
         ArenaKeeper::instance().ptr_at(ctx.rank_for_context(),
                                        mp->get_dtensor(op_ctx->input_ids[op_ctx->num_inputs - 1]).offset()));
     if (*has_nan != 0) return;
     OPT_CPU_RESOLVE(0) OPT_CPU_GRAD(1) OPT_CPU_M(2) OPT_CPU_V(3) if (sz == 0) return;
     float lr = OPT_CPU_SCALAR(0), wd = OPT_CPU_SCALAR(1), b1 = OPT_CPU_SCALAR(2), b2 = OPT_CPU_SCALAR(3), eps = OPT_CPU_SCALAR(4), scaling = OPT_CPU_SCALAR(5);
-    adamw_update_cpu(wp, gp, mp_ptr, vp, OPT_CPU_N, lr, wd, b1, b2, eps, scaling);
+    float bc1 = OPT_CPU_SCALAR(6), bc2 = OPT_CPU_SCALAR(7);
+    adamw_update_cpu(wp, gp, mp_ptr, vp, OPT_CPU_N, lr, wd, b1, b2, eps, scaling, bc1, bc2);
 }
 
 // --- Bias CPU ---
@@ -461,14 +477,15 @@ static void launch_opt_bias_nesterov_cpu(CpuOpContext* op_ctx) {
 
 static void launch_opt_bias_adam_cpu(CpuOpContext* op_ctx) {
     const DeviceContext& ctx = *op_ctx->ctx; const MemoryPlan* mp = ctx.memory_plan();
-    if (!mp || op_ctx->num_input_ranges < 4 || op_ctx->num_inputs < 6) return;
+    if (!mp || op_ctx->num_input_ranges < 4 || op_ctx->num_inputs < 8) return;
     const int32_t* has_nan = static_cast<const int32_t*>(
         ArenaKeeper::instance().ptr_at(ctx.rank_for_context(),
                                        mp->get_dtensor(op_ctx->input_ids[op_ctx->num_inputs - 1]).offset()));
     if (*has_nan != 0) return;
     OPT_CPU_RESOLVE(0) OPT_CPU_GRAD(1) OPT_CPU_M(2) OPT_CPU_V(3) if (sz == 0) return;
     float lr = OPT_CPU_SCALAR(0), b1 = OPT_CPU_SCALAR(1), b2 = OPT_CPU_SCALAR(2), eps = OPT_CPU_SCALAR(3), scaling = OPT_CPU_SCALAR(4);
-    adam_update_cpu(wp, gp, mp_ptr, vp, OPT_CPU_N, lr, 0.0f, b1, b2, eps, scaling);
+    float bc1 = OPT_CPU_SCALAR(5), bc2 = OPT_CPU_SCALAR(6);
+    adam_update_cpu(wp, gp, mp_ptr, vp, OPT_CPU_N, lr, 0.0f, b1, b2, eps, scaling, bc1, bc2);
 }
 
 #undef OPT_CPU_RESOLVE
