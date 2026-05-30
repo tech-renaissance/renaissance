@@ -868,7 +868,7 @@ TrainingResult DeepLearningTask::run_gpu() {
             catch (...) { prep_exc = std::current_exception(); }
         });
         float train_loss = run_train_epoch_gpu();
-        LOG_INFO << "[TRAIN] loss=" << std::fixed << std::setprecision(6) << train_loss;
+        // LOG_INFO << "[TRAIN] loss=" << std::fixed << std::setprecision(6) << train_loss;
         prep_thread.join();
         if (prep_exc) std::rethrow_exception(prep_exc);
 
@@ -1271,7 +1271,7 @@ TrainingResult DeepLearningTask::run_cpu() {
             catch (...) { prep_exc = std::current_exception(); }
         });
         float train_loss = run_train_epoch_cpu();
-        LOG_INFO << "[TRAIN-CPU] loss=" << std::fixed << std::setprecision(6) << train_loss;
+        // LOG_INFO << "[TRAIN-CPU] loss=" << std::fixed << std::setprecision(6) << train_loss;
         prep_thread.join();
         if (prep_exc) std::rethrow_exception(prep_exc);
 
@@ -1647,8 +1647,8 @@ std::tuple<float, float, float> DeepLearningTask::run_val_epoch_gpu(bool validat
         }
     }
 
-    LOG_INFO << "[VAL] loss=" << std::fixed << std::setprecision(6) << avg_loss << " top1=" << avg_top1 * 100.0f
-             << "% top5=" << avg_top5 * 100.0f << "%";
+    // LOG_INFO << "[VAL] loss=" << std::fixed << std::setprecision(6) << avg_loss << " top1=" << avg_top1 * 100.0f
+    //          << "% top5=" << avg_top5 * 100.0f << "%";
 
     return {avg_loss, avg_top1, avg_top5};
 #else
@@ -1761,8 +1761,8 @@ std::tuple<float, float, float> DeepLearningTask::run_val_epoch_cpu(bool validat
         avg_top5 = std::round(val) / static_cast<float>(total_val);
     }
 
-    LOG_INFO << "[VAL-CPU] loss=" << std::fixed << std::setprecision(6) << avg_loss << " top1=" << avg_top1 * 100.0f
-             << "% top5=" << avg_top5 * 100.0f << "%";
+    // LOG_INFO << "[VAL-CPU] loss=" << std::fixed << std::setprecision(6) << avg_loss << " top1=" << avg_top1 * 100.0f
+    //          << "% top5=" << avg_top5 * 100.0f << "%";
 
     return {avg_loss, avg_top1, avg_top5};
 }

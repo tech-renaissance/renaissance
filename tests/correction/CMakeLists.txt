@@ -384,6 +384,10 @@ add_executable(test_dl_full test_dl_full.cpp)
 setup_dl_test(test_dl_full)
 message(STATUS "  - test_dl_full: DeepLearningTask full training test (CPU/GPU/AMP)")
 
+add_executable(mnist_best mnist_best.cpp)
+setup_dl_test(mnist_best)
+message(STATUS "  - mnist_best: MNIST MLP ultimate accuracy test")
+
 add_executable(test_h2d_copy_correctness test_h2d_copy_correctness.cpp)
 setup_dl_test(test_h2d_copy_correctness)
 message(STATUS "  - test_h2d_copy_correctness: H2D COPY A/B correctness (preprocessor + fetch)")

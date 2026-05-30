@@ -658,9 +658,9 @@ void Preprocessor::run(DataLoader& loader) {
     // 输出统计信息
     size_t total = total_samples_.load(std::memory_order_acquire);
     buffer_count_ = buffer_count;  // 保存buffer计数到成员变量
-    LOG_INFO << "Preprocessor completed: " << total << " total samples";
-    LOG_INFO << "Total buffers processed: " << buffer_count;
-    LOG_INFO << "Total epoch time: " << elapsed.count() << " seconds";
+    // LOG_INFO << "Preprocessor completed: " << total << " total samples";
+    // LOG_INFO << "Total buffers processed: " << buffer_count;
+    // LOG_INFO << "Total epoch time: " << elapsed.count() << " seconds";
 
     // 验证每个worker的样本数（整个epoch的累积）
     size_t min_count = SIZE_MAX;

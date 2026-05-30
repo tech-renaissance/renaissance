@@ -445,11 +445,11 @@ void TransferStation::reset_and_update() {
     }
 
     // 【调试】输出分辨率更新信息
-    LOG_INFO << "[EB#" << engine_id_ << "] reset_and_update(): "
-             << "phase=" << (is_train_ ? "TRAIN" : "VAL")
-             << ", current_resolution_=" << current_resolution_
-             << ", num_color_channels_=" << num_color_channels_
-             << ", current_sample_bytes_=" << current_sample_bytes_;
+    // LOG_INFO << "[EB#" << engine_id_ << "] reset_and_update(): "
+    //          << "phase=" << (is_train_ ? "TRAIN" : "VAL")
+    //          << ", current_resolution_=" << current_resolution_
+    //          << ", num_color_channels_=" << num_color_channels_
+    //          << ", current_sample_bytes_=" << current_sample_bytes_;
 }
 
 uint8_t* TransferStation::request_write_slot(int position, int batch_id, int32_t label) {
