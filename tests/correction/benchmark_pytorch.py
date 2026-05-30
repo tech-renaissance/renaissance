@@ -60,10 +60,10 @@ if __name__ == '__main__':
     batch_size = 128
     epochs = 4
 
-    # --- SGD+Nesterov config: identical to TR4 test_dl_full ---
-    lr = 0.01
+    # --- SGD config: identical to TR4 test_dl_full ---
+    lr = 0.1
     momentum = 0.9
-    wd = 0.01
+    wd = 0.0
 
     transform = transforms.Compose([
         transforms.ToTensor(),
