@@ -375,6 +375,7 @@ void MemoryPlan::alloc_baseline_dtensors(const Shape& label_shape,
     baseline_.has_nan = alloc_impl(scalar_shape, DType::INT32, Region::S_SCALAR_INT32).id;
     baseline_.lr      = alloc_impl(scalar_shape, DType::FP32,  Region::S_SCALAR_FP32).id;
     baseline_.scaling = alloc_impl(scalar_shape, DType::FP32,  Region::S_SCALAR_FP32).id;
+    baseline_.label_smoothing = alloc_impl(scalar_shape, DType::FP32,  Region::S_SCALAR_FP32).id;
 
     baseline_.loss = alloc_impl(scalar_shape, DType::FP32, Region::R_RESULT).id;
     baseline_.top1 = alloc_impl(scalar_shape, DType::FP32, Region::R_RESULT).id;
@@ -439,6 +440,7 @@ void MemoryPlan::alloc_baseline_dtensors(
     baseline_.has_nan = alloc_impl(scalar_shape, DType::INT32, Region::S_SCALAR_INT32).id;
     baseline_.lr      = alloc_impl(scalar_shape, DType::FP32,  Region::S_SCALAR_FP32).id;
     baseline_.scaling = alloc_impl(scalar_shape, DType::FP32,  Region::S_SCALAR_FP32).id;
+    baseline_.label_smoothing = alloc_impl(scalar_shape, DType::FP32,  Region::S_SCALAR_FP32).id;
 
     baseline_.loss = alloc_impl(scalar_shape, DType::FP32, Region::R_RESULT).id;
     baseline_.top1 = alloc_impl(scalar_shape, DType::FP32, Region::R_RESULT).id;

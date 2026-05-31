@@ -128,7 +128,7 @@ int main(int argc, char** argv) {
 
     DeepLearningTask task;
     task.model(ultimate_mlp)
-        .loss(CrossEntropyLoss())              // 标准交叉熵损失
+        .loss(CrossEntropyLoss().label_smoothing(0.1f))  // Label Smoothing交叉熵损失
 
         // 初始化：Kaiming Uniform + FAN_IN（ReLU标准初始化）
         .initializer(Initializer()

@@ -908,6 +908,29 @@ public:
     float random_erasing_p() const;
 
     // =========================================================================
+    // Label Smoothing参数方法
+    // =========================================================================
+
+    /**
+     * @brief 设置Label Smoothing系数
+     * @param value 标签平滑系数，范围[0, 0.2]
+     * @throws TRException::ValueError 如果已初始化后修改或非幂等赋值
+     */
+    void set_label_smoothing(float value);
+
+    /**
+     * @brief 获取Label Smoothing系数
+     * @return 当前标签平滑系数 [0, 0.2]
+     */
+    [[nodiscard]] float label_smoothing() const;
+
+    /**
+     * @brief Label Smoothing是否已被显式设置
+     * @return true表示用户已调用setter，false表示从未设置
+     */
+    [[nodiscard]] bool has_label_smoothing_set() const;
+
+    // =========================================================================
     // 渐进式分辨率参数getter方法
     // =========================================================================
 
@@ -1128,6 +1151,13 @@ private:
     // =========================================================================
 
     std::atomic<float> fixed_random_erasing_p_{0.0f};                            ///< Random Erasing概率 [0.0, 1.0]
+
+    // =========================================================================
+    // Label Smoothing参数（fixed型变量，Pattern B：value + _set_ 标志）
+    // =========================================================================
+
+    std::atomic<float> fixed_label_smoothing_{0.0f};      ///< 标签平滑系数 [0, 0.2]
+    std::atomic<bool>  fixed_label_smoothing_set_{false}; ///< 是否已被显式设置
 
     // =========================================================================
     // 渐进式分辨率参数

@@ -85,7 +85,7 @@ DeepLearningTask& DeepLearningTask::model(const BluePrint& bp) {
 DeepLearningTask& DeepLearningTask::loss(const CrossEntropyLoss& loss_cfg) {
     TR_CHECK(phase_ == Phase::PLANNING, ValueError,
              "Cannot set loss after memory planning");
-    label_smoothing_ = loss_cfg.label_smoothing();
+    (void)loss_cfg;
     return *this;
 }
 

@@ -431,8 +431,6 @@ private:
     BluePrint blueprint_;
     bool has_blueprint_ = false;
 
-    float label_smoothing_ = 0.0f;
-
     // 优化器配置（variant 存储，编译期确定类型）
     std::variant<std::monostate, LARS, SGD, Adam, AdamW> opt_cfg_;
     bool has_optimizer_ = false;

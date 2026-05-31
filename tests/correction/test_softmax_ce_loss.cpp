@@ -63,6 +63,7 @@ int main(int argc, char** argv) {
     DTensor d_labels     = task.alloc(labels_shape, DType::INT32, Region::I_A_LABEL);
     DTensor d_scaling    = task.alloc(scalar_shape, DType::FP32, Region::S_SCALAR_FP32);
     DTensor d_batch_size = task.alloc(scalar_shape, DType::INT32, Region::S_SCALAR_FP32);
+    DTensor d_label_smoothing = task.alloc(scalar_shape, DType::FP32, Region::S_SCALAR_FP32);
 
     // FWD 独立输出
     DTensor d_loss_fwd   = task.alloc(scalar_shape, DType::FP32, Region::R_RESULT);
@@ -90,14 +91,14 @@ int main(int argc, char** argv) {
 
     ComputationGraph g_fwd;
     g_fwd.append(ComputeOp::SOFTMAX_CE_FP32_FWD,
-        {d_logits.id, d_scaling.id, d_batch_size.id, d_labels.id},
+        {d_logits.id, d_scaling.id, d_batch_size.id, d_labels.id, d_label_smoothing.id},
         {d_loss_fwd.id, d_inv_sc_fwd.id, d_pred_fwd.id, d_probs_fwd.id, d_top1_fwd.id, d_top5_fwd.id},
         OpParams{loss_params});
     task.add_graph("fwd", std::move(g_fwd), StreamKind::COMP_1);
 
     ComputationGraph g_inf;
     g_inf.append(ComputeOp::SOFTMAX_CE_FP32_INF,
-        {d_logits.id, d_scaling.id, d_batch_size.id, d_labels.id},
+        {d_logits.id, d_scaling.id, d_batch_size.id, d_labels.id, d_label_smoothing.id},
         {d_loss_inf.id, d_inv_sc_inf.id, d_pred_inf.id, d_probs_inf.id, d_top1_inf.id, d_top5_inf.id},
         OpParams{loss_params});
     task.add_graph("inf", std::move(g_inf), StreamKind::COMP_1);
@@ -107,21 +108,27 @@ int main(int argc, char** argv) {
     // ------------------------------------------------------------------------
     // 数据传输
     // ------------------------------------------------------------------------
+    Tensor h_label_smoothing = Tensor::fill(scalar_shape, DType::FP32, 0.0f);
     task.transfer_to_rank(h_logits,     d_logits,     0);
     task.transfer_to_rank(h_labels,     d_labels,     0);
     task.transfer_to_rank(h_scaling,    d_scaling,    0);
     task.transfer_to_rank(h_batch_size, d_batch_size, 0);
+    task.transfer_to_rank(h_label_smoothing, d_label_smoothing, 0);
 
     // ------------------------------------------------------------------------
-    // 运行 FWD，取回 loss
+    // 清零 result 张量（SimpleTask 不自动 kInitZeros），然后单次运行验证
     // ------------------------------------------------------------------------
+    Tensor h_zero = Tensor::fill(scalar_shape, DType::FP32, 0.0f);
+    task.transfer_to_rank(h_zero, d_loss_fwd, 0);
+    task.transfer_to_rank(h_zero, d_top1_fwd, 0);
+    task.transfer_to_rank(h_zero, d_top5_fwd, 0);
     task.run("fwd");
     Tensor h_loss_fwd = task.fetch_from_rank(d_loss_fwd, 0);
     float loss_fwd = h_loss_fwd.data<float>()[0];
 
-    // ------------------------------------------------------------------------
-    // 运行 INF，取回 loss
-    // ------------------------------------------------------------------------
+    task.transfer_to_rank(h_zero, d_loss_inf, 0);
+    task.transfer_to_rank(h_zero, d_top1_inf, 0);
+    task.transfer_to_rank(h_zero, d_top5_inf, 0);
     task.run("inf");
     Tensor h_loss_inf = task.fetch_from_rank(d_loss_inf, 0);
     float loss_inf = h_loss_inf.data<float>()[0];

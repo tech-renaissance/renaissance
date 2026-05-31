@@ -105,6 +105,9 @@ int main(int argc, char** argv) {
     DTensor d_top5_correct = task.alloc(scalar_shape, DType::FP32,   Region::R_RESULT);
     DTensor d_d_logits     = task.alloc(logits_shape, feature_dtype, grad_region);
 
+    DTensor d_local_batch_size = task.alloc(scalar_shape, DType::INT32, Region::S_SCALAR_INT32);
+    DTensor d_label_smoothing  = task.alloc(scalar_shape, DType::FP32,  Region::S_SCALAR_FP32);
+
     task.finalize_memory();
 
     ComputationGraph g_fwd;
@@ -115,7 +118,7 @@ int main(int argc, char** argv) {
     loss_params.num_classes     = num_classes;
 
     g_fwd.append(fwd_op,
-        { d_logits.id, d_scaling.id, d_labels.id },
+        { d_logits.id, d_scaling.id, d_local_batch_size.id, d_labels.id, d_label_smoothing.id },
         { d_ce_loss.id, d_inv_scaling.id, d_pred_labels.id,
           d_softmax_probs.id, d_top1_correct.id, d_top5_correct.id },
         OpParams{loss_params});
@@ -126,7 +129,7 @@ int main(int argc, char** argv) {
     ComputeOp bwd_op = is_amp ? ComputeOp::SOFTMAX_CE_AMP_BWD : ComputeOp::SOFTMAX_CE_FP32_BWD;
 
     g_bwd.append(bwd_op,
-        { d_d_logits.id, d_softmax_probs.id, d_inv_scaling.id, d_scaling.id, d_labels.id },
+        { d_d_logits.id, d_softmax_probs.id, d_inv_scaling.id, d_scaling.id, d_labels.id, d_label_smoothing.id },
         { d_d_logits.id },
         OpParams{loss_params});
 
@@ -138,16 +141,24 @@ int main(int argc, char** argv) {
         Tensor h_logits  = Tensor::randn_fp16(logits_shape, DType::FP16, 0.0f, 0.1f);
         Tensor h_labels  = Tensor::fill(labels_shape, DType::INT32, 0.0f);
         Tensor h_scaling = Tensor::fill(scalar_shape, DType::FP32, 1.0f);
+        Tensor h_local_batch_size = Tensor::fill(scalar_shape, DType::INT32, static_cast<float>(batch));
+        Tensor h_label_smoothing  = Tensor::fill(scalar_shape, DType::FP32, 0.0f);
         task.transfer_to_rank(h_logits,  d_logits,  0);
         task.transfer_to_rank(h_labels,  d_labels,  0);
         task.transfer_to_rank(h_scaling, d_scaling, 0);
+        task.transfer_to_rank(h_local_batch_size, d_local_batch_size, 0);
+        task.transfer_to_rank(h_label_smoothing,  d_label_smoothing,  0);
     } else {
         Tensor h_logits  = Tensor::randn(logits_shape, DType::FP32, 0.0f, 0.1f);
         Tensor h_labels  = Tensor::fill(labels_shape, DType::INT32, 0.0f);
         Tensor h_scaling = Tensor::fill(scalar_shape, DType::FP32, 1.0f);
+        Tensor h_local_batch_size = Tensor::fill(scalar_shape, DType::INT32, static_cast<float>(batch));
+        Tensor h_label_smoothing  = Tensor::fill(scalar_shape, DType::FP32, 0.0f);
         task.transfer_to_rank(h_logits,  d_logits,  0);
         task.transfer_to_rank(h_labels,  d_labels,  0);
         task.transfer_to_rank(h_scaling, d_scaling, 0);
+        task.transfer_to_rank(h_local_batch_size, d_local_batch_size, 0);
+        task.transfer_to_rank(h_label_smoothing,  d_label_smoothing,  0);
     }
 
     std::cout << "===== SOFTMAX_CE FWD 性能测试 =====" << std::endl;

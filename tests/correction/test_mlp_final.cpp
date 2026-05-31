@@ -263,6 +263,9 @@ int main(int argc, char** argv) {
     DTensor d_labels  = task.alloc(pred_s,     DType::INT32, Region::I_A_LABEL);
     DTensor d_scaling = task.alloc(scalar_s,   DType::FP32, Region::S_SCALAR_FP32);
 
+    DTensor d_local_batch_size = task.alloc(scalar_s, DType::INT32, Region::S_SCALAR_INT32);
+    DTensor d_label_smoothing  = task.alloc(scalar_s, DType::FP32,  Region::S_SCALAR_FP32);
+
     // ── BWD 梯度张量 (in-place: dx covers x) ──
     DTensor d_dw3 = task.alloc(w3_shape, dtype, g_region);
     DTensor d_db3 = task.alloc(b3_shape, DType::FP32, Region::G_FC_BIAS);
@@ -337,7 +340,7 @@ int main(int argc, char** argv) {
 
     LossParams loss_params; loss_params.num_classes = num_classes;
     g_fwd.append(softmax_ce_fwd,
-        {d_logits.id, d_scaling.id, d_labels.id},
+        {d_logits.id, d_scaling.id, d_local_batch_size.id, d_labels.id, d_label_smoothing.id},
         {d_loss.id, d_inv_sc.id, d_pred.id, d_probs.id, d_top1.id, d_top5.id},
         OpParams{loss_params});
 
@@ -348,7 +351,7 @@ int main(int argc, char** argv) {
 
     // SoftmaxCE BWD: d_logits covers logits
     g_bwd.append(softmax_ce_bwd,
-        {d_logits.id, d_probs.id, d_inv_sc.id, d_scaling.id, d_labels.id},
+        {d_logits.id, d_probs.id, d_inv_sc.id, d_scaling.id, d_labels.id, d_label_smoothing.id},
         {d_logits.id},
         OpParams{loss_params});
 
@@ -383,8 +386,16 @@ int main(int argc, char** argv) {
 
     task.compile();
 
+    // ── 清零 result 张量（SimpleTask 不经过 Compiler，不会自动 kInitZeros）──
+    Tensor h_zero = Tensor::fill(scalar_s, DType::FP32, 0.0f);
+    task.transfer_to_rank(h_zero, d_loss, 0);
+    task.transfer_to_rank(h_zero, d_top1, 0);
+    task.transfer_to_rank(h_zero, d_top5, 0);
+
     // ── 传输数据 ──
     Tensor h_scaling = Tensor::fill(Shape{1,1,1,1}, DType::FP32, 1.0f);
+    Tensor h_local_batch_size = Tensor::fill(scalar_s, DType::INT32, static_cast<float>(batch));
+    Tensor h_label_smoothing  = Tensor::fill(scalar_s, DType::FP32, 0.0f);
 
     task.transfer_to_rank(h_x,        d_x,        0);
     task.transfer_to_rank(h_w1,       d_w1,       0);
@@ -395,6 +406,8 @@ int main(int argc, char** argv) {
     task.transfer_to_rank(h_b3,       d_b3,       0);
     task.transfer_to_rank(h_labels,   d_labels,   0);
     task.transfer_to_rank(h_scaling,  d_scaling,  0);
+    task.transfer_to_rank(h_local_batch_size, d_local_batch_size, 0);
+    task.transfer_to_rank(h_label_smoothing,  d_label_smoothing,  0);
     if (num_ranks > 1) {
         task.broadcast_from_rank0(d_x);
         task.broadcast_from_rank0(d_w1);  task.broadcast_from_rank0(d_b1);
@@ -402,6 +415,8 @@ int main(int argc, char** argv) {
         task.broadcast_from_rank0(d_w3);  task.broadcast_from_rank0(d_b3);
         task.broadcast_from_rank0(d_labels);
         task.broadcast_from_rank0(d_scaling);
+        task.broadcast_from_rank0(d_local_batch_size);
+        task.broadcast_from_rank0(d_label_smoothing);
     }
 
     std::cout << "\n===== FWD [Flatten+FC1+Tanh1+FC2+Tanh2+FC3+SoftmaxCE] "

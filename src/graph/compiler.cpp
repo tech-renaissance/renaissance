@@ -553,7 +553,8 @@ namespace {
         }
         if (std::holds_alternative<SoftmaxCELayerParams>(lp)) {
             auto& p = std::get<SoftmaxCELayerParams>(lp);
-            return OpParams{LossParams{0.0f, p.num_classes}};
+            float ls = GlobalRegistry::instance().label_smoothing();
+            return OpParams{LossParams{ls, p.num_classes}};
         }
         return OpParams{};
     }
@@ -777,6 +778,11 @@ void Compiler::create_memory_plans(
             memory_plans[s]->baseline().top1, kInitZeros);
         memory_plans[s]->set_init_config(
             memory_plans[s]->baseline().top5, kInitZeros);
+
+        // Label Smoothing标量初始化
+        float ls_val = GlobalRegistry::instance().label_smoothing();
+        memory_plans[s]->set_init_config(
+            memory_plans[s]->baseline().label_smoothing, kInitConstant(ls_val));
 
         // 仅 Adam/AdamW 需要 step 标量
         if (opt == OptimizerKind::ADAM || opt == OptimizerKind::ADAMW) {
@@ -1131,6 +1137,7 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
                 gn.input_ids.push_back(b.scaling);
                 gn.input_ids.push_back(b.local_batch_size);
                 gn.input_ids.push_back(b.label_smce);
+                gn.input_ids.push_back(b.label_smoothing);   // [NEW] → ids_in[4]
                 gn.output_ids.insert(gn.output_ids.begin(), b.loss);
                 gn.output_ids.push_back(b.top1);
                 gn.output_ids.push_back(b.top5);
@@ -1250,6 +1257,7 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
                 const auto& b = memory_plan.baseline();
                 gn.input_ids.push_back(b.scaling);
                 gn.input_ids.push_back(b.label_smce);
+                gn.input_ids.push_back(b.label_smoothing);   // [NEW] → ids_in[5]
             }
 
             train_cg.append(backward_graph_id, gn);
@@ -1397,6 +1405,7 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
                 gn.input_ids.push_back(b.scaling);
                 gn.input_ids.push_back(b.local_batch_size);
                 gn.input_ids.push_back(b.label_smce);
+                gn.input_ids.push_back(b.label_smoothing);   // [NEW] → ids_in[4]
                 gn.output_ids.insert(gn.output_ids.begin(), b.loss);
                 gn.output_ids.push_back(b.top1);
                 gn.output_ids.push_back(b.top5);

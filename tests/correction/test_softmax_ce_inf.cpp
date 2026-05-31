@@ -227,6 +227,9 @@ int main(int argc, char** argv) {
     DTensor d_top1_correct = task.alloc(scalar_shape,       DType::FP32,  Region::R_RESULT);
     DTensor d_top5_correct = task.alloc(scalar_shape,       DType::FP32,  Region::R_RESULT);
 
+    DTensor d_local_batch_size = task.alloc(scalar_shape, DType::INT32, Region::S_SCALAR_INT32);
+    DTensor d_label_smoothing  = task.alloc(scalar_shape, DType::FP32,  Region::S_SCALAR_FP32);
+
     task.finalize_memory();
 
     ComputationGraph g_inf;
@@ -237,7 +240,7 @@ int main(int argc, char** argv) {
     loss_params.num_classes     = cfg.num_classes;
 
     g_inf.append(inf_op,
-        { d_logits.id, d_scaling.id, d_labels.id },
+        { d_logits.id, d_scaling.id, d_local_batch_size.id, d_labels.id, d_label_smoothing.id },
         { d_ce_loss.id, d_inv_scaling.id, d_pred_labels.id,
           d_softmax_probs.id, d_top1_correct.id, d_top5_correct.id },
         OpParams{loss_params});
@@ -246,24 +249,29 @@ int main(int argc, char** argv) {
 
     task.compile();
 
+    Tensor h_zero = Tensor::fill(scalar_shape, DType::FP32, 0.0f);
+    task.transfer_to_rank(h_zero, d_ce_loss, 0);
+    task.transfer_to_rank(h_zero, d_top1_correct, 0);
+    task.transfer_to_rank(h_zero, d_top5_correct, 0);
+
     Tensor h_scaling = Tensor::fill(Shape{1,1,1,1}, DType::FP32, 1.0f);
+    Tensor h_local_batch_size = Tensor::fill(scalar_shape, DType::INT32, static_cast<float>(cfg.batch));
+    Tensor h_label_smoothing  = Tensor::fill(scalar_shape, DType::FP32, 0.0f);
     task.transfer_to_rank(h_logits,        d_logits,   0);
     task.transfer_to_rank(h_labels,        d_labels,   0);
     task.transfer_to_rank(h_scaling,       d_scaling,  0);
+    task.transfer_to_rank(h_local_batch_size, d_local_batch_size, 0);
+    task.transfer_to_rank(h_label_smoothing,  d_label_smoothing,  0);
     if (num_ranks > 1) {
         task.broadcast_from_rank0(d_logits);
         task.broadcast_from_rank0(d_labels);
         task.broadcast_from_rank0(d_scaling);
+        task.broadcast_from_rank0(d_local_batch_size);
+        task.broadcast_from_rank0(d_label_smoothing);
     }
 
-    std::cout << "\n===== SOFTMAX_CE INF [" << mode_name(cfg.mode) << "] =====\n";
-
-    task.run_iter("inf", cfg.warmup);
-    auto t0 = std::chrono::high_resolution_clock::now();
-    task.run_iter("inf", cfg.iterations);
-    auto t1 = std::chrono::high_resolution_clock::now();
-    double avg_us = std::chrono::duration<double, std::micro>(t1 - t0).count()
-                  / cfg.iterations;
+    // ── 验证阶段：单次运行，result 已清零（SimpleTask 不自动 kInitZeros）──
+    task.run("inf");
 
     bool all_pass = true;
     double max_mse = 0.0;
@@ -271,7 +279,6 @@ int main(int argc, char** argv) {
 
     for (int rank = 0; rank < num_ranks; ++rank) {
         Tensor h_fwd_loss    = task.fetch_from_rank(d_ce_loss,      rank);
-        Tensor h_fwd_inv_sc  = task.fetch_from_rank(d_inv_scaling,  rank);
         Tensor h_fwd_probs   = task.fetch_from_rank(d_softmax_probs,rank);
 
         double mse_loss    = compute_mse_fp32(h_fwd_loss, h_ce_loss);
@@ -292,8 +299,18 @@ int main(int argc, char** argv) {
     std::cout << "\n===== SOFTMAX_CE INF " << mode_name(cfg.mode)
               << " (" << num_ranks << " rank(s)): "
               << (all_pass ? "PASS" : "FAIL") << " =====\n"
-              << "  INF Avg: " << std::fixed << std::setprecision(2) << avg_us << " us/iter\n"
               << "  MaxMSE:  " << std::scientific << max_mse << std::endl;
+
+    // ── 性能阶段：多次运行（result 会累加，但时间测量不受影响）──
+    std::cout << "\n===== SOFTMAX_CE INF [" << mode_name(cfg.mode) << "] =====\n";
+    task.run_iter("inf", cfg.warmup);
+    auto t0 = std::chrono::high_resolution_clock::now();
+    task.run_iter("inf", cfg.iterations);
+    auto t1 = std::chrono::high_resolution_clock::now();
+    double avg_us = std::chrono::duration<double, std::micro>(t1 - t0).count()
+                  / cfg.iterations;
+
+    std::cout << "  INF Avg: " << std::fixed << std::setprecision(2) << avg_us << " us/iter\n";
 
     return all_pass ? 0 : 1;
 }

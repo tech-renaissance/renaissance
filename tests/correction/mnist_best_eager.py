@@ -135,7 +135,7 @@ if __name__ == '__main__':
 
     model = UltimateMLP().to(device)
 
-    criterion = nn.CrossEntropyLoss()
+    criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
     optimizer = optim.AdamW(model.parameters(), lr=BASE_LR,
                             betas=(0.9, 0.999), eps=1e-8, weight_decay=1e-4)
     scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=warmup_cosine_lambda)

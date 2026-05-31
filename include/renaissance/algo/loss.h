@@ -11,6 +11,7 @@
 #pragma once
 
 #include "renaissance/core/tr_exception.h"
+#include "renaissance/core/global_registry.h"
 
 namespace tr {
 
@@ -49,9 +50,10 @@ public:
      * - 0.1f：MLPerf 标准配置，目标分布 = 0.9 * one_hot + 0.1 * uniform
      */
     CrossEntropyLoss& label_smoothing(float value) {
-        TR_CHECK(value >= 0.0f && value < 1.0f, ValueError,
-                 "label_smoothing must be in [0, 1), got " << value);
+        TR_CHECK(value >= 0.0f && value <= 0.20001f, ValueError,
+                 "label_smoothing must be in [0, 0.2], got " << value);
         label_smoothing_ = value;
+        GlobalRegistry::instance().set_label_smoothing(value);
         return *this;
     }
 

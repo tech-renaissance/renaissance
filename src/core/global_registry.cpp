@@ -560,6 +560,43 @@ bool GlobalRegistry::has_amp_set() const {
     return fixed_using_amp_set_.load(std::memory_order_relaxed);
 }
 
+// ============================================================================
+// Label Smoothing参数方法（Pattern B）
+// ============================================================================
+
+void GlobalRegistry::set_label_smoothing(float value) {
+    TR_CHECK(value >= 0.0f && value <= 0.20001f, ValueError,
+             "label_smoothing must be in [0, 0.2], got " << value);
+
+    float old_value = fixed_label_smoothing_.load(std::memory_order_relaxed);
+    bool  old_set   = fixed_label_smoothing_set_.load(std::memory_order_relaxed);
+
+    if (!old_set) {
+        fixed_label_smoothing_.store(value, std::memory_order_release);
+        fixed_label_smoothing_set_.store(true, std::memory_order_release);
+        LOG_INFO << "GlobalRegistry: fixed_label_smoothing_ set to " << value;
+        return;
+    }
+
+    if (initialized_.load(std::memory_order_acquire)) {
+        TR_VALUE_ERROR("Cannot modify fixed_label_smoothing after initialization. "
+                      "Current value: " << old_value << ", Attempted value: " << value);
+    }
+
+    if (old_value == value) return;
+
+    TR_VALUE_ERROR("Cannot modify fixed_label_smoothing after first assignment. "
+                  "Current value: " << old_value << ", Attempted value: " << value);
+}
+
+float GlobalRegistry::label_smoothing() const {
+    return fixed_label_smoothing_.load(std::memory_order_relaxed);
+}
+
+bool GlobalRegistry::has_label_smoothing_set() const {
+    return fixed_label_smoothing_set_.load(std::memory_order_relaxed);
+}
+
 void GlobalRegistry::set_using_drop_last(bool value) {
     bool old_value = fixed_using_drop_last_.load(std::memory_order_relaxed);
     bool old_set = fixed_using_drop_last_set_.load(std::memory_order_relaxed);
@@ -1857,6 +1894,8 @@ int GlobalRegistry::get_value_int(const std::string& name) const {
 float GlobalRegistry::get_value_float(const std::string& name) const {
     if (name == "random_erasing_p") {
         return fixed_random_erasing_p_.load(std::memory_order_relaxed);
+    } else if (name == "label_smoothing") {
+        return fixed_label_smoothing_.load(std::memory_order_relaxed);
     } else {
         TR_VALUE_ERROR("Unknown variable name: " << name);
         return 0.0f;  // Unreachable
@@ -1915,6 +1954,8 @@ void GlobalRegistry::set_value_int(const std::string& name, int value) {
 void GlobalRegistry::set_value_float(const std::string& name, float value) {
     if (name == "random_erasing_p") {
         set_random_erasing_p(value);
+    } else if (name == "label_smoothing") {
+        set_label_smoothing(value);
     } else {
         TR_VALUE_ERROR("Unknown variable name: " << name);
     }
