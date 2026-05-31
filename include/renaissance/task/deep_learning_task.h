@@ -591,9 +591,6 @@ private:
     /** @brief 打印训练完成汇总 */
     void log_final_summary(double total_time_sec) const;
 
-    /** @brief 从 GlobalRegistry 获取当前学习率（由 Scheduler 管理） */
-    [[nodiscard]] float get_current_lr() const;
-
     /** @brief 获取当前训练分辨率（渐进式分辨率支持） */
     [[nodiscard]] int get_current_train_resolution() const;
 

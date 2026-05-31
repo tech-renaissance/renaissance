@@ -6,7 +6,14 @@
  * @author 技术觉醒团队
  * @note 依赖项: core/tr_exception.h, <cstdint>, <cmath>
  * @note 所属系列: algo
- * @note 设计依据: LR_FINAL.md
+ * @note 设计依据: LR_FINAL.md, OTS_FINAL.md
+ *
+ * @note 重要设计说明：
+ *   本调度器采用无状态（stateless）纯函数设计。给定 (epoch, batch) 直接计算学习率，
+ *   不维护 current_step / current_lr 等可变状态，不提供 step() / reset() 等状态推进接口。
+ *   这是 TR4 多 RANK 并行训练架构的必然选择：纯函数保证所有 RANK 在相同 (epoch, batch)
+ *   下得到完全相同的 LR，无需同步、无竞态、无锁。
+ *   若将来需要 ReduceLROnPlateau 等有状态调度器，请派生独立子类，勿在基类添加状态。
  */
 
 #pragma once
@@ -19,10 +26,12 @@ namespace tr {
 
 /**
  * @class LRScheduler
- * @brief 学习率调度器抽象基类
+ * @brief 学习率调度器抽象基类 —— 无状态纯函数设计
  *
- * 所有调度器共享 warmup（线性）、步进语义（batch/epoch 双模式）、冲突检测、
- * 无状态查询（get_lr_by_batch/get_lr_by_epoch）和只读状态查询（get_current_lr）。
+ * 核心设计：给定 (epoch, batch) → 直接返回 lr。没有 step()，没有可变状态。
+ *
+ * 所有调度器共享 warmup（线性）、batch/epoch 双模式配置、冲突检测。
+ * 运行期唯一接口：get_lr_by_batch(step) / get_lr_by_epoch(epoch)，均为 const 纯函数。
  *
  * 派生类只需覆写 compute_decay_lr(decay_step, total_decay) 提供衰减公式。
  */
@@ -40,20 +49,14 @@ public:
 
     // ===== 生命周期 =====
     void prepare(int total_epochs, int steps_per_epoch);
-    void reset();
     bool is_prepared() const noexcept { return prepared_; }
 
-    // ===== 状态推进 =====
-    void step();
-
-    // ===== 查询（只读）=====
-    float get_current_lr() const;
+    // ===== 查询（唯一运行期接口，const 纯函数）=====
     float get_lr_by_batch(int batch_id) const;
     float get_lr_by_epoch(int epoch_id) const;
     bool is_step_by_batch() const noexcept { return step_by_batch_; }
 
-    // ===== 运行期状态查询 =====
-    int current_step()    const noexcept { return current_step_; }
+    // ===== 配置参数只读查询 =====
     int total_steps()     const noexcept { return total_steps_; }
     int total_epochs()    const noexcept { return total_epochs_; }
     int steps_per_epoch() const noexcept { return steps_per_epoch_; }
@@ -94,9 +97,6 @@ protected:
     int   steps_per_epoch_  = 0;
     int   total_steps_      = 0;
     int   warmup_steps_     = 0;
-
-    int   current_step_ = 0;
-    float current_lr_   = 0.0f;
     bool  prepared_     = false;
 };
 

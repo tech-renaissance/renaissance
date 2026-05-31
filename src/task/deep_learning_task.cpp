@@ -392,10 +392,6 @@ void DeepLearningTask::run_train_epoch() {
     if (batches == 1) {
         TaskBase::run("fwd_bwd_deep_a");
         if (!frozen) TaskBase::run("first_layer_bwd");
-        std::visit([](auto&& sch) {
-            using T = std::decay_t<decltype(sch)>;
-            if constexpr (!std::is_same_v<T, std::monostate>) sch.step();
-        }, sched_cfg_);
         return;
     }
 
@@ -429,13 +425,7 @@ void DeepLearningTask::run_train_epoch() {
             TaskBase::run("first_layer_bwd");
         }
 
-        // 每个 batch 后更新学习率（按 batch 步进）
-        std::visit([](auto&& scheduler) {
-            using T = std::decay_t<decltype(scheduler)>;
-            if constexpr (!std::is_same_v<T, std::monostate>) {
-                scheduler.step();
-            }
-        }, sched_cfg_);
+
     }
 
     // ══════════════════════════════════════════════════════════════
@@ -453,13 +443,7 @@ void DeepLearningTask::run_train_epoch() {
         TaskBase::run("first_layer_bwd");
     }
 
-    // 最后一个 batch 后更新学习率
-    std::visit([](auto&& scheduler) {
-        using T = std::decay_t<decltype(scheduler)>;
-        if constexpr (!std::is_same_v<T, std::monostate>) {
-            scheduler.step();
-        }
-    }, sched_cfg_);
+
 }
 
 void DeepLearningTask::run_val_epoch(bool validate_ema) {
@@ -876,17 +860,6 @@ TrainingResult DeepLearningTask::run_gpu() {
         prep_thread.join();
         if (prep_exc) std::rethrow_exception(prep_exc);
 
-        std::visit([batches = prep.steps_per_epoch()](auto&& sch) {
-            using T = std::decay_t<decltype(sch)>;
-            if constexpr (!std::is_same_v<T, std::monostate>) {
-                if (sch.is_step_by_batch()) {
-                    for (int i = 0; i < batches; ++i) sch.step();
-                } else {
-                    sch.step();
-                }
-            }
-        }, sched_cfg_);
-
         bool did_validate = false;
         float val_loss = 0.0f, top1 = 0.0f, top5 = 0.0f;
         float ema_top1 = 0.0f, ema_top5 = 0.0f;
@@ -1297,17 +1270,6 @@ TrainingResult DeepLearningTask::run_cpu() {
         // LOG_INFO << "[TRAIN-CPU] loss=" << std::fixed << std::setprecision(6) << train_loss;
         prep_thread.join();
         if (prep_exc) std::rethrow_exception(prep_exc);
-
-        std::visit([batches = prep.steps_per_epoch()](auto&& sch) {
-            using T = std::decay_t<decltype(sch)>;
-            if constexpr (!std::is_same_v<T, std::monostate>) {
-                if (sch.is_step_by_batch()) {
-                    for (int i = 0; i < batches; ++i) sch.step();
-                } else {
-                    sch.step();
-                }
-            }
-        }, sched_cfg_);
 
         bool did_validate = false;
         float val_loss = 0.0f, top1 = 0.0f, top5 = 0.0f;
@@ -1839,18 +1801,6 @@ int DeepLearningTask::get_current_train_resolution() const {
     }
     // 渐进式分辨率：根据当前 epoch 判断
     return reg.get_train_sample_resolution_by_epoch(current_epoch_);
-}
-
-float DeepLearningTask::get_current_lr() const {
-    // 从 Scheduler 获取当前学习率
-    return std::visit([](auto&& scheduler) -> float {
-        using T = std::decay_t<decltype(scheduler)>;
-        if constexpr (std::is_same_v<T, std::monostate>) {
-            return 0.0f;
-        } else {
-            return scheduler.get_current_lr();
-        }
-    }, sched_cfg_);
 }
 
 // =============================================================================

@@ -4,7 +4,11 @@
  * @version 4.20.2
  * @date 2026-05-14
  * @author 技术觉醒团队
- * @note 设计依据: LR_FINAL.md
+ * @note 设计依据: LR_FINAL.md, OTS_FINAL.md
+ *
+ * @note 重要：本文件不提供 step() / reset() / get_current_lr()。
+ *   调度器为无状态纯函数设计，LR 由 get_lr_by_batch() / get_lr_by_epoch() 直接计算。
+ *   详见 scheduler.h 顶部设计说明。
  */
 
 #define _USE_MATH_DEFINES
@@ -81,37 +85,7 @@ void LRScheduler::prepare(int total_epochs, int steps_per_epoch) {
 
     validate_config();
 
-    current_step_ = 0;
-    current_lr_   = compute_lr_at_step(0);
-    prepared_     = true;
-}
-
-void LRScheduler::reset() {
-    current_step_ = 0;
-    current_lr_   = compute_lr_at_step(0);
-}
-
-void LRScheduler::step() {
-    TR_CHECK(prepared_, RuntimeError,
-             "step() called before prepare()");
-
-    if (current_step_ >= total_steps_) {
-        return;
-    }
-
-    current_lr_ = compute_lr_at_step(current_step_);
-
-    if (step_by_batch_) {
-        current_step_ += 1;
-    } else {
-        current_step_ += steps_per_epoch_;
-    }
-}
-
-float LRScheduler::get_current_lr() const {
-    TR_CHECK(prepared_, RuntimeError,
-             "get_current_lr() called before prepare()");
-    return current_lr_;
+    prepared_ = true;
 }
 
 float LRScheduler::get_lr_by_batch(int batch_id) const {
