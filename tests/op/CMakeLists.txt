@@ -120,6 +120,150 @@ endif()
 message(STATUS "  - test_tanh_fwd_bwd: TANH FWD+BWD correctness test")
 
 # ============================================================================
+# SiLU FWD+BWD 串接测试
+# ============================================================================
+add_executable(test_silu_fwd_bwd test_silu_fwd_bwd.cpp)
+target_link_libraries(test_silu_fwd_bwd PRIVATE renaissance)
+target_compile_definitions(test_silu_fwd_bwd PRIVATE TR_LOG_LEVEL=1)
+
+if(TR_USE_CUDA)
+    setup_gpu_runtime_env(test_silu_fwd_bwd)
+endif()
+
+set_target_properties(test_silu_fwd_bwd PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/op
+    WIN32_EXECUTABLE FALSE
+)
+
+if(MSVC)
+    target_compile_options(test_silu_fwd_bwd PRIVATE /W4 /utf-8 /wd4244 /wd4505 /wd4458 /wd4127)
+else()
+    target_compile_options(test_silu_fwd_bwd PRIVATE -Wall -Wextra -Wpedantic -Wno-unused-function)
+endif()
+
+message(STATUS "  - test_silu_fwd_bwd: SiLU FWD+BWD correctness test")
+
+# ============================================================================
+# ReLU6 FWD+BWD 串接测试
+# ============================================================================
+add_executable(test_relu6_fwd_bwd test_relu6_fwd_bwd.cpp)
+target_link_libraries(test_relu6_fwd_bwd PRIVATE renaissance)
+target_compile_definitions(test_relu6_fwd_bwd PRIVATE TR_LOG_LEVEL=1)
+
+if(TR_USE_CUDA)
+    setup_gpu_runtime_env(test_relu6_fwd_bwd)
+endif()
+
+set_target_properties(test_relu6_fwd_bwd PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/op
+    WIN32_EXECUTABLE FALSE
+)
+
+if(MSVC)
+    target_compile_options(test_relu6_fwd_bwd PRIVATE /W4 /utf-8 /wd4244 /wd4505 /wd4458 /wd4127)
+else()
+    target_compile_options(test_relu6_fwd_bwd PRIVATE -Wall -Wextra -Wpedantic -Wno-unused-function)
+endif()
+
+message(STATUS "  - test_relu6_fwd_bwd: ReLU6 FWD+BWD correctness test")
+
+# ============================================================================
+# LeakyReLU FWD+BWD 串接测试
+# ============================================================================
+add_executable(test_leaky_relu_fwd_bwd test_leaky_relu_fwd_bwd.cpp)
+target_link_libraries(test_leaky_relu_fwd_bwd PRIVATE renaissance)
+target_compile_definitions(test_leaky_relu_fwd_bwd PRIVATE TR_LOG_LEVEL=1)
+
+if(TR_USE_CUDA)
+    setup_gpu_runtime_env(test_leaky_relu_fwd_bwd)
+endif()
+
+set_target_properties(test_leaky_relu_fwd_bwd PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/op
+    WIN32_EXECUTABLE FALSE
+)
+
+if(MSVC)
+    target_compile_options(test_leaky_relu_fwd_bwd PRIVATE /W4 /utf-8 /wd4244 /wd4505 /wd4458 /wd4127)
+else()
+    target_compile_options(test_leaky_relu_fwd_bwd PRIVATE -Wall -Wextra -Wpedantic -Wno-unused-function)
+endif()
+
+message(STATUS "  - test_leaky_relu_fwd_bwd: LeakyReLU FWD+BWD correctness test")
+
+# ============================================================================
+# HardSwish FWD+BWD 串接测试
+# ============================================================================
+add_executable(test_hardswish_fwd_bwd test_hardswish_fwd_bwd.cpp)
+target_link_libraries(test_hardswish_fwd_bwd PRIVATE renaissance)
+target_compile_definitions(test_hardswish_fwd_bwd PRIVATE TR_LOG_LEVEL=1)
+
+if(TR_USE_CUDA)
+    setup_gpu_runtime_env(test_hardswish_fwd_bwd)
+endif()
+
+set_target_properties(test_hardswish_fwd_bwd PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/op
+    WIN32_EXECUTABLE FALSE
+)
+
+if(MSVC)
+    target_compile_options(test_hardswish_fwd_bwd PRIVATE /W4 /utf-8 /wd4244 /wd4505 /wd4458 /wd4127)
+else()
+    target_compile_options(test_hardswish_fwd_bwd PRIVATE -Wall -Wextra -Wpedantic -Wno-unused-function)
+endif()
+
+message(STATUS "  - test_hardswish_fwd_bwd: HardSwish FWD+BWD correctness test")
+
+# ============================================================================
+# ELU FWD+BWD 串接测试
+# ============================================================================
+add_executable(test_elu_fwd_bwd test_elu_fwd_bwd.cpp)
+target_link_libraries(test_elu_fwd_bwd PRIVATE renaissance)
+target_compile_definitions(test_elu_fwd_bwd PRIVATE TR_LOG_LEVEL=1)
+
+if(TR_USE_CUDA)
+    setup_gpu_runtime_env(test_elu_fwd_bwd)
+endif()
+
+set_target_properties(test_elu_fwd_bwd PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/op
+    WIN32_EXECUTABLE FALSE
+)
+
+if(MSVC)
+    target_compile_options(test_elu_fwd_bwd PRIVATE /W4 /utf-8 /wd4244 /wd4505 /wd4458 /wd4127)
+else()
+    target_compile_options(test_elu_fwd_bwd PRIVATE -Wall -Wextra -Wpedantic -Wno-unused-function)
+endif()
+
+message(STATUS "  - test_elu_fwd_bwd: ELU FWD+BWD correctness test")
+
+# ============================================================================
+# Sigmoid FWD+BWD 串接测试
+# ============================================================================
+add_executable(test_sigmoid_fwd_bwd test_sigmoid_fwd_bwd.cpp)
+target_link_libraries(test_sigmoid_fwd_bwd PRIVATE renaissance)
+target_compile_definitions(test_sigmoid_fwd_bwd PRIVATE TR_LOG_LEVEL=1)
+
+if(TR_USE_CUDA)
+    setup_gpu_runtime_env(test_sigmoid_fwd_bwd)
+endif()
+
+set_target_properties(test_sigmoid_fwd_bwd PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/op
+    WIN32_EXECUTABLE FALSE
+)
+
+if(MSVC)
+    target_compile_options(test_sigmoid_fwd_bwd PRIVATE /W4 /utf-8 /wd4244 /wd4505 /wd4458 /wd4127)
+else()
+    target_compile_options(test_sigmoid_fwd_bwd PRIVATE -Wall -Wextra -Wpedantic -Wno-unused-function)
+endif()
+
+message(STATUS "  - test_sigmoid_fwd_bwd: Sigmoid FWD+BWD correctness test")
+
+# ============================================================================
 # FLATTEN FWD+BWD 串接测试 — Flatten 算子验证
 # ============================================================================
 add_executable(test_flatten_fwd_bwd test_flatten_fwd_bwd.cpp)
