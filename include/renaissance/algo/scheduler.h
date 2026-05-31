@@ -1,6 +1,6 @@
 /**
  * @file scheduler.h
- * @brief 学习率调度器基类及派生类：PolynomialLR / CosineAnnealingLR / StepLR / ConstantLR
+ * @brief 学习率调度器基类及派生类：PolynomialLR / CosineAnnealingLR / StepLR / ConstantLR / MultiStepLR / ExponentialLR / WSDLR / CosineAnnealingWithWarmRestartsLR
  * @version 4.20.2
  * @date 2026-05-14
  * @author 技术觉醒团队
@@ -21,6 +21,8 @@
 #include <cstdint>
 #include <cmath>
 #include <memory>
+#include <vector>
+#include <limits>
 
 namespace tr {
 
@@ -117,6 +119,9 @@ public:
     PolynomialLR& warmup_start_lr(float start_lr) {
         LRScheduler::warmup_start_lr(start_lr); return *this;
     }
+    PolynomialLR& warmup_start_factor(float factor) {
+        LRScheduler::warmup_start_factor(factor); return *this;
+    }
     PolynomialLR& step_by_batch(bool v = true) {
         LRScheduler::step_by_batch(v); return *this;
     }
@@ -152,6 +157,9 @@ public:
     CosineAnnealingLR& warmup_start_factor(float factor) {
         LRScheduler::warmup_start_factor(factor); return *this;
     }
+    CosineAnnealingLR& warmup_start_lr(float start_lr) {
+        LRScheduler::warmup_start_lr(start_lr); return *this;
+    }
     CosineAnnealingLR& step_by_batch(bool v = true) {
         LRScheduler::step_by_batch(v); return *this;
     }
@@ -186,6 +194,9 @@ public:
     }
     StepLR& warmup_start_factor(float factor) {
         LRScheduler::warmup_start_factor(factor); return *this;
+    }
+    StepLR& warmup_start_lr(float start_lr) {
+        LRScheduler::warmup_start_lr(start_lr); return *this;
     }
     StepLR& step_by_batch(bool v = true) {
         LRScheduler::step_by_batch(v); return *this;
@@ -224,6 +235,9 @@ public:
     ConstantLR& warmup_start_factor(float factor) {
         LRScheduler::warmup_start_factor(factor); return *this;
     }
+    ConstantLR& warmup_start_lr(float start_lr) {
+        LRScheduler::warmup_start_lr(start_lr); return *this;
+    }
     ConstantLR& step_by_batch(bool v = true) {
         LRScheduler::step_by_batch(v); return *this;
     }
@@ -239,6 +253,168 @@ protected:
         // ConstantLR 无需验证配置
     }
     const char* name() const override { return "ConstantLR"; }
+};
+
+// ============================================================================
+// MultiStepLR
+// ============================================================================
+
+class MultiStepLR final : public LRScheduler {
+public:
+    MultiStepLR() = default;
+
+    MultiStepLR& base_lr(float lr) {
+        LRScheduler::base_lr(lr); return *this;
+    }
+    MultiStepLR& warmup(int epochs) {
+        LRScheduler::warmup(epochs); return *this;
+    }
+    MultiStepLR& warmup_start_lr(float start_lr) {
+        LRScheduler::warmup_start_lr(start_lr); return *this;
+    }
+    MultiStepLR& warmup_start_factor(float factor) {
+        LRScheduler::warmup_start_factor(factor); return *this;
+    }
+    MultiStepLR& step_by_batch(bool v = true) {
+        LRScheduler::step_by_batch(v); return *this;
+    }
+    MultiStepLR& step_by_epoch() {
+        LRScheduler::step_by_epoch(); return *this;
+    }
+
+    MultiStepLR& milestones(const std::vector<int>& m);
+    MultiStepLR& gamma(float g);
+
+protected:
+    float compute_decay_lr(int decay_step, int /*total_decay*/) const override;
+    void  validate_config() const override;
+    const char* name() const override { return "MultiStepLR"; }
+
+private:
+    std::vector<int> milestones_;
+    float gamma_ = 0.1f;
+};
+
+// ============================================================================
+// ExponentialLR
+// ============================================================================
+
+class ExponentialLR final : public LRScheduler {
+public:
+    ExponentialLR() = default;
+
+    ExponentialLR& base_lr(float lr) {
+        LRScheduler::base_lr(lr); return *this;
+    }
+    ExponentialLR& warmup(int epochs) {
+        LRScheduler::warmup(epochs); return *this;
+    }
+    ExponentialLR& warmup_start_lr(float start_lr) {
+        LRScheduler::warmup_start_lr(start_lr); return *this;
+    }
+    ExponentialLR& warmup_start_factor(float factor) {
+        LRScheduler::warmup_start_factor(factor); return *this;
+    }
+    ExponentialLR& step_by_batch(bool v = true) {
+        LRScheduler::step_by_batch(v); return *this;
+    }
+    ExponentialLR& step_by_epoch() {
+        LRScheduler::step_by_epoch(); return *this;
+    }
+
+    ExponentialLR& gamma(float g);
+
+protected:
+    float compute_decay_lr(int decay_step, int /*total_decay*/) const override;
+    void  validate_config() const override;
+    const char* name() const override { return "ExponentialLR"; }
+
+private:
+    float gamma_ = 0.95f;
+};
+
+// ============================================================================
+// WSDLR
+// ============================================================================
+
+class WSDLR final : public LRScheduler {
+public:
+    WSDLR() = default;
+
+    WSDLR& base_lr(float lr) {
+        LRScheduler::base_lr(lr); return *this;
+    }
+    WSDLR& warmup(int epochs) {
+        LRScheduler::warmup(epochs); return *this;
+    }
+    WSDLR& warmup_start_lr(float start_lr) {
+        LRScheduler::warmup_start_lr(start_lr); return *this;
+    }
+    WSDLR& warmup_start_factor(float factor) {
+        LRScheduler::warmup_start_factor(factor); return *this;
+    }
+    WSDLR& step_by_batch(bool v = true) {
+        LRScheduler::step_by_batch(v); return *this;
+    }
+    WSDLR& step_by_epoch() {
+        LRScheduler::step_by_epoch(); return *this;
+    }
+
+    /// @brief 衰减起始位置，以占 total_decay 的比例表示（0.0 ~ 1.0）
+    /// @note 0.8 表示前 80% 为 stable，后 20% 线性衰减到 end_lr
+    WSDLR& decay_start(float fraction);
+    WSDLR& end_lr(float lr);
+
+protected:
+    float compute_decay_lr(int decay_step, int total_decay) const override;
+    void  validate_config() const override;
+    const char* name() const override { return "WSDLR"; }
+
+private:
+    float decay_start_ = 0.8f;
+    float end_lr_      = 0.0f;
+};
+
+// ============================================================================
+// CosineAnnealingWithWarmRestartsLR
+// ============================================================================
+
+class CosineAnnealingWithWarmRestartsLR final : public LRScheduler {
+public:
+    CosineAnnealingWithWarmRestartsLR() = default;
+
+    CosineAnnealingWithWarmRestartsLR& base_lr(float lr) {
+        LRScheduler::base_lr(lr); return *this;
+    }
+    CosineAnnealingWithWarmRestartsLR& warmup(int epochs) {
+        LRScheduler::warmup(epochs); return *this;
+    }
+    CosineAnnealingWithWarmRestartsLR& warmup_start_lr(float start_lr) {
+        LRScheduler::warmup_start_lr(start_lr); return *this;
+    }
+    CosineAnnealingWithWarmRestartsLR& warmup_start_factor(float factor) {
+        LRScheduler::warmup_start_factor(factor); return *this;
+    }
+    CosineAnnealingWithWarmRestartsLR& step_by_batch(bool v = true) {
+        LRScheduler::step_by_batch(v); return *this;
+    }
+    CosineAnnealingWithWarmRestartsLR& step_by_epoch() {
+        LRScheduler::step_by_epoch(); return *this;
+    }
+
+    CosineAnnealingWithWarmRestartsLR& T_0(int t0);
+    CosineAnnealingWithWarmRestartsLR& T_mult(int tm);
+    CosineAnnealingWithWarmRestartsLR& eta_min(float emin);
+
+protected:
+    float compute_decay_lr(int decay_step, int /*total_decay*/) const override;
+    void  validate_config() const override;
+    const char* name() const override { return "CosineAnnealingWithWarmRestartsLR"; }
+
+private:
+    int   T_0_     = 10;
+    int   T_mult_  = 1;
+    float eta_min_ = 0.0f;
 };
 
 } // namespace tr

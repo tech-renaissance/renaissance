@@ -157,6 +157,39 @@ DeepLearningTask& DeepLearningTask::scheduler(const ConstantLR& sched) {
     return *this;
 }
 
+DeepLearningTask& DeepLearningTask::scheduler(const MultiStepLR& sched) {
+    TR_CHECK(phase_ == Phase::PLANNING, ValueError,
+             "Cannot set scheduler after memory planning");
+    sched_cfg_ = sched;
+    has_scheduler_ = true;
+    return *this;
+}
+
+DeepLearningTask& DeepLearningTask::scheduler(const ExponentialLR& sched) {
+    TR_CHECK(phase_ == Phase::PLANNING, ValueError,
+             "Cannot set scheduler after memory planning");
+    sched_cfg_ = sched;
+    has_scheduler_ = true;
+    return *this;
+}
+
+DeepLearningTask& DeepLearningTask::scheduler(const WSDLR& sched) {
+    TR_CHECK(phase_ == Phase::PLANNING, ValueError,
+             "Cannot set scheduler after memory planning");
+    sched_cfg_ = sched;
+    has_scheduler_ = true;
+    return *this;
+}
+
+DeepLearningTask& DeepLearningTask::scheduler(
+        const CosineAnnealingWithWarmRestartsLR& sched) {
+    TR_CHECK(phase_ == Phase::PLANNING, ValueError,
+             "Cannot set scheduler after memory planning");
+    sched_cfg_ = sched;
+    has_scheduler_ = true;
+    return *this;
+}
+
 DeepLearningTask& DeepLearningTask::total_epochs(int n) {
     TR_CHECK(phase_ == Phase::PLANNING, ValueError,
              "Cannot set total_epochs after memory planning");

@@ -216,4 +216,183 @@ float StepLR::compute_decay_lr(int decay_step, int /*total_decay*/) const {
     return base_lr_ * std::pow(gamma_, static_cast<float>(num_decays));
 }
 
+// ============================================================================
+// MultiStepLR 实现
+// ============================================================================
+
+MultiStepLR& MultiStepLR::milestones(const std::vector<int>& m) {
+    for (size_t i = 0; i < m.size(); ++i) {
+        TR_CHECK(m[i] >= 0, ValueError,
+                 "MultiStepLR milestone must be >= 0, got " << m[i]);
+        if (i > 0) {
+            TR_CHECK(m[i] > m[i - 1], ValueError,
+                     "MultiStepLR milestones must be strictly increasing, got "
+                     << m[i - 1] << " followed by " << m[i]);
+        }
+    }
+    milestones_ = m;
+    return *this;
+}
+
+MultiStepLR& MultiStepLR::gamma(float g) {
+    TR_CHECK(g > 0.0f, ValueError,
+             "MultiStepLR gamma must be > 0, got " << g);
+    gamma_ = g;
+    return *this;
+}
+
+void MultiStepLR::validate_config() const {
+    TR_CHECK(gamma_ > 0.0f, ValueError,
+             "MultiStepLR gamma must be > 0, got " << gamma_);
+    for (size_t i = 0; i < milestones_.size(); ++i) {
+        TR_CHECK(milestones_[i] >= 0, ValueError,
+                 "MultiStepLR milestone must be >= 0, got " << milestones_[i]);
+        if (i > 0) {
+            TR_CHECK(milestones_[i] > milestones_[i - 1], ValueError,
+                     "MultiStepLR milestones must be strictly increasing");
+        }
+    }
+}
+
+float MultiStepLR::compute_decay_lr(int decay_step, int /*total_decay*/) const {
+    int epoch = warmup_epochs_
+              + (steps_per_epoch_ > 0 ? (decay_step / steps_per_epoch_) : 0);
+    int num_decays = 0;
+    for (int m : milestones_) {
+        if (epoch >= m) ++num_decays;
+    }
+    return base_lr_ * std::pow(gamma_, static_cast<float>(num_decays));
+}
+
+// ============================================================================
+// ExponentialLR 实现
+// ============================================================================
+
+ExponentialLR& ExponentialLR::gamma(float g) {
+    TR_CHECK(g > 0.0f, ValueError,
+             "ExponentialLR gamma must be > 0, got " << g);
+    gamma_ = g;
+    return *this;
+}
+
+void ExponentialLR::validate_config() const {
+    TR_CHECK(gamma_ > 0.0f, ValueError,
+             "ExponentialLR gamma must be > 0, got " << gamma_);
+}
+
+float ExponentialLR::compute_decay_lr(int decay_step, int /*total_decay*/) const {
+    int epoch = (steps_per_epoch_ > 0)
+                ? (decay_step / steps_per_epoch_)
+                : 0;
+    return base_lr_ * std::pow(gamma_, static_cast<float>(epoch));
+}
+
+// ============================================================================
+// WSDLR 实现
+// ============================================================================
+
+WSDLR& WSDLR::decay_start(float fraction) {
+    TR_CHECK(fraction >= 0.0f && fraction <= 1.0f, ValueError,
+             "WSDLR decay_start must be in [0, 1], got " << fraction);
+    decay_start_ = fraction;
+    return *this;
+}
+
+WSDLR& WSDLR::end_lr(float lr) {
+    TR_CHECK(lr >= 0.0f, ValueError,
+             "WSDLR end_lr must be >= 0, got " << lr);
+    end_lr_ = lr;
+    return *this;
+}
+
+void WSDLR::validate_config() const {
+    TR_CHECK(decay_start_ >= 0.0f && decay_start_ <= 1.0f, ValueError,
+             "WSDLR decay_start must be in [0, 1], got " << decay_start_);
+    TR_CHECK(end_lr_ >= 0.0f, ValueError,
+             "WSDLR end_lr must be >= 0, got " << end_lr_);
+}
+
+float WSDLR::compute_decay_lr(int decay_step, int total_decay) const {
+    if (total_decay <= 0) return base_lr_;
+
+    int stable_steps = static_cast<int>(static_cast<float>(total_decay) * decay_start_);
+    if (decay_step < stable_steps) return base_lr_;
+
+    int decay_phase_step  = decay_step - stable_steps;
+    int decay_phase_total = total_decay - stable_steps;
+    if (decay_phase_total <= 0) return end_lr_;
+
+    float progress = static_cast<float>(decay_phase_step)
+                   / static_cast<float>(decay_phase_total);
+    if (progress > 1.0f) progress = 1.0f;
+
+    return base_lr_ + (end_lr_ - base_lr_) * progress;
+}
+
+// ============================================================================
+// CosineAnnealingWithWarmRestartsLR 实现
+// ============================================================================
+
+CosineAnnealingWithWarmRestartsLR& CosineAnnealingWithWarmRestartsLR::T_0(int t0) {
+    TR_CHECK(t0 > 0, ValueError,
+             "CosineAnnealingWithWarmRestartsLR T_0 must be > 0, got " << t0);
+    T_0_ = t0;
+    return *this;
+}
+
+CosineAnnealingWithWarmRestartsLR& CosineAnnealingWithWarmRestartsLR::T_mult(int tm) {
+    TR_CHECK(tm >= 1, ValueError,
+             "CosineAnnealingWithWarmRestartsLR T_mult must be >= 1, got " << tm);
+    T_mult_ = tm;
+    return *this;
+}
+
+CosineAnnealingWithWarmRestartsLR& CosineAnnealingWithWarmRestartsLR::eta_min(float emin) {
+    TR_CHECK(emin >= 0.0f, ValueError,
+             "CosineAnnealingWithWarmRestartsLR eta_min must be >= 0, got " << emin);
+    eta_min_ = emin;
+    return *this;
+}
+
+void CosineAnnealingWithWarmRestartsLR::validate_config() const {
+    TR_CHECK(T_0_ > 0, ValueError,
+             "CosineAnnealingWithWarmRestartsLR T_0 must be > 0, got " << T_0_);
+    TR_CHECK(T_mult_ >= 1, ValueError,
+             "CosineAnnealingWithWarmRestartsLR T_mult must be >= 1, got " << T_mult_);
+    TR_CHECK(eta_min_ >= 0.0f, ValueError,
+             "CosineAnnealingWithWarmRestartsLR eta_min must be >= 0, got " << eta_min_);
+    TR_CHECK(eta_min_ <= base_lr_, ValueError,
+             "CosineAnnealingWithWarmRestartsLR eta_min must be <= base_lr, got "
+             << eta_min_ << " with base_lr " << base_lr_);
+}
+
+float CosineAnnealingWithWarmRestartsLR::compute_decay_lr(
+        int decay_step, int /*total_decay*/) const {
+    int T_0_steps = T_0_ * steps_per_epoch_;
+    if (T_0_steps <= 0) return base_lr_;
+
+    int accumulated = 0;
+    int T_cur = T_0_steps;
+
+    while (decay_step >= accumulated + T_cur) {
+        accumulated += T_cur;
+        if (T_mult_ > 1) {
+            if (T_cur > std::numeric_limits<int>::max() / T_mult_) {
+                T_cur = std::numeric_limits<int>::max();
+                break;
+            }
+            T_cur *= T_mult_;
+        }
+    }
+
+    int t_cur = decay_step - accumulated;
+    float progress = (T_cur > 0)
+                     ? (static_cast<float>(t_cur) / static_cast<float>(T_cur))
+                     : 0.0f;
+    if (progress > 1.0f) progress = 1.0f;
+
+    return eta_min_ + (base_lr_ - eta_min_)
+           * (1.0f + std::cos(static_cast<float>(M_PI) * progress)) * 0.5f;
+}
+
 } // namespace tr
