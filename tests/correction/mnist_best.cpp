@@ -149,7 +149,7 @@ int main(int argc, char** argv) {
             .base_lr(0.001f)                  // AdamW标准初始学习率
             .eta_min(1e-6f)                   // 最小学习率
             .warmup(5)                        // 5轮预热
-            .step_by_epoch())                 // 按epoch更新
+            .step_by_batch())                // 按batch更新
 
         .validate_every(1, 1)                // 每轮验证
         .early_stop_by_top1(0.999f)          // 极高目标早停

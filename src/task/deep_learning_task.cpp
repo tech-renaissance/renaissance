@@ -359,6 +359,10 @@ TrainingResult DeepLearningTask::run_impl(bool dry_run) {
 // =============================================================================
 
 void DeepLearningTask::run_train_epoch() {
+    TR_CHECK(false, RuntimeError,
+             "run_train_epoch() is DEPRECATED and must not be called. "
+             "Use run_train_epoch_gpu() or run_train_epoch_cpu() instead.");
+
     auto& prep = Preprocessor::instance();
     const int batches = prep.steps_per_epoch();
     const bool frozen = is_first_layer_frozen();
@@ -872,6 +876,17 @@ TrainingResult DeepLearningTask::run_gpu() {
         prep_thread.join();
         if (prep_exc) std::rethrow_exception(prep_exc);
 
+        std::visit([batches = prep.steps_per_epoch()](auto&& sch) {
+            using T = std::decay_t<decltype(sch)>;
+            if constexpr (!std::is_same_v<T, std::monostate>) {
+                if (sch.is_step_by_batch()) {
+                    for (int i = 0; i < batches; ++i) sch.step();
+                } else {
+                    sch.step();
+                }
+            }
+        }, sched_cfg_);
+
         bool did_validate = false;
         float val_loss = 0.0f, top1 = 0.0f, top5 = 0.0f;
         float ema_top1 = 0.0f, ema_top5 = 0.0f;
@@ -1084,8 +1099,16 @@ float DeepLearningTask::run_train_epoch_gpu() {
                     if (g_xfer_n) cudaGraphLaunch(g_xfer_n, s_trans);
                     sync_comp(); sync_tr();
 
+                    bool need_lr = is_step_by_batch_mode() || batch == 0;
+                    if (need_lr) {
+                        lr = fetch_lr_for_batch(batch);
+                        *lr_pinned_[rank] = lr;
+                        cudaMemcpyAsync(lr_dev_ptr, lr_pinned_[rank], sizeof(float),
+                                        cudaMemcpyHostToDevice, s_trans);
+                    }
+
                     if (n_accum) cudaGraphLaunch(n_accum, s_up);
-                    sync_up();
+                    sync_up(); sync_tr();
 
                     ts->set_buffer_readable(next_buf, false);
                     ts->set_buffer_writeable(next_buf, true);
@@ -1105,10 +1128,6 @@ float DeepLearningTask::run_train_epoch_gpu() {
 
                     if (using_amp && n_ncg) { cudaGraphLaunch(n_ncg, s_up); sync_up(); }
 
-                    lr = fetch_lr_for_batch(batch);
-                    *lr_pinned_[rank] = lr;
-                    cudaMemcpyAsync(lr_dev_ptr, lr_pinned_[rank], sizeof(float),
-                                    cudaMemcpyHostToDevice, s_up);
                     if (n_wu) cudaGraphLaunch(n_wu, s_up);
                     sync_up();
                     if (using_amp && n_cm) { cudaGraphLaunch(n_cm, s_up); sync_up(); }
@@ -1131,7 +1150,15 @@ float DeepLearningTask::run_train_epoch_gpu() {
                     sync_comp();
 
                     if (l_accum_tl) cudaGraphLaunch(l_accum_tl, s_up);
-                    sync_up();
+
+                    bool need_lr = is_step_by_batch_mode() || batches == 1;
+                    if (need_lr) {
+                        float lr_last = fetch_lr_for_batch(batches - 1);
+                        *lr_pinned_[rank] = lr_last;
+                        cudaMemcpyAsync(lr_dev_ptr, lr_pinned_[rank], sizeof(float),
+                                        cudaMemcpyHostToDevice, s_trans);
+                    }
+                    sync_up(); sync_tr();
 
                     if (!frozen && g_first_l) cudaGraphLaunch(g_first_l, s_c1);
                     sync_comp();
@@ -1148,10 +1175,6 @@ float DeepLearningTask::run_train_epoch_gpu() {
 
                     if (using_amp && n_ncg) { cudaGraphLaunch(n_ncg, s_up); sync_up(); }
 
-                    lr = fetch_lr_for_batch(batches - 1);
-                    *lr_pinned_[rank] = lr;
-                    cudaMemcpyAsync(lr_dev_ptr, lr_pinned_[rank], sizeof(float),
-                                    cudaMemcpyHostToDevice, s_up);
                     if (n_wu) cudaGraphLaunch(n_wu, s_up);
                     sync_up();
                     if (using_amp && n_cm) { cudaGraphLaunch(n_cm, s_up); sync_up(); }
@@ -1274,6 +1297,17 @@ TrainingResult DeepLearningTask::run_cpu() {
         // LOG_INFO << "[TRAIN-CPU] loss=" << std::fixed << std::setprecision(6) << train_loss;
         prep_thread.join();
         if (prep_exc) std::rethrow_exception(prep_exc);
+
+        std::visit([batches = prep.steps_per_epoch()](auto&& sch) {
+            using T = std::decay_t<decltype(sch)>;
+            if constexpr (!std::is_same_v<T, std::monostate>) {
+                if (sch.is_step_by_batch()) {
+                    for (int i = 0; i < batches; ++i) sch.step();
+                } else {
+                    sch.step();
+                }
+            }
+        }, sched_cfg_);
 
         bool did_validate = false;
         float val_loss = 0.0f, top1 = 0.0f, top5 = 0.0f;
@@ -1465,7 +1499,9 @@ float DeepLearningTask::run_train_epoch_cpu() {
         int32_t idx_accum_nb = idx_for(GraphId::ACCUM_METRICS, v_base);
         if (idx_accum_nb >= 0) launch(idx_accum_nb);
 
-        *static_cast<float*>(lr_ptr) = fetch_lr_for_batch(batch);
+        if (is_step_by_batch_mode() || batch == 0) {
+            *static_cast<float*>(lr_ptr) = fetch_lr_for_batch(batch);
+        }
         launch(idx_far);
         launch(idx_opt);
     }
@@ -1488,7 +1524,9 @@ float DeepLearningTask::run_train_epoch_cpu() {
         int32_t idx_accum_lb = idx_for(GraphId::ACCUM_METRICS_TRAIN_LAST, v_last);
         if (idx_accum_lb >= 0) launch(idx_accum_lb);
 
-        *static_cast<float*>(lr_ptr) = fetch_lr_for_batch(batches - 1);
+        if (is_step_by_batch_mode() || batches == 1) {
+            *static_cast<float*>(lr_ptr) = fetch_lr_for_batch(batches - 1);
+        }
         launch(idx_far);
         launch(idx_opt);
 

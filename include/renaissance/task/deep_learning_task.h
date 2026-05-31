@@ -530,6 +530,17 @@ public:
     void build_exec_table();
     float fetch_lr_for_batch(int batch_id) const;
 
+    [[nodiscard]] bool is_step_by_batch_mode() const {
+        return std::visit([](auto&& sch) -> bool {
+            using T = std::decay_t<decltype(sch)>;
+            if constexpr (std::is_same_v<T, std::monostate>) {
+                return false;
+            } else {
+                return sch.is_step_by_batch();
+            }
+        }, sched_cfg_);
+    }
+
     // --- 测试接口：H2D copy 算子的正确性和带宽测试 ---
     /// @brief 验证 H2D copy 数据正确性（第一个 epoch 的前 2 个 batch）
     H2DTestResult test_h2d_copy_correctness();
