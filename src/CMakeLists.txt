@@ -63,6 +63,18 @@ list(APPEND RENAISSANCE_SOURCES
     backend/ops/dtensor/identity_op.cu
     backend/ops/dtensor/tanh_op.cpp
     backend/ops/dtensor/tanh_op.cu
+    backend/ops/dtensor/silu_op.cpp
+    backend/ops/dtensor/silu_op.cu
+    backend/ops/dtensor/relu6_op.cpp
+    backend/ops/dtensor/relu6_op.cu
+    backend/ops/dtensor/leaky_relu_op.cpp
+    backend/ops/dtensor/leaky_relu_op.cu
+    backend/ops/dtensor/hardswish_op.cpp
+    backend/ops/dtensor/hardswish_op.cu
+    backend/ops/dtensor/elu_op.cpp
+    backend/ops/dtensor/elu_op.cu
+    backend/ops/dtensor/sigmoid_op.cpp
+    backend/ops/dtensor/sigmoid_op.cu
     backend/ops/dtensor/fc_op.cpp
     backend/ops/dtensor/fc_op.cu
     backend/ops/dtensor/flatten_op.cpp

@@ -623,6 +623,210 @@ SubgraphPattern build_tanh_inference(const OpParams&, const std::vector<TensorDe
 }
 
 // ============================================================================
+// SiLU — 1张量
+// ============================================================================
+std::vector<TensorDesc> infer_silu_tensors(
+    const Shape& input, const OpParams&, const InferContext& ctx)
+{
+    DType feat_dt = ctx.enable_amp ? DType::FP16 : DType::FP32;
+    return { TensorDesc{"silu_output", input, select_feature_region(ctx), feat_dt} };
+}
+
+SubgraphPattern build_silu_forward(const OpParams&, const std::vector<TensorDesc>& descs) {
+    SubgraphPattern p;
+    if (descs.empty()) return p;
+    SubgraphPattern::Node n;
+    n.op = GlobalRegistry::instance().using_amp() ? ComputeOp::SILU_AMP_FWD : ComputeOp::SILU_FP32_FWD;
+    n.output_indices = {0};
+    p.nodes.push_back(n);
+    return p;
+}
+
+SubgraphPattern build_silu_backward(const OpParams&, const std::vector<TensorDesc>&) {
+    SubgraphPattern p;
+    SubgraphPattern::Node n;
+    n.op = GlobalRegistry::instance().using_amp() ? ComputeOp::SILU_AMP_BWD : ComputeOp::SILU_FP32_BWD;
+    n.input_indices  = {0};
+    n.output_indices = {0};
+    p.nodes.push_back(n);
+    return p;
+}
+
+SubgraphPattern build_silu_inference(const OpParams&, const std::vector<TensorDesc>& descs) {
+    return build_silu_forward({}, descs);
+}
+
+// ============================================================================
+// ReLU6 — 1张量
+// ============================================================================
+std::vector<TensorDesc> infer_relu6_tensors(
+    const Shape& input, const OpParams&, const InferContext& ctx)
+{
+    DType feat_dt = ctx.enable_amp ? DType::FP16 : DType::FP32;
+    return { TensorDesc{"relu6_output", input, select_feature_region(ctx), feat_dt} };
+}
+
+SubgraphPattern build_relu6_forward(const OpParams&, const std::vector<TensorDesc>& descs) {
+    SubgraphPattern p;
+    if (descs.empty()) return p;
+    SubgraphPattern::Node n;
+    n.op = GlobalRegistry::instance().using_amp() ? ComputeOp::RELU6_AMP_FWD : ComputeOp::RELU6_FP32_FWD;
+    n.output_indices = {0};
+    p.nodes.push_back(n);
+    return p;
+}
+
+SubgraphPattern build_relu6_backward(const OpParams&, const std::vector<TensorDesc>&) {
+    SubgraphPattern p;
+    SubgraphPattern::Node n;
+    n.op = GlobalRegistry::instance().using_amp() ? ComputeOp::RELU6_AMP_BWD : ComputeOp::RELU6_FP32_BWD;
+    n.input_indices  = {0};
+    n.output_indices = {0};
+    p.nodes.push_back(n);
+    return p;
+}
+
+SubgraphPattern build_relu6_inference(const OpParams&, const std::vector<TensorDesc>& descs) {
+    return build_relu6_forward({}, descs);
+}
+
+// ============================================================================
+// LeakyReLU — 1张量
+// ============================================================================
+std::vector<TensorDesc> infer_leaky_relu_tensors(
+    const Shape& input, const OpParams&, const InferContext& ctx)
+{
+    DType feat_dt = ctx.enable_amp ? DType::FP16 : DType::FP32;
+    return { TensorDesc{"leaky_relu_output", input, select_feature_region(ctx), feat_dt} };
+}
+
+SubgraphPattern build_leaky_relu_forward(const OpParams&, const std::vector<TensorDesc>& descs) {
+    SubgraphPattern p;
+    if (descs.empty()) return p;
+    SubgraphPattern::Node n;
+    n.op = GlobalRegistry::instance().using_amp() ? ComputeOp::LEAKY_RELU_AMP_FWD : ComputeOp::LEAKY_RELU_FP32_FWD;
+    n.output_indices = {0};
+    p.nodes.push_back(n);
+    return p;
+}
+
+SubgraphPattern build_leaky_relu_backward(const OpParams&, const std::vector<TensorDesc>&) {
+    SubgraphPattern p;
+    SubgraphPattern::Node n;
+    n.op = GlobalRegistry::instance().using_amp() ? ComputeOp::LEAKY_RELU_AMP_BWD : ComputeOp::LEAKY_RELU_FP32_BWD;
+    n.input_indices  = {0};
+    n.output_indices = {0};
+    p.nodes.push_back(n);
+    return p;
+}
+
+SubgraphPattern build_leaky_relu_inference(const OpParams&, const std::vector<TensorDesc>& descs) {
+    return build_leaky_relu_forward({}, descs);
+}
+
+// ============================================================================
+// Hardswish — 1张量
+// ============================================================================
+std::vector<TensorDesc> infer_hardswish_tensors(
+    const Shape& input, const OpParams&, const InferContext& ctx)
+{
+    DType feat_dt = ctx.enable_amp ? DType::FP16 : DType::FP32;
+    return { TensorDesc{"hardswish_output", input, select_feature_region(ctx), feat_dt} };
+}
+
+SubgraphPattern build_hardswish_forward(const OpParams&, const std::vector<TensorDesc>& descs) {
+    SubgraphPattern p;
+    if (descs.empty()) return p;
+    SubgraphPattern::Node n;
+    n.op = GlobalRegistry::instance().using_amp() ? ComputeOp::HARDSWISH_AMP_FWD : ComputeOp::HARDSWISH_FP32_FWD;
+    n.output_indices = {0};
+    p.nodes.push_back(n);
+    return p;
+}
+
+SubgraphPattern build_hardswish_backward(const OpParams&, const std::vector<TensorDesc>&) {
+    SubgraphPattern p;
+    SubgraphPattern::Node n;
+    n.op = GlobalRegistry::instance().using_amp() ? ComputeOp::HARDSWISH_AMP_BWD : ComputeOp::HARDSWISH_FP32_BWD;
+    n.input_indices  = {0};
+    n.output_indices = {0};
+    p.nodes.push_back(n);
+    return p;
+}
+
+SubgraphPattern build_hardswish_inference(const OpParams&, const std::vector<TensorDesc>& descs) {
+    return build_hardswish_forward({}, descs);
+}
+
+// ============================================================================
+// ELU — 1张量
+// ============================================================================
+std::vector<TensorDesc> infer_elu_tensors(
+    const Shape& input, const OpParams&, const InferContext& ctx)
+{
+    DType feat_dt = ctx.enable_amp ? DType::FP16 : DType::FP32;
+    return { TensorDesc{"elu_output", input, select_feature_region(ctx), feat_dt} };
+}
+
+SubgraphPattern build_elu_forward(const OpParams&, const std::vector<TensorDesc>& descs) {
+    SubgraphPattern p;
+    if (descs.empty()) return p;
+    SubgraphPattern::Node n;
+    n.op = GlobalRegistry::instance().using_amp() ? ComputeOp::ELU_AMP_FWD : ComputeOp::ELU_FP32_FWD;
+    n.output_indices = {0};
+    p.nodes.push_back(n);
+    return p;
+}
+
+SubgraphPattern build_elu_backward(const OpParams&, const std::vector<TensorDesc>&) {
+    SubgraphPattern p;
+    SubgraphPattern::Node n;
+    n.op = GlobalRegistry::instance().using_amp() ? ComputeOp::ELU_AMP_BWD : ComputeOp::ELU_FP32_BWD;
+    n.input_indices  = {0};
+    n.output_indices = {0};
+    p.nodes.push_back(n);
+    return p;
+}
+
+SubgraphPattern build_elu_inference(const OpParams&, const std::vector<TensorDesc>& descs) {
+    return build_elu_forward({}, descs);
+}
+
+// ============================================================================
+// Sigmoid — 1张量
+// ============================================================================
+std::vector<TensorDesc> infer_sigmoid_tensors(
+    const Shape& input, const OpParams&, const InferContext& ctx)
+{
+    DType feat_dt = ctx.enable_amp ? DType::FP16 : DType::FP32;
+    return { TensorDesc{"sigmoid_output", input, select_feature_region(ctx), feat_dt} };
+}
+
+SubgraphPattern build_sigmoid_forward(const OpParams&, const std::vector<TensorDesc>& descs) {
+    SubgraphPattern p;
+    if (descs.empty()) return p;
+    SubgraphPattern::Node n;
+    n.op = GlobalRegistry::instance().using_amp() ? ComputeOp::SIGMOID_AMP_FWD : ComputeOp::SIGMOID_FP32_FWD;
+    n.output_indices = {0};
+    p.nodes.push_back(n);
+    return p;
+}
+
+SubgraphPattern build_sigmoid_backward(const OpParams&, const std::vector<TensorDesc>&) {
+    SubgraphPattern p;
+    SubgraphPattern::Node n;
+    n.op = GlobalRegistry::instance().using_amp() ? ComputeOp::SIGMOID_AMP_BWD : ComputeOp::SIGMOID_FP32_BWD;
+    n.input_indices  = {0};
+    n.output_indices = {0};
+    p.nodes.push_back(n);
+    return p;
+}
+
+SubgraphPattern build_sigmoid_inference(const OpParams&, const std::vector<TensorDesc>& descs) {
+    return build_sigmoid_forward({}, descs);
+}
+
+// ============================================================================
 // Add2* — 1张量（双输入加法占位符; 单输入跨层链限制）
 //   Add2 需要两个输入（主分支 + shortcut分支）进行逐元素加法。
 //   当前 Compiler 的跨层链设计为单输入单输出，因此:
@@ -1795,6 +1999,12 @@ Shape get_output_shape(LayerKind kind, const std::vector<TensorDesc>& descs)
         case LayerKind::Add2ShortcutEnd:
         case LayerKind::Add2End:
         case LayerKind::Tanh:          return find(0);
+        case LayerKind::SiLU:
+        case LayerKind::ReLU6:
+        case LayerKind::LeakyReLU:
+        case LayerKind::Hardswish:
+        case LayerKind::ELU:
+        case LayerKind::Sigmoid:       return find(0);
         case LayerKind::SoftmaxCE:     return find(0);   // ce_output at index 0
         case LayerKind::BNReLU:        return find(2);   // BN output
         case LayerKind::ConvBNReLU:    return find(8);   // BN output (index 6+2=8)
@@ -1830,6 +2040,12 @@ const LayerDescriptor& get_layer_descriptor(LayerKind kind) {
     static const LayerDescriptor ce_desc     = { infer_softmaxce_tensors, build_softmaxce_forward, build_softmaxce_backward, build_softmaxce_inference };
     static const LayerDescriptor id_desc     = { infer_identity_tensors,  build_identity_forward,  build_identity_backward,  build_identity_inference };
     static const LayerDescriptor tanh_desc   = { infer_tanh_tensors,      build_tanh_forward,      build_tanh_backward,      build_tanh_inference };
+    static const LayerDescriptor silu_desc       = { infer_silu_tensors,       build_silu_forward,       build_silu_backward,       build_silu_inference };
+    static const LayerDescriptor relu6_desc      = { infer_relu6_tensors,      build_relu6_forward,      build_relu6_backward,      build_relu6_inference };
+    static const LayerDescriptor leaky_relu_desc = { infer_leaky_relu_tensors, build_leaky_relu_forward, build_leaky_relu_backward, build_leaky_relu_inference };
+    static const LayerDescriptor hardswish_desc  = { infer_hardswish_tensors,  build_hardswish_forward,  build_hardswish_backward,  build_hardswish_inference };
+    static const LayerDescriptor elu_desc        = { infer_elu_tensors,        build_elu_forward,        build_elu_backward,        build_elu_inference };
+    static const LayerDescriptor sigmoid_desc    = { infer_sigmoid_tensors,    build_sigmoid_forward,    build_sigmoid_backward,    build_sigmoid_inference };
     static const LayerDescriptor add2_desc   = { infer_add2_tensors,      build_add2_forward,      build_add2_backward,      build_add2_inference };
     static const LayerDescriptor cbr_desc    = { infer_convbnrelu_tensors, build_convbnrelu_forward, build_convbnrelu_backward, build_convbnrelu_inference };
     static const LayerDescriptor cb_desc     = { infer_convbn_tensors,     build_convbn_forward,    build_convbn_backward,     build_convbn_inference };
@@ -1865,6 +2081,12 @@ const LayerDescriptor& get_layer_descriptor(LayerKind kind) {
         case LayerKind::Add2ShortcutEnd:      return id_desc;    // pass-through, marks shortcut exit
         case LayerKind::Add2End:              return add2_desc;  // ADD_FWD: main + shortcut → shortcut(in-place)
         case LayerKind::Tanh:                 return tanh_desc;
+        case LayerKind::SiLU:                 return silu_desc;
+        case LayerKind::ReLU6:                return relu6_desc;
+        case LayerKind::LeakyReLU:            return leaky_relu_desc;
+        case LayerKind::Hardswish:            return hardswish_desc;
+        case LayerKind::ELU:                  return elu_desc;
+        case LayerKind::Sigmoid:              return sigmoid_desc;
         case LayerKind::BNReLU:               return bnr_desc;
         case LayerKind::ConvBNReLU:           return cbr_desc;
         case LayerKind::ConvBN:               return cb_desc;

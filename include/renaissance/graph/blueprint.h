@@ -69,6 +69,12 @@ private:
     friend Layer bn(double, double);
     friend Layer relu();
     friend Layer tanh_act();
+    friend Layer silu();
+    friend Layer relu6();
+    friend Layer leaky_relu();
+    friend Layer hardswish();
+    friend Layer elu();
+    friend Layer sigmoid();
     friend Layer dropout(float);
     friend Layer flatten(int);
     friend Layer maxpool(int, int, int);
@@ -98,7 +104,7 @@ namespace detail {
 
 enum class NodeKind {
     Conv2d, DWConv2d, GroupConv2d,
-    BN, ReLU, TanhAct, Dropout, Flatten,
+    BN, ReLU, TanhAct, SiLU, ReLU6, LeakyReLU, Hardswish, ELU, Sigmoid, Dropout, Flatten,
     MaxPool, GAP, FC, Identity,
     Sequential, Add2, Repeat,
     CBR, CBRP, GapFC,
@@ -111,6 +117,12 @@ struct GroupConvParam   { int out_ch; int groups; int k; int s; int p; };
 struct BNParam          { double momentum; double eps; };
 struct ReLUParam        {};
 struct TanhActParam     {};
+struct SiLUParam        {};
+struct ReLU6Param       {};
+struct LeakyReLUParam   {};
+struct HardswishParam   {};
+struct ELUParam         {};
+struct SigmoidParam     {};
 struct DropoutParam     { float p; };
 struct FlattenParam     { int start_dim; };
 struct MaxPoolParam     { int k; int s; int p; };
@@ -129,7 +141,7 @@ struct BlockParam       { BlockStyle style; int mid_ch; int out_ch; int stride; 
 
 using Payload = std::variant<
     ConvParam, DWConvParam, GroupConvParam,
-    BNParam, ReLUParam, TanhActParam, DropoutParam, FlattenParam,
+    BNParam, ReLUParam, TanhActParam, SiLUParam, ReLU6Param, LeakyReLUParam, HardswishParam, ELUParam, SigmoidParam, DropoutParam, FlattenParam,
     MaxPoolParam, GAPParam, FCParam, IdentityParam,
     SequentialParam, Add2Param, RepeatParam,
     CBRParam, CBRPParam, GapFCParam, BlockParam
@@ -171,6 +183,30 @@ inline Layer relu() {
 inline Layer tanh_act() {
     return Layer(std::make_shared<Layer::Node>(
         detail::NodeKind::TanhAct, detail::TanhActParam{}));
+}
+inline Layer silu() {
+    return Layer(std::make_shared<Layer::Node>(
+        detail::NodeKind::SiLU, detail::SiLUParam{}));
+}
+inline Layer relu6() {
+    return Layer(std::make_shared<Layer::Node>(
+        detail::NodeKind::ReLU6, detail::ReLU6Param{}));
+}
+inline Layer leaky_relu() {
+    return Layer(std::make_shared<Layer::Node>(
+        detail::NodeKind::LeakyReLU, detail::LeakyReLUParam{}));
+}
+inline Layer hardswish() {
+    return Layer(std::make_shared<Layer::Node>(
+        detail::NodeKind::Hardswish, detail::HardswishParam{}));
+}
+inline Layer elu() {
+    return Layer(std::make_shared<Layer::Node>(
+        detail::NodeKind::ELU, detail::ELUParam{}));
+}
+inline Layer sigmoid() {
+    return Layer(std::make_shared<Layer::Node>(
+        detail::NodeKind::Sigmoid, detail::SigmoidParam{}));
 }
 inline Layer dropout(float p) {
     return Layer(std::make_shared<Layer::Node>(

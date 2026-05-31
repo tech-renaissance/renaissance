@@ -63,6 +63,30 @@ static void expand_primitive_impl(const Layer::Node& node, std::vector<ArchLayer
         out.push_back({LayerKind::Tanh, EmptyParams{}, "tanh", {}, {}, false, false, src_id});
         break;
     }
+    case NodeKind::SiLU: {
+        out.push_back({LayerKind::SiLU, EmptyParams{}, "silu", {}, {}, false, false, src_id});
+        break;
+    }
+    case NodeKind::ReLU6: {
+        out.push_back({LayerKind::ReLU6, EmptyParams{}, "relu6", {}, {}, false, false, src_id});
+        break;
+    }
+    case NodeKind::LeakyReLU: {
+        out.push_back({LayerKind::LeakyReLU, EmptyParams{}, "leaky_relu", {}, {}, false, false, src_id});
+        break;
+    }
+    case NodeKind::Hardswish: {
+        out.push_back({LayerKind::Hardswish, EmptyParams{}, "hardswish", {}, {}, false, false, src_id});
+        break;
+    }
+    case NodeKind::ELU: {
+        out.push_back({LayerKind::ELU, EmptyParams{}, "elu", {}, {}, false, false, src_id});
+        break;
+    }
+    case NodeKind::Sigmoid: {
+        out.push_back({LayerKind::Sigmoid, EmptyParams{}, "sigmoid", {}, {}, false, false, src_id});
+        break;
+    }
     case NodeKind::Dropout: {
         break;
     }
@@ -375,6 +399,12 @@ void ArchPlan::expand_tree(const Layer& root, std::vector<ArchLayer>& out,
     case NodeKind::Flatten:
     case NodeKind::Identity:
     case NodeKind::TanhAct:
+    case NodeKind::SiLU:
+    case NodeKind::ReLU6:
+    case NodeKind::LeakyReLU:
+    case NodeKind::Hardswish:
+    case NodeKind::ELU:
+    case NodeKind::Sigmoid:
     case NodeKind::Dropout:
     case NodeKind::CBR:
     case NodeKind::CBRP:

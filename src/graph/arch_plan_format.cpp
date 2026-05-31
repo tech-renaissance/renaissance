@@ -20,6 +20,12 @@ const char* kind_name(LayerKind k) {
     case LayerKind::Bn2d: return "Bn2d";
     case LayerKind::ReLU: return "ReLU";
     case LayerKind::Tanh: return "Tanh";
+    case LayerKind::SiLU: return "SiLU";
+    case LayerKind::ReLU6: return "ReLU6";
+    case LayerKind::LeakyReLU: return "LeakyReLU";
+    case LayerKind::Hardswish: return "Hardswish";
+    case LayerKind::ELU: return "ELU";
+    case LayerKind::Sigmoid: return "Sigmoid";
     case LayerKind::MaxPool: return "MaxPool";
     case LayerKind::GAP: return "GAP";
     case LayerKind::FC: return "FC";

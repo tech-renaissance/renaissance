@@ -39,6 +39,12 @@ void register_default_ops() {
     register_op_relu();
     register_op_identity();
     register_op_tanh();
+    register_op_silu();
+    register_op_relu6();
+    register_op_leaky_relu();
+    register_op_hardswish();
+    register_op_elu();
+    register_op_sigmoid();
     register_op_fc();
     register_op_flatten();
     register_op_conv();
@@ -95,6 +101,18 @@ bool require_warmup(ComputeOp op) noexcept {
         case ComputeOp::TANH_FP32_BWD:
         case ComputeOp::TANH_AMP_FWD:
         case ComputeOp::TANH_AMP_BWD:
+        case ComputeOp::SILU_FP32_FWD:   case ComputeOp::SILU_FP32_BWD:
+        case ComputeOp::SILU_AMP_FWD:    case ComputeOp::SILU_AMP_BWD:
+        case ComputeOp::RELU6_FP32_FWD:  case ComputeOp::RELU6_FP32_BWD:
+        case ComputeOp::RELU6_AMP_FWD:   case ComputeOp::RELU6_AMP_BWD:
+        case ComputeOp::LEAKY_RELU_FP32_FWD: case ComputeOp::LEAKY_RELU_FP32_BWD:
+        case ComputeOp::LEAKY_RELU_AMP_FWD:  case ComputeOp::LEAKY_RELU_AMP_BWD:
+        case ComputeOp::HARDSWISH_FP32_FWD:  case ComputeOp::HARDSWISH_FP32_BWD:
+        case ComputeOp::HARDSWISH_AMP_FWD:   case ComputeOp::HARDSWISH_AMP_BWD:
+        case ComputeOp::ELU_FP32_FWD:    case ComputeOp::ELU_FP32_BWD:
+        case ComputeOp::ELU_AMP_FWD:     case ComputeOp::ELU_AMP_BWD:
+        case ComputeOp::SIGMOID_FP32_FWD: case ComputeOp::SIGMOID_FP32_BWD:
+        case ComputeOp::SIGMOID_AMP_FWD:  case ComputeOp::SIGMOID_AMP_BWD:
         case ComputeOp::FC_AMP_FWD:
         case ComputeOp::FC_AMP_BWD:
             return true;

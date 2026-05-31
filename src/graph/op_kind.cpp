@@ -37,6 +37,32 @@ std::string compute_op_to_string(ComputeOp op) {
         case ComputeOp::TANH_AMP_FWD:          return "TANH_AMP_FWD";
         case ComputeOp::TANH_AMP_BWD:          return "TANH_AMP_BWD";
 
+        // === 扩展激活函数（6个，每函数4个变体）===
+        case ComputeOp::SILU_FP32_FWD:       return "SILU_FP32_FWD";
+        case ComputeOp::SILU_FP32_BWD:       return "SILU_FP32_BWD";
+        case ComputeOp::SILU_AMP_FWD:        return "SILU_AMP_FWD";
+        case ComputeOp::SILU_AMP_BWD:        return "SILU_AMP_BWD";
+        case ComputeOp::RELU6_FP32_FWD:      return "RELU6_FP32_FWD";
+        case ComputeOp::RELU6_FP32_BWD:      return "RELU6_FP32_BWD";
+        case ComputeOp::RELU6_AMP_FWD:       return "RELU6_AMP_FWD";
+        case ComputeOp::RELU6_AMP_BWD:       return "RELU6_AMP_BWD";
+        case ComputeOp::LEAKY_RELU_FP32_FWD: return "LEAKY_RELU_FP32_FWD";
+        case ComputeOp::LEAKY_RELU_FP32_BWD: return "LEAKY_RELU_FP32_BWD";
+        case ComputeOp::LEAKY_RELU_AMP_FWD:  return "LEAKY_RELU_AMP_FWD";
+        case ComputeOp::LEAKY_RELU_AMP_BWD:  return "LEAKY_RELU_AMP_BWD";
+        case ComputeOp::HARDSWISH_FP32_FWD:  return "HARDSWISH_FP32_FWD";
+        case ComputeOp::HARDSWISH_FP32_BWD:  return "HARDSWISH_FP32_BWD";
+        case ComputeOp::HARDSWISH_AMP_FWD:   return "HARDSWISH_AMP_FWD";
+        case ComputeOp::HARDSWISH_AMP_BWD:   return "HARDSWISH_AMP_BWD";
+        case ComputeOp::ELU_FP32_FWD:        return "ELU_FP32_FWD";
+        case ComputeOp::ELU_FP32_BWD:        return "ELU_FP32_BWD";
+        case ComputeOp::ELU_AMP_FWD:         return "ELU_AMP_FWD";
+        case ComputeOp::ELU_AMP_BWD:         return "ELU_AMP_BWD";
+        case ComputeOp::SIGMOID_FP32_FWD:    return "SIGMOID_FP32_FWD";
+        case ComputeOp::SIGMOID_FP32_BWD:    return "SIGMOID_FP32_BWD";
+        case ComputeOp::SIGMOID_AMP_FWD:     return "SIGMOID_AMP_FWD";
+        case ComputeOp::SIGMOID_AMP_BWD:     return "SIGMOID_AMP_BWD";
+
         // === Dropout（推理时恒等）===
         case ComputeOp::DROPOUT_AMP_FWD:      return "DROPOUT_AMP_FWD";
         case ComputeOp::DROPOUT_AMP_BWD:      return "DROPOUT_AMP_BWD";

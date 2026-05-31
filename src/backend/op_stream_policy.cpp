@@ -49,6 +49,18 @@ StreamKind get_op_default_stream(ComputeOp op) noexcept {
         case ComputeOp::RELU_FP32_INF: case ComputeOp::RELU_AMP_INF:
         case ComputeOp::TANH_FP32_FWD: case ComputeOp::TANH_AMP_FWD:
         case ComputeOp::TANH_FP32_BWD: case ComputeOp::TANH_AMP_BWD:
+        case ComputeOp::SILU_FP32_FWD:  case ComputeOp::SILU_AMP_FWD:
+        case ComputeOp::SILU_FP32_BWD:  case ComputeOp::SILU_AMP_BWD:
+        case ComputeOp::RELU6_FP32_FWD: case ComputeOp::RELU6_AMP_FWD:
+        case ComputeOp::RELU6_FP32_BWD: case ComputeOp::RELU6_AMP_BWD:
+        case ComputeOp::LEAKY_RELU_FP32_FWD: case ComputeOp::LEAKY_RELU_AMP_FWD:
+        case ComputeOp::LEAKY_RELU_FP32_BWD: case ComputeOp::LEAKY_RELU_AMP_BWD:
+        case ComputeOp::HARDSWISH_FP32_FWD:  case ComputeOp::HARDSWISH_AMP_FWD:
+        case ComputeOp::HARDSWISH_FP32_BWD:  case ComputeOp::HARDSWISH_AMP_BWD:
+        case ComputeOp::ELU_FP32_FWD:   case ComputeOp::ELU_AMP_FWD:
+        case ComputeOp::ELU_FP32_BWD:   case ComputeOp::ELU_AMP_BWD:
+        case ComputeOp::SIGMOID_FP32_FWD: case ComputeOp::SIGMOID_AMP_FWD:
+        case ComputeOp::SIGMOID_FP32_BWD: case ComputeOp::SIGMOID_AMP_BWD:
             return StreamKind::COMP_3;
 
         // ===== 损失函数（SoftmaxCE）→ DEEP_FWD_BWD =====

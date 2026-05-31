@@ -26,7 +26,7 @@ class Layer;
 
 enum class LayerKind : uint16_t {
     // 基础原语
-    Conv, Bn1d, Bn2d, ReLU, Tanh, MaxPool, GAP, FC,
+    Conv, Bn1d, Bn2d, ReLU, Tanh, SiLU, ReLU6, LeakyReLU, Hardswish, ELU, Sigmoid, MaxPool, GAP, FC,
     Flatten, Identity, SoftmaxCE,
 
     // Add2 结构标记

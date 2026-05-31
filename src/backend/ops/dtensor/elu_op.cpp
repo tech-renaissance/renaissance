@@ -1,11 +1,9 @@
 /**
- * @file tanh_op.cpp
- * @brief TANH 算子的 CPU 实现 + 手写 CUDA kernel 分发
- * @version 1.2.0
- * @date 2026-05-21
+ * @file elu_op.cpp
+ * @brief ELU 算子的 CPU 实现 + CUDA kernel 分发 + 注册
+ * @version 1.0.0
+ * @date 2026-06-01
  * @author 技术觉醒团队
- * @note 数学公式：FWD: y = tanh(x), BWD: dx = dy * (1 - tanh(x)^2) (重计算)
- * @note FWD 为 1-input 1-output, BWD 为 1-input 1-output (x in-place, 重计算 tanh)
  */
 
 #include "renaissance/backend/op_registry.h"
@@ -21,17 +19,15 @@
 
 #ifdef TR_USE_CUDA
 #include <cuda_fp16.h>
-#include <cstdint>
-
 namespace tr {
-extern cudaError_t launch_tanh_fwd_fp32(cudaStream_t stream,
-    const float* x, float* y, int64_t n);
-extern cudaError_t launch_tanh_fwd_amp(cudaStream_t stream,
-    const __half* x, __half* y, int64_t n);
-extern cudaError_t launch_tanh_bwd_recompute_fp32(cudaStream_t stream,
-    const float* dy, float* dx, int64_t n);
-extern cudaError_t launch_tanh_bwd_recompute_amp(cudaStream_t stream,
-    const __half* dy, __half* dx, int64_t n);
+extern cudaError_t launch_elu_fwd_fp32(cudaStream_t,
+    const float*, float*, int64_t);
+extern cudaError_t launch_elu_fwd_amp(cudaStream_t,
+    const __half*, __half*, int64_t);
+extern cudaError_t launch_elu_bwd_recompute_fp32(cudaStream_t,
+    const float*, float*, int64_t);
+extern cudaError_t launch_elu_bwd_recompute_amp(cudaStream_t,
+    const __half*, __half*, int64_t);
 } // namespace tr
 #endif
 
@@ -41,63 +37,62 @@ extern cudaError_t launch_tanh_bwd_recompute_amp(cudaStream_t stream,
 
 namespace tr {
 
-// ===== FP32 CPU 实现 =====
-static void launch_tanh_fp32_fwd_cpu(CpuOpContext* op_ctx) {
+// ===== FP32 CPU FWD（Eigen3 向量化 + 朴素循环 fallback）=====
+static void launch_elu_fp32_fwd_cpu(CpuOpContext* op_ctx) {
     TR_CHECK(op_ctx->num_inputs >= 1 && op_ctx->num_outputs >= 1, ShapeError,
-             "TANH_FP32_FWD CPU requires 1 input, 1 output");
+             "ELU_FP32_FWD CPU requires 1 input, 1 output");
 
-    const float* x = static_cast<const float*>(const_cast<DeviceContext*>(op_ctx->ctx)
-                                                ->ptr_at(op_ctx->input_ids[0]));
-    float* y = static_cast<float*>(const_cast<DeviceContext*>(op_ctx->ctx)
-                                   ->ptr_at(op_ctx->output_ids[0]));
+    const float* x = static_cast<const float*>(
+        const_cast<DeviceContext*>(op_ctx->ctx)->ptr_at(op_ctx->input_ids[0]));
+    float* y = static_cast<float*>(
+        const_cast<DeviceContext*>(op_ctx->ctx)->ptr_at(op_ctx->output_ids[0]));
     int64_t n = op_ctx->total_elements;
 
 #ifdef TR_USE_EIGEN
     Eigen::Map<const Eigen::VectorXf> xm(x, static_cast<Eigen::Index>(n));
     Eigen::Map<Eigen::VectorXf> ym(y, static_cast<Eigen::Index>(n));
-    ym = xm.array().tanh();
+    ym = (xm.array() > 0.0f).select(xm, xm.array().exp() - 1.0f);
 #else
     for (int64_t i = 0; i < n; ++i) {
-        y[i] = std::tanh(x[i]);
+        y[i] = (x[i] > 0.0f) ? x[i] : std::exp(x[i]) - 1.0f;
     }
 #endif
 }
 
-static void launch_tanh_fp32_bwd_cpu(CpuOpContext* op_ctx) {
+// ===== FP32 CPU BWD（Eigen3 + 安全 in-place 重计算）=====
+static void launch_elu_fp32_bwd_cpu(CpuOpContext* op_ctx) {
     TR_CHECK(op_ctx->num_inputs >= 1 && op_ctx->num_outputs >= 1, ShapeError,
-             "TANH_FP32_BWD CPU requires 1 input (dy), 1 output (dx in-place to x)");
+             "ELU_FP32_BWD CPU requires 1 input (dy), 1 output (dx in-place to x)");
 
-    const float* dy = static_cast<const float*>(const_cast<DeviceContext*>(op_ctx->ctx)
-                                                 ->ptr_at(op_ctx->input_ids[0]));
-    float* dx = static_cast<float*>(const_cast<DeviceContext*>(op_ctx->ctx)
-                                    ->ptr_at(op_ctx->output_ids[0]));
+    const float* dy = static_cast<const float*>(
+        const_cast<DeviceContext*>(op_ctx->ctx)->ptr_at(op_ctx->input_ids[0]));
+    float* dx = static_cast<float*>(
+        const_cast<DeviceContext*>(op_ctx->ctx)->ptr_at(op_ctx->output_ids[0]));
     int64_t n = op_ctx->total_elements;
 
 #ifdef TR_USE_EIGEN
     Eigen::Map<const Eigen::VectorXf> dy_vec(dy, static_cast<Eigen::Index>(n));
     Eigen::Map<Eigen::VectorXf> dx_vec(dx, static_cast<Eigen::Index>(n));
-    // dx is in-place to x: read original x from dx, compute tanh(x), then overwrite dx
-    Eigen::VectorXf tanh_x = dx_vec.array().tanh();
-    dx_vec = dy_vec.array() * (1.0f - tanh_x.array().square());
+    Eigen::VectorXf x_copy = dx_vec;
+    dx_vec = (x_copy.array() > 0.0f).select(dy_vec, dy_vec.array() * x_copy.array().exp());
 #else
     for (int64_t i = 0; i < n; ++i) {
-        float x = dx[i];  // dx is in-place to x: read original x first
-        float t = std::tanh(x);
-        dx[i] = dy[i] * (1.0f - t * t);
+        float x = dx[i];
+        dx[i] = (x > 0.0f) ? dy[i] : dy[i] * std::exp(x);
     }
 #endif
 }
 
 // ===== AMP CPU 不支持 =====
-static void launch_tanh_amp_cpu_not_supported(CpuOpContext* op_ctx) {
+static void launch_elu_amp_cpu_not_supported(CpuOpContext* op_ctx) {
     (void)op_ctx;
-    TR_THROW(TypeError, "TANH_AMP_FWD/BWD not supported on CPU (use GPU)");
+    TR_THROW(TypeError, "ELU_AMP not supported on CPU (use GPU)");
 }
 
 #ifdef TR_USE_CUDA
 
-// ===== FP32 FWD CUDA 分发 =====
-static void launch_tanh_fp32_fwd_cuda(
+// ===== FP32 FWD CUDA Dispatch =====
+static void launch_elu_fp32_fwd_cuda(
     const GraphNode& node,
     const MemoryPlan& mp,
     const DeviceContext& ctx,
@@ -105,7 +100,7 @@ static void launch_tanh_fp32_fwd_cuda(
 {
     (void)mp;
     TR_CHECK(node.input_ids.size() >= 1 && node.output_ids.size() >= 1, ShapeError,
-             "TANH_FP32_FWD requires 1 input, 1 output");
+             "ELU_FP32_FWD requires 1 input, 1 output");
 
     const float* x = static_cast<const float*>(ctx.ptr_at(node.input_ids[0]));
     float* y = static_cast<float*>(ctx.ptr_at(node.output_ids[0]));
@@ -128,15 +123,15 @@ static void launch_tanh_fp32_fwd_cuda(
     const DTensor& dt_x = mp.get_dtensor(node.input_ids[0]);
     int64_t n = dt_x.numel();
 
-    cudaError_t err = launch_tanh_fwd_fp32(s, x, y, n);
+    cudaError_t err = launch_elu_fwd_fp32(s, x, y, n);
     if (err != cudaSuccess)
-        TR_DEVICE_ERROR("TANH_FP32_FWD: " << cudaGetErrorString(err));
+        TR_DEVICE_ERROR("ELU_FP32_FWD: " << cudaGetErrorString(err));
 
     cudaEventRecord(state.streams[si].last_done_event, s);
 }
 
-// ===== FP32 BWD CUDA 分发 =====
-static void launch_tanh_fp32_bwd_cuda(
+// ===== FP32 BWD CUDA Dispatch =====
+static void launch_elu_fp32_bwd_cuda(
     const GraphNode& node,
     const MemoryPlan& mp,
     const DeviceContext& ctx,
@@ -144,7 +139,7 @@ static void launch_tanh_fp32_bwd_cuda(
 {
     (void)mp;
     TR_CHECK(node.input_ids.size() >= 1 && node.output_ids.size() >= 1, ShapeError,
-             "TANH_FP32_BWD requires 1 input (dy), 1 output (dx in-place to x)");
+             "ELU_FP32_BWD requires 1 input (dy), 1 output (dx in-place to x)");
 
     const float* dy = static_cast<const float*>(ctx.ptr_at(node.input_ids[0]));
     float* dx = static_cast<float*>(ctx.ptr_at(node.output_ids[0]));
@@ -167,15 +162,15 @@ static void launch_tanh_fp32_bwd_cuda(
     const DTensor& dt_dy = mp.get_dtensor(node.input_ids[0]);
     int64_t n = dt_dy.numel();
 
-    cudaError_t err = launch_tanh_bwd_recompute_fp32(s, dy, dx, n);
+    cudaError_t err = launch_elu_bwd_recompute_fp32(s, dy, dx, n);
     if (err != cudaSuccess)
-        TR_DEVICE_ERROR("TANH_FP32_BWD: " << cudaGetErrorString(err));
+        TR_DEVICE_ERROR("ELU_FP32_BWD: " << cudaGetErrorString(err));
 
     cudaEventRecord(state.streams[si].last_done_event, s);
 }
 
-// ===== AMP FWD CUDA 分发 =====
-static void launch_tanh_amp_fwd_cuda(
+// ===== AMP FWD CUDA Dispatch =====
+static void launch_elu_amp_fwd_cuda(
     const GraphNode& node,
     const MemoryPlan& mp,
     const DeviceContext& ctx,
@@ -183,7 +178,7 @@ static void launch_tanh_amp_fwd_cuda(
 {
     (void)mp;
     TR_CHECK(node.input_ids.size() >= 1 && node.output_ids.size() >= 1, ShapeError,
-             "TANH_AMP_FWD requires 1 input, 1 output");
+             "ELU_AMP_FWD requires 1 input, 1 output");
 
     const __half* x = static_cast<const __half*>(ctx.ptr_at(node.input_ids[0]));
     __half* y = static_cast<__half*>(ctx.ptr_at(node.output_ids[0]));
@@ -206,15 +201,15 @@ static void launch_tanh_amp_fwd_cuda(
     const DTensor& dt_x = mp.get_dtensor(node.input_ids[0]);
     int64_t n = dt_x.numel();
 
-    cudaError_t err = launch_tanh_fwd_amp(s, x, y, n);
+    cudaError_t err = launch_elu_fwd_amp(s, x, y, n);
     if (err != cudaSuccess)
-        TR_DEVICE_ERROR("TANH_AMP_FWD: " << cudaGetErrorString(err));
+        TR_DEVICE_ERROR("ELU_AMP_FWD: " << cudaGetErrorString(err));
 
     cudaEventRecord(state.streams[si].last_done_event, s);
 }
 
-// ===== AMP BWD CUDA 分发 =====
-static void launch_tanh_amp_bwd_cuda(
+// ===== AMP BWD CUDA Dispatch =====
+static void launch_elu_amp_bwd_cuda(
     const GraphNode& node,
     const MemoryPlan& mp,
     const DeviceContext& ctx,
@@ -222,7 +217,7 @@ static void launch_tanh_amp_bwd_cuda(
 {
     (void)mp;
     TR_CHECK(node.input_ids.size() >= 1 && node.output_ids.size() >= 1, ShapeError,
-             "TANH_AMP_BWD requires 1 input (dy), 1 output (dx in-place to x)");
+             "ELU_AMP_BWD requires 1 input (dy), 1 output (dx in-place to x)");
 
     const __half* dy = static_cast<const __half*>(ctx.ptr_at(node.input_ids[0]));
     __half* dx = static_cast<__half*>(ctx.ptr_at(node.output_ids[0]));
@@ -245,61 +240,61 @@ static void launch_tanh_amp_bwd_cuda(
     const DTensor& dt_dy = mp.get_dtensor(node.input_ids[0]);
     int64_t n = dt_dy.numel();
 
-    cudaError_t err = launch_tanh_bwd_recompute_amp(s, dy, dx, n);
+    cudaError_t err = launch_elu_bwd_recompute_amp(s, dy, dx, n);
     if (err != cudaSuccess)
-        TR_DEVICE_ERROR("TANH_AMP_BWD: " << cudaGetErrorString(err));
+        TR_DEVICE_ERROR("ELU_AMP_BWD: " << cudaGetErrorString(err));
 
     cudaEventRecord(state.streams[si].last_done_event, s);
 }
 
 #endif // TR_USE_CUDA
 
-// ===== 注册 TANH 算子 =====
-void register_op_tanh() {
+// ===== 注册 =====
+void register_op_elu() {
     auto& table = g_compute_op_table;
 
     {
-        auto& e = table[static_cast<size_t>(ComputeOp::TANH_FP32_FWD)];
-        e.op = ComputeOp::TANH_FP32_FWD;
+        auto& e = table[static_cast<size_t>(ComputeOp::ELU_FP32_FWD)];
+        e.op = ComputeOp::ELU_FP32_FWD;
 #ifdef TR_USE_EIGEN
-        e.launch_cpu = launch_tanh_fp32_fwd_cpu;
+        e.launch_cpu = launch_elu_fp32_fwd_cpu;
 #endif
 #ifdef TR_USE_CUDA
-        e.launch_cuda = launch_tanh_fp32_fwd_cuda;
+        e.launch_cuda = launch_elu_fp32_fwd_cuda;
 #endif
-        TR_LOG_DEBUG("graph") << "Registered TANH_FP32_FWD (CPU/CUDA)";
+        TR_LOG_DEBUG("graph") << "Registered ELU_FP32_FWD";
     }
 
     {
-        auto& e = table[static_cast<size_t>(ComputeOp::TANH_FP32_BWD)];
-        e.op = ComputeOp::TANH_FP32_BWD;
+        auto& e = table[static_cast<size_t>(ComputeOp::ELU_FP32_BWD)];
+        e.op = ComputeOp::ELU_FP32_BWD;
 #ifdef TR_USE_EIGEN
-        e.launch_cpu = launch_tanh_fp32_bwd_cpu;
+        e.launch_cpu = launch_elu_fp32_bwd_cpu;
 #endif
 #ifdef TR_USE_CUDA
-        e.launch_cuda = launch_tanh_fp32_bwd_cuda;
+        e.launch_cuda = launch_elu_fp32_bwd_cuda;
 #endif
-        TR_LOG_DEBUG("graph") << "Registered TANH_FP32_BWD (CPU/CUDA)";
+        TR_LOG_DEBUG("graph") << "Registered ELU_FP32_BWD";
     }
 
     {
-        auto& e = table[static_cast<size_t>(ComputeOp::TANH_AMP_FWD)];
-        e.op = ComputeOp::TANH_AMP_FWD;
-        e.launch_cpu = launch_tanh_amp_cpu_not_supported;
+        auto& e = table[static_cast<size_t>(ComputeOp::ELU_AMP_FWD)];
+        e.op = ComputeOp::ELU_AMP_FWD;
+        e.launch_cpu = launch_elu_amp_cpu_not_supported;
 #ifdef TR_USE_CUDA
-        e.launch_cuda = launch_tanh_amp_fwd_cuda;
+        e.launch_cuda = launch_elu_amp_fwd_cuda;
 #endif
-        TR_LOG_DEBUG("graph") << "Registered TANH_AMP_FWD (CUDA only)";
+        TR_LOG_DEBUG("graph") << "Registered ELU_AMP_FWD (CUDA only)";
     }
 
     {
-        auto& e = table[static_cast<size_t>(ComputeOp::TANH_AMP_BWD)];
-        e.op = ComputeOp::TANH_AMP_BWD;
-        e.launch_cpu = launch_tanh_amp_cpu_not_supported;
+        auto& e = table[static_cast<size_t>(ComputeOp::ELU_AMP_BWD)];
+        e.op = ComputeOp::ELU_AMP_BWD;
+        e.launch_cpu = launch_elu_amp_cpu_not_supported;
 #ifdef TR_USE_CUDA
-        e.launch_cuda = launch_tanh_amp_bwd_cuda;
+        e.launch_cuda = launch_elu_amp_bwd_cuda;
 #endif
-        TR_LOG_DEBUG("graph") << "Registered TANH_AMP_BWD (CUDA only)";
+        TR_LOG_DEBUG("graph") << "Registered ELU_AMP_BWD (CUDA only)";
     }
 }
 

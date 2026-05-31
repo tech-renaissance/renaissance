@@ -156,6 +156,32 @@ enum class ComputeOp : uint16_t {
     TANH_FP32_BWD,     // FP32 反向：dx = dy * (1 - y²)
     TANH_AMP_FWD,      // AMP FP16 前向：y = tanh(x)
     TANH_AMP_BWD,      // AMP FP16 反向：dx = dy * (1 - y²)
+
+    // === 扩展激活函数（6个，每函数4个变体）===
+    // SiLU
+    SILU_FP32_FWD,     SILU_FP32_BWD,
+    SILU_AMP_FWD,      SILU_AMP_BWD,
+
+    // ReLU6
+    RELU6_FP32_FWD,    RELU6_FP32_BWD,
+    RELU6_AMP_FWD,     RELU6_AMP_BWD,
+
+    // LeakyReLU
+    LEAKY_RELU_FP32_FWD,  LEAKY_RELU_FP32_BWD,
+    LEAKY_RELU_AMP_FWD,   LEAKY_RELU_AMP_BWD,
+
+    // Hardswish
+    HARDSWISH_FP32_FWD,  HARDSWISH_FP32_BWD,
+    HARDSWISH_AMP_FWD,   HARDSWISH_AMP_BWD,
+
+    // ELU
+    ELU_FP32_FWD,      ELU_FP32_BWD,
+    ELU_AMP_FWD,       ELU_AMP_BWD,
+
+    // Sigmoid
+    SIGMOID_FP32_FWD,  SIGMOID_FP32_BWD,
+    SIGMOID_AMP_FWD,   SIGMOID_AMP_BWD,
+
     // 注意：SimpleTask 专用图 ID 仅保留一个占位符
     // SimpleTask 运行时按 name 查找，不走 GraphAtlas 索引
 

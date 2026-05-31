@@ -277,6 +277,12 @@ private:
                 break;
             case LayerKind::ReLU:
             case LayerKind::Tanh:
+            case LayerKind::SiLU:
+            case LayerKind::ReLU6:
+            case LayerKind::LeakyReLU:
+            case LayerKind::Hardswish:
+            case LayerKind::ELU:
+            case LayerKind::Sigmoid:
             case LayerKind::MaxPool:
             case LayerKind::GAP:
             case LayerKind::Flatten:
@@ -960,6 +966,12 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
             case LayerKind::SoftmaxCE:          idx = 0; break;
             case LayerKind::Identity:           idx = 0; break;
             case LayerKind::Tanh:               idx = 0; break;
+            case LayerKind::SiLU:              idx = 0; break;
+            case LayerKind::ReLU6:             idx = 0; break;
+            case LayerKind::LeakyReLU:         idx = 0; break;
+            case LayerKind::Hardswish:         idx = 0; break;
+            case LayerKind::ELU:               idx = 0; break;
+            case LayerKind::Sigmoid:           idx = 0; break;
             case LayerKind::Add2Start: case LayerKind::Add2ShortcutEnd: case LayerKind::Add2End: idx = 0; break;
             case LayerKind::ConvBNReLU:         idx = 8; break;
             case LayerKind::ConvBN:             idx = 8; break;
@@ -994,6 +1006,12 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
             case LayerKind::SoftmaxCE:          idx = 0; break;  // ce_output (gradient in-place覆写)
             case LayerKind::Identity:           idx = -1; break;  // in-place
             case LayerKind::Tanh:               idx = -1; break;  // dX in-place to x (handled by prev_grad_id tracking)
+            case LayerKind::SiLU:              idx = -1; break;
+            case LayerKind::ReLU6:             idx = -1; break;
+            case LayerKind::LeakyReLU:         idx = -1; break;
+            case LayerKind::Hardswish:         idx = -1; break;
+            case LayerKind::ELU:               idx = -1; break;
+            case LayerKind::Sigmoid:           idx = -1; break;
             case LayerKind::Add2Start: case LayerKind::Add2ShortcutEnd: case LayerKind::Add2End: idx = 0; break;  // inplace到第一个input
             case LayerKind::ConvBNReLU:         idx = 2; break;  // 融合层的grad_slot
             case LayerKind::ConvBN:             idx = 2; break;
@@ -1223,7 +1241,13 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
             }
 
             if (gn.compute_op == ComputeOp::TANH_FP32_BWD || gn.compute_op == ComputeOp::TANH_AMP_BWD ||
-                gn.compute_op == ComputeOp::RELU_FP32_BWD || gn.compute_op == ComputeOp::RELU_AMP_BWD) {
+                gn.compute_op == ComputeOp::RELU_FP32_BWD || gn.compute_op == ComputeOp::RELU_AMP_BWD ||
+                gn.compute_op == ComputeOp::SILU_FP32_BWD || gn.compute_op == ComputeOp::SILU_AMP_BWD ||
+                gn.compute_op == ComputeOp::RELU6_FP32_BWD || gn.compute_op == ComputeOp::RELU6_AMP_BWD ||
+                gn.compute_op == ComputeOp::LEAKY_RELU_FP32_BWD || gn.compute_op == ComputeOp::LEAKY_RELU_AMP_BWD ||
+                gn.compute_op == ComputeOp::HARDSWISH_FP32_BWD || gn.compute_op == ComputeOp::HARDSWISH_AMP_BWD ||
+                gn.compute_op == ComputeOp::ELU_FP32_BWD || gn.compute_op == ComputeOp::ELU_AMP_BWD ||
+                gn.compute_op == ComputeOp::SIGMOID_FP32_BWD || gn.compute_op == ComputeOp::SIGMOID_AMP_BWD) {
                 auto it = layer_input_ids.find(l);
                 if (it != layer_input_ids.end() && it->second >= 0) {
                     gn.output_ids = {it->second};  // dX in-place to X (dX covers X)
@@ -1272,7 +1296,10 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
         // FC dX in-place：梯度直接写入X张量（前一层输出），追踪该张量ID
         if (grad_id < 0 && (layer.kind == LayerKind::FC ||
             layer.kind == LayerKind::FCBNReLU || layer.kind == LayerKind::GapFC ||
-            layer.kind == LayerKind::Tanh || layer.kind == LayerKind::ReLU)) {
+            layer.kind == LayerKind::Tanh || layer.kind == LayerKind::ReLU ||
+            layer.kind == LayerKind::SiLU || layer.kind == LayerKind::ReLU6 ||
+            layer.kind == LayerKind::LeakyReLU || layer.kind == LayerKind::Hardswish ||
+            layer.kind == LayerKind::ELU || layer.kind == LayerKind::Sigmoid)) {
             auto it = layer_input_ids.find(l);
             if (it != layer_input_ids.end() && it->second >= 0) grad_id = it->second;
         }
