@@ -40,36 +40,70 @@ const char* mode_name(TestMode m) {
     }
 }
 
-TestMode parse_cli(int argc, char** argv) {
-    bool mode_set = false;
+struct CliConfig {
     TestMode mode = TestMode::GPU;
+    std::string activation = "relu";
+};
+
+CliConfig parse_cli(int argc, char** argv) {
+    CliConfig cfg;
+    bool mode_set = false;
 
     for (int i = 1; i < argc; ++i) {
         std::string a = argv[i];
         if (a == "--cpu") {
             if (mode_set) { std::cerr << "Multiple mode flags.\n"; std::exit(1); }
-            mode = TestMode::CPU;
+            cfg.mode = TestMode::CPU;
             mode_set = true;
         } else if (a == "--gpu") {
             if (mode_set) { std::cerr << "Multiple mode flags.\n"; std::exit(1); }
-            mode = TestMode::GPU;
+            cfg.mode = TestMode::GPU;
             mode_set = true;
         } else if (a == "--amp") {
             if (mode_set) { std::cerr << "Multiple mode flags.\n"; std::exit(1); }
-            mode = TestMode::AMP;
+            cfg.mode = TestMode::AMP;
             mode_set = true;
+        } else if (a == "--activation" && i + 1 < argc) {
+            cfg.activation = argv[++i];
+        } else if (a == "--help") {
+            std::cout << "Usage: " << argv[0] << " [OPTIONS]\n\n"
+                      << "Mode flags (default: --gpu):\n"
+                      << "  --cpu          Run on CPU\n"
+                      << "  --gpu          Run on GPU (FP32)\n"
+                      << "  --amp          Run on GPU (AMP FP16)\n\n"
+                      << "Activation (default: relu):\n"
+                      << "  --activation NAME   Choose from: relu, tanh, silu, relu6,\n"
+                      << "                      leaky_relu, hardswish, elu, sigmoid\n\n"
+                      << "Other:\n"
+                      << "  --help         Show this message\n";
+            std::exit(0);
         } else {
-            std::cerr << "Usage: " << argv[0] << " --cpu | --gpu | --amp\n";
+            std::cerr << "Unknown argument: " << a << "\n"
+                      << "Use --help for usage information.\n";
             std::exit(1);
         }
     }
-    return mode;
+    return cfg;
+}
+
+Layer make_activation(const std::string& name) {
+    if (name == "relu")       return relu();
+    if (name == "tanh")       return tanh_act();
+    if (name == "silu")       return silu();
+    if (name == "relu6")      return relu6();
+    if (name == "leaky_relu") return leaky_relu();
+    if (name == "hardswish")  return hardswish();
+    if (name == "elu")        return elu();
+    if (name == "sigmoid")    return sigmoid();
+    std::cerr << "Unknown activation: " << name << "\n"
+              << "Supported: relu, tanh, silu, relu6, leaky_relu, hardswish, elu, sigmoid\n";
+    std::exit(1);
 }
 
 int main(int argc, char** argv) {
-    auto mode = parse_cli(argc, argv);
+    auto cfg = parse_cli(argc, argv);
 
-    switch (mode) {
+    switch (cfg.mode) {
     case TestMode::CPU:
         GLOBAL_SETTING.use_cpu();
         break;
@@ -116,14 +150,15 @@ int main(int argc, char** argv) {
 
     // 网络结构：1024→512→256（比AWY_FINAL_K更宽，补偿无Label Smoothing）
     // 采用AWY_FINAL的选择：三层隐藏层 + bias=true
+
     BluePrint ultimate_mlp = seq(
-        fc(1024, true),   // 宽首层，提供充足容量
-        relu(),
-        fc(512, true),    // 中间层递减
-        relu(),
-        fc(256, true),    // 瓶颈层
-        relu(),
-        fc(10, true)      // 输出层
+        fc(1024, true),                    // 宽首层，提供充足容量
+        make_activation(cfg.activation),   // 动态选择激活函数
+        fc(512, true),                     // 中间层递减
+        make_activation(cfg.activation),   // 动态选择激活函数
+        fc(256, true),                     // 瓶颈层
+        make_activation(cfg.activation),   // 动态选择激活函数
+        fc(10, true)                       // 输出层
     );
 
     DeepLearningTask task;
@@ -158,10 +193,10 @@ int main(int argc, char** argv) {
     std::cout << "\n=====================================\n"
               << "Renaissance MNIST Ultimate Test\n"
               << "=====================================\n"
-              << " Mode: " << mode_name(mode) << "\n"
+              << " Mode: " << mode_name(cfg.mode) << "\n"
               << "=====================================\n"
               << "Network: 784→1024→512→256→10\n"
-              << "Activation: ReLU\n"
+              << "Activation: " << cfg.activation << "\n"
               << "Optimizer: AdamW (wd=1e-4)\n"
               << "Scheduler: CosineAnnealing + Warmup(5)\n"
               << "Augmentation: Pad+Rotation+Scale+Crop+Autocontrast+Erasing\n"
@@ -177,7 +212,7 @@ int main(int argc, char** argv) {
 
     std::cout << std::fixed << std::setprecision(2)
               << "\n=====================================\n"
-              << " Mode: " << mode_name(mode) << "\n"
+              << " Mode: " << mode_name(cfg.mode) << "\n"
               << "=====================================\n"
               << " Best Top-1: " << result.best_top1 * 100.0f << "%\n"
               << " Best Epoch: " << result.best_epoch << "\n"
