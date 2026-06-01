@@ -1456,7 +1456,7 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
             Region::R_RESULT_ACCUMULATED, Region::R_RESULT_ACCUMULATED);
         GraphNode node;
         node.kind = GraphNode::Kind::RANGE;
-        node.range_op = RangeOp::RANGE_SUM_ALLREDUCE;
+        node.range_op = RangeOp::RANGE_MEAN_ALLREDUCE;
         node.input_ranges.push_back(r_accum);
         node.output_ranges.push_back(r_accum);
         infer_cg.append(GraphId::VAL_RESULT_COMM, node);
@@ -1545,16 +1545,16 @@ void Compiler::build_auxiliary_graphs(ComputationGraph& train_cg, const MemoryPl
         }
     }
 
-    // 3-4. RANGE_SUM_ALLREDUCE：Region 范围直接指定，分拆到 FIRST_COMM / DEEP_COMM
+    // 3-4. RANGE_MEAN_ALLREDUCE：Region 范围直接指定，分拆到 FIRST_COMM / DEEP_COMM
     {
         MemRange r_first = memory_plan.region_range(
             Region::G_BN_BIAS, Region::G_FIRST_CONV);
-        train_cg.append_range(GraphId::FIRST_COMM, RangeOp::RANGE_SUM_ALLREDUCE,
+        train_cg.append_range(GraphId::FIRST_COMM, RangeOp::RANGE_MEAN_ALLREDUCE,
             {r_first}, {r_first});
 
         MemRange r_deep = memory_plan.region_range(
             Region::G_DEEP_CONV, Region::R_RESULT);
-        train_cg.append_range(GraphId::DEEP_COMM, RangeOp::RANGE_SUM_ALLREDUCE,
+        train_cg.append_range(GraphId::DEEP_COMM, RangeOp::RANGE_MEAN_ALLREDUCE,
             {r_deep}, {r_deep});
     }
 

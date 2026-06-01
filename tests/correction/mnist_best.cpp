@@ -108,16 +108,16 @@ int main(int argc, char** argv) {
         GLOBAL_SETTING.use_cpu();
         break;
     case TestMode::GPU:
-        GLOBAL_SETTING.use_gpu("0").amp(false);
+        GLOBAL_SETTING.use_gpu().amp(false);
         break;
     case TestMode::AMP:
-        GLOBAL_SETTING.use_gpu("0").amp(true);
+        GLOBAL_SETTING.use_gpu().amp(true);
         break;
     }
 
     GLOBAL_SETTING
         .manual_seed(123)           // 固定随机种子，确保可复现
-        .local_batch_size(128)     // 标准batch size
+        .global_batch_size(128)     // 全局batch size，自动按world_size缩放
         .train_resolution(28)      // MNIST标准分辨率
         .val_resolution(28)
         .use_tf32(true);           // 启用TF32加速

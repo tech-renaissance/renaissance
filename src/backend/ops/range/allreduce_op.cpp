@@ -48,7 +48,8 @@ static void launch_allreduce_cuda_impl(
         cudaEventRecord(state.streams[si].last_done_event, s);
         return;
     }
-    bool do_mean = (node.range_op == RangeOp::RANGE_MEAN_ALLREDUCE);
+    bool do_mean = (node.range_op == RangeOp::RANGE_MEAN_ALLREDUCE ||
+                node.range_op == RangeOp::RANGE_BN_STATS_ALLREDUCE);
 
     for (size_t i = 0; i < node.input_ranges.size() && i < node.output_ranges.size(); ++i) {
         auto [src_off, src_sz] = mp.resolve_region_bounds(
@@ -107,7 +108,8 @@ static void launch_allreduce_cpu_impl(CpuOpContext* op_ctx) {
     int world_size = GlobalRegistry::instance().world_size();
     if (world_size <= 1) return;
 
-    bool do_mean = (op_ctx->range_op == RangeOp::RANGE_MEAN_ALLREDUCE);
+    bool do_mean = (op_ctx->range_op == RangeOp::RANGE_MEAN_ALLREDUCE ||
+                op_ctx->range_op == RangeOp::RANGE_BN_STATS_ALLREDUCE);
     const DeviceContext& ctx = *op_ctx->ctx;
 
     for (int i = 0; i < op_ctx->num_input_ranges && i < op_ctx->num_output_ranges; ++i) {
@@ -167,7 +169,15 @@ void register_op_range_allreduce() {
         entry.launch_cuda = launch_allreduce_cuda_impl;
 #endif
     }
-    TR_LOG_DEBUG("backend") << "RANGE_SUM_ALLREDUCE / RANGE_MEAN_ALLREDUCE registered"
+    {
+        auto& entry = g_range_op_table[static_cast<size_t>(RangeOp::RANGE_BN_STATS_ALLREDUCE)];
+        entry.op = RangeOp::RANGE_BN_STATS_ALLREDUCE;
+        entry.launch_cpu = launch_allreduce_cpu_impl;
+#ifdef TR_USE_CUDA
+        entry.launch_cuda = launch_allreduce_cuda_impl;
+#endif
+    }
+    TR_LOG_DEBUG("backend") << "RANGE_SUM_ALLREDUCE / RANGE_MEAN_ALLREDUCE / RANGE_BN_STATS_ALLREDUCE registered"
 #ifdef TR_USE_NCCL
                             << " (NCCL enabled)"
 #else

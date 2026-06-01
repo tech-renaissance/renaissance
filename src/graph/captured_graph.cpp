@@ -15,9 +15,13 @@
 #include "renaissance/backend/graph_executor.h"
 #include "renaissance/core/logger.h"
 #include "renaissance/core/tr_exception.h"
+#include "renaissance/backend/op_stream_policy.h"
 
 #ifdef TR_USE_CUDA
 #include <cuda_runtime.h>
+#ifdef TR_USE_NCCL
+#include <nccl.h>
+#endif
 #endif
 
 #include <iostream>
@@ -43,7 +47,20 @@ void capture_all_for_rank(PreCaptureResult& result,
                            const std::unordered_map<CapturedGraph::Key, const MemoryPlan*,
                                                     CapturedGraph::KeyHash>& key_to_mp,
                            DeviceContext& ctx,
-                           int rank);
+                           int rank,
+                           const std::vector<bool>& skip_key);
+
+#ifdef TR_USE_CUDA
+#ifdef TR_USE_NCCL
+static void capture_nccl_graph_coordinated(
+    PreCaptureResult& result,
+    const std::vector<CapturedGraph::Key>& key_by_idx,
+    const std::unordered_map<CapturedGraph::Key, const MemoryPlan*,
+                             CapturedGraph::KeyHash>& key_to_mp,
+    const std::vector<DeviceContext*>& contexts,
+    int32_t k);
+#endif
+#endif
 
 // ============================================================================
 // capture() 实现 —— 双后端统一入口
@@ -262,14 +279,24 @@ PreCaptureResult pre_capture(const GraphAtlas& compile_atlas,
     }
 
     // =====================================================================
-    // Phase B3: 捕获（0串行 + 1~N-1并行）
+    // Phase B2.5: 识别包含NCCL操作的graph（需要coordinated capture）
+    // =====================================================================
+    std::vector<bool> is_nccl_key(K, false);
+    for (int32_t k = 0; k < K; ++k) {
+        if (key_by_idx[k].cg && key_by_idx[k].cg->has_nccl_ops(key_by_idx[k].gid)) {
+            is_nccl_key[k] = true;
+        }
+    }
+
+    // =====================================================================
+    // Phase B3: 捕获（0串行 + 1~N-1并行），NCCL graph除外
     // =====================================================================
     std::vector<std::exception_ptr> exc(num_ranks);
 
     // Rank 0 在主线程串行捕获
     try {
         TR_LOG_INFO("graph") << "[B3] Capturing rank 0 in main thread";
-        ::tr::capture_all_for_rank(result, key_by_idx, key_to_mp, *contexts[0], 0);
+        ::tr::capture_all_for_rank(result, key_by_idx, key_to_mp, *contexts[0], 0, is_nccl_key);
     } catch (...) {
         exc[0] = std::current_exception();
     }
@@ -283,7 +310,7 @@ PreCaptureResult pre_capture(const GraphAtlas& compile_atlas,
             threads.emplace_back([&, r]() {
                 try {
                     ::tr::capture_all_for_rank(result, key_by_idx, key_to_mp,
-                                         *contexts[r], r);
+                                         *contexts[r], r, is_nccl_key);
                 } catch (...) {
                     exc[r] = std::current_exception();
                 }
@@ -302,6 +329,23 @@ PreCaptureResult pre_capture(const GraphAtlas& compile_atlas,
     }
 
     // =====================================================================
+    // Phase B3.5: NCCL graph coordinated multi-rank capture
+    // =====================================================================
+#ifdef TR_USE_CUDA
+#ifdef TR_USE_NCCL
+    if (is_cuda) {
+        for (int32_t k = 0; k < K; ++k) {
+            if (is_nccl_key[k]) {
+                TR_LOG_INFO("graph") << "[B3-NCCL] Coordinated capture for graph "
+                                     << static_cast<int>(key_by_idx[k].gid);
+                capture_nccl_graph_coordinated(result, key_by_idx, key_to_mp, contexts, k);
+            }
+        }
+    }
+#endif
+#endif
+
+    // =====================================================================
     // Phase B4: warmup launch（仅Rank 0）
     // =====================================================================
     if (is_cuda && K > 0) {
@@ -310,6 +354,14 @@ PreCaptureResult pre_capture(const GraphAtlas& compile_atlas,
         cudaSetDevice(contexts[0]->device_id());
 
         for (const auto& cg : result.graphs) {
+            // 跳过含 NCCL 的 graph：warmup 只跑 rank 0，
+            // 若 launch 含 ncclAllReduce 的 graph 会导致其他 rank 未同步而死锁
+            if (cg.key().cg && cg.key().cg->has_nccl_ops(cg.key().gid)) {
+                TR_LOG_INFO("graph") << "[B4] Skip NCCL graph gid="
+                                     << static_cast<int>(cg.key().gid)
+                                     << " in warmup launch";
+                continue;
+            }
             StreamKind sk = StreamKind::COMP_1;
             for (uint8_t gi = 0; gi < static_cast<uint8_t>(GraphId::COUNT); ++gi) {
                 const auto& sl = result.atlas.slot(0, gi);
@@ -344,7 +396,8 @@ void capture_all_for_rank(PreCaptureResult& result,
                            const std::unordered_map<CapturedGraph::Key, const MemoryPlan*,
                                                     CapturedGraph::KeyHash>& key_to_mp,
                            DeviceContext& ctx,
-                           int rank) {
+                           int rank,
+                           const std::vector<bool>& skip_key) {
     ctx.set_rank(rank);
 
 #ifdef TR_USE_CUDA
@@ -358,6 +411,7 @@ void capture_all_for_rank(PreCaptureResult& result,
                           << K << " graphs";
 
     for (int32_t k = 0; k < K; ++k) {
+        if (!skip_key.empty() && skip_key[k]) continue;
         const auto& key = key_by_idx[k];
         auto it = key_to_mp.find(key);
         TR_CHECK(it != key_to_mp.end() && it->second != nullptr, RuntimeError,
@@ -392,5 +446,203 @@ void capture_all_for_rank(PreCaptureResult& result,
                               << static_cast<int>(key.gid) << " captured";
     }
 }
+
+// ============================================================================
+// NCCL graph coordinated multi-rank capture
+// ============================================================================
+
+#ifdef TR_USE_CUDA
+#ifdef TR_USE_NCCL
+static void capture_nccl_graph_coordinated(
+    PreCaptureResult& result,
+    const std::vector<CapturedGraph::Key>& key_by_idx,
+    const std::unordered_map<CapturedGraph::Key, const MemoryPlan*,
+                             CapturedGraph::KeyHash>& key_to_mp,
+    const std::vector<DeviceContext*>& contexts,
+    int32_t k)
+{
+    const auto& key = key_by_idx[k];
+    auto it = key_to_mp.find(key);
+    TR_CHECK(it != key_to_mp.end() && it->second != nullptr, RuntimeError,
+             "No MemoryPlan found for NCCL key");
+    const MemoryPlan* mp = it->second;
+
+    StreamKind stream_kind = StreamKind::COMP_1;
+    for (uint8_t gi = 0; gi < static_cast<uint8_t>(GraphId::COUNT); ++gi) {
+        const auto& sl = result.atlas.slot(0, gi);
+        if (static_cast<GraphId>(gi) == key.gid && sl.cg == key.cg) {
+            stream_kind = sl.stream_kind;
+            break;
+        }
+    }
+
+    const int num_ranks = static_cast<int>(contexts.size());
+    std::vector<cudaStream_t> cap_streams(num_ranks);
+    std::vector<cudaGraph_t> captured_graphs(num_ranks, nullptr);
+
+    // =====================================================================
+    // Phase 0（新增）: 预创建所有事件（对齐 capture_cuda.cpp 模式）
+    // 注意：对于 NCCL 图（FIRST_COMM / DEEP_COMM / VAL_RESULT_COMM），
+    // cap_streams[r] 即为 dc.stream(StreamKind::UPDATE)（由 deep_learning_task.cpp
+    // 的 get_stream_kind() 决定）。因此 launch_allreduce_cuda_impl 中的
+    // get_or_register(UPDATE) 会命中已注册的 primary stream，不会在 capture 期间创建新 event。
+    // =====================================================================
+    std::vector<MultiStreamCaptureState> states(num_ranks);
+    for (int r = 0; r < num_ranks; ++r) {
+        DeviceContext& dc = *contexts[r];
+        cudaSetDevice(dc.device_id());
+        cudaDeviceSynchronize();
+
+        dc.set_rank(r);
+        dc.set_memory_plan(mp);
+        cap_streams[r] = static_cast<cudaStream_t>(dc.stream(stream_kind));
+
+        states[r].primary_stream = cap_streams[r];
+        states[r].get_or_register(cap_streams[r]);
+        states[r].get_or_register(
+            static_cast<cudaStream_t>(dc.stream(StreamKind::COMP_1)));
+        states[r].get_or_register(
+            static_cast<cudaStream_t>(dc.stream(StreamKind::COMP_2)));
+        states[r].get_or_register(
+            static_cast<cudaStream_t>(dc.stream(StreamKind::COMP_3)));
+
+        for (int i = 0; i < states[r].num_active; ++i) {
+            if (states[r].streams[i].last_done_event) {
+                cudaEventDestroy(states[r].streams[i].last_done_event);
+            }
+            cudaEventCreateWithFlags(
+                &states[r].streams[i].last_done_event,
+                cudaEventDisableTiming);
+        }
+    }
+
+    // =====================================================================
+    // Phase 1: BeginCapture on ALL ranks simultaneously
+    // =====================================================================
+    for (int r = 0; r < num_ranks; ++r) {
+        cudaSetDevice(contexts[r]->device_id());
+        cudaError_t cap_err = cudaStreamBeginCapture(cap_streams[r], cudaStreamCaptureModeThreadLocal);
+        if (cap_err != cudaSuccess) {
+            TR_DEVICE_ERROR("cudaStreamBeginCapture failed for rank " << r
+                            << ": " << cudaGetErrorString(cap_err));
+        }
+    }
+
+    // Phase 2: ncclGroupStart → replay all ranks → ncclGroupEnd
+    bool capture_committed = false;
+    try {
+        ncclGroupStart();
+        for (int r = 0; r < num_ranks; ++r) {
+            DeviceContext& dc = *contexts[r];
+            cudaSetDevice(dc.device_id());
+
+            MultiStreamCaptureState& state = states[r];
+
+            if (state.num_active > 1) {
+                cudaEventRecord(state.streams[0].last_done_event, state.primary_stream);
+                for (int i = 1; i < state.num_active; ++i) {
+                    cudaStreamWaitEvent(state.streams[i].stream,
+                                       state.streams[0].last_done_event, 0);
+                }
+            }
+
+            const auto& nodes = key.cg->nodes(key.gid);
+            if (!nodes.empty()) {
+                LOG_INFO << "[CAPTURE-CUDA] gid=" << static_cast<int>(key.gid)
+                         << " nodes=" << nodes.size() << " (NCCL coordinated)";
+                for (size_t i = 0; i < nodes.size(); ++i) {
+                    const auto& node = nodes[i];
+                    if (i > 0) {
+                        insert_cross_op_barrier(nodes[i-1], node, state, dc);
+                    }
+                    if (node.kind == GraphNode::Kind::COMPUTE) {
+                        auto& entry = g_compute_op_table[static_cast<size_t>(node.compute_op)];
+                        if (entry.launch_cuda) {
+                            entry.launch_cuda(node, *mp, dc, state);
+                        } else {
+                            StreamKind sk = get_op_default_stream(node.compute_op);
+                            cudaStream_t s = static_cast<cudaStream_t>(dc.stream(sk));
+                            int si = state.get_or_register(s);
+                            state.output_stream_idx = si;
+                            state.streams[si].has_pending_work = true;
+                            cudaEventRecord(state.streams[si].last_done_event, s);
+                        }
+                    } else {
+                        auto& entry = g_range_op_table[static_cast<size_t>(node.range_op)];
+                        if (entry.launch_cuda) {
+                            entry.launch_cuda(node, *mp, dc, state);
+                        } else {
+                            TR_DEVICE_ERROR("Unimplemented RangeOp in NCCL graph: "
+                                            << static_cast<int>(node.range_op));
+                        }
+                    }
+                }
+                finalize_cross_stream_barrier(state);
+            }
+        }
+        ncclGroupEnd();
+        capture_committed = true;
+    } catch (...) {
+        ncclGroupEnd();
+        for (int r = 0; r < num_ranks; ++r) {
+            cudaSetDevice(contexts[r]->device_id());
+            cudaGraph_t dummy = nullptr;
+            cudaError_t end_err = cudaStreamEndCapture(
+                cap_streams[r], &dummy);
+            if (dummy) cudaGraphDestroy(dummy);
+            (void)end_err;
+        }
+        for (int r = 0; r < num_ranks; ++r) {
+            cudaSetDevice(contexts[r]->device_id());
+            states[r].cleanup_all_events();
+        }
+        throw;
+    }
+
+    // Phase 3a: EndCapture on ALL ranks
+    for (int r = 0; r < num_ranks; ++r) {
+        cudaSetDevice(contexts[r]->device_id());
+        cudaError_t end_err = cudaStreamEndCapture(cap_streams[r], &captured_graphs[r]);
+        if (end_err != cudaSuccess) {
+            TR_DEVICE_ERROR("cudaStreamEndCapture failed for rank " << r
+                            << ": " << cudaGetErrorString(end_err));
+        }
+    }
+
+    // Phase 3b: Instantiate on ALL ranks
+    for (int r = 0; r < num_ranks; ++r) {
+        cudaSetDevice(contexts[r]->device_id());
+
+        cudaGraphExec_t exec = nullptr;
+        cudaGraphNode_t error_node = nullptr;
+        char log_buf[2048] = {};
+        cudaError_t inst_err = cudaGraphInstantiate(
+            &exec, captured_graphs[r], &error_node, log_buf, sizeof(log_buf));
+        if (inst_err != cudaSuccess) {
+            std::string info;
+            if (log_buf[0] != '\0') info = std::string(" log='") + log_buf + "'";
+            TR_DEVICE_ERROR("cudaGraphInstantiate failed for rank " << r
+                            << ": " << cudaGetErrorString(inst_err) << info);
+        }
+
+        result.graphs[k].set_rank_exec(r, exec);
+        if (captured_graphs[r]) cudaGraphDestroy(captured_graphs[r]);
+    }
+
+    // =====================================================================
+    // Phase 4（新增）: 所有 Instantiate 完成后销毁事件
+    // =====================================================================
+    for (int r = 0; r < num_ranks; ++r) {
+        cudaSetDevice(contexts[r]->device_id());
+        states[r].cleanup_all_events();
+    }
+
+    CapturedGraph meta;
+    meta.set_key(key);
+    meta.set_is_cuda(true);
+    result.graphs[k].set_metadata_from(meta);
+}
+#endif // TR_USE_NCCL
+#endif // TR_USE_CUDA
 
 } // namespace tr

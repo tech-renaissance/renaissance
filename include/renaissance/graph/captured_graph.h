@@ -163,6 +163,7 @@ public:
     }
 
     void set_is_cuda(bool v) noexcept { is_cuda_ = v; }
+    void set_key(const Key& k) noexcept { key_ = k; }
 
 private:
     static void capture_cuda(const ComputationGraph& cg,

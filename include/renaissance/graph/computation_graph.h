@@ -325,6 +325,20 @@ public:
         return false;
     }
 
+    /// 检测指定 GraphId 子图中是否包含 NCCL 集合操作
+    bool has_nccl_ops(GraphId gid) const {
+        auto is_nccl_range = [](const GraphNode& node) -> bool {
+            return node.kind == GraphNode::Kind::RANGE &&
+                   (node.range_op == RangeOp::RANGE_SUM_ALLREDUCE ||
+                    node.range_op == RangeOp::RANGE_MEAN_ALLREDUCE ||
+                    node.range_op == RangeOp::RANGE_BN_STATS_ALLREDUCE);
+        };
+        for (const auto& node : graphs_[static_cast<size_t>(gid)]) {
+            if (is_nccl_range(node)) return true;
+        }
+        return false;
+    }
+
     /**
      * @brief RangeOp 便捷构图接口（V4.21 新增）
      * @param gid     目标子图标识

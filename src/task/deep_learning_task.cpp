@@ -777,6 +777,19 @@ void DeepLearningTask::build_exec_table() {
         }
     }
 
+    if (K > 1) {
+        for (size_t v = 0; v < 4; ++v) {
+            for (int rank = 0; rank < K; ++rank) {
+                TR_CHECK(gpu_exec_.variant_graphs[v][rank][S(GraphSlot::DEEP_ALLREDUCE)],
+                         RuntimeError,
+                         "DEEP_ALLREDUCE is nullptr for v=" << v << " rank=" << rank);
+                TR_CHECK(gpu_exec_.variant_graphs[v][rank][S(GraphSlot::FIRST_LAYER_ALLREDUCE)],
+                         RuntimeError,
+                         "FIRST_LAYER_ALLREDUCE is nullptr for v=" << v << " rank=" << rank);
+            }
+        }
+    }
+
     for (size_t v = 0; v < GraphAtlas::kMaxVariants; ++v) {
         for (int rank = 0; rank < K; ++rank) {
             if (captured_result_.atlas.index(v, GraphId::FIRST_LAYER_FWD_A) >= 0)
@@ -1113,8 +1126,7 @@ float DeepLearningTask::run_train_epoch_gpu() {
                                         cudaMemcpyHostToDevice, s_trans);
                     }
 
-                    if (n_accum) cudaGraphLaunch(n_accum, s_up);
-                    sync_up(); sync_tr();
+                    sync_tr();
 
                     ts->set_buffer_readable(next_buf, false);
                     ts->set_buffer_writeable(next_buf, true);
@@ -1130,6 +1142,9 @@ float DeepLearningTask::run_train_epoch_gpu() {
                     if (using_amp && n_cfg) { cudaGraphLaunch(n_cfg, s_up); sync_up(); }
 
                     if (n_far) cudaGraphLaunch(n_far, s_up);
+                    sync_up();
+
+                    if (n_accum) cudaGraphLaunch(n_accum, s_up);
                     sync_up();
 
                     if (using_amp && n_ncg) { cudaGraphLaunch(n_ncg, s_up); sync_up(); }
@@ -1155,8 +1170,6 @@ float DeepLearningTask::run_train_epoch_gpu() {
                     if (g_deep_l) cudaGraphLaunch(g_deep_l, s_c1);
                     sync_comp();
 
-                    if (l_accum_tl) cudaGraphLaunch(l_accum_tl, s_up);
-
                     bool need_lr = is_step_by_batch_mode() || batches == 1;
                     if (need_lr) {
                         float lr_last = fetch_lr_for_batch(batches - 1);
@@ -1177,6 +1190,9 @@ float DeepLearningTask::run_train_epoch_gpu() {
                     if (using_amp && n_cfg) { cudaGraphLaunch(n_cfg, s_up); sync_up(); }
 
                     if (n_far) cudaGraphLaunch(n_far, s_up);
+                    sync_up();
+
+                    if (l_accum_tl) cudaGraphLaunch(l_accum_tl, s_up);
                     sync_up();
 
                     if (using_amp && n_ncg) { cudaGraphLaunch(n_ncg, s_up); sync_up(); }
@@ -1208,8 +1224,8 @@ float DeepLearningTask::run_train_epoch_gpu() {
             const auto& accum_dt = active_memory_plan_->get_dtensor(accum_loss_id);
             Tensor h_accum = fetch_from_rank(accum_dt, 0);
             float accum_val = h_accum.data<float>()[0];
-            size_t total = GlobalRegistry::instance().num_train_samples();
-            if (total > 0) train_loss = accum_val / static_cast<float>(total);
+            size_t per_rank = GlobalRegistry::instance().train_samples_per_rank();
+            if (per_rank > 0) train_loss = accum_val / static_cast<float>(per_rank);
         }
     }
 
@@ -1465,8 +1481,8 @@ float DeepLearningTask::run_train_epoch_cpu() {
         if (bl.accum_loss >= 0) {
             Tensor h = fetch_from_rank(active_memory_plan_->get_dtensor(bl.accum_loss), 0);
             float val = h.data<float>()[0];
-            size_t total = registry.num_train_samples();
-            if (total > 0) train_loss = val / static_cast<float>(total);
+            size_t per_rank = registry.train_samples_per_rank();
+            if (per_rank > 0) train_loss = val / static_cast<float>(per_rank);
         }
         return train_loss;
     }
@@ -1532,8 +1548,8 @@ float DeepLearningTask::run_train_epoch_cpu() {
     if (bl.accum_loss >= 0) {
         Tensor h = fetch_from_rank(active_memory_plan_->get_dtensor(bl.accum_loss), 0);
         float val = h.data<float>()[0];
-        size_t total = registry.num_train_samples();
-        if (total > 0) train_loss = val / static_cast<float>(total);
+        size_t per_rank = registry.train_samples_per_rank();
+        if (per_rank > 0) train_loss = val / static_cast<float>(per_rank);
     }
     return train_loss;
 }
@@ -1656,7 +1672,7 @@ std::tuple<float, float, float> DeepLearningTask::run_val_epoch_gpu(bool validat
     float avg_loss = 0.0f, avg_top1 = 0.0f, avg_top5 = 0.0f;
     if (active_memory_plan_) {
         const auto& b = active_memory_plan_->baseline();
-        size_t n = registry.num_val_samples();
+        size_t n = registry.val_samples_per_rank();
         int32_t al_id = b.accum_loss;
         int32_t at1_id = b.accum_top1;
         int32_t at5_id = b.accum_top5;
@@ -1670,13 +1686,13 @@ std::tuple<float, float, float> DeepLearningTask::run_val_epoch_gpu(bool validat
             const auto& at1_dt = active_memory_plan_->get_dtensor(at1_id);
             Tensor h_at1 = fetch_from_rank(at1_dt, 0);
             float accum_top1 = h_at1.data<float>()[0];
-            avg_top1 = std::round(accum_top1) / static_cast<float>(n);
+            avg_top1 = accum_top1 / static_cast<float>(n);
         }
         if (at5_id >= 0 && n > 0) {
             const auto& at5_dt = active_memory_plan_->get_dtensor(at5_id);
             Tensor h_at5 = fetch_from_rank(at5_dt, 0);
             float accum_top5 = h_at5.data<float>()[0];
-            avg_top5 = std::round(accum_top5) / static_cast<float>(n);
+            avg_top5 = accum_top5 / static_cast<float>(n);
         }
     }
 
@@ -1777,21 +1793,21 @@ std::tuple<float, float, float> DeepLearningTask::run_val_epoch_cpu(bool validat
     }
 
     float avg_loss = 0.0f, avg_top1 = 0.0f, avg_top5 = 0.0f;
-    size_t total_val = registry.num_val_samples();
-    if (bl.accum_loss >= 0 && total_val > 0) {
+    size_t per_rank = registry.val_samples_per_rank();
+    if (bl.accum_loss >= 0 && per_rank > 0) {
         Tensor h = fetch_from_rank(active_memory_plan_->get_dtensor(bl.accum_loss), 0);
         float val = h.data<float>()[0];
-        avg_loss = val / static_cast<float>(total_val);
+        avg_loss = val / static_cast<float>(per_rank);
     }
-    if (bl.accum_top1 >= 0 && total_val > 0) {
+    if (bl.accum_top1 >= 0 && per_rank > 0) {
         Tensor h = fetch_from_rank(active_memory_plan_->get_dtensor(bl.accum_top1), 0);
         float val = h.data<float>()[0];
-        avg_top1 = std::round(val) / static_cast<float>(total_val);
+        avg_top1 = val / static_cast<float>(per_rank);
     }
-    if (bl.accum_top5 >= 0 && total_val > 0) {
+    if (bl.accum_top5 >= 0 && per_rank > 0) {
         Tensor h = fetch_from_rank(active_memory_plan_->get_dtensor(bl.accum_top5), 0);
         float val = h.data<float>()[0];
-        avg_top5 = std::round(val) / static_cast<float>(total_val);
+        avg_top5 = val / static_cast<float>(per_rank);
     }
 
     // LOG_INFO << "[VAL-CPU] loss=" << std::fixed << std::setprecision(6) << avg_loss << " top1=" << avg_top1 * 100.0f

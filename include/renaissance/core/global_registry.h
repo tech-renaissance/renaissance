@@ -175,6 +175,18 @@ public:
      */
     GlobalRegistry& local_batch_size(int value);
 
+    /**
+     * @brief 设置全局batch size（这是一个setter方法，不是getter）
+     * @details 将 global_batch_size / world_size 的商作为 local_batch_size 设置，
+     *          确保多RANK情形下 global batch size 保持一致。
+     *          例如：use_gpu("0,1") 后 world_size=2，global_batch_size(128) 会设置 local_batch_size=64。
+     * @param value 全局batch size值
+     * @throws TRException::DeviceError 如果尚未调用 use_gpu() 或 use_cpu()
+     * @throws TRException::ValueError 如果 value 不能被 world_size 整除
+     * @return GlobalRegistry 引用，支持链式调用
+     */
+    GlobalRegistry& global_batch_size(int value);
+
     // =========================================================================
     // 状态查询方法
     // =========================================================================

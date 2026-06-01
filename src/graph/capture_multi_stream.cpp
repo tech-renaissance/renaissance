@@ -87,6 +87,10 @@ void insert_cross_op_barrier(const GraphNode& /*prev_node*/,
             case RangeOp::RANGE_GRAD_SCALING:
             case RangeOp::RANGE_CHECK_NAN:
                 target_sk = StreamKind::COMP_1; break;
+            case RangeOp::RANGE_SUM_ALLREDUCE:
+            case RangeOp::RANGE_MEAN_ALLREDUCE:
+            case RangeOp::RANGE_BN_STATS_ALLREDUCE:
+                target_sk = StreamKind::UPDATE; break;
             default:
                 target_sk = StreamKind::COMP_1; break;
         }

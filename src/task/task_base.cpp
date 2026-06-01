@@ -453,73 +453,109 @@ void TaskBase::compile_capture_simple() {
 
 #ifdef TR_USE_CUDA
 #ifdef TR_USE_NCCL
-            // ── Phase 1: BeginCapture on ALL ranks simultaneously ──
+            // =====================================================================
+            // Phase 0（新增）: 预创建所有事件（对齐 capture_cuda.cpp 模式）
+            // =====================================================================
             std::vector<cudaStream_t> cap_streams(num_gpus_);
+            std::vector<MultiStreamCaptureState> states(num_gpus_);
             for (int r = 0; r < num_gpus_; ++r) {
                 DeviceContext& dc = *backend_->contexts[r];
                 cudaSetDevice(dc.device_id());
+                cudaDeviceSynchronize();
+
                 dc.set_rank(r);
                 dc.set_memory_plan(&memory_plan_);
                 cap_streams[r] = static_cast<cudaStream_t>(dc.stream(entry.stream));
-                cudaStreamBeginCapture(cap_streams[r], cudaStreamCaptureModeThreadLocal);
-            }
 
-            // ── Phase 2: ncclGroupStart → replay all ranks → ncclGroupEnd ──
-            ncclGroupStart();
-            for (int r = 0; r < num_gpus_; ++r) {
-                DeviceContext& dc = *backend_->contexts[r];
-                cudaSetDevice(dc.device_id());
-
-                MultiStreamCaptureState state;
-                state.primary_stream = cap_streams[r];
-
-                state.get_or_register(cap_streams[r]);
-                state.get_or_register(
+                states[r].primary_stream = cap_streams[r];
+                states[r].get_or_register(cap_streams[r]);
+                states[r].get_or_register(
                     static_cast<cudaStream_t>(dc.stream(StreamKind::COMP_1)));
-                state.get_or_register(
+                states[r].get_or_register(
                     static_cast<cudaStream_t>(dc.stream(StreamKind::COMP_2)));
-                state.get_or_register(
+                states[r].get_or_register(
                     static_cast<cudaStream_t>(dc.stream(StreamKind::COMP_3)));
+                states[r].get_or_register(
+                    static_cast<cudaStream_t>(dc.stream(StreamKind::UPDATE)));
 
-                for (int i = 0; i < state.num_active; ++i) {
-                    if (state.streams[i].last_done_event) {
-                        cudaEventDestroy(state.streams[i].last_done_event);
+                for (int i = 0; i < states[r].num_active; ++i) {
+                    if (states[r].streams[i].last_done_event) {
+                        cudaEventDestroy(states[r].streams[i].last_done_event);
                     }
                     cudaEventCreateWithFlags(
-                        &state.streams[i].last_done_event,
+                        &states[r].streams[i].last_done_event,
                         cudaEventDisableTiming);
                 }
+            }
 
-                if (state.num_active > 1) {
-                    cudaEventRecord(state.streams[0].last_done_event,
-                                   state.primary_stream);
-                    for (int i = 1; i < state.num_active; ++i) {
-                        cudaStreamWaitEvent(state.streams[i].stream,
-                                           state.streams[0].last_done_event, 0);
-                    }
+            // =====================================================================
+            // Phase 1: BeginCapture on ALL ranks simultaneously
+            // =====================================================================
+            for (int r = 0; r < num_gpus_; ++r) {
+                cudaSetDevice(backend_->contexts[r]->device_id());
+                cudaError_t cap_err = cudaStreamBeginCapture(
+                    cap_streams[r], cudaStreamCaptureModeThreadLocal);
+                if (cap_err != cudaSuccess) {
+                    TR_DEVICE_ERROR("cudaStreamBeginCapture failed for rank "
+                                    << r << ": " << cudaGetErrorString(cap_err));
                 }
+            }
 
-                const auto& nodes = (entry.graph.linear_nodes().empty()
-                                     ? entry.graph.nodes(gid)
-                                     : entry.graph.linear_nodes());
-                if (!nodes.empty()) {
-                    for (size_t ni = 0; ni < nodes.size(); ++ni) {
-                        const auto& node = nodes[ni];
-                        if (node.kind != GraphNode::Kind::RANGE) continue;
-                        auto& range_entry = g_range_op_table[
-                            static_cast<size_t>(node.range_op)];
-                        if (range_entry.launch_cuda) {
-                            range_entry.launch_cuda(
-                                node, memory_plan_, dc, state);
+            // Phase 2: ncclGroupStart → replay all ranks → ncclGroupEnd
+            bool capture_committed = false;
+            try {
+                ncclGroupStart();
+                for (int r = 0; r < num_gpus_; ++r) {
+                    DeviceContext& dc = *backend_->contexts[r];
+                    cudaSetDevice(dc.device_id());
+
+                    MultiStreamCaptureState& state = states[r];
+
+                    if (state.num_active > 1) {
+                        cudaEventRecord(state.streams[0].last_done_event,
+                                       state.primary_stream);
+                        for (int i = 1; i < state.num_active; ++i) {
+                            cudaStreamWaitEvent(state.streams[i].stream,
+                                               state.streams[0].last_done_event, 0);
+                        }
+                    }
+
+                    const auto& nodes = (entry.graph.linear_nodes().empty()
+                                         ? entry.graph.nodes(gid)
+                                         : entry.graph.linear_nodes());
+                    if (!nodes.empty()) {
+                        for (size_t ni = 0; ni < nodes.size(); ++ni) {
+                            const auto& node = nodes[ni];
+                            if (node.kind != GraphNode::Kind::RANGE) continue;
+                            auto& range_entry = g_range_op_table[
+                                static_cast<size_t>(node.range_op)];
+                            if (range_entry.launch_cuda) {
+                                range_entry.launch_cuda(
+                                    node, memory_plan_, dc, state);
+                            }
                         }
                     }
                 }
-
-                state.cleanup_all_events();
+                ncclGroupEnd();
+                capture_committed = true;
+            } catch (...) {
+                ncclGroupEnd();
+                for (int r = 0; r < num_gpus_; ++r) {
+                    cudaSetDevice(backend_->contexts[r]->device_id());
+                    cudaGraph_t dummy = nullptr;
+                    cudaError_t end_err = cudaStreamEndCapture(
+                        cap_streams[r], &dummy);
+                    if (dummy) cudaGraphDestroy(dummy);
+                    (void)end_err;
+                }
+                for (int r = 0; r < num_gpus_; ++r) {
+                    cudaSetDevice(backend_->contexts[r]->device_id());
+                    states[r].cleanup_all_events();
+                }
+                throw;
             }
-            ncclGroupEnd();
 
-            // ── Phase 3a: EndCapture on ALL ranks ──
+            // Phase 3a: EndCapture on ALL ranks
             std::vector<cudaGraph_t> captured_graphs(num_gpus_, nullptr);
             for (int r = 0; r < num_gpus_; ++r) {
                 cudaSetDevice(backend_->contexts[r]->device_id());
@@ -531,7 +567,7 @@ void TaskBase::compile_capture_simple() {
                 }
             }
 
-            // ── Phase 3b: Instantiate on ALL ranks ──
+            // Phase 3b: Instantiate on ALL ranks
             for (int r = 0; r < num_gpus_; ++r) {
                 cudaSetDevice(backend_->contexts[r]->device_id());
 
@@ -553,6 +589,15 @@ void TaskBase::compile_capture_simple() {
                 cg.set_rank_exec(r, exec);
                 cudaGraphDestroy(captured_graphs[r]);
             }
+
+            // =====================================================================
+            // Phase 4（新增）: 所有 Instantiate 完成后销毁事件
+            // =====================================================================
+            for (int r = 0; r < num_gpus_; ++r) {
+                cudaSetDevice(backend_->contexts[r]->device_id());
+                states[r].cleanup_all_events();
+            }
+
             cg.set_is_cuda(true);
 #else
             TR_NOT_IMPLEMENTED("TR_USE_NCCL not defined, NCCL graph not supported");

@@ -240,6 +240,23 @@ GlobalRegistry& GlobalRegistry::local_batch_size(int value) {
     return *this;
 }
 
+GlobalRegistry& GlobalRegistry::global_batch_size(int value) {
+    if (!fixed_using_gpu_set_.load(std::memory_order_relaxed)) {
+        TR_DEVICE_ERROR("Must call use_gpu() or use_cpu() before global_batch_size().");
+    }
+
+    int ws = world_size();
+    if (value % ws != 0) {
+        TR_VALUE_ERROR("global_batch_size " << value
+                      << " is not divisible by world_size " << ws
+                      << ". Please ensure global_batch_size is a multiple of world_size.");
+    }
+
+    int local_bs = value / ws;
+    local_batch_size(local_bs);
+    return *this;
+}
+
 // =============================================================================
 // 状态查询方法
 // =============================================================================
