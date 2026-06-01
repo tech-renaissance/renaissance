@@ -558,8 +558,13 @@ GraphAtlas DeepLearningTask::build_graph_atlas() {
             }
 
             // ===== 选择 ComputationGraph =====
-            const ComputationGraph* cg = is_inference_graph(gid) ? infer_cg_ : train_cg_;
-            if (!cg || cg->nodes(gid).empty()) continue;
+            const ComputationGraph* cg = nullptr;
+            if (train_cg_ && !train_cg_->nodes(gid).empty()) {
+                cg = train_cg_;
+            } else if (infer_cg_ && !infer_cg_->nodes(gid).empty()) {
+                cg = infer_cg_;
+            }
+            if (!cg) continue;
 
             auto& sl = atlas.slot(v, gi);
             sl.cg = cg;
