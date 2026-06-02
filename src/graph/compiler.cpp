@@ -774,7 +774,7 @@ void Compiler::create_memory_plans(
             max_io_label_bytes, max_io_data_bytes, max_smce_bytes);
 
         float init_scaling = amp ? TR_AMP_INITIAL_SCALING : 1.0f;
-        LOG_INFO << "[COMPILER] amp=" << amp << " TR_AMP_INITIAL_SCALING=" << TR_AMP_INITIAL_SCALING << " init_scaling=" << init_scaling;
+        // LOG_INFO << "[COMPILER] amp=" << amp << " TR_AMP_INITIAL_SCALING=" << TR_AMP_INITIAL_SCALING << " init_scaling=" << init_scaling;
         memory_plans[s]->set_init_config(
             memory_plans[s]->baseline().scaling, kInitConstant(init_scaling));
         memory_plans[s]->set_init_config(
@@ -1349,27 +1349,27 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
             if (it != layer_input_ids.end() && it->second >= 0) grad_id = it->second;
         }
         if (grad_id >= 0) prev_grad_id = grad_id;
-        LOG_INFO << "[COMPILER] BWD l=" << l << " kind=" << static_cast<int>(layer.kind)
-                 << " grad_id=" << grad_id << " prev_grad_id=" << prev_grad_id;
+        // LOG_INFO << "[COMPILER] BWD l=" << l << " kind=" << static_cast<int>(layer.kind)
+        //          << " grad_id=" << grad_id << " prev_grad_id=" << prev_grad_id;
     }
 
     // ===== DEBUG: 打印 DEEP_FWD_BWD 图节点 =====
-    {
-        const auto& nodes = train_cg.nodes(GraphId::DEEP_FWD_BWD);
-        for (size_t i = 0; i < nodes.size(); ++i) {
-            const auto& n = nodes[i];
-            std::stringstream ss;
-            ss << "[COMPILER] DEEP[" << i << "] op=" << static_cast<int>(n.compute_op);
-            ss << " in=[";
-            for (size_t j = 0; j < n.input_ids.size(); ++j)
-                ss << (j?",":"") << n.input_ids[j];
-            ss << "] out=[";
-            for (size_t j = 0; j < n.output_ids.size(); ++j)
-                ss << (j?",":"") << n.output_ids[j];
-            ss << "]";
-            LOG_INFO << ss.str();
-        }
-    }
+    // {
+    //     const auto& nodes = train_cg.nodes(GraphId::DEEP_FWD_BWD);
+    //     for (size_t i = 0; i < nodes.size(); ++i) {
+    //         const auto& n = nodes[i];
+    //         std::stringstream ss;
+    //         ss << "[COMPILER] DEEP[" << i << "] op=" << static_cast<int>(n.compute_op);
+    //         ss << " in=[";
+    //         for (size_t j = 0; j < n.input_ids.size(); ++j)
+    //             ss << (j?",":"") << n.input_ids[j];
+    //         ss << "] out=[";
+    //         for (size_t j = 0; j < n.output_ids.size(); ++j)
+    //             ss << (j?",":"") << n.output_ids[j];
+    //         ss << "]";
+    //         LOG_INFO << ss.str();
+    //     }
+    // }
 
     // 构建辅助图：通信、优化器、EMA等
     build_auxiliary_graphs(train_cg, memory_plan, arch, nan_flag_id, scalar_ids);
@@ -1636,9 +1636,9 @@ void Compiler::build_auxiliary_graphs(ComputationGraph& train_cg, const MemoryPl
                 TR_CHECK(w_ids.size() == n_ids.size(), ShapeError, "LARS: W/N count mismatch");
 
                 for (size_t i = 0; i < w_ids.size(); ++i) {
-                    LOG_INFO << "[LARS_BUILD] layer=" << i
-                             << " w_id=" << w_ids[i] << " g_id=" << g_ids[i]
-                             << " m_id=" << m_ids[i] << " n_id=" << n_ids[i];
+                    // LOG_INFO << "[LARS_BUILD] layer=" << i
+                    //          << " w_id=" << w_ids[i] << " g_id=" << g_ids[i]
+                    //          << " m_id=" << m_ids[i] << " n_id=" << n_ids[i];
 
                     // Step 1: Trust Ratio
                     GraphNode trust_node;
@@ -2051,8 +2051,8 @@ Compiler::Result Compiler::compile(const ArchPlan& arch,
                                     const PlanConfig& plan_config,
                                     Initializer& initializer,
                                     const std::vector<CompileSpec>& variant_specs) {
-    LOG_INFO << "Compiler::compile - starting five-phase compilation";
-    LOG_INFO << "  ArchPlan: " << arch.layers().size() << " layers";
+    // LOG_INFO << "Compiler::compile - starting five-phase compilation";
+    // LOG_INFO << "  ArchPlan: " << arch.layers().size() << " layers";
 
     // 准备6个CompileSpec（base + 5个变体）
     std::vector<CompileSpec> all_specs;
@@ -2092,7 +2092,7 @@ Compiler::Result Compiler::compile(const ArchPlan& arch,
     auto opt = GlobalRegistry::instance().optimizer_kind();
     // 除纯 SGD 外全部需要 M 系列（Adam/AdamW 的 M 是一阶矩，LARS 的 M 是动量缓冲）
     bool needs_momentum = (opt != OptimizerKind::SGD);
-    LOG_INFO << "Compiler: optimizer_kind=" << static_cast<int>(opt) << ", needs_momentum=" << needs_momentum;
+    // LOG_INFO << "Compiler: optimizer_kind=" << static_cast<int>(opt) << ", needs_momentum=" << needs_momentum;
     pc.use_momentum = needs_momentum;
     pc.use_adam     = (opt == OptimizerKind::ADAM || opt == OptimizerKind::ADAMW);
     pc.use_lars     = (opt == OptimizerKind::LARS || opt == OptimizerKind::LARS_NESTEROV);
@@ -2116,8 +2116,8 @@ Compiler::Result Compiler::compile(const ArchPlan& arch,
     // Phase 5: 组装 Result（share_or_clone）
     share_or_clone(result, result.train_cg, result.infer_cg, all_specs);
 
-    LOG_INFO << "Compiler::compile - five-phase compilation complete";
-    LOG_INFO << "  Generated " << result.variants.size() << " variants";
+    // LOG_INFO << "Compiler::compile - five-phase compilation complete";
+    // LOG_INFO << "  Generated " << result.variants.size() << " variants";
 
     return result;
 }

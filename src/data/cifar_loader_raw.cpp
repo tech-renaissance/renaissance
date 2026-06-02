@@ -118,13 +118,13 @@ void CifarLoaderRaw::configure(int num_load_workers, int num_preproc_workers,
                                 const std::string& val_path,
                                 bool shuffle_train, bool shuffle_val,
                                 bool skip_first, bool verify_crc) {
-    LOG_INFO << "Configuring CifarLoaderRaw";
-    LOG_INFO << "  Preprocessor workers (M): " << num_preproc_workers;
-    LOG_INFO << "  Train path: " << train_path;
-    LOG_INFO << "  Val path: " << val_path;
-    LOG_INFO << "  Shuffle train: " << (shuffle_train ? "true" : "false");
-    LOG_INFO << "  Shuffle val: " << (shuffle_val ? "true" : "false");
-    LOG_INFO << "  Verify files: " << (verify_crc ? "true" : "false");
+    // LOG_INFO << "Configuring CifarLoaderRaw";
+    // LOG_INFO << "  Preprocessor workers (M): " << num_preproc_workers;
+    // LOG_INFO << "  Train path: " << train_path;
+    // LOG_INFO << "  Val path: " << val_path;
+    // LOG_INFO << "  Shuffle train: " << (shuffle_train ? "true" : "false");
+    // LOG_INFO << "  Shuffle val: " << (shuffle_val ? "true" : "false");
+    // LOG_INFO << "  Verify files: " << (verify_crc ? "true" : "false");
 
     // 参数验证（num_load_workers参数未使用，静默忽略）
     (void)num_load_workers;  // 标记为未使用，避免编译器警告
@@ -163,7 +163,7 @@ void CifarLoaderRaw::configure(int num_load_workers, int num_preproc_workers,
         }
     }
 
-    LOG_INFO << "Configuration completed";
+    // LOG_INFO << "Configuration completed";
 }
 
 void CifarLoaderRaw::set_train_mode(LoadMode mode) {
@@ -194,7 +194,7 @@ void CifarLoaderRaw::begin_epoch(int epoch_id, bool is_train) {
 
     // 2. 懒加载：检查是否已加载
     if (current_set_->labels_region == nullptr) {
-        LOG_INFO << "Dataset not loaded, loading now";
+        // LOG_INFO << "Dataset not loaded, loading now";
         load_dataset_fully(*current_set_);
     }
 
@@ -329,8 +329,8 @@ bool CifarLoaderRaw::get_next_sample(
 // =============================================================================
 
 void CifarLoaderRaw::load_dataset_fully(Dataset& ds) {
-    LOG_INFO << "Loading " << (ds.is_train ? "train" : "val")
-             << " set (FULLY mode): " << ds.file_path;
+    // LOG_INFO << "Loading " << (ds.is_train ? "train" : "val")
+    //          << " set (FULLY mode): " << ds.file_path;
 
     // 检查detected_num_classes_是否已被Preprocessor设置
     TR_CHECK(detected_num_classes_ == 10 || detected_num_classes_ == 100, ValueError,
@@ -379,9 +379,9 @@ void CifarLoaderRaw::load_dataset_fully(Dataset& ds) {
     size_t images_size = ds.num_samples * ds.image_bytes;
     ds.data_size = labels_size + images_size;
 
-    LOG_INFO << "  Samples: " << ds.num_samples;
-    LOG_INFO << "  Labels: " << (labels_size / 1024.0) << " KB";
-    LOG_INFO << "  Images: " << (images_size / 1024.0 / 1024.0) << " MB";
+    // LOG_INFO << "  Samples: " << ds.num_samples;
+    // LOG_INFO << "  Labels: " << (labels_size / 1024.0) << " KB";
+    // LOG_INFO << "  Images: " << (images_size / 1024.0 / 1024.0) << " MB";
 
     // 分配内存并填充
     uint8_t* full_data = allocate_aligned_memory(ds.data_size);
@@ -395,8 +395,8 @@ void CifarLoaderRaw::load_dataset_fully(Dataset& ds) {
     double duration = std::chrono::duration<double>(end - start).count();
 
     double bandwidth = (ds.data_size / (1024.0 * 1024.0)) / duration;
-    LOG_INFO << "Loading completed in " << duration << " seconds";
-    LOG_INFO << "Average bandwidth: " << bandwidth << " MB/s";
+    // LOG_INFO << "Loading completed in " << duration << " seconds";
+    // LOG_INFO << "Average bandwidth: " << bandwidth << " MB/s";
 }
 
 void CifarLoaderRaw::read_cifar_bin_file(const std::string& file_path,
@@ -510,7 +510,7 @@ void CifarLoaderRaw::register_sample_info(Dataset& ds, bool is_train) {
         return;
     }
 
-    LOG_INFO << "Registering SampleInfo for " << (is_train ? "train" : "val") << " set";
+    // LOG_INFO << "Registering SampleInfo for " << (is_train ? "train" : "val") << " set";
 
     // 分配空间
     global_info.resize(ds.num_samples);
@@ -525,7 +525,7 @@ void CifarLoaderRaw::register_sample_info(Dataset& ds, bool is_train) {
     // 标记已登记
     registered = true;
 
-    LOG_INFO << "SampleInfo registration completed: " << ds.num_samples << " samples";
+    // LOG_INFO << "SampleInfo registration completed: " << ds.num_samples << " samples";
 }
 
 void CifarLoaderRaw::perform_global_shuffle(std::vector<SampleInfo>& global_info, int epoch_id) {

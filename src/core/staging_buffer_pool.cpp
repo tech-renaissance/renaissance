@@ -96,8 +96,8 @@ void StagingBufferPool::allocate_worker(int gpu_id, int numa_node, size_t bytes,
             std::memset(*out_ptr, 0, bytes);
         }
         if (*out_ptr) {
-            LOG_INFO << "StagingBufferPool: allocated " << bytes << " bytes for GPU " << gpu_id
-                     << " using standard malloc (PC_CUDA mode)";
+            // LOG_INFO << "StagingBufferPool: allocated " << bytes << " bytes for GPU " << gpu_id
+            //          << " using standard malloc (PC_CUDA mode)";
         }
     #else
         // GPU_CLOUD场景：使用完整的CUDA pinned memory
@@ -221,8 +221,8 @@ StagingBufferPool::StagingBufferPool(const std::vector<int>& gpu_ids,
                        << gpu_ids_[failed_rank] << " (RANK " << failed_rank << ")");
     }
 
-    LOG_INFO << "StagingBufferPool: allocated " << n << " blocks of "
-             << (bytes_per_block_ / (1024 * 1024)) << " MB each";
+    // LOG_INFO << "StagingBufferPool: allocated " << n << " blocks of "
+    //          << (bytes_per_block_ / (1024 * 1024)) << " MB each";
 
 #if defined(TR_USE_CUDA)
     #if defined(TR_SCENE_PC_CUDA)
@@ -236,17 +236,17 @@ StagingBufferPool::StagingBufferPool(const std::vector<int>& gpu_ids,
     const char* mem_type = "normal (malloc)";
 #endif
 
-    std::cout << "[StagingDebug] StagingBufferPool created: "
-                 << "blocks=" << n << ", "
-                 << "per_block=" << (bytes_per_block_ / (1024 * 1024)) << "MB, "
-                 << "type=" << mem_type << std::endl;
+    // std::cout << "[StagingDebug] StagingBufferPool created: "
+    //              << "blocks=" << n << ", "
+    //              << "per_block=" << (bytes_per_block_ / (1024 * 1024)) << "MB, "
+    //              << "type=" << mem_type << std::endl;
 
     for (int i = 0; i < n; ++i) {
-        std::cout << "[StagingDebug]   RANK[" << i << "]: "
-                     << "GPU=" << gpu_ids_[i] << ", "
-                     << "NUMA=" << numa_nodes_[i] << ", "
-                     << "base=" << ptrs_[i] << ", "
-                     << "size=" << bytes_per_block_ << "B" << std::endl;
+        // std::cout << "[StagingDebug]   RANK[" << i << "]: "
+        //              << "GPU=" << gpu_ids_[i] << ", "
+        //              << "NUMA=" << numa_nodes_[i] << ", "
+        //              << "base=" << ptrs_[i] << ", "
+        //              << "size=" << bytes_per_block_ << "B" << std::endl;
     }
 }
 

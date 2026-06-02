@@ -370,15 +370,15 @@ void ImageNetLoaderDts::configure(int num_load_workers, int num_preproc_workers,
                                   const std::string& val_path,
                                   bool shuffle_train, bool shuffle_val,
                                   bool skip_first, bool verify_crc) {
-    LOG_INFO << "Configuring ImageNetLoaderDts V4.0";
-    LOG_INFO << "  IO workers (N): " << num_load_workers;
-    LOG_INFO << "  Preprocessor workers (M): " << num_preproc_workers;
-    LOG_INFO << "  Train path: " << train_path;
-    LOG_INFO << "  Val path: " << val_path;
-    LOG_INFO << "  Shuffle train: " << (shuffle_train ? "true" : "false");
-    LOG_INFO << "  Shuffle val: " << (shuffle_val ? "true" : "false");
-    LOG_INFO << "  Skip first: " << (skip_first ? "true" : "false");
-    LOG_INFO << "  Verify CRC: " << (verify_crc ? "true" : "false");
+    // LOG_INFO << "Configuring ImageNetLoaderDts V4.0";
+    // LOG_INFO << "  IO workers (N): " << num_load_workers;
+    // LOG_INFO << "  Preprocessor workers (M): " << num_preproc_workers;
+    // LOG_INFO << "  Train path: " << train_path;
+    // LOG_INFO << "  Val path: " << val_path;
+    // LOG_INFO << "  Shuffle train: " << (shuffle_train ? "true" : "false");
+    // LOG_INFO << "  Shuffle val: " << (shuffle_val ? "true" : "false");
+    // LOG_INFO << "  Skip first: " << (skip_first ? "true" : "false");
+    // LOG_INFO << "  Verify CRC: " << (verify_crc ? "true" : "false");
 
     // 参数验证
     TR_CHECK(num_load_workers >= 1 && num_load_workers <= 16, ValueError,
@@ -499,10 +499,10 @@ void ImageNetLoaderDts::configure(int num_load_workers, int num_preproc_workers,
                  << val_set_.num_samples << " samples, "
                  << (val_set_.dataset_size_bytes / (1024.0 * 1024.0)) << " MB";
     } else {
-        LOG_INFO << "Validation set path not provided, skipping";
+        // LOG_INFO << "Validation set path not provided, skipping";
     }
 
-    LOG_INFO << "Configuration completed";
+    // LOG_INFO << "Configuration completed";
 }
 
 void ImageNetLoaderDts::set_train_mode(LoadMode mode) {

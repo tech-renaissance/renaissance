@@ -244,11 +244,11 @@ static void launch_fc_amp_fwd_cuda(
     const DTensor& dt_w = mp.get_dtensor(node.input_ids[1]);
     const DTensor& dt_y = mp.get_dtensor(node.output_ids[0]);
 
-    LOG_INFO << "[FC_AMP_FWD] input_ids=[" << node.input_ids[0] << "," << node.input_ids[1]
-             << (node.input_ids.size() > 2 ? ("," + std::to_string(node.input_ids[2])) : "")
-             << "] dt_x shape={" << dt_x.n() << "," << dt_x.c() << "," << dt_x.h() << "," << dt_x.w() << "}"
-             << " dt_w shape={" << dt_w.n() << "," << dt_w.c() << "," << dt_w.h() << "," << dt_w.w() << "}"
-             << " dt_y shape={" << dt_y.n() << "," << dt_y.c() << "," << dt_y.h() << "," << dt_y.w() << "}";
+    // LOG_INFO << "[FC_AMP_FWD] input_ids=[" << node.input_ids[0] << "," << node.input_ids[1]
+    //          << (node.input_ids.size() > 2 ? ("," + std::to_string(node.input_ids[2])) : "")
+    //          << "] dt_x shape={" << dt_x.n() << "," << dt_x.c() << "," << dt_x.h() << "," << dt_x.w() << "}"
+    //          << " dt_w shape={" << dt_w.n() << "," << dt_w.c() << "," << dt_w.h() << "," << dt_w.w() << "}"
+    //          << " dt_y shape={" << dt_y.n() << "," << dt_y.c() << "," << dt_y.h() << "," << dt_y.w() << "}";
 
     TR_DEBUG_CHECK(dt_x.h() == 1 && dt_x.w() == 1, ShapeError,
                    "FC_AMP_FWD input must have H=1, W=1. Got H=" << dt_x.h()

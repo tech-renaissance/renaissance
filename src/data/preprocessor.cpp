@@ -968,9 +968,9 @@ void Preprocessor::calculate_steps_per_epoch() {
     // 计算每个epoch的步数（向上取整）
     steps_per_epoch_ = static_cast<int>((total_train_samples + global_batch_size - 1) / global_batch_size);
 
-    LOG_INFO << "Calculated steps_per_epoch: " << steps_per_epoch_
-             << " (total_samples: " << total_train_samples
-             << ", global_batch_size: " << global_batch_size << ")";
+    // LOG_INFO << "Calculated steps_per_epoch: " << steps_per_epoch_
+    //          << " (total_samples: " << total_train_samples
+    //          << ", global_batch_size: " << global_batch_size << ")";
 }
 
 // =============================================================================
@@ -1213,12 +1213,12 @@ void Preprocessor::worker_func_persistent(int worker_id, DataLoader& loader) {
                 int numa_node = GlobalRegistry::instance().staging_memory_numa_node(rank);
                 int target_cpu = GlobalRegistry::instance().cpu_binding_map()[worker_id];
                 auto tid = std::this_thread::get_id();
-                std::cout << "[StagingDebug] PW created: "
-                               << "worker_id=" << worker_id << ", "
-                               << "tid=" << tid << ", "
-                               << "RANK=" << rank << ", "
-                               << "NUMA=" << numa_node << ", "
-                               << "CPU=" << target_cpu << "\n";
+                // std::cout << "[StagingDebug] PW created: "
+                //                << "worker_id=" << worker_id << ", "
+                //                << "tid=" << tid << ", "
+                //                << "RANK=" << rank << ", "
+                //                << "NUMA=" << numa_node << ", "
+                //                << "CPU=" << target_cpu << "\n";
             }
 #endif
         }
@@ -2171,7 +2171,7 @@ void Preprocessor::multi_thread_init() {
 
 #endif  // #ifndef TEST_WITHOUT_PW
 
-    LOG_INFO << "Preprocessor initialized.";
+    // LOG_INFO << "Preprocessor initialized.";
     // 设置初始化完成标志
     multi_thread_inited_ = true;
 }
@@ -3040,11 +3040,11 @@ static size_t calculate_staging_buffer_size(GlobalRegistry& registry) {
 
     size_t total = 2ULL * (data_aligned + label_aligned);
 
-    LOG_INFO << "Setup: staging buffer = "
-             << (total / (1024 * 1024)) << " MB per GPU"
-             << " (" << res << "x" << res << "x" << ch
-             << ", batch=" << batch
-             << ", " << (amp ? "AMP" : "FP32") << ")";
+    // LOG_INFO << "Setup: staging buffer = "
+    //          << (total / (1024 * 1024)) << " MB per GPU"
+    //          << " (" << res << "x" << res << "x" << ch
+    //          << ", batch=" << batch
+    //          << ", " << (amp ? "AMP" : "FP32") << ")";
     return total;
 }
 

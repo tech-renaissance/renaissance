@@ -1244,14 +1244,14 @@ bool PreprocessWorker::work(
 					if (v > fmax) fmax = v;
 				}
 
-				LOG_INFO << "[DIAG-WORKER] pid=" << config_.pid_in_engine
-						 << " wkr=" << config_.worker_id
-						 << " lbl=" << label
-						 << " fout_ptr=" << (void*)fout
-						 << " | raw: first_nz=" << first_nz << " nz=" << nz_count
-						 << " [" << (int)min_val << "," << (int)max_val << "]"
-						 << " | norm: first_nz=" << fnz << " nz=" << fnz_count
-						 << " [" << fmin << "," << fmax << "]";
+				// LOG_INFO << "[DIAG-WORKER] pid=" << config_.pid_in_engine
+				// 			 << " wkr=" << config_.worker_id
+				// 			 << " lbl=" << label
+				// 			 << " fout_ptr=" << (void*)fout
+				// 			 << " | raw: first_nz=" << first_nz << " nz=" << nz_count
+				// 			 << " [" << (int)min_val << "," << (int)max_val << "]"
+				// 			 << " | norm: first_nz=" << fnz << " nz=" << fnz_count
+				// 			 << " [" << fmin << "," << fmax << "]";
 			}
 		}
 	}

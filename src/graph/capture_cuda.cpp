@@ -94,8 +94,8 @@ void CapturedGraph::capture_cuda(const ComputationGraph& cg,
     }
 
     if (!nodes.empty()) {
-        LOG_INFO << "[CAPTURE-CUDA] gid=" << static_cast<int>(gid)
-                 << " nodes=" << nodes.size();
+        // LOG_INFO << "[CAPTURE-CUDA] gid=" << static_cast<int>(gid)
+        //          << " nodes=" << nodes.size();
         for (size_t i = 0; i < nodes.size(); ++i) {
             const auto& node = nodes[i];
 
@@ -105,9 +105,9 @@ void CapturedGraph::capture_cuda(const ComputationGraph& cg,
 
             if (node.kind == GraphNode::Kind::COMPUTE) {
                 auto& entry = g_compute_op_table[static_cast<size_t>(node.compute_op)];
-                LOG_INFO << "[CAPTURE-CUDA]   node[" << i << "] COMPUTE op="
-                         << static_cast<int>(node.compute_op)
-                         << " has_launch=" << (entry.launch_cuda ? 1 : 0);
+                // LOG_INFO << "[CAPTURE-CUDA]   node[" << i << "] COMPUTE op="
+                //          << static_cast<int>(node.compute_op)
+                //          << " has_launch=" << (entry.launch_cuda ? 1 : 0);
                 if (entry.launch_cuda) {
                     entry.launch_cuda(node, mp, ctx, state);
                 } else {

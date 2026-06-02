@@ -88,7 +88,7 @@ void GlobalRegistry::initialize() {
     // 所有检查通过，设置initialized标志
     initialized_.store(true, std::memory_order_release);
 
-    LOG_INFO << "GlobalRegistry initialized successfully";
+    // LOG_INFO << "GlobalRegistry initialized successfully";
 }
 
 void GlobalRegistry::init() {
@@ -197,7 +197,7 @@ GlobalRegistry& GlobalRegistry::amp(bool value) {
     if (!old_set) {
         fixed_using_amp_.store(value, std::memory_order_release);
         fixed_using_amp_set_.store(true, std::memory_order_release);
-        LOG_INFO << "GlobalRegistry: fixed_using_amp set to " << (value ? "true" : "false");
+        // LOG_INFO << "GlobalRegistry: fixed_using_amp set to " << (value ? "true" : "false");
         return *this;
     }
 
@@ -289,7 +289,7 @@ void GlobalRegistry::set_dataset_type(DatasetType value) {
     // 检查是否是首次赋值（从非法值变为合法值）
     if (old_value == DatasetType::no_dataset) {
         fixed_dataset_type_.store(value, std::memory_order_release);
-        LOG_INFO << "GlobalRegistry: fixed_dataset_type set to " << static_cast<int>(value);
+        // LOG_INFO << "GlobalRegistry: fixed_dataset_type set to " << static_cast<int>(value);
 
         // 根据数据集类型自动设置num_classes
         int num_classes = -1;  // -1表示非分类任务或未确定
@@ -312,8 +312,8 @@ void GlobalRegistry::set_dataset_type(DatasetType value) {
         }
         if (num_classes > 0) {
             fixed_num_classes_.store(num_classes, std::memory_order_release);
-            LOG_INFO << "GlobalRegistry: fixed_num_classes automatically set to " << num_classes
-                     << " based on dataset type " << static_cast<int>(value);
+            // LOG_INFO << "GlobalRegistry: fixed_num_classes automatically set to " << num_classes
+            //          << " based on dataset type " << static_cast<int>(value);
         }
         return;
     }
@@ -346,7 +346,7 @@ void GlobalRegistry::set_num_load_workers(int value) {
 
     if (old_value == -1) {
         fixed_num_load_workers_.store(value, std::memory_order_release);
-        LOG_INFO << "GlobalRegistry: fixed_num_load_workers set to " << value;
+        // LOG_INFO << "GlobalRegistry: fixed_num_load_workers set to " << value;
         return;
     }
 
@@ -372,7 +372,7 @@ void GlobalRegistry::set_num_preproc_workers(int value) {
 
     if (old_value == -1) {
         fixed_num_preproc_workers_.store(value, std::memory_order_release);
-        LOG_INFO << "GlobalRegistry: fixed_num_preproc_workers set to " << value;
+        // LOG_INFO << "GlobalRegistry: fixed_num_preproc_workers set to " << value;
         return;
     }
 
@@ -427,7 +427,7 @@ void GlobalRegistry::set_optimizer_kind(OptimizerKind kind) {
 
     if (old_value == -1) {
         fixed_optimizer_kind_.store(value, std::memory_order_release);
-        LOG_INFO << "GlobalRegistry: fixed_optimizer_kind set to " << value;
+        // LOG_INFO << "GlobalRegistry: fixed_optimizer_kind set to " << value;
         return;
     }
 
@@ -460,7 +460,7 @@ void GlobalRegistry::set_batch_size(int value) {
 
     if (old_value == -1) {
         fixed_batch_size_.store(value, std::memory_order_release);
-        LOG_INFO << "GlobalRegistry: fixed_batch_size set to " << value;
+        // LOG_INFO << "GlobalRegistry: fixed_batch_size set to " << value;
         return;
     }
 
@@ -489,7 +489,7 @@ void GlobalRegistry::set_num_color_channels(int value) {
 
     if (old_value == -1) {
         fixed_num_color_channels_.store(value, std::memory_order_release);
-        LOG_INFO << "GlobalRegistry: fixed_num_color_channels set to " << value;
+        // LOG_INFO << "GlobalRegistry: fixed_num_color_channels set to " << value;
         return;
     }
 
@@ -515,7 +515,7 @@ void GlobalRegistry::set_sdmp_factor(int value) {
 
     if (old_value == -1) {
         fixed_sdmp_factor_.store(value, std::memory_order_release);
-        LOG_INFO << "GlobalRegistry: fixed_sdmp_factor set to " << value;
+        // LOG_INFO << "GlobalRegistry: fixed_sdmp_factor set to " << value;
         return;
     }
 
@@ -544,7 +544,7 @@ void GlobalRegistry::set_using_cpvs(bool value) {
     if (!old_set) {
         fixed_using_cpvs_.store(value, std::memory_order_release);
         fixed_using_cpvs_set_.store(true, std::memory_order_release);
-        LOG_INFO << "GlobalRegistry: fixed_using_cpvs set to " << (value ? "true" : "false");
+        // LOG_INFO << "GlobalRegistry: fixed_using_cpvs set to " << (value ? "true" : "false");
         return;
     }
 
@@ -591,7 +591,7 @@ void GlobalRegistry::set_label_smoothing(float value) {
     if (!old_set) {
         fixed_label_smoothing_.store(value, std::memory_order_release);
         fixed_label_smoothing_set_.store(true, std::memory_order_release);
-        LOG_INFO << "GlobalRegistry: fixed_label_smoothing_ set to " << value;
+        // LOG_INFO << "GlobalRegistry: fixed_label_smoothing_ set to " << value;
         return;
     }
 
@@ -622,7 +622,7 @@ void GlobalRegistry::set_using_drop_last(bool value) {
     if (!old_set) {
         fixed_using_drop_last_.store(value, std::memory_order_release);
         fixed_using_drop_last_set_.store(true, std::memory_order_release);
-        LOG_INFO << "GlobalRegistry: fixed_using_drop_last set to " << (value ? "true" : "false");
+        // LOG_INFO << "GlobalRegistry: fixed_using_drop_last set to " << (value ? "true" : "false");
         return;
     }
 
@@ -663,7 +663,7 @@ void GlobalRegistry::set_reproducibility_insurance(bool value) {
     if (!old_set) {
         fixed_reproducibility_insurance_.store(value, std::memory_order_release);
         fixed_reproducibility_insurance_set_.store(true, std::memory_order_release);
-        LOG_INFO << "GlobalRegistry: fixed_reproducibility_insurance set to " << (value ? "true" : "false");
+        // LOG_INFO << "GlobalRegistry: fixed_reproducibility_insurance set to " << (value ? "true" : "false");
         return;
     }
 
@@ -701,7 +701,7 @@ void GlobalRegistry::set_using_progressive_resolution(bool value) {
     if (!old_set) {
         fixed_using_progressive_resolution_.store(value, std::memory_order_release);
         fixed_using_progressive_resolution_set_.store(true, std::memory_order_release);
-        LOG_INFO << "GlobalRegistry: fixed_using_progressive_resolution set to " << (value ? "true" : "false");
+        // LOG_INFO << "GlobalRegistry: fixed_using_progressive_resolution set to " << (value ? "true" : "false");
         return;
     }
 
@@ -734,7 +734,7 @@ void GlobalRegistry::set_is_deployment_mode(bool value) {
     if (!old_set) {
         fixed_is_deployment_mode_.store(value, std::memory_order_release);
         fixed_is_deployment_mode_set_.store(true, std::memory_order_release);
-        LOG_INFO << "GlobalRegistry: fixed_is_deployment_mode set to " << (value ? "true" : "false");
+        // LOG_INFO << "GlobalRegistry: fixed_is_deployment_mode set to " << (value ? "true" : "false");
         return;
     }
 
@@ -767,7 +767,7 @@ void GlobalRegistry::set_train_with_rhf(bool value) {
     if (!old_set) {
         fixed_train_with_rhf_.store(value, std::memory_order_release);
         fixed_train_with_rhf_set_.store(true, std::memory_order_release);
-        LOG_INFO << "GlobalRegistry: fixed_train_with_rhf set to " << (value ? "true" : "false");
+        // LOG_INFO << "GlobalRegistry: fixed_train_with_rhf set to " << (value ? "true" : "false");
         return;
     }
 
@@ -800,7 +800,7 @@ void GlobalRegistry::set_val_with_rhf(bool value) {
     if (!old_set) {
         fixed_val_with_rhf_.store(value, std::memory_order_release);
         fixed_val_with_rhf_set_.store(true, std::memory_order_release);
-        LOG_INFO << "GlobalRegistry: fixed_val_with_rhf set to " << (value ? "true" : "false");
+        // LOG_INFO << "GlobalRegistry: fixed_val_with_rhf set to " << (value ? "true" : "false");
         return;
     }
 
@@ -833,7 +833,7 @@ void GlobalRegistry::set_shuffle_train(bool value) {
     if (!old_set) {
         fixed_shuffle_train_.store(value, std::memory_order_release);
         fixed_shuffle_train_set_.store(true, std::memory_order_release);
-        LOG_INFO << "GlobalRegistry: fixed_shuffle_train set to " << (value ? "true" : "false");
+        // LOG_INFO << "GlobalRegistry: fixed_shuffle_train set to " << (value ? "true" : "false");
         return;
     }
 
@@ -869,7 +869,7 @@ void GlobalRegistry::set_using_gpu(bool value) {
     if (!old_set) {
         fixed_using_gpu_.store(value, std::memory_order_release);
         fixed_using_gpu_set_.store(true, std::memory_order_release);
-        LOG_INFO << "GlobalRegistry: fixed_using_gpu set to " << (value ? "true" : "false");
+        // LOG_INFO << "GlobalRegistry: fixed_using_gpu set to " << (value ? "true" : "false");
         return;
     }
 
@@ -916,7 +916,7 @@ void GlobalRegistry::set_gpu_ids(const std::vector<int>& ids) {
             gpu_list += std::to_string(ids[i]);
         }
         gpu_list += "]";
-        LOG_INFO << "GlobalRegistry: fixed_gpu_ids set to " << gpu_list;
+        // LOG_INFO << "GlobalRegistry: fixed_gpu_ids set to " << gpu_list;
         return;
     }
 
@@ -1469,13 +1469,13 @@ GlobalRegistry& GlobalRegistry::train_resolution(int value) {
     int current_max = fixed_max_sample_resolution_.load(std::memory_order_relaxed);
     if (value > current_max) {
         fixed_max_sample_resolution_.store(value, std::memory_order_release);
-        LOG_INFO << "GlobalRegistry: fixed_max_sample_resolution_ updated to " << value;
+        // LOG_INFO << "GlobalRegistry: fixed_max_sample_resolution_ updated to " << value;
     }
 
     // 设置train_sample_resolution_begin_和train_sample_resolution_end_
     fixed_train_sample_resolution_begin_.store(value, std::memory_order_release);
     fixed_train_sample_resolution_end_.store(value, std::memory_order_release);
-    LOG_INFO << "GlobalRegistry: fixed_train_sample_resolution_begin_ and end_ set to " << value;
+    // LOG_INFO << "GlobalRegistry: fixed_train_sample_resolution_begin_ and end_ set to " << value;
 
     // boundary_epoch_保持为-1
     fixed_boundary_epoch_.store(-1, std::memory_order_release);
@@ -1494,12 +1494,12 @@ GlobalRegistry& GlobalRegistry::val_resolution(int value) {
     int current_max = fixed_max_sample_resolution_.load(std::memory_order_relaxed);
     if (value > current_max) {
         fixed_max_sample_resolution_.store(value, std::memory_order_release);
-        LOG_INFO << "GlobalRegistry: fixed_max_sample_resolution_ updated to " << value;
+        // LOG_INFO << "GlobalRegistry: fixed_max_sample_resolution_ updated to " << value;
     }
 
     // 设置val_sample_resolution_
     fixed_val_sample_resolution_.store(value, std::memory_order_release);
-    LOG_INFO << "GlobalRegistry: fixed_val_sample_resolution_ set to " << value;
+    // LOG_INFO << "GlobalRegistry: fixed_val_sample_resolution_ set to " << value;
 
     // 不修改boundary_epoch_（保持原值）
 
@@ -1533,25 +1533,25 @@ GlobalRegistry& GlobalRegistry::train_resolution(std::pair<int, int> pair_begin,
     int current_max = fixed_max_sample_resolution_.load(std::memory_order_relaxed);
     if (train_sample_resolution_begin > current_max) {
         fixed_max_sample_resolution_.store(train_sample_resolution_begin, std::memory_order_release);
-        LOG_INFO << "GlobalRegistry: fixed_max_sample_resolution_ updated to " << train_sample_resolution_begin;
+        // LOG_INFO << "GlobalRegistry: fixed_max_sample_resolution_ updated to " << train_sample_resolution_begin;
     }
 
     // 比较train_sample_resolution_end与max_sample_resolution_，更新最大值
     current_max = fixed_max_sample_resolution_.load(std::memory_order_relaxed);
     if (train_sample_resolution_end > current_max) {
         fixed_max_sample_resolution_.store(train_sample_resolution_end, std::memory_order_release);
-        LOG_INFO << "GlobalRegistry: fixed_max_sample_resolution_ updated to " << train_sample_resolution_end;
+        // LOG_INFO << "GlobalRegistry: fixed_max_sample_resolution_ updated to " << train_sample_resolution_end;
     }
 
     // 设置train_sample_resolution_begin_和train_sample_resolution_end_
     fixed_train_sample_resolution_begin_.store(train_sample_resolution_begin, std::memory_order_release);
     fixed_train_sample_resolution_end_.store(train_sample_resolution_end, std::memory_order_release);
-    LOG_INFO << "GlobalRegistry: fixed_train_sample_resolution_begin_ set to " << train_sample_resolution_begin
-             << ", fixed_train_sample_resolution_end_ set to " << train_sample_resolution_end;
+    // LOG_INFO << "GlobalRegistry: fixed_train_sample_resolution_begin_ set to " << train_sample_resolution_begin
+    //          << ", fixed_train_sample_resolution_end_ set to " << train_sample_resolution_end;
 
     // 设置boundary_epoch_
     fixed_boundary_epoch_.store(boundary_epoch, std::memory_order_release);
-    LOG_INFO << "GlobalRegistry: fixed_boundary_epoch_ set to " << boundary_epoch;
+    // LOG_INFO << "GlobalRegistry: fixed_boundary_epoch_ set to " << boundary_epoch;
 
     // 调用set_using_progressive_resolution(true)
     set_using_progressive_resolution(true);
@@ -1566,7 +1566,7 @@ void GlobalRegistry::set_cpu_binding_enabled(bool value) {
     if (!old_set) {
         fixed_cpu_binding_enabled_.store(value, std::memory_order_release);
         fixed_cpu_binding_enabled_set_.store(true, std::memory_order_release);
-        LOG_INFO << "GlobalRegistry: fixed_cpu_binding_enabled set to " << (value ? "true" : "false");
+        // LOG_INFO << "GlobalRegistry: fixed_cpu_binding_enabled set to " << (value ? "true" : "false");
         return;
     }
 
@@ -1596,7 +1596,7 @@ void GlobalRegistry::set_cpu_binding_map(const std::vector<int>& map) {
 
     if (fixed_cpu_binding_map_.empty()) {
         fixed_cpu_binding_map_ = map;
-        LOG_INFO << "GlobalRegistry: fixed_cpu_binding_map set with " << map.size() << " entries";
+        // LOG_INFO << "GlobalRegistry: fixed_cpu_binding_map set with " << map.size() << " entries";
         return;
     }
 
@@ -1630,7 +1630,7 @@ void GlobalRegistry::set_fixed_s_original_indices(const std::vector<int>& indice
     if (fixed_s_original_indices_.empty()) {
         // 首次赋值
         fixed_s_original_indices_ = indices;
-        LOG_INFO << "GlobalRegistry: fixed_s_original_indices_ set with size=" << indices.size();
+        // LOG_INFO << "GlobalRegistry: fixed_s_original_indices_ set with size=" << indices.size();
         return;
     }
 
@@ -1664,7 +1664,7 @@ void GlobalRegistry::set_current_resolution_train(int value) {
 
     // 允许修改
     alterable_current_resolution_train_.store(value, std::memory_order_release);
-    LOG_INFO << "GlobalRegistry: alterable_current_resolution_train_ set to " << value;
+    // LOG_INFO << "GlobalRegistry: alterable_current_resolution_train_ set to " << value;
 }
 
 int GlobalRegistry::current_resolution_train() const {
@@ -1680,7 +1680,7 @@ void GlobalRegistry::set_current_resolution_val(int value) {
 
     // 允许修改
     alterable_current_resolution_val_.store(value, std::memory_order_release);
-    LOG_INFO << "GlobalRegistry: alterable_current_resolution_val_ set to " << value;
+    // LOG_INFO << "GlobalRegistry: alterable_current_resolution_val_ set to " << value;
 }
 
 int GlobalRegistry::current_resolution_val() const {
@@ -1717,7 +1717,7 @@ void GlobalRegistry::set_train_crop_output(int value) {
 
     // 允许修改
     alterable_train_crop_output_.store(value, std::memory_order_release);
-    LOG_INFO << "GlobalRegistry: alterable_train_crop_output_ set to " << value;
+    // LOG_INFO << "GlobalRegistry: alterable_train_crop_output_ set to " << value;
 }
 
 int GlobalRegistry::train_crop_output() const {
@@ -1733,7 +1733,7 @@ void GlobalRegistry::set_train_resize_output(int value) {
 
     // 允许修改
     alterable_train_resize_output_.store(value, std::memory_order_release);
-    LOG_INFO << "GlobalRegistry: alterable_train_resize_output_ set to " << value;
+    // LOG_INFO << "GlobalRegistry: alterable_train_resize_output_ set to " << value;
 }
 
 int GlobalRegistry::train_resize_output() const {
@@ -1749,7 +1749,7 @@ void GlobalRegistry::set_val_crop_output(int value) {
 
     // 允许修改
     alterable_val_crop_output_.store(value, std::memory_order_release);
-    LOG_INFO << "GlobalRegistry: alterable_val_crop_output_ set to " << value;
+    // LOG_INFO << "GlobalRegistry: alterable_val_crop_output_ set to " << value;
 }
 
 int GlobalRegistry::val_crop_output() const {
@@ -1765,7 +1765,7 @@ void GlobalRegistry::set_val_resize_output(int value) {
 
     // 允许修改
     alterable_val_resize_output_.store(value, std::memory_order_release);
-    LOG_INFO << "GlobalRegistry: alterable_val_resize_output_ set to " << value;
+    // LOG_INFO << "GlobalRegistry: alterable_val_resize_output_ set to " << value;
 }
 
 int GlobalRegistry::val_resize_output() const {
@@ -1804,7 +1804,7 @@ void GlobalRegistry::set_user_epoch_id(int value) {
 
     // 允许修改
     alterable_user_epoch_id_.store(value, std::memory_order_release);
-    LOG_INFO << "GlobalRegistry: alterable_user_epoch_id_ set to " << value;
+    // LOG_INFO << "GlobalRegistry: alterable_user_epoch_id_ set to " << value;
 }
 
 int GlobalRegistry::user_epoch_id() const {
@@ -1840,7 +1840,7 @@ void GlobalRegistry::set_random_erasing_p(float value) {
 
     // 允许修改（虽然是fixed类型，但Random Erasing需要一次性设置）
     fixed_random_erasing_p_.store(value, std::memory_order_release);
-    LOG_INFO << "GlobalRegistry: fixed_random_erasing_p_ set to " << value;
+    // LOG_INFO << "GlobalRegistry: fixed_random_erasing_p_ set to " << value;
 }
 
 float GlobalRegistry::random_erasing_p() const {
@@ -2246,8 +2246,8 @@ GlobalRegistry& GlobalRegistry::allocate_staging_memory(size_t bytes_per_gpu) {
 
     staging_buffer_pool_ = std::make_unique<StagingBufferPool>(ids, bytes_per_gpu);
 
-    LOG_INFO << "GlobalRegistry: Staging buffer pool created with " << ids.size()
-             << " blocks, " << (bytes_per_gpu / (1024 * 1024)) << " MB each";
+    // LOG_INFO << "GlobalRegistry: Staging buffer pool created with " << ids.size()
+    //          << " blocks, " << (bytes_per_gpu / (1024 * 1024)) << " MB each";
 
     return *this;
 }
@@ -2398,7 +2398,7 @@ void GlobalRegistry::set_num_classes(int value) {
 
     if (old_value == -1) {
         fixed_num_classes_.store(value, std::memory_order_release);
-        LOG_INFO << "GlobalRegistry: fixed_num_classes set to " << value;
+        // LOG_INFO << "GlobalRegistry: fixed_num_classes set to " << value;
         return;
     }
 

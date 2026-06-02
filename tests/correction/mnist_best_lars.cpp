@@ -179,6 +179,7 @@ int main(int argc, char** argv) {
             .momentum(0.9f)
             .weight_decay(5e-5f)
             .trust_coefficient(0.001f)
+            .nesterov(false)
             .eps(0.0f))
 
         .scheduler(CosineAnnealingLR()
@@ -198,7 +199,7 @@ int main(int argc, char** argv) {
               << "=====================================\n"
               << "Network: 784→1024→512→256→10\n"
               << "Activation: " << cfg.activation << "\n"
-              << "Optimizer: LARS (m=0.9, wd=5e-5, tc=0.001, eps=0.0)\n"
+              << "Optimizer: LARS (m=0.9, wd=5e-5, tc=0.001, eps=0.0, nesterov=false)\n"
               << "Scheduler: CosineAnnealing + Warmup(5)\n"
               << "Augmentation: Pad+Rotation+Scale+Crop+Autocontrast+Erasing\n"
               << "Training: 100 epochs, batch_size=128\n"

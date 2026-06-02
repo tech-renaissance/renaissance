@@ -793,22 +793,22 @@ void DeepLearningTask::build_exec_table() {
                 g[S(GraphSlot::VAL_RESULT_ALLREDUCE)]     = resolve(GraphId::VAL_RESULT_COMM, rank, v);
             }
 
-            LOG_INFO << "[EXEC-TABLE] v=" << v << " rank=" << rank
-                     << " DEEP=" << (g[S(GraphSlot::FWD_BWD_DEEP_A)] ? "OK" : "NULL")
-                     << " ZG=" << (g[S(GraphSlot::ZERO_GRAD)] ? "OK" : "NULL")
-                     << " BWD_A=" << (g[S(GraphSlot::FIRST_LAYER_BWD_A)] ? "OK" : "NULL")
-                     << " BWD_B=" << (g[S(GraphSlot::FIRST_LAYER_BWD_B)] ? "OK" : "NULL")
-                     << " FWD_A=" << (g[S(GraphSlot::FIRST_LAYER_FWD_A)] ? "OK" : "NULL")
-                     << " FWD_B=" << (g[S(GraphSlot::FIRST_LAYER_FWD_B)] ? "OK" : "NULL")
-                     << " OPT=" << (g[S(GraphSlot::WEIGHT_UPDATE)] ? "OK" : "NULL")
-                     << " XFER_A=" << (g[S(GraphSlot::XFER_A)] ? "OK" : "NULL")
-                     << " XFER_B=" << (g[S(GraphSlot::XFER_B)] ? "OK" : "NULL")
-                     << " INF_A=" << (g[S(GraphSlot::INF_MAIN_A)] ? "OK" : "NULL")
-                     << " INF_B=" << (g[S(GraphSlot::INF_MAIN_B)] ? "OK" : "NULL");
+            // LOG_INFO << "[EXEC-TABLE] v=" << v << " rank=" << rank
+            //          << " DEEP=" << (g[S(GraphSlot::FWD_BWD_DEEP_A)] ? "OK" : "NULL")
+            //          << " ZG=" << (g[S(GraphSlot::ZERO_GRAD)] ? "OK" : "NULL")
+            //          << " BWD_A=" << (g[S(GraphSlot::FIRST_LAYER_BWD_A)] ? "OK" : "NULL")
+            //          << " BWD_B=" << (g[S(GraphSlot::FIRST_LAYER_BWD_B)] ? "OK" : "NULL")
+            //          << " FWD_A=" << (g[S(GraphSlot::FIRST_LAYER_FWD_A)] ? "OK" : "NULL")
+            //          << " FWD_B=" << (g[S(GraphSlot::FIRST_LAYER_FWD_B)] ? "OK" : "NULL")
+            //          << " OPT=" << (g[S(GraphSlot::WEIGHT_UPDATE)] ? "OK" : "NULL")
+            //          << " XFER_A=" << (g[S(GraphSlot::XFER_A)] ? "OK" : "NULL")
+            //          << " XFER_B=" << (g[S(GraphSlot::XFER_B)] ? "OK" : "NULL")
+            //          << " INF_A=" << (g[S(GraphSlot::INF_MAIN_A)] ? "OK" : "NULL")
+            //          << " INF_B=" << (g[S(GraphSlot::INF_MAIN_B)] ? "OK" : "NULL");
             for (int gi = 0; gi < static_cast<int>(GraphId::COUNT); ++gi) {
                 int32_t idx = captured_result_.atlas.index(v, static_cast<GraphId>(gi));
                 if (idx >= 0) {
-                    LOG_INFO << "[ATLAS] v=" << v << " gid=" << gi << " atlas_idx=" << idx;
+                    // LOG_INFO << "[ATLAS] v=" << v << " gid=" << gi << " atlas_idx=" << idx;
                 }
             }
         }
@@ -873,9 +873,9 @@ TrainingResult DeepLearningTask::run_gpu() {
     const int total_epochs = total_epochs_;
     const int steps_per_epoch = prep.steps_per_epoch();
 
-    LOG_INFO << "==================================================";
-    LOG_INFO << " Tech-Renaissance Training Started";
-    LOG_INFO << "--------------------------------------------------";
+    // LOG_INFO << "==================================================";
+    // LOG_INFO << " Tech-Renaissance Training Started";
+    // LOG_INFO << "--------------------------------------------------";
     {
         std::ostringstream oss;
         oss << "[";
@@ -885,17 +885,17 @@ TrainingResult DeepLearningTask::run_gpu() {
             oss << gpu_ids[i];
         }
         oss << "]";
-        LOG_INFO << " GPU IDs: " << oss.str();
+        // LOG_INFO << " GPU IDs: " << oss.str();
     }
-    LOG_INFO << " Local batch size: " << reg.get_local_batch_size();
-    LOG_INFO << " World size: " << reg.world_size();
-    LOG_INFO << " Total batch size: " << (reg.get_local_batch_size() * reg.world_size());
-    LOG_INFO << " Total epochs: " << total_epochs_;
-    LOG_INFO << " AMP: " << (reg.using_amp() ? "enabled" : "disabled");
-    LOG_INFO << " SEMA: " << (use_sema_ ? "enabled" : "disabled");
-    LOG_INFO << " Validate every: " << val_interval_ << " epochs, offset: " << val_offset_;
-    LOG_INFO << " Early stop by Top-1: " << early_stop_thr_;
-    LOG_INFO << "==================================================";
+    // LOG_INFO << " Local batch size: " << reg.get_local_batch_size();
+    // LOG_INFO << " World size: " << reg.world_size();
+    // LOG_INFO << " Total batch size: " << (reg.get_local_batch_size() * reg.world_size());
+    // LOG_INFO << " Total epochs: " << total_epochs_;
+    // LOG_INFO << " AMP: " << (reg.using_amp() ? "enabled" : "disabled");
+    // LOG_INFO << " SEMA: " << (use_sema_ ? "enabled" : "disabled");
+    // LOG_INFO << " Validate every: " << val_interval_ << " epochs, offset: " << val_offset_;
+    // LOG_INFO << " Early stop by Top-1: " << early_stop_thr_;
+    // LOG_INFO << "==================================================";
 
     current_epoch_ = 0;
     best_top1_ = best_top5_ = best_ema_top1_ = best_ema_top5_ = 0.0f;
@@ -1310,18 +1310,18 @@ TrainingResult DeepLearningTask::run_cpu() {
     const int total_epochs = total_epochs_;
     const int steps_per_epoch = prep.steps_per_epoch();
 
-    LOG_INFO << "==================================================";
-    LOG_INFO << " Tech-Renaissance Training Started  [CPU Mode]";
-    LOG_INFO << "--------------------------------------------------";
-    LOG_INFO << " Local batch size: " << reg.get_local_batch_size();
-    LOG_INFO << " World size: " << reg.world_size();
-    LOG_INFO << " Total batch size: " << (reg.get_local_batch_size() * reg.world_size());
-    LOG_INFO << " Total epochs: " << total_epochs_;
-    LOG_INFO << " AMP: disabled (CPU)";
-    LOG_INFO << " SEMA: " << (use_sema_ ? "enabled" : "disabled");
-    LOG_INFO << " Validate every: " << val_interval_ << " epochs, offset: " << val_offset_;
-    LOG_INFO << " Early stop by Top-1: " << early_stop_thr_;
-    LOG_INFO << "==================================================";
+    // LOG_INFO << "==================================================";
+    // LOG_INFO << " Tech-Renaissance Training Started  [CPU Mode]";
+    // LOG_INFO << "--------------------------------------------------";
+    // LOG_INFO << " Local batch size: " << reg.get_local_batch_size();
+    // LOG_INFO << " World size: " << reg.world_size();
+    // LOG_INFO << " Total batch size: " << (reg.get_local_batch_size() * reg.world_size());
+    // LOG_INFO << " Total epochs: " << total_epochs_;
+    // LOG_INFO << " AMP: disabled (CPU)";
+    // LOG_INFO << " SEMA: " << (use_sema_ ? "enabled" : "disabled");
+    // LOG_INFO << " Validate every: " << val_interval_ << " epochs, offset: " << val_offset_;
+    // LOG_INFO << " Early stop by Top-1: " << early_stop_thr_;
+    // LOG_INFO << "==================================================";
 
     current_epoch_ = 0;
     best_top1_ = best_top5_ = best_ema_top1_ = best_ema_top5_ = 0.0f;
@@ -1984,7 +1984,7 @@ void DeepLearningTask::log_epoch_results(float train_loss, float val_loss,
     oss << std::setw(12) << std::fixed << std::setprecision(6) << lr << " | ";
     oss << std::setw(7) << std::fixed << std::setprecision(1) << epoch_time_sec << "s";
 
-    LOG_INFO << oss.str();
+    std::cout << oss.str() << '\n' << std::flush;
 }
 
 void DeepLearningTask::log_final_summary(double total_time_sec) const {
@@ -1992,21 +1992,21 @@ void DeepLearningTask::log_final_summary(double total_time_sec) const {
     int minutes = (static_cast<int>(total_time_sec) % 3600) / 60;
     int seconds = static_cast<int>(total_time_sec) % 60;
 
-    LOG_INFO << "==================================================";
-    LOG_INFO << " Training Complete";
-    LOG_INFO << "--------------------------------------------------";
-    LOG_INFO << " Best Val Top-1: " << std::fixed << std::setprecision(2)
-             << (best_top1_ * 100.0f) << "%";
-    if (use_sema_) {
-        LOG_INFO << " Best EMA Top-1: " << std::fixed << std::setprecision(2)
-                 << (best_ema_top1_ * 100.0f) << "%";
-    }
-    LOG_INFO << " Best Epoch: " << best_epoch_;
-    LOG_INFO << " Total Time: " << hours << "h " << minutes << "m " << seconds << "s";
-    if (early_stopped_) {
-        LOG_INFO << " Stopped early by threshold";
-    }
-    LOG_INFO << "==================================================";
+    // std::cout << "==================================================" << '\n' << std::flush;
+    // std::cout << " Training Complete" << '\n' << std::flush;
+    // std::cout << "--------------------------------------------------" << '\n' << std::flush;
+    // std::cout << " Best Val Top-1: " << std::fixed << std::setprecision(2)
+    //           << (best_top1_ * 100.0f) << "%" << '\n' << std::flush;
+    // if (use_sema_) {
+    //     std::cout << " Best EMA Top-1: " << std::fixed << std::setprecision(2)
+    //               << (best_ema_top1_ * 100.0f) << "%" << '\n' << std::flush;
+    // }
+    // std::cout << " Best Epoch: " << best_epoch_ << '\n' << std::flush;
+    // std::cout << " Total Time: " << hours << "h " << minutes << "m " << seconds << "s" << '\n' << std::flush;
+    // if (early_stopped_) {
+    //     std::cout << " Stopped early by threshold" << '\n' << std::flush;
+    // }
+    // std::cout << "==================================================" << '\n' << std::flush;
 }
 
 // =============================================================================

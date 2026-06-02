@@ -245,9 +245,9 @@ PreCaptureResult pre_capture(const GraphAtlas& compile_atlas,
             cudaSetDevice(gpu_id);
             contexts[rank]->set_rank(rank);
 
-            TR_LOG_INFO("graph") << "[B2] cuDNN warmup on rank " << rank
-                                 << " (GPU " << gpu_id << ") for "
-                                 << K << " unique graphs";
+            // TR_LOG_INFO("graph") << "[B2] cuDNN warmup on rank " << rank
+            //                      << " (GPU " << gpu_id << ") for "
+            //                      << K << " unique graphs";
 
             for (int32_t k = 0; k < K; ++k) {
                 const auto& key = key_by_idx[k];
@@ -263,18 +263,18 @@ PreCaptureResult pre_capture(const GraphAtlas& compile_atlas,
                 for (const auto& node : key.cg->nodes(key.gid)) {
                     if (node.kind != GraphNode::Kind::COMPUTE) { ++node_idx; continue; }
                     if (!require_warmup(node.compute_op)) { ++node_idx; continue; }
-                    TR_LOG_INFO("graph") << "[B2-DBG] warmup k=" << k
-                                         << " gid=" << static_cast<int>(key.gid)
-                                         << " node=" << node_idx
-                                         << " op=" << static_cast<int>(node.compute_op);
+                    // TR_LOG_INFO("graph") << "[B2-DBG] warmup k=" << k
+                    //                      << " gid=" << static_cast<int>(key.gid)
+                    //                      << " node=" << node_idx
+                    //                      << " op=" << static_cast<int>(node.compute_op);
                     warmup_single_cudnn_op(node, *mp, *contexts[rank]);
                     ++node_idx;
                 }
             }
             cudaDeviceSynchronize();
         }
-        TR_LOG_INFO("graph") << "[B2] cuDNN warmup completed on all "
-                             << num_ranks << " ranks";
+        // TR_LOG_INFO("graph") << "[B2] cuDNN warmup completed on all "
+        //                      << num_ranks << " ranks";
 #endif
     }
 
@@ -295,7 +295,7 @@ PreCaptureResult pre_capture(const GraphAtlas& compile_atlas,
 
     // Rank 0 在主线程串行捕获
     try {
-        TR_LOG_INFO("graph") << "[B3] Capturing rank 0 in main thread";
+        // TR_LOG_INFO("graph") << "[B3] Capturing rank 0 in main thread";
         ::tr::capture_all_for_rank(result, key_by_idx, key_to_mp, *contexts[0], 0, is_nccl_key);
     } catch (...) {
         exc[0] = std::current_exception();
@@ -303,8 +303,8 @@ PreCaptureResult pre_capture(const GraphAtlas& compile_atlas,
 
     // Rank 1~N-1 并行捕获
     if (num_ranks > 1) {
-        TR_LOG_INFO("graph") << "[B3] Capturing ranks 1~" << (num_ranks-1)
-                             << " in parallel threads";
+        // TR_LOG_INFO("graph") << "[B3] Capturing ranks 1~" << (num_ranks-1)
+        //                      << " in parallel threads";
         std::vector<std::thread> threads;
         for (int r = 1; r < num_ranks; ++r) {
             threads.emplace_back([&, r]() {
@@ -336,8 +336,8 @@ PreCaptureResult pre_capture(const GraphAtlas& compile_atlas,
     if (is_cuda) {
         for (int32_t k = 0; k < K; ++k) {
             if (is_nccl_key[k]) {
-                TR_LOG_INFO("graph") << "[B3-NCCL] Coordinated capture for graph "
-                                     << static_cast<int>(key_by_idx[k].gid);
+                // TR_LOG_INFO("graph") << "[B3-NCCL] Coordinated capture for graph "
+                //                      << static_cast<int>(key_by_idx[k].gid);
                 capture_nccl_graph_coordinated(result, key_by_idx, key_to_mp, contexts, k);
             }
         }
@@ -350,16 +350,16 @@ PreCaptureResult pre_capture(const GraphAtlas& compile_atlas,
     // =====================================================================
     if (is_cuda && K > 0) {
 #ifdef TR_USE_CUDA
-        TR_LOG_INFO("graph") << "[B4] Warmup launching " << K << " graphs on rank 0";
+        // TR_LOG_INFO("graph") << "[B4] Warmup launching " << K << " graphs on rank 0";
         cudaSetDevice(contexts[0]->device_id());
 
         for (const auto& cg : result.graphs) {
             // 跳过含 NCCL 的 graph：warmup 只跑 rank 0，
             // 若 launch 含 ncclAllReduce 的 graph 会导致其他 rank 未同步而死锁
             if (cg.key().cg && cg.key().cg->has_nccl_ops(cg.key().gid)) {
-                TR_LOG_INFO("graph") << "[B4] Skip NCCL graph gid="
-                                     << static_cast<int>(cg.key().gid)
-                                     << " in warmup launch";
+                // TR_LOG_INFO("graph") << "[B4] Skip NCCL graph gid="
+                //                      << static_cast<int>(cg.key().gid)
+                //                      << " in warmup launch";
                 continue;
             }
             StreamKind sk = StreamKind::COMP_1;
@@ -375,14 +375,14 @@ PreCaptureResult pre_capture(const GraphAtlas& compile_atlas,
         }
 
         contexts[0]->synchronize_all();
-        TR_LOG_INFO("graph") << "[B4] Warmup launch completed";
+        // TR_LOG_INFO("graph") << "[B4] Warmup launch completed";
 #endif
     }
 
-    TR_LOG_INFO("graph") << "[PRE_CAPTURE] Summary: " << result.total_slots
-                         << " slots, " << result.captured
-                         << " captured, " << result.reused << " reused, "
-                         << K << " unique graphs, " << num_ranks << " ranks";
+    // TR_LOG_INFO("graph") << "[PRE_CAPTURE] Summary: " << result.total_slots
+    //                      << " slots, " << result.captured
+    //                      << " captured, " << result.reused << " reused, "
+    //                      << K << " unique graphs, " << num_ranks << " ranks";
 
     return result;
 }
@@ -548,8 +548,8 @@ static void capture_nccl_graph_coordinated(
 
             const auto& nodes = key.cg->nodes(key.gid);
             if (!nodes.empty()) {
-                LOG_INFO << "[CAPTURE-CUDA] gid=" << static_cast<int>(key.gid)
-                         << " nodes=" << nodes.size() << " (NCCL coordinated)";
+                // LOG_INFO << "[CAPTURE-CUDA] gid=" << static_cast<int>(key.gid)
+                //          << " nodes=" << nodes.size() << " (NCCL coordinated)";
                 for (size_t i = 0; i < nodes.size(); ++i) {
                     const auto& node = nodes[i];
                     if (i > 0) {

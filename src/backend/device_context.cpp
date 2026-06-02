@@ -153,8 +153,8 @@ DeviceContext::DeviceContext(int device_id) : device_id_(device_id) {
         }
     }
 
-    TR_LOG_INFO("backend") << "DeviceContext " << device_id_
-                           << ": created 5 non-blocking streams + per-stream cuDNN + cuBLAS handles";
+    // TR_LOG_INFO("backend") << "DeviceContext " << device_id_
+    //                        << ": created 5 non-blocking streams + per-stream cuDNN + cuBLAS handles";
 #endif
 }
 

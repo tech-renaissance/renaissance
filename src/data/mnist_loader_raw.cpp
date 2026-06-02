@@ -48,7 +48,7 @@ MnistLoaderRaw& MnistLoaderRaw::instance() {
 }
 
 MnistLoaderRaw::~MnistLoaderRaw() {
-    LOG_INFO << "MnistLoaderRaw destroying...";
+    // LOG_INFO << "MnistLoaderRaw destroying...";
 
     // 释放训练集内存
     free_dataset(train_set_);
@@ -56,7 +56,7 @@ MnistLoaderRaw::~MnistLoaderRaw() {
     // 释放验证集内存
     free_dataset(val_set_);
 
-    LOG_INFO << "MnistLoaderRaw destroyed";
+    // LOG_INFO << "MnistLoaderRaw destroyed";
 }
 
 // =============================================================================
@@ -94,8 +94,8 @@ uint8_t* MnistLoaderRaw::allocate_aligned_memory(size_t size) {
 }
 
 void MnistLoaderRaw::free_dataset(Dataset& ds) {
-    LOG_INFO << "Freeing dataset: "
-             << (ds.is_train ? "train" : "val");
+    // LOG_INFO << "Freeing dataset: "
+    //          << (ds.is_train ? "train" : "val");
 
     if (ds.labels_region != nullptr) {
 #ifdef _WIN32
@@ -118,13 +118,13 @@ void MnistLoaderRaw::configure(int num_load_workers, int num_preproc_workers,
                                 const std::string& val_path,
                                 bool shuffle_train, bool shuffle_val,
                                 bool skip_first, bool verify_crc) {
-    LOG_INFO << "Configuring MnistLoaderRaw";
-    LOG_INFO << "  Preprocessor workers (M): " << num_preproc_workers;
-    LOG_INFO << "  Train path: " << train_path;
-    LOG_INFO << "  Val path: " << val_path;
-    LOG_INFO << "  Shuffle train: " << (shuffle_train ? "true" : "false");
-    LOG_INFO << "  Shuffle val: " << (shuffle_val ? "true" : "false");
-    LOG_INFO << "  Verify files: " << (verify_crc ? "true" : "false");
+    // LOG_INFO << "Configuring MnistLoaderRaw";
+    // LOG_INFO << "  Preprocessor workers (M): " << num_preproc_workers;
+    // LOG_INFO << "  Train path: " << train_path;
+    // LOG_INFO << "  Val path: " << val_path;
+    // LOG_INFO << "  Shuffle train: " << (shuffle_train ? "true" : "false");
+    // LOG_INFO << "  Shuffle val: " << (shuffle_val ? "true" : "false");
+    // LOG_INFO << "  Verify files: " << (verify_crc ? "true" : "false");
 
     // 参数验证（num_load_workers参数未使用，静默忽略）
     (void)num_load_workers;  // 标记为未使用，避免编译器警告
@@ -163,7 +163,7 @@ void MnistLoaderRaw::configure(int num_load_workers, int num_preproc_workers,
         }
     }
 
-    LOG_INFO << "Configuration completed";
+    // LOG_INFO << "Configuration completed";
 }
 
 void MnistLoaderRaw::set_train_mode(LoadMode mode) {
@@ -194,7 +194,7 @@ void MnistLoaderRaw::begin_epoch(int epoch_id, bool is_train) {
 
     // 2. 懒加载：检查是否已加载
     if (current_set_->labels_region == nullptr) {
-        LOG_INFO << "Dataset not loaded, loading now";
+        // LOG_INFO << "Dataset not loaded, loading now";
         load_dataset_fully(*current_set_);
     }
 
@@ -329,8 +329,8 @@ bool MnistLoaderRaw::get_next_sample(
 // =============================================================================
 
 void MnistLoaderRaw::load_dataset_fully(Dataset& ds) {
-    LOG_INFO << "Loading " << (ds.is_train ? "train" : "val")
-             << " set (RAW format): " << ds.file_path;
+    // LOG_INFO << "Loading " << (ds.is_train ? "train" : "val")
+    //          << " set (RAW format): " << ds.file_path;
 
     auto start = std::chrono::high_resolution_clock::now();
 
@@ -339,8 +339,8 @@ void MnistLoaderRaw::load_dataset_fully(Dataset& ds) {
     std::string image_path = ds.file_path + "/" + prefix + "-images-idx3-ubyte";
     std::string label_path = ds.file_path + "/" + prefix + "-labels-idx1-ubyte";
 
-    LOG_INFO << "  Image file: " << image_path;
-    LOG_INFO << "  Label file: " << label_path;
+    // LOG_INFO << "  Image file: " << image_path;
+    // LOG_INFO << "  Label file: " << label_path;
 
     // 2. 读取标签文件
     std::ifstream label_file(label_path, std::ios::binary);
@@ -366,8 +366,8 @@ void MnistLoaderRaw::load_dataset_fully(Dataset& ds) {
     }
 
     size_t num_samples = label_header.num_items;
-    LOG_INFO << "  Label file magic: " << label_header.magic;
-    LOG_INFO << "  Number of labels: " << num_samples;
+    // LOG_INFO << "  Label file magic: " << label_header.magic;
+    // LOG_INFO << "  Number of labels: " << num_samples;
 
     // 读取标签数据
     std::vector<uint8_t> labels(num_samples);
@@ -413,8 +413,8 @@ void MnistLoaderRaw::load_dataset_fully(Dataset& ds) {
                       << ", labels=" << num_samples);
     }
 
-    LOG_INFO << "  Image file magic: " << image_header.magic;
-    LOG_INFO << "  Image size: " << image_header.rows << "x" << image_header.cols;
+    // LOG_INFO << "  Image file magic: " << image_header.magic;
+    // LOG_INFO << "  Image size: " << image_header.rows << "x" << image_header.cols;
 
     // 读取图像数据（已经是NHWC格式）
     size_t image_bytes = num_samples * 28 * 28;
@@ -432,9 +432,9 @@ void MnistLoaderRaw::load_dataset_fully(Dataset& ds) {
     ds.data_size = labels_size + images_size;
     ds.num_samples = num_samples;
 
-    LOG_INFO << "  Samples: " << num_samples;
-    LOG_INFO << "  Labels: " << (labels_size / 1024.0) << " KB";
-    LOG_INFO << "  Images: " << (images_size / 1024.0 / 1024.0) << " MB";
+    // LOG_INFO << "  Samples: " << num_samples;
+    // LOG_INFO << "  Labels: " << (labels_size / 1024.0) << " KB";
+    // LOG_INFO << "  Images: " << (images_size / 1024.0 / 1024.0) << " MB";
 
     // 5. 分配内存
     uint8_t* full_data = allocate_aligned_memory(ds.data_size);
@@ -451,8 +451,8 @@ void MnistLoaderRaw::load_dataset_fully(Dataset& ds) {
     double duration = std::chrono::duration<double>(end - start).count();
 
     double bandwidth = (ds.data_size / (1024.0 * 1024.0)) / duration;
-    LOG_INFO << "Loading completed in " << duration << " seconds";
-    LOG_INFO << "Average bandwidth: " << bandwidth << " MB/s";
+    // LOG_INFO << "Loading completed in " << duration << " seconds";
+    // LOG_INFO << "Average bandwidth: " << bandwidth << " MB/s";
 }
 
 // =============================================================================
@@ -468,7 +468,7 @@ void MnistLoaderRaw::register_sample_info(Dataset& ds, bool is_train) {
         return;
     }
 
-    LOG_INFO << "Registering SampleInfo for " << (is_train ? "train" : "val") << " set";
+    // LOG_INFO << "Registering SampleInfo for " << (is_train ? "train" : "val") << " set";
 
     // 分配空间
     global_info.resize(ds.num_samples);
@@ -483,7 +483,7 @@ void MnistLoaderRaw::register_sample_info(Dataset& ds, bool is_train) {
     // 标记已登记
     registered = true;
 
-    LOG_INFO << "SampleInfo registration completed: " << ds.num_samples << " samples";
+    // LOG_INFO << "SampleInfo registration completed: " << ds.num_samples << " samples";
 }
 
 void MnistLoaderRaw::perform_global_shuffle(std::vector<SampleInfo>& global_info, int epoch_id) {

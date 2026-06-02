@@ -290,12 +290,12 @@ void TransferStation::configure(
     buffer_labels_[1] = reinterpret_cast<int32_t*>(base + per_zone);
     buffer_data_[1]   = base + per_zone + label_aligned_;  // 跳过B区的labels区
 
-    LOG_INFO << "[EB#" << engine_id_ << "] Using StagingBufferPool RANK " << engine_id_
-             << ": per_zone=" << per_zone << ", base=" << static_cast<void*>(base);
+    // LOG_INFO << "[EB#" << engine_id_ << "] Using StagingBufferPool RANK " << engine_id_
+    //          << ": per_zone=" << per_zone << ", base=" << static_cast<void*>(base);
 
-    LOG_INFO << "[EB#" << engine_id_ << "] Before staging_memory_numa_node call";
-    int numa_node = GlobalRegistry::instance().staging_memory_numa_node(engine_id_);
-    LOG_INFO << "[EB#" << engine_id_ << "] After staging_memory_numa_node call, numa_node=" << numa_node;
+    // LOG_INFO << "[EB#" << engine_id_ << "] Before staging_memory_numa_node call";
+    // int numa_node = GlobalRegistry::instance().staging_memory_numa_node(engine_id_);
+    // LOG_INFO << "[EB#" << engine_id_ << "] After staging_memory_numa_node call, numa_node=" << numa_node;
 
     std::string worker_list;
     for (int w = 0; w < num_workers_per_engine_; ++w) {
@@ -303,17 +303,17 @@ void TransferStation::configure(
         worker_list += std::to_string(engine_id_ + w * world_size_);
     }
 
-    std::cout << "[StagingDebug] TransferStation configured: "
-                 << "engine_id=" << engine_id_ << ", "
-                 << "numa_node=" << numa_node << ", "
-                 << "workers_per_engine=" << num_workers_per_engine << std::endl;
-    std::cout << "[StagingDebug]   associated_workers=[" << worker_list << "]" << std::endl;
-    std::cout << "[StagingDebug]   Zone A: labels=" << static_cast<void*>(buffer_labels_[0])
-                 << ", data=" << static_cast<void*>(buffer_data_[0]) << std::endl;
-    std::cout << "[StagingDebug]   Zone B: labels=" << static_cast<void*>(buffer_labels_[1])
-                 << ", data=" << static_cast<void*>(buffer_data_[1]) << std::endl;
-    std::cout << "[StagingDebug]   transfer_size=" << bytes_per_transfer_ << "B"
-                 << " (labels=" << label_aligned_ << "B, data=" << data_aligned_ << "B)" << std::endl;
+    // std::cout << "[StagingDebug] TransferStation configured: "
+    //              << "engine_id=" << engine_id_ << ", "
+    //              << "numa_node=" << numa_node << ", "
+    //              << "workers_per_engine=" << num_workers_per_engine << std::endl;
+    // std::cout << "[StagingDebug]   associated_workers=[" << worker_list << "]" << std::endl;
+    // std::cout << "[StagingDebug]   Zone A: labels=" << static_cast<void*>(buffer_labels_[0])
+    //              << ", data=" << static_cast<void*>(buffer_data_[0]) << std::endl;
+    // std::cout << "[StagingDebug]   Zone B: labels=" << static_cast<void*>(buffer_labels_[1])
+    //              << ", data=" << static_cast<void*>(buffer_data_[1]) << std::endl;
+    // std::cout << "[StagingDebug]   transfer_size=" << bytes_per_transfer_ << "B"
+    //              << " (labels=" << label_aligned_ << "B, data=" << data_aligned_ << "B)" << std::endl;
 
     reset();
 }
@@ -855,12 +855,12 @@ void TransferStation::execute_transfer_locked(int samples_count, bool fill_befor
 #ifdef TRANSFER_STATION_SAVE_FIRST_IMAGE
 void TransferStation::save_first_image() {
     // 【调试】打印当前分辨率和sample_bytes
-    LOG_INFO << "[EB#" << engine_id_ << "] save_first_image START: current_resolution_=" << current_resolution_
-             << ", current_sample_bytes_=" << current_sample_bytes_
-             << ", num_color_channels_=" << num_color_channels_;
+    // LOG_INFO << "[EB#" << engine_id_ << "] save_first_image START: current_resolution_=" << current_resolution_
+    //          << ", current_sample_bytes_=" << current_sample_bytes_
+    //          << ", num_color_channels_=" << num_color_channels_;
 
     const uint8_t* first_sample_data = buffer_data_[0];
-    LOG_INFO << "[EB#" << engine_id_ << "] buffer_data_[0] ptr=" << static_cast<const void*>(first_sample_data);
+    // LOG_INFO << "[EB#" << engine_id_ << "] buffer_data_[0] ptr=" << static_cast<const void*>(first_sample_data);
 
     // 图像参数
     const int width = current_resolution_;
@@ -888,13 +888,13 @@ void TransferStation::save_first_image() {
     }
 
     // 使用TurboJPEG保存图像
-    LOG_INFO << "[EB#" << engine_id_ << "] Initializing TurboJPEG...";
+    // LOG_INFO << "[EB#" << engine_id_ << "] Initializing TurboJPEG...";
     tjhandle tj = tj3Init(TJINIT_COMPRESS);
     if (!tj) {
         LOG_ERROR << "[EB#" << engine_id_ << "] Failed to initialize TurboJPEG for compression";
         return;
     }
-    LOG_INFO << "[EB#" << engine_id_ << "] TurboJPEG initialized";
+    // LOG_INFO << "[EB#" << engine_id_ << "] TurboJPEG initialized";
 
     // 设置压缩质量和子采样
     const int jpeg_quality = 90;  // 默认质量
@@ -903,17 +903,17 @@ void TransferStation::save_first_image() {
     // 根据通道数选择子采样方式
     int subsamp = (channels == 1) ? TJSAMP_GRAY : TJSAMP_444;
     tj3Set(tj, TJPARAM_SUBSAMP, subsamp);
-    LOG_INFO << "[EB#" << engine_id_ << "] JPEG params: quality=" << jpeg_quality << ", subsamp=" << subsamp;
+    // LOG_INFO << "[EB#" << engine_id_ << "] JPEG params: quality=" << jpeg_quality << ", subsamp=" << subsamp;
 
     // 估算JPEG buffer大小
     size_t jpeg_size = tj3JPEGBufSize(width, height, subsamp);
-    LOG_INFO << "[EB#" << engine_id_ << "] Estimated JPEG size: " << jpeg_size << " bytes";
+    // LOG_INFO << "[EB#" << engine_id_ << "] Estimated JPEG size: " << jpeg_size << " bytes";
 
     // 压缩图像（TurboJPEG 3.x API）
     unsigned char* jpeg_buffer = nullptr;
     int pixel_format = (channels == 1) ? TJPF_GRAY : TJPF_RGB;
-    LOG_INFO << "[EB#" << engine_id_ << "] Calling tj3Compress8: width=" << width << ", height=" << height
-             << ", stride=" << stride << ", pixel_format=" << pixel_format;
+    // LOG_INFO << "[EB#" << engine_id_ << "] Calling tj3Compress8: width=" << width << ", height=" << height
+    //          << ", stride=" << stride << ", pixel_format=" << pixel_format;
 
     if (tj3Compress8(tj, first_sample_data, width, stride, height,
                      pixel_format, &jpeg_buffer, &jpeg_size) != 0) {
@@ -945,9 +945,9 @@ void TransferStation::save_first_image() {
         return;
     }
 
-    LOG_INFO << "[EB#" << engine_id_ << "] Saved first image: " << file_path
-             << ", size: " << width << "x" << height << "x" << channels
-             << ", jpeg_size: " << jpeg_size << " bytes";
+    // LOG_INFO << "[EB#" << engine_id_ << "] Saved first image: " << file_path
+    //          << ", size: " << width << "x" << height << "x" << channels
+    //          << ", jpeg_size: " << jpeg_size << " bytes";
 }
 #endif  // #ifdef TRANSFER_STATION_SAVE_FIRST_IMAGE
 

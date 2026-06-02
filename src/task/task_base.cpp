@@ -308,12 +308,12 @@ void TaskBase::compile_impl(bool debug_mode) {
                 cudaSetDevice(ctx.device_id());
                 cudaMemcpy(&scaling_val, ctx.ptr_at(b.scaling), sizeof(float), cudaMemcpyDeviceToHost);
                 cudaMemcpy(&lr_val, ctx.ptr_at(b.lr), sizeof(float), cudaMemcpyDeviceToHost);
-                fprintf(stderr, "[INIT-CHECK] rank=%d scaling=%f (id=%d, offset=%llu, ptr=%p) lr=%f (id=%d)\n",
-                       rank, scaling_val, b.scaling,
-                       (unsigned long long)active_memory_plan_->get_dtensor(b.scaling).offset(),
-                       (void*)ctx.ptr_at(b.scaling),
-                       lr_val, b.lr);
-                fflush(stderr);
+                // fprintf(stderr, "[INIT-CHECK] rank=%d scaling=%f (id=%d, offset=%llu, ptr=%p) lr=%f (id=%d)\n",
+                //        rank, scaling_val, b.scaling,
+                //        (unsigned long long)active_memory_plan_->get_dtensor(b.scaling).offset(),
+                //        (void*)ctx.ptr_at(b.scaling),
+                //        lr_val, b.lr);
+                // fflush(stderr);
             }
             // ==============================================================
             dl->lr_pinned_.resize(num_gpus_);
@@ -326,22 +326,22 @@ void TaskBase::compile_impl(bool debug_mode) {
         #endif
 
         // ========== 诊断打印：ArchPlan / MemoryPlan / ComputationGraph ==========
-        LOG_INFO << "\n========== COMPILE DIAGNOSTICS ==========";
-        LOG_INFO << "--- ArchPlan ---";
-        LOG_INFO << dl->arch_plan_.to_string();
-        LOG_INFO << "--- MemoryPlan ---";
+        // LOG_INFO << "\n========== COMPILE DIAGNOSTICS ==========";
+        // LOG_INFO << "--- ArchPlan ---";
+        // LOG_INFO << dl->arch_plan_.to_string();
+        // LOG_INFO << "--- MemoryPlan ---";
         if (dl->active_memory_plan_) {
-            LOG_INFO << dl->active_memory_plan_->dump_layout();
+            // LOG_INFO << dl->active_memory_plan_->dump_layout();
         }
-        LOG_INFO << "--- Train ComputationGraph ---";
+        // LOG_INFO << "--- Train ComputationGraph ---";
         if (dl->train_cg_) {
-            LOG_INFO << dl->train_cg_->debug_dump(true);
+            // LOG_INFO << dl->train_cg_->debug_dump(true);
         }
-        LOG_INFO << "--- Inference ComputationGraph ---";
+        // LOG_INFO << "--- Inference ComputationGraph ---";
         if (dl->infer_cg_) {
-            LOG_INFO << dl->infer_cg_->debug_dump(true);
+            // LOG_INFO << dl->infer_cg_->debug_dump(true);
         }
-        LOG_INFO << "=========================================\n";
+        // LOG_INFO << "=========================================\n";
     }
 }
 
@@ -1380,13 +1380,13 @@ void TaskBase::init_all() {
     }
 
     // 第 1 步：标准初始化全部 DTensor（按各自的 init_config）
-    LOG_INFO << "[DEBUG] init_all: dtensors count=" << active_memory_plan_->dtensors().size();
+    // LOG_INFO << "[DEBUG] init_all: dtensors count=" << active_memory_plan_->dtensors().size();
     for (size_t i = 0; i < active_memory_plan_->dtensors().size(); ++i) {
         const auto& dt = active_memory_plan_->dtensors()[i];
-        LOG_INFO << "[DEBUG] dtensor[" << i << "] id=" << dt.id
-                 << " region=" << static_cast<int>(dt.region)
-                 << " shape=" << dt.shape.to_string()
-                 << " init=" << static_cast<int>(dt.init_config.kind);
+        // LOG_INFO << "[DEBUG] dtensor[" << i << "] id=" << dt.id
+        //          << " region=" << static_cast<int>(dt.region)
+        //          << " shape=" << dt.shape.to_string()
+        //          << " init=" << static_cast<int>(dt.init_config.kind);
     }
     for (const auto& dtensor : active_memory_plan_->dtensors()) {
         init(dtensor);
@@ -1597,13 +1597,13 @@ void TaskBase::compile_alloc_hardware() {
             for (size_t i = 0; i < gpu_ids.size(); ++i) {
                 backend_->contexts[i]->set_nccl_comm(comms[i]);
             }
-            TR_LOG_INFO("task") << "NCCL initialized for " << gpu_ids.size() << " GPUs";
+            // TR_LOG_INFO("task") << "NCCL initialized for " << gpu_ids.size() << " GPUs";
         }
 #endif
 
-        TR_LOG_INFO("task") << "Allocated " << gpu_ids.size()
-                            << " GPU device context(s), "
-                            << (total_bytes / (1024.0 * 1024.0)) << " MB each";
+        // TR_LOG_INFO("task") << "Allocated " << gpu_ids.size()
+        //                     << " GPU device context(s), "
+        //                     << (total_bytes / (1024.0 * 1024.0)) << " MB each";
     } else {
         // CPU 模式：分配 mimalloc 内存池
         ArenaKeeper::instance().initialize(false, {0}, total_bytes);
