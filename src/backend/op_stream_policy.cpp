@@ -77,6 +77,30 @@ StreamKind get_op_default_stream(ComputeOp op) noexcept {
         case ComputeOp::ADAM_BIAS_CORRECTION:
             return StreamKind::UPDATE;
 
+        // ===== LARS 原有（默认 COMP_1）=====
+        case ComputeOp::LARS_COMPUTE_TRUST_RATIO:
+        case ComputeOp::LARS_UPDATE:
+        case ComputeOp::LARS_NESTEROV_UPDATE:
+            return StreamKind::COMP_1;
+
+        // ===== LARS FC 层流感知变体 → COMP_1 =====
+        case ComputeOp::LARS_COMPUTE_TRUST_RATIO_FC:
+        case ComputeOp::LARS_UPDATE_FC:
+        case ComputeOp::LARS_NESTEROV_UPDATE_FC:
+            return StreamKind::COMP_1;
+
+        // ===== LARS 首层卷积流感知变体 → COMP_2 =====
+        case ComputeOp::LARS_COMPUTE_TRUST_RATIO_FIRST:
+        case ComputeOp::LARS_UPDATE_FIRST:
+        case ComputeOp::LARS_NESTEROV_UPDATE_FIRST:
+            return StreamKind::COMP_2;
+
+        // ===== LARS 深层卷积流感知变体 → COMP_3 =====
+        case ComputeOp::LARS_COMPUTE_TRUST_RATIO_DEEP:
+        case ComputeOp::LARS_UPDATE_DEEP:
+        case ComputeOp::LARS_NESTEROV_UPDATE_DEEP:
+            return StreamKind::COMP_3;
+
         default:
             return StreamKind::COMP_1;
     }

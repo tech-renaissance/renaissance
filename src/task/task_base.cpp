@@ -290,6 +290,12 @@ void TaskBase::compile_impl(bool debug_mode) {
 
         #ifdef TR_USE_CUDA
         if (GlobalRegistry::instance().using_gpu()) {
+            // ===== 为所有 variant memory plan 执行 init_all() =====
+            // 确保每个 variant 的 optimizer scalars (beta/wd/tc/eps/beta2) 都被正确初始化，
+            // 而不是仅依赖 cudaMemset 清零后的零值。
+            dl->init_all_variant_memory_plans();
+            // ======================================================
+
             // ===== init_all() 之后：为所有 variant 写入运行时标量（batch_size 等）=====
             dl->init_variant_scalars();
             // =========================================================

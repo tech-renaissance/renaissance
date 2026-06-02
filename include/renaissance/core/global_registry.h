@@ -942,6 +942,21 @@ public:
      */
     [[nodiscard]] bool has_label_smoothing_set() const;
 
+    void set_momentum(float value)       { optimizer_momentum_.store(value); }
+    [[nodiscard]] float momentum() const { return optimizer_momentum_.load(); }
+
+    void set_weight_decay(float value)       { optimizer_weight_decay_.store(value); }
+    [[nodiscard]] float weight_decay() const { return optimizer_weight_decay_.load(); }
+
+    void set_trust_coefficient(float value)       { optimizer_trust_coefficient_.store(value); }
+    [[nodiscard]] float trust_coefficient() const { return optimizer_trust_coefficient_.load(); }
+
+    void set_eps(float value)       { optimizer_eps_.store(value); }
+    [[nodiscard]] float eps() const { return optimizer_eps_.load(); }
+
+    void set_beta2(float value)       { optimizer_beta2_.store(value); }
+    [[nodiscard]] float beta2() const { return optimizer_beta2_.load(); }
+
     // =========================================================================
     // 渐进式分辨率参数getter方法
     // =========================================================================
@@ -1170,6 +1185,12 @@ private:
 
     std::atomic<float> fixed_label_smoothing_{0.0f};      ///< 标签平滑系数 [0, 0.2]
     std::atomic<bool>  fixed_label_smoothing_set_{false}; ///< 是否已被显式设置
+
+    std::atomic<float> optimizer_momentum_{0.9f};
+    std::atomic<float> optimizer_weight_decay_{0.0f};
+    std::atomic<float> optimizer_trust_coefficient_{0.001f};
+    std::atomic<float> optimizer_eps_{0.0f};
+    std::atomic<float> optimizer_beta2_{0.999f};
 
     // =========================================================================
     // 渐进式分辨率参数

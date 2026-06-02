@@ -11,10 +11,10 @@
  * - 在零框架改动前提下达到最高准确率
  *
  * 核心策略：
- * - 网络结构：1024→512→256（比AWY_FINAL_K更宽，补偿无Label Smoothing）
+ * - 网络结构：1024→512→256（比AWY_FINAL_K更宽，配合Label Smoothing=0.1）
  * - 激活函数：ReLU（全票通过的最优选择）
  * - Bias：true（AWY_FINAL选择，补偿无BN）
- * - 优化器：AdamW with weight_decay=1e-4（中间值，平衡正则化）
+ * - 优化器：LARS with weight_decay=5e-5（MLPerf Closed配置）
  * - 学习率：CosineAnnealing+warmup(5)（AWY_FINAL选择，更稳定）
  * - 数据增强：完整6种预处理链（前辈验证的最强组合）
  * - 训练轮数：100 epochs（平衡点）
@@ -172,19 +172,18 @@ int main(int argc, char** argv) {
 
         .total_epochs(100)                     // 充分训练轮数
 
-        // 优化器：AdamW，采用AWY_FINAL的weight_decay=1e-4
-        .optimizer(AdamW()
-            .beta1(0.9f)                      // 标准动量参数
-            .beta2(0.999f)                    // 标准二阶矩参数
-            .eps(1e-8f)                       // 数值稳定性
-            .weight_decay(1e-4f))             // 适中的权重衰减
+        // 优化器：LARS（MLPerf Closed配置）
+        .optimizer(LARS()
+            .momentum(0.9f)
+            .weight_decay(5e-5f)
+            .trust_coefficient(0.001f)
+            .eps(0.0f))
 
-        // 学习率调度：CosineAnnealing + warmup（AWY_FINAL选择）
         .scheduler(CosineAnnealingLR()
-            .base_lr(0.001f)                  // AdamW标准初始学习率
-            .eta_min(1e-6f)                   // 最小学习率
-            .warmup(5)                        // 5轮预热
-            .step_by_epoch())                // 按epoch更新（历史基准配置）
+            .base_lr(0.5f)
+            .eta_min(1e-6f)
+            .warmup(5)
+            .step_by_epoch())
 
         .validate_every(1, 1)                // 每轮验证
         .early_stop_by_top1(0.999f)          // 极高目标早停
@@ -197,7 +196,7 @@ int main(int argc, char** argv) {
               << "=====================================\n"
               << "Network: 784→1024→512→256→10\n"
               << "Activation: " << cfg.activation << "\n"
-              << "Optimizer: AdamW (wd=1e-4)\n"
+              << "Optimizer: LARS (m=0.9, wd=5e-5, tc=0.001, eps=0.0)\n"
               << "Scheduler: CosineAnnealing + Warmup(5)\n"
               << "Augmentation: Pad+Rotation+Scale+Crop+Autocontrast+Erasing\n"
               << "Training: 100 epochs, batch_size=128\n"

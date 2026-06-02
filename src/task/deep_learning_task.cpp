@@ -45,6 +45,9 @@ enum class GraphSlot : uint8_t {
     DEEP_ALLREDUCE,
     FIRST_LAYER_ALLREDUCE,
     WEIGHT_UPDATE,
+    LARS_FC_UPDATE,
+    LARS_FIRST_CONV_UPDATE,
+    LARS_DEEP_CONV_UPDATE,
     EMA_UPDATE,
     CAST_DEEP_GRAD,
     CAST_FIRST_GRAD,
@@ -95,6 +98,11 @@ DeepLearningTask& DeepLearningTask::optimizer(const LARS& opt) {
     opt_cfg_ = opt;
     has_optimizer_ = true;
     GlobalRegistry::instance().set_optimizer_kind(opt.kind());
+    const auto& cfg = opt.config();
+    GlobalRegistry::instance().set_momentum(cfg.momentum);
+    GlobalRegistry::instance().set_weight_decay(cfg.weight_decay);
+    GlobalRegistry::instance().set_trust_coefficient(cfg.trust_coefficient);
+    GlobalRegistry::instance().set_eps(cfg.eps);
     return *this;
 }
 
@@ -104,6 +112,9 @@ DeepLearningTask& DeepLearningTask::optimizer(const SGD& opt) {
     opt_cfg_ = opt;
     has_optimizer_ = true;
     GlobalRegistry::instance().set_optimizer_kind(opt.kind());
+    const auto& cfg = opt.config();
+    GlobalRegistry::instance().set_momentum(cfg.momentum);
+    GlobalRegistry::instance().set_weight_decay(cfg.weight_decay);
     return *this;
 }
 
@@ -113,6 +124,11 @@ DeepLearningTask& DeepLearningTask::optimizer(const Adam& opt) {
     opt_cfg_ = opt;
     has_optimizer_ = true;
     GlobalRegistry::instance().set_optimizer_kind(OptimizerKind::ADAM);
+    const auto& cfg = opt.config();
+    GlobalRegistry::instance().set_momentum(cfg.beta1);
+    GlobalRegistry::instance().set_beta2(cfg.beta2);
+    GlobalRegistry::instance().set_weight_decay(cfg.weight_decay);
+    GlobalRegistry::instance().set_eps(cfg.eps);
     return *this;
 }
 
@@ -122,6 +138,11 @@ DeepLearningTask& DeepLearningTask::optimizer(const AdamW& opt) {
     opt_cfg_ = opt;
     has_optimizer_ = true;
     GlobalRegistry::instance().set_optimizer_kind(OptimizerKind::ADAMW);
+    const auto& cfg = opt.config();
+    GlobalRegistry::instance().set_momentum(cfg.beta1);
+    GlobalRegistry::instance().set_beta2(cfg.beta2);
+    GlobalRegistry::instance().set_weight_decay(cfg.weight_decay);
+    GlobalRegistry::instance().set_eps(cfg.eps);
     return *this;
 }
 
@@ -613,6 +634,12 @@ StreamKind DeepLearningTask::stream_for(GraphId gid) {
         case GraphId::VAL_RESULT_COMM:
         case GraphId::CLEAR_METRICS:
             return StreamKind::UPDATE;
+        case GraphId::LARS_FC_OPT:
+            return StreamKind::COMP_1;
+        case GraphId::LARS_FIRST_CONV_OPT:
+            return StreamKind::COMP_2;
+        case GraphId::LARS_DEEP_CONV_OPT:
+            return StreamKind::COMP_3;
         default:                        return StreamKind::COMP_1;
     }
 }
@@ -631,6 +658,27 @@ float DeepLearningTask::fetch_lr_for_batch(int batch_id) const {
             }
         }
     }, sched_cfg_);
+}
+
+void DeepLearningTask::init_all_variant_memory_plans() {
+    for (size_t i = 0; i < GraphAtlas::kMaxVariants; ++i) {
+        if (!variant_memory_plans_[i]) continue;
+        if (i == 0) continue;
+
+        MemoryPlan* old_mp = active_memory_plan_;
+        active_memory_plan_ = variant_memory_plans_[i].get();
+
+        for (int rank = 0; rank < num_gpus_; ++rank) {
+            context(rank).set_memory_plan(active_memory_plan_);
+        }
+
+        init_all();
+
+        active_memory_plan_ = old_mp;
+        for (int rank = 0; rank < num_gpus_; ++rank) {
+            context(rank).set_memory_plan(old_mp);
+        }
+    }
 }
 
 void DeepLearningTask::init_variant_scalars() {
@@ -723,6 +771,9 @@ void DeepLearningTask::build_exec_table() {
                 g[S(GraphSlot::DEEP_ALLREDUCE)]   = resolve(GraphId::DEEP_COMM, rank, v);
                 g[S(GraphSlot::FIRST_LAYER_ALLREDUCE)] = resolve(GraphId::FIRST_COMM, rank, v);
                 g[S(GraphSlot::WEIGHT_UPDATE)]    = resolve(GraphId::OPTIMIZER, rank, v);
+                g[S(GraphSlot::LARS_FC_UPDATE)]         = resolve(GraphId::LARS_FC_OPT, rank, v);
+                g[S(GraphSlot::LARS_FIRST_CONV_UPDATE)] = resolve(GraphId::LARS_FIRST_CONV_OPT, rank, v);
+                g[S(GraphSlot::LARS_DEEP_CONV_UPDATE)]  = resolve(GraphId::LARS_DEEP_CONV_OPT, rank, v);
                 g[S(GraphSlot::EMA_UPDATE)]       = resolve(GraphId::EMA_UPDATE, rank, v);
                 g[S(GraphSlot::CAST_DEEP_GRAD)]     = resolve(GraphId::CAST_DEEP_GRAD_FP16_TO_FP32, rank, v);
                 g[S(GraphSlot::CAST_FIRST_GRAD)]    = resolve(GraphId::CAST_FIRST_GRAD_FP16_TO_FP32, rank, v);
@@ -1042,6 +1093,9 @@ float DeepLearningTask::run_train_epoch_gpu() {
                 auto n_dar     = g_n[S(GraphSlot::DEEP_ALLREDUCE)];
                 auto n_far     = g_n[S(GraphSlot::FIRST_LAYER_ALLREDUCE)];
                 auto n_wu      = g_n[S(GraphSlot::WEIGHT_UPDATE)];
+                auto n_lars_fc   = g_n[S(GraphSlot::LARS_FC_UPDATE)];
+                auto n_lars_fc2  = g_n[S(GraphSlot::LARS_FIRST_CONV_UPDATE)];
+                auto n_lars_dc   = g_n[S(GraphSlot::LARS_DEEP_CONV_UPDATE)];
                 auto n_cdg     = g_n[S(GraphSlot::CAST_DEEP_GRAD)];
                 auto n_cfg     = g_n[S(GraphSlot::CAST_FIRST_GRAD)];
                 auto n_ncg     = g_n[S(GraphSlot::NAN_CHECK_GRAD_SCALE)];
@@ -1155,7 +1209,11 @@ float DeepLearningTask::run_train_epoch_gpu() {
                     if (using_amp && n_ncg) { cudaGraphLaunch(n_ncg, s_up); sync_up(); }
 
                     if (n_wu) cudaGraphLaunch(n_wu, s_up);
+                    if (n_lars_fc)  cudaGraphLaunch(n_lars_fc,  s_c1);
+                    if (n_lars_fc2) cudaGraphLaunch(n_lars_fc2, s_c2);
+                    if (n_lars_dc)  cudaGraphLaunch(n_lars_dc,  s_c3);
                     sync_up();
+                    sync_comp();
                     if (using_amp && n_cm) { cudaGraphLaunch(n_cm, s_up); sync_up(); }
                 }
 
@@ -1203,7 +1261,11 @@ float DeepLearningTask::run_train_epoch_gpu() {
                     if (using_amp && n_ncg) { cudaGraphLaunch(n_ncg, s_up); sync_up(); }
 
                     if (n_wu) cudaGraphLaunch(n_wu, s_up);
+                    if (n_lars_fc)  cudaGraphLaunch(n_lars_fc,  s_c1);
+                    if (n_lars_fc2) cudaGraphLaunch(n_lars_fc2, s_c2);
+                    if (n_lars_dc)  cudaGraphLaunch(n_lars_dc,  s_c3);
                     sync_up();
+                    sync_comp();
                     if (using_amp && n_cm) { cudaGraphLaunch(n_cm, s_up); sync_up(); }
                 }
 
@@ -1439,6 +1501,10 @@ float DeepLearningTask::run_train_epoch_cpu() {
     int32_t idx_opt    = idx_for(GraphId::OPTIMIZER, 0);
     int32_t idx_clear  = idx_for(GraphId::CLEAR_METRICS, 0);
 
+    int32_t idx_lars_fc  = idx_for(GraphId::LARS_FC_OPT, 0);
+    int32_t idx_lars_fc2 = idx_for(GraphId::LARS_FIRST_CONV_OPT, 0);
+    int32_t idx_lars_dc  = idx_for(GraphId::LARS_DEEP_CONV_OPT, 0);
+
     int32_t idx_deep_nb  = idx_for(GraphId::DEEP_FWD_BWD, v_base);
     int32_t idx_fwd_a_nb = idx_for(GraphId::FIRST_LAYER_FWD_A, v_base);
     int32_t idx_fwd_b_nb = idx_for(GraphId::FIRST_LAYER_FWD_B, v_base);
@@ -1481,6 +1547,9 @@ float DeepLearningTask::run_train_epoch_cpu() {
         *static_cast<float*>(lr_ptr) = fetch_lr_for_batch(0);
         launch(idx_far);
         launch(idx_opt);
+        launch(idx_lars_fc);
+        launch(idx_lars_fc2);
+        launch(idx_lars_dc);
 
         float train_loss = 0.0f;
         if (bl.accum_loss >= 0) {
@@ -1520,6 +1589,9 @@ float DeepLearningTask::run_train_epoch_cpu() {
         }
         launch(idx_far);
         launch(idx_opt);
+        launch(idx_lars_fc);
+        launch(idx_lars_fc2);
+        launch(idx_lars_dc);
     }
 
     {
@@ -1545,6 +1617,9 @@ float DeepLearningTask::run_train_epoch_cpu() {
         }
         launch(idx_far);
         launch(idx_opt);
+        launch(idx_lars_fc);
+        launch(idx_lars_fc2);
+        launch(idx_lars_dc);
 
         ctx.set_memory_plan(active_memory_plan_);
     }

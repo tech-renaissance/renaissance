@@ -942,6 +942,7 @@ void MemoryPlan::validate_layer_correspondence() const {
             auto kind = static_cast<OptimizerKind>(opt_raw);
             bool need_m = (kind == OptimizerKind::SGD_MOMENTUM ||
                            kind == OptimizerKind::SGD_NESTEROV ||
+                           kind == OptimizerKind::LARS ||
                            kind == OptimizerKind::LARS_NESTEROV ||
                            kind == OptimizerKind::ADAM ||
                            kind == OptimizerKind::ADAMW);
@@ -960,6 +961,22 @@ void MemoryPlan::validate_layer_correspondence() const {
                              + cnt(R::V_FC_WEIGHT) + cnt(R::V_FIRST_CONV) + cnt(R::V_DEEP_CONV);
                 TR_CHECK(v_cnt == w_fp32, ValueError,
                          "W/V layer count mismatch: " << w_fp32 << " vs " << v_cnt);
+            }
+
+            // N-Series 校验（LARS 专用）
+            bool need_n = (kind == OptimizerKind::LARS ||
+                           kind == OptimizerKind::LARS_NESTEROV);
+            if (need_n) {
+                auto check = [&](Region w_r, Region n_r, const char* name) {
+                    size_t w_cnt = cnt(w_r);
+                    size_t n_cnt = cnt(n_r);
+                    TR_CHECK(w_cnt == n_cnt, ValueError,
+                             "LARS: " << name << " W count=" << w_cnt
+                             << " != N count=" << n_cnt);
+                };
+                check(R::W_FC_WEIGHT,  R::N_FC_WEIGHT,  "FC");
+                check(R::W_FIRST_CONV, R::N_FIRST_CONV, "FirstConv");
+                check(R::W_DEEP_CONV,  R::N_DEEP_CONV,  "DeepConv");
             }
         }
     }

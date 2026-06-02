@@ -17,74 +17,10 @@ try:
 except AttributeError:
     _HAS_AUTOCONTRAST = False
 
-parser = argparse.ArgumentParser(description="PyTorch MNIST MLP Ultimate benchmark")
+parser = argparse.ArgumentParser(description="PyTorch MNIST MLP Ultimate benchmark (eager mode, no compile)")
 parser.add_argument("--cpu", action="store_true", help="Run on CPU (FP32)")
 parser.add_argument("--gpu", action="store_true", help="Run on GPU (FP32)")
 parser.add_argument("--amp", action="store_true", help="Run on GPU with AMP (FP16)")
-
-
-class LARS(optim.Optimizer):
-    """LARS优化器（与CLOSED.py字节级相同，MNIST适配版）"""
-    def __init__(self, params, lr=1.0, momentum=0.9, weight_decay=0.0,
-                 trust_coefficient=0.001, eps=1e-8, nesterov=False):
-        if lr < 0.0:
-            raise ValueError(f"Invalid learning rate: {lr}")
-        if momentum < 0.0:
-            raise ValueError(f"Invalid momentum value: {momentum}")
-        if weight_decay < 0.0:
-            raise ValueError(f"Invalid weight_decay value: {weight_decay}")
-        defaults = dict(lr=lr, momentum=momentum, weight_decay=weight_decay,
-                        trust_coefficient=trust_coefficient, eps=eps, nesterov=nesterov)
-        super(LARS, self).__init__(params, defaults)
-
-    @torch.no_grad()
-    def step(self, closure=None):
-        loss = None
-        if closure is not None:
-            with torch.enable_grad():
-                loss = closure()
-        for group in self.param_groups:
-            weight_decay = group['weight_decay']
-            momentum = group['momentum']
-            trust_coefficient = group['trust_coefficient']
-            eps = group['eps']
-            lr = group['lr']
-            nesterov = group['nesterov']
-            for p in group['params']:
-                if p.grad is None:
-                    continue
-                grad = p.grad.data
-                # Step 1: Trust Ratio（使用原始梯度）
-                if trust_coefficient > 0:
-                    param_norm = torch.norm(p.data)
-                    grad_norm = torch.norm(grad)
-                    _NUMERICAL_EPS = 1e-12
-                    if param_norm > _NUMERICAL_EPS and grad_norm > _NUMERICAL_EPS:
-                        trust_ratio = trust_coefficient * param_norm / (
-                            grad_norm + weight_decay * param_norm + eps
-                        )
-                        trust_ratio = min(trust_ratio, 100.0)
-                    else:
-                        trust_ratio = 1.0
-                else:
-                    trust_ratio = 1.0
-                # Step 2: Weight Decay
-                if weight_decay != 0:
-                    grad = grad.add(p.data, alpha=weight_decay)
-                # Step 3: Momentum
-                param_state = self.state[p]
-                if 'momentum_buffer' not in param_state:
-                    buf = param_state['momentum_buffer'] = torch.clone(grad).detach() * (lr * trust_ratio)
-                else:
-                    buf = param_state['momentum_buffer']
-                    buf.mul_(momentum).add_(grad, alpha=lr * trust_ratio)
-                # Step 4: Nesterov
-                if nesterov:
-                    update = grad.mul(lr * trust_ratio).add(buf, alpha=momentum)
-                else:
-                    update = buf
-                p.data.add_(update, alpha=-1.0)
-        return loss
 
 
 class UltimateMLP(nn.Module):
@@ -105,9 +41,7 @@ class UltimateMLP(nn.Module):
     def _init_weights(self):
         for m in self.modules():
             if isinstance(m, nn.Linear):
-                # Match TR4: Kaiming Uniform (FAN_IN) for ReLU
                 nn.init.kaiming_uniform_(m.weight, a=0, mode='fan_in')
-                # Match TR4: bias is initialized to ZEROS (initializer.cpp is_bias_region -> ZEROS)
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
 
@@ -118,20 +52,12 @@ class UltimateMLP(nn.Module):
 WARMUP_EPOCHS = 5
 TOTAL_EPOCHS  = 100
 ETA_MIN       = 1e-6
-BASE_LR       = 0.001
+BASE_LR       = 0.5  # 提高学习率，LARS通常需要更高学习率
 
 
 def warmup_cosine_lambda(epoch):
-    """
-    Match TR4 CosineAnnealingLR + warmup(5) behaviour exactly.
-    Epoch 1 (epoch=0): lr = 0
-    Epoch 2 (epoch=1): lr = 0.0002
-    ...
-    Epoch 6 (epoch=5): lr = 0.001  (base_lr reached)
-    Epoch 7+          : cosine annealing down to eta_min
-    """
     if epoch < WARMUP_EPOCHS:
-        return epoch / WARMUP_EPOCHS          # 0 -> 0.0, 1 -> 0.2, ..., 4 -> 0.8
+        return epoch / WARMUP_EPOCHS
     progress = (epoch - WARMUP_EPOCHS) / (TOTAL_EPOCHS - WARMUP_EPOCHS)
     cos_val = 0.5 * (1.0 + math.cos(math.pi * progress))
     return (ETA_MIN + (BASE_LR - ETA_MIN) * cos_val) / BASE_LR
@@ -154,7 +80,7 @@ if __name__ == '__main__':
         use_amp = False
 
     print("===========================================", flush=True)
-    print(" PyTorch MNIST MLP Ultimate Benchmark", flush=True)
+    print(" PyTorch MNIST MLP Ultimate (LARS vs TR)", flush=True)
     print("===========================================", flush=True)
     print(f" Mode:       {mode}", flush=True)
     print(f" Device:     {device}", flush=True)
@@ -177,8 +103,6 @@ if __name__ == '__main__':
 
     # -----------------------------------------------------------------------
     # Transforms: match TR4 as closely as possible
-    # TR4 order: Pad -> RandomRotation -> RandomScale -> RandomCrop
-    #            -> RandomAutocontrast -> (ToTensor + Normalize + RandomErasing)
     # -----------------------------------------------------------------------
     train_transform_list = [
         transforms.Pad((2, 2, 2, 2), fill=0),
@@ -205,76 +129,120 @@ if __name__ == '__main__':
 
     pin_mem = (device.type == "cuda")
     train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True,
-                              pin_memory=pin_mem, num_workers=8, persistent_workers=True)
+                              pin_memory=pin_mem, num_workers=4, persistent_workers=False)
     val_loader   = DataLoader(val_set,   batch_size=batch_size, shuffle=False,
-                              pin_memory=pin_mem, num_workers=8, persistent_workers=True)
+                              pin_memory=pin_mem, num_workers=4, persistent_workers=False)
 
     model = UltimateMLP().to(device)
 
-    if hasattr(torch, "compile") and device.type == "cuda":
-        model = torch.compile(model, mode="max-autotune")
-
     criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
-    optimizer = LARS(model.parameters(), lr=BASE_LR,
-                     momentum=0.9, weight_decay=5e-5,
-                     trust_coefficient=0.001, eps=0.0, nesterov=False)
+
+    # MLPerf Closed Division LARS配置
+    MOMENTUM = 0.9
+    WEIGHT_DECAY = 5e-5
+    LARS_TRUST_COEF = 0.001
+    LARS_EPS = 0.0
+
+    # 参数分组：权重使用LARS，BN/bias使用标准SGD
+    weight_params = []
+    bn_bias_params = []
+
+    for name, param in model.named_parameters():
+        if not param.requires_grad:
+            continue
+        # BN层参数或bias参数使用标准SGD（trust_coefficient=0）
+        if 'bn' in name or 'bias' in name or len(param.shape) == 1:
+            bn_bias_params.append(param)
+        else:
+            weight_params.append(param)
+
+    param_groups = [
+        {
+            'params': weight_params,
+            'weight_decay': WEIGHT_DECAY,
+            'trust_coefficient': LARS_TRUST_COEF
+        },
+        {
+            'params': bn_bias_params,
+            'weight_decay': 0.0,
+            'trust_coefficient': 0.0
+        }
+    ]
+
+    # 使用CLOSED.py的LARS实现
+    class LARS(optim.Optimizer):
+        def __init__(self, params, lr=1.0, momentum=0.9, weight_decay=0.0,
+                     trust_coefficient=0.001, eps=1e-8, nesterov=False):
+            defaults = dict(lr=lr, momentum=momentum, weight_decay=weight_decay,
+                           trust_coefficient=trust_coefficient, eps=eps, nesterov=nesterov)
+            super(LARS, self).__init__(params, defaults)
+
+        @torch.no_grad()
+        def step(self, closure=None):
+            loss = None
+            if closure is not None:
+                with torch.enable_grad():
+                    loss = closure()
+
+            for group in self.param_groups:
+                weight_decay = group['weight_decay']
+                momentum = group['momentum']
+                trust_coefficient = group['trust_coefficient']
+                eps = group['eps']
+                lr = group['lr']
+                nesterov = group['nesterov']
+
+                for p in group['params']:
+                    if p.grad is None:
+                        continue
+
+                    grad = p.grad.data
+
+                    # Step 1: 计算Trust Ratio（使用原始梯度）
+                    if trust_coefficient > 0:
+                        param_norm = torch.norm(p.data)
+                        grad_norm = torch.norm(grad)
+
+                        if param_norm > 1e-12 and grad_norm > 1e-12:
+                            # 标准LARS公式
+                            trust_ratio = trust_coefficient * param_norm / (
+                                grad_norm + weight_decay * param_norm + eps
+                            )
+                            trust_ratio = min(trust_ratio, 100.0)
+                        else:
+                            trust_ratio = 1.0
+                    else:
+                        trust_ratio = 1.0
+
+                    # Step 2: 施加Weight Decay
+                    if weight_decay != 0:
+                        grad = grad.add(p.data, alpha=weight_decay)
+
+                    # Step 3: Momentum更新
+                    param_state = self.state[p]
+                    if 'momentum_buffer' not in param_state:
+                        buf = param_state['momentum_buffer'] = torch.clone(grad).detach() * (lr * trust_ratio)
+                    else:
+                        buf = param_state['momentum_buffer']
+                        buf.mul_(momentum).add_(grad, alpha=lr * trust_ratio)
+
+                    # Step 4: Nesterov
+                    if nesterov:
+                        update = grad.mul(lr * trust_ratio).add(buf, alpha=momentum)
+                    else:
+                        update = buf
+
+                    # Step 5: 应用更新
+                    p.data.add_(update, alpha=-1.0)
+
+            return loss
+
+    optimizer = LARS(param_groups, lr=BASE_LR, momentum=MOMENTUM,
+                     weight_decay=0.0, trust_coefficient=LARS_TRUST_COEF,
+                     eps=LARS_EPS, nesterov=False)
     scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=warmup_cosine_lambda)
 
     scaler = torch.amp.GradScaler("cuda") if use_amp else None
-
-    # ====================================================================
-    # WARMUP  (GPU / AMP only)
-    #
-    # Purpose: trigger torch.compile(max-autotune) so compilation finishes
-    #          BEFORE the timed 100-epoch loop starts.
-    # After warmup: re-seed + re-init.  torch.compile FX-graph cache makes
-    #               the second compilation near-instant.
-    # ====================================================================
-    if hasattr(torch, "compile") and device.type == "cuda":
-        print("\n--- Warmup: triggering max-autotune compilation ---", flush=True)
-        tw0 = time.perf_counter()
-
-        dummy_data  = torch.randn(batch_size, 1, 28, 28, device=device)
-        dummy_label = torch.randint(0, 10, (batch_size,), device=device)
-
-        model.train()
-        optimizer.zero_grad()
-        if use_amp:
-            with torch.amp.autocast("cuda"):
-                out = model(dummy_data)
-                l = criterion(out, dummy_label)
-            scaler.scale(l).backward()
-            scaler.step(optimizer)
-            scaler.update()
-        else:
-            out = model(dummy_data)
-            l = criterion(out, dummy_label)
-            l.backward()
-            optimizer.step()
-
-        model.eval()
-        with torch.no_grad():
-            if use_amp:
-                with torch.amp.autocast("cuda"):
-                    _ = model(dummy_data)
-            else:
-                _ = model(dummy_data)
-
-        torch.cuda.synchronize()
-        tw1 = time.perf_counter()
-        print(f"    warmup done in {tw1 - tw0:.3f}s", flush=True)
-
-        # Re-initialize everything so the timed run is pure training cost
-        torch.manual_seed(123)
-        model = UltimateMLP().to(device)
-        model = torch.compile(model, mode="max-autotune")
-        optimizer = LARS(model.parameters(), lr=BASE_LR,
-                         momentum=0.9, weight_decay=5e-5,
-                         trust_coefficient=0.001, eps=0.0, nesterov=False)
-        scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=warmup_cosine_lambda)
-        if use_amp:
-            scaler = torch.amp.GradScaler("cuda")
-        print("--- Re-initialized.  Timed 100-epoch run begins. ---\n", flush=True)
 
     best_acc = 0.0
     best_epoch = 0

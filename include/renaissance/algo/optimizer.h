@@ -93,7 +93,7 @@ struct LARSConfig : public OptimizerConfig {
     float momentum           = 0.9f;    ///< 动量系数
     float weight_decay       = 0.0f;    ///< L2 权重衰减
     float trust_coefficient  = 0.001f;  ///< LARS trust coefficient（eta）
-    float eps                = 0.0f;    ///< LARS epsilon（数值稳定）
+    float eps                = 1e-8f;   ///< LARS epsilon（数值稳定）
     bool  nesterov           = false;   ///< 是否使用 Nesterov 动量
 
     // 参数设置标记
@@ -316,6 +316,8 @@ public:
      */
     operator Optimizer() const;
 
+    const SGDConfig& config() const noexcept { return config_; }
+
 private:
     SGDConfig config_;
 };
@@ -389,6 +391,8 @@ public:
      */
     operator Optimizer() const;
 
+    const LARSConfig& config() const noexcept { return config_; }
+
 private:
     LARSConfig config_;
 };
@@ -440,6 +444,8 @@ public:
      * @brief 隐式转换为 Optimizer（值语义）
      */
     operator Optimizer() const;
+
+    const AdamConfig& config() const noexcept { return config_; }
 
 private:
     AdamConfig config_;
@@ -494,6 +500,8 @@ public:
      * @brief 隐式转换为 Optimizer（值语义）
      */
     operator Optimizer() const;
+
+    const AdamWConfig& config() const noexcept { return config_; }
 
 private:
     AdamWConfig config_;

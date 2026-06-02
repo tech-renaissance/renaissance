@@ -164,6 +164,15 @@ std::string compute_op_to_string(ComputeOp op) {
         case ComputeOp::EMA_UPDATE:            return "EMA_UPDATE";
         case ComputeOp::SCALAR_INCREMENT:      return "SCALAR_INCREMENT";
         case ComputeOp::ADAM_BIAS_CORRECTION:  return "ADAM_BIAS_CORRECTION";
+        case ComputeOp::LARS_COMPUTE_TRUST_RATIO_FC:  return "LARS_COMPUTE_TRUST_RATIO_FC";
+        case ComputeOp::LARS_UPDATE_FC:               return "LARS_UPDATE_FC";
+        case ComputeOp::LARS_NESTEROV_UPDATE_FC:      return "LARS_NESTEROV_UPDATE_FC";
+        case ComputeOp::LARS_COMPUTE_TRUST_RATIO_FIRST:  return "LARS_COMPUTE_TRUST_RATIO_FIRST";
+        case ComputeOp::LARS_UPDATE_FIRST:               return "LARS_UPDATE_FIRST";
+        case ComputeOp::LARS_NESTEROV_UPDATE_FIRST:      return "LARS_NESTEROV_UPDATE_FIRST";
+        case ComputeOp::LARS_COMPUTE_TRUST_RATIO_DEEP:  return "LARS_COMPUTE_TRUST_RATIO_DEEP";
+        case ComputeOp::LARS_UPDATE_DEEP:               return "LARS_UPDATE_DEEP";
+        case ComputeOp::LARS_NESTEROV_UPDATE_DEEP:      return "LARS_NESTEROV_UPDATE_DEEP";
 
         default:                               return "UNKNOWN";
     }
@@ -331,6 +340,15 @@ std::string format_params(ComputeOp op, const OpParams& p) {
         case ComputeOp::LARS_UPDATE:
         case ComputeOp::LARS_NESTEROV_UPDATE:
         case ComputeOp::LARS_COMPUTE_TRUST_RATIO:
+        case ComputeOp::LARS_UPDATE_FC:
+        case ComputeOp::LARS_NESTEROV_UPDATE_FC:
+        case ComputeOp::LARS_COMPUTE_TRUST_RATIO_FC:
+        case ComputeOp::LARS_UPDATE_FIRST:
+        case ComputeOp::LARS_NESTEROV_UPDATE_FIRST:
+        case ComputeOp::LARS_COMPUTE_TRUST_RATIO_FIRST:
+        case ComputeOp::LARS_UPDATE_DEEP:
+        case ComputeOp::LARS_NESTEROV_UPDATE_DEEP:
+        case ComputeOp::LARS_COMPUTE_TRUST_RATIO_DEEP:
         case ComputeOp::SGD_UPDATE:
         case ComputeOp::ADAM_UPDATE:
         case ComputeOp::ADAMW_UPDATE: {

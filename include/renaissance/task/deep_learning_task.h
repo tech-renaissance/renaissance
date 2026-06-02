@@ -368,8 +368,15 @@ protected:
                  "LR DTensor not found: no DTensor with region S_SCALAR_FP32");
 
         // 设置优化器标量 DTensor 的 init_config，使 init_all() 能将其初始化为正确常数
+        // 统一应用到所有 variant memory plan，避免 variant > 0 的标量未初始化
         auto set_scalar_init = [this](int32_t id, float value) {
-            if (id >= 0) active_memory_plan_->set_init_config(id, InitConfig{value, InitKind::CONSTANTS, FanMode::FAN_IN});
+            if (id < 0) return;
+            InitConfig cfg{value, InitKind::CONSTANTS, FanMode::FAN_IN};
+            for (size_t i = 0; i < GraphAtlas::kMaxVariants; ++i) {
+                if (variant_memory_plans_[i]) {
+                    variant_memory_plans_[i]->set_init_config(id, cfg);
+                }
+            }
         };
         if (auto* sgd = std::get_if<SGD>(&opt_cfg_)) {
             Optimizer opt = *sgd;
@@ -408,6 +415,13 @@ protected:
         train_cg_ = &named_graphs_["train"].graph;
         infer_cg_ = &named_graphs_["inference"].graph;
     }
+
+    /**
+     * @brief 对所有 variant 的 MemoryPlan 执行 init_all()
+     * @note 确保每个 variant 的标量都按 init_config 正确初始化，避免 variant > 0 的
+     *       optimizer scalars (beta, wd, tc, eps, beta2) 处于未初始化的零值状态。
+     */
+    void init_all_variant_memory_plans();
 
     /// @brief 检查ArchPlan中是否包含ReLU类型层（用于推导PlanConfig::need_mask）
     static bool has_relu_layers(const ArchPlan& plan) {

@@ -17,6 +17,7 @@
 #endif
 
 #include "renaissance/graph/compiler.h"
+#include "renaissance/backend/lars_common.h"
 #include "renaissance/backend/graph_executor.h"
 #include "renaissance/graph/arch_plan.h"
 #include "renaissance/graph/memory_plan.h"
@@ -796,6 +797,39 @@ void Compiler::create_memory_plans(
                 memory_plans[s]->baseline().step, kInitZeros);
         }
 
+        // 优化器参数标量初始化（从 GlobalRegistry 动态读取，消除硬编码）
+        auto& reg = GlobalRegistry::instance();
+        float beta_val  = reg.momentum();
+        float wd_val    = reg.weight_decay();
+        float tc_val    = reg.trust_coefficient();
+        float eps_val   = reg.eps();
+        float beta2_val = reg.beta2();
+
+        if (opt == OptimizerKind::SGD_MOMENTUM || opt == OptimizerKind::SGD_NESTEROV ||
+            opt == OptimizerKind::LARS || opt == OptimizerKind::LARS_NESTEROV ||
+            opt == OptimizerKind::ADAM || opt == OptimizerKind::ADAMW) {
+            memory_plans[s]->set_init_config(
+                memory_plans[s]->baseline().beta, kInitConstant(beta_val));
+        }
+        if (opt == OptimizerKind::SGD_MOMENTUM || opt == OptimizerKind::SGD_NESTEROV ||
+            opt == OptimizerKind::LARS || opt == OptimizerKind::LARS_NESTEROV ||
+            opt == OptimizerKind::ADAM || opt == OptimizerKind::ADAMW) {
+            memory_plans[s]->set_init_config(
+                memory_plans[s]->baseline().wd, kInitConstant(wd_val));
+        }
+        if (opt == OptimizerKind::LARS || opt == OptimizerKind::LARS_NESTEROV) {
+            memory_plans[s]->set_init_config(
+                memory_plans[s]->baseline().tc, kInitConstant(tc_val));
+            memory_plans[s]->set_init_config(
+                memory_plans[s]->baseline().eps, kInitConstant(eps_val));
+        }
+        if (opt == OptimizerKind::ADAM || opt == OptimizerKind::ADAMW) {
+            memory_plans[s]->set_init_config(
+                memory_plans[s]->baseline().beta2, kInitConstant(beta2_val));
+            memory_plans[s]->set_init_config(
+                memory_plans[s]->baseline().eps, kInitConstant(eps_val));
+        }
+
         if (s == 0) {
             const auto& b = memory_plans[s]->baseline();
             nan_flag_id     = b.has_nan;
@@ -908,6 +942,17 @@ void Compiler::create_memory_plans(
                 if (has_w_fc_weight)   memory_plans[s]->alloc_norm_fc_weight(Shape{1});
                 if (has_w_first_conv)  memory_plans[s]->alloc_norm_first_conv(Shape{1});
                 if (has_w_deep_conv)   memory_plans[s]->alloc_norm_deep_conv(Shape{1});
+
+                static const int kBlockCount = tr::lars::kLarsMaxPartial;
+                if (memory_plans[s]->is_region_populated(Region::W_FC_WEIGHT)) {
+                    memory_plans[s]->alloc_temp(Shape{kBlockCount * 2}, DType::FP32);
+                }
+                if (memory_plans[s]->is_region_populated(Region::W_FIRST_CONV)) {
+                    memory_plans[s]->alloc_temp(Shape{kBlockCount * 2}, DType::FP32);
+                }
+                if (memory_plans[s]->is_region_populated(Region::W_DEEP_CONV)) {
+                    memory_plans[s]->alloc_temp(Shape{kBlockCount * 2}, DType::FP32);
+                }
             }
 
             // Block 融合层内部 BN3 标记：找到最后一个 W_BN_WEIGHT 张量
@@ -1572,9 +1617,11 @@ void Compiler::build_auxiliary_graphs(ComputationGraph& train_cg, const MemoryPl
 
         // --- Weight 更新 ---
         if (opt == OptimizerKind::LARS || opt == OptimizerKind::LARS_NESTEROV) {
-            // LARS: 逐 DTensor ComputeOp 注入（共 2N 个 COMPUTE 节点）
-            for (auto w_region : {Region::W_FC_WEIGHT, Region::W_FIRST_CONV,
-                                  Region::W_DEEP_CONV}) {
+            bool is_nesterov = (opt == OptimizerKind::LARS_NESTEROV);
+
+            auto build_lars_pair = [&](Region w_region, GraphId gid,
+                                        ComputeOp trust_op, ComputeOp update_op,
+                                        int32_t temp_partial_id) {
                 Region g_region = paired_grad_region(w_region);
                 Region m_region = paired_momentum_region(w_region);
                 Region n_region = paired_norm_region(w_region);
@@ -1584,36 +1631,71 @@ void Compiler::build_auxiliary_graphs(ComputationGraph& train_cg, const MemoryPl
                 const auto& m_ids = memory_plan.get_ids_by_region(m_region);
                 const auto& n_ids = memory_plan.get_ids_by_region(n_region);
 
-                TR_CHECK(w_ids.size() == g_ids.size(), ShapeError,
-                         "LARS: W/G DTensor count mismatch");
-                TR_CHECK(w_ids.size() == m_ids.size(), ShapeError,
-                         "LARS: W/M DTensor count mismatch");
-                TR_CHECK(w_ids.size() == n_ids.size(), ShapeError,
-                         "LARS: W/N DTensor count mismatch");
+                TR_CHECK(w_ids.size() == g_ids.size(), ShapeError, "LARS: W/G count mismatch");
+                TR_CHECK(w_ids.size() == m_ids.size(), ShapeError, "LARS: W/M count mismatch");
+                TR_CHECK(w_ids.size() == n_ids.size(), ShapeError, "LARS: W/N count mismatch");
 
                 for (size_t i = 0; i < w_ids.size(); ++i) {
-                    // Step 1: 归约算 η = tc·‖W‖₂/(‖G_raw‖₂+wd·‖W‖₂+ε)
+                    LOG_INFO << "[LARS_BUILD] layer=" << i
+                             << " w_id=" << w_ids[i] << " g_id=" << g_ids[i]
+                             << " m_id=" << m_ids[i] << " n_id=" << n_ids[i];
+
+                    // Step 1: Trust Ratio
                     GraphNode trust_node;
                     trust_node.kind = GraphNode::Kind::COMPUTE;
-                    trust_node.compute_op = ComputeOp::LARS_COMPUTE_TRUST_RATIO;
+                    trust_node.compute_op = trust_op;
                     trust_node.input_ids  = {w_ids[i], g_ids[i],
                                               scalar_ids.tc, scalar_ids.wd,
-                                              scalar_ids.eps};
+                                              scalar_ids.eps,
+                                              scalar_ids.scaling,
+                                              scalar_ids.has_nan,
+                                              temp_partial_id};
                     trust_node.output_ids = {n_ids[i]};
-                    train_cg.append(GraphId::OPTIMIZER, trust_node);
+                    train_cg.append(gid, trust_node);
 
-                    // Step 2: 逐 DTensor 更新 W + M
+                    // Step 2: Weight Update
                     GraphNode update_node;
                     update_node.kind = GraphNode::Kind::COMPUTE;
-                    update_node.compute_op = (opt == OptimizerKind::LARS_NESTEROV)
-                        ? ComputeOp::LARS_NESTEROV_UPDATE
-                        : ComputeOp::LARS_UPDATE;
+                    update_node.compute_op = update_op;
                     update_node.input_ids  = {w_ids[i], g_ids[i], m_ids[i], n_ids[i],
                                                scalar_ids.lr, scalar_ids.beta,
-                                               scalar_ids.wd};
+                                               scalar_ids.wd,
+                                               scalar_ids.scaling,
+                                               scalar_ids.has_nan};
                     update_node.output_ids = {w_ids[i], m_ids[i]};
-                    train_cg.append(GraphId::OPTIMIZER, update_node);
+                    train_cg.append(gid, update_node);
                 }
+            };
+
+            // T_TEMP_FP32 分配顺序：FC → FirstConv → DeepConv，索引从 0 开始
+            const auto& temp_ids = memory_plan.get_ids_by_region(Region::T_TEMP_FP32);
+            int temp_idx = 0;
+
+            // FC 权重层 → COMP_1
+            if (memory_plan.is_region_populated(Region::W_FC_WEIGHT)) {
+                build_lars_pair(Region::W_FC_WEIGHT, GraphId::LARS_FC_OPT,
+                    ComputeOp::LARS_COMPUTE_TRUST_RATIO_FC,
+                    is_nesterov ? ComputeOp::LARS_NESTEROV_UPDATE_FC
+                                : ComputeOp::LARS_UPDATE_FC,
+                    temp_ids[temp_idx++]);
+            }
+
+            // 首层卷积 → COMP_2
+            if (memory_plan.is_region_populated(Region::W_FIRST_CONV)) {
+                build_lars_pair(Region::W_FIRST_CONV, GraphId::LARS_FIRST_CONV_OPT,
+                    ComputeOp::LARS_COMPUTE_TRUST_RATIO_FIRST,
+                    is_nesterov ? ComputeOp::LARS_NESTEROV_UPDATE_FIRST
+                                : ComputeOp::LARS_UPDATE_FIRST,
+                    temp_ids[temp_idx++]);
+            }
+
+            // 深层卷积 → COMP_3
+            if (memory_plan.is_region_populated(Region::W_DEEP_CONV)) {
+                build_lars_pair(Region::W_DEEP_CONV, GraphId::LARS_DEEP_CONV_OPT,
+                    ComputeOp::LARS_COMPUTE_TRUST_RATIO_DEEP,
+                    is_nesterov ? ComputeOp::LARS_NESTEROV_UPDATE_DEEP
+                                : ComputeOp::LARS_UPDATE_DEEP,
+                    temp_ids[temp_idx++]);
             }
         } else {
             // 非 LARS: 单 RangeOp 覆盖全部 Weight（路径改为 region_range() 直接指定）

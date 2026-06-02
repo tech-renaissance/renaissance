@@ -270,6 +270,21 @@ enum class ComputeOp : uint16_t {
     SCALAR_INCREMENT,       // GPU 端 step += 1
     ADAM_BIAS_CORRECTION,   // bc1=1/(1-beta1^step), bc2=1/(1-beta2^step)
 
+    // === LARS 流感知变体（FC 层 → COMP_1）===
+    LARS_COMPUTE_TRUST_RATIO_FC,
+    LARS_UPDATE_FC,
+    LARS_NESTEROV_UPDATE_FC,
+
+    // === LARS 流感知变体（首层卷积 → COMP_2）===
+    LARS_COMPUTE_TRUST_RATIO_FIRST,
+    LARS_UPDATE_FIRST,
+    LARS_NESTEROV_UPDATE_FIRST,
+
+    // === LARS 流感知变体（深层卷积 → COMP_3）===
+    LARS_COMPUTE_TRUST_RATIO_DEEP,
+    LARS_UPDATE_DEEP,
+    LARS_NESTEROV_UPDATE_DEEP,
+
     COUNT,              ///< 算子类型总数（哨兵值，用于数组大小计算）
     UNKNOWN = 0xFFFF
 };

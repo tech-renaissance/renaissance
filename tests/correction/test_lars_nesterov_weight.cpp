@@ -53,12 +53,14 @@ int main(int argc, char* argv[]) {
     DTensor d_n_a = task.alloc(Shape{1}, DType::FP32, Region::N_FC_WEIGHT);
     DTensor d_n_b = task.alloc(Shape{1}, DType::FP32, Region::N_FC_WEIGHT);
 
-    // 分配标量DTensor（5个：lr, wd, beta, tc, eps）
+    // 分配标量DTensor（7个：lr, wd, beta, tc, eps, scaling, has_nan）
     DTensor d_lr   = task.alloc_scalar(DType::FP32);
     DTensor d_wd   = task.alloc_scalar(DType::FP32);
     DTensor d_beta = task.alloc_scalar(DType::FP32);
     DTensor d_tc   = task.alloc_scalar(DType::FP32);
     DTensor d_eps  = task.alloc_scalar(DType::FP32);
+    DTensor d_scaling = task.alloc_scalar(DType::FP32);
+    DTensor d_has_nan = task.alloc_scalar(DType::INT32);
 
     task.finalize_memory();
     const auto& mp = task.memory_plan();
@@ -72,7 +74,7 @@ int main(int argc, char* argv[]) {
         GraphNode node;
         node.kind = GraphNode::Kind::COMPUTE;
         node.compute_op = ComputeOp::LARS_COMPUTE_TRUST_RATIO;
-        node.input_ids = {d_w_a.id, d_g_a.id, d_tc.id, d_wd.id, d_eps.id};
+        node.input_ids = {d_w_a.id, d_g_a.id, d_tc.id, d_wd.id, d_eps.id, d_scaling.id, d_has_nan.id};
         node.output_ids = {d_n_a.id};
         g.append(std::move(node));
     }
@@ -83,7 +85,7 @@ int main(int argc, char* argv[]) {
         node.kind = GraphNode::Kind::COMPUTE;
         node.compute_op = ComputeOp::LARS_NESTEROV_UPDATE;
         node.input_ids = {d_w_a.id, d_g_a.id, d_m_a.id, d_n_a.id,
-                          d_lr.id, d_beta.id, d_wd.id};
+                          d_lr.id, d_beta.id, d_wd.id, d_scaling.id, d_has_nan.id};
         node.output_ids = {d_w_a.id, d_m_a.id};
         g.append(std::move(node));
     }
@@ -93,7 +95,7 @@ int main(int argc, char* argv[]) {
         GraphNode node;
         node.kind = GraphNode::Kind::COMPUTE;
         node.compute_op = ComputeOp::LARS_COMPUTE_TRUST_RATIO;
-        node.input_ids = {d_w_b.id, d_g_b.id, d_tc.id, d_wd.id, d_eps.id};
+        node.input_ids = {d_w_b.id, d_g_b.id, d_tc.id, d_wd.id, d_eps.id, d_scaling.id, d_has_nan.id};
         node.output_ids = {d_n_b.id};
         g.append(std::move(node));
     }
@@ -104,7 +106,7 @@ int main(int argc, char* argv[]) {
         node.kind = GraphNode::Kind::COMPUTE;
         node.compute_op = ComputeOp::LARS_NESTEROV_UPDATE;
         node.input_ids = {d_w_b.id, d_g_b.id, d_m_b.id, d_n_b.id,
-                          d_lr.id, d_beta.id, d_wd.id};
+                          d_lr.id, d_beta.id, d_wd.id, d_scaling.id, d_has_nan.id};
         node.output_ids = {d_w_b.id, d_m_b.id};
         g.append(std::move(node));
     }
@@ -118,18 +120,24 @@ int main(int argc, char* argv[]) {
     float beta_val = 0.9f;
     float tc_val   = 0.001f;
     float eps_val  = 0.0f;
+    float scaling_val = 1.0f;  // 非 AMP 模式
+    int32_t has_nan_val = 0;   // 正常情况，无 NaN
 
     Tensor h_lr   = Tensor::fill({1}, DType::FP32, lr_val);
     Tensor h_wd   = Tensor::fill({1}, DType::FP32, wd_val);
     Tensor h_beta = Tensor::fill({1}, DType::FP32, beta_val);
     Tensor h_tc   = Tensor::fill({1}, DType::FP32, tc_val);
     Tensor h_eps  = Tensor::fill({1}, DType::FP32, eps_val);
+    Tensor h_scaling = Tensor::fill({1}, DType::FP32, scaling_val);
+    Tensor h_has_nan = Tensor::fill({1}, DType::INT32, has_nan_val);
 
     task.transfer_to_rank(h_lr,   d_lr,   0);
     task.transfer_to_rank(h_wd,   d_wd,   0);
     task.transfer_to_rank(h_beta, d_beta, 0);
     task.transfer_to_rank(h_tc,   d_tc,   0);
     task.transfer_to_rank(h_eps,  d_eps,  0);
+    task.transfer_to_rank(h_scaling, d_scaling, 0);
+    task.transfer_to_rank(h_has_nan, d_has_nan, 0);
 
     if (num_ranks > 1) {
         task.broadcast_from_rank0(d_lr);
@@ -137,6 +145,8 @@ int main(int argc, char* argv[]) {
         task.broadcast_from_rank0(d_beta);
         task.broadcast_from_rank0(d_tc);
         task.broadcast_from_rank0(d_eps);
+        task.broadcast_from_rank0(d_scaling);
+        task.broadcast_from_rank0(d_has_nan);
     }
 
     // 初始化权重和梯度
@@ -174,7 +184,7 @@ int main(int argc, char* argv[]) {
             sum_g2 += static_cast<double>(g.data<float>()[i]) * g.data<float>()[i];
         }
         float w_norm = sqrtf(static_cast<float>(sum_w2));
-        float g_norm = sqrtf(static_cast<float>(sum_g2));
+        float g_norm = sqrtf(static_cast<float>(sum_g2)) / scaling_val;
 
         if (w_norm < 1e-12f || g_norm < 1e-12f) {
             return 1.0f;
@@ -194,11 +204,12 @@ int main(int argc, char* argv[]) {
             float mv = m_in.data<float>()[i];
 
             float g_prime = gv + wd_val * wv;
-            float m_new = beta_val * mv + eta * g_prime;
+            float scaled_grad = lr_val * eta * g_prime;
+            float m_new = beta_val * mv + scaled_grad;
 
             e_m.data<float>()[i] = m_new;
-            // Nesterov前瞻项：W = W - lr·(η·G' + β·M_new)
-            e_w.data<float>()[i] = wv - lr_val * (eta * g_prime + beta_val * m_new);
+            // Nesterov前瞻项：W = W - (scaled_grad + β·M_new)
+            e_w.data<float>()[i] = wv - (scaled_grad + beta_val * m_new);
         }
         return std::make_pair(std::move(e_w), std::move(e_m));
     };

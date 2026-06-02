@@ -99,7 +99,10 @@ enum class GraphId : uint8_t {
     VAL_RESULT_COMM,           ///< 验证集 R_RESULT_ACCUMULATED AllReduce
     CLEAR_METRICS,             ///< 累积区清零
     SIMPLE_TASK_GRAPH,      ///< SimpleTask 通用图 ID（不受图集数量限制）
-    COUNT              ///< = 28
+    LARS_FC_OPT,            ///< FC 权重 LARS 优化（trust + update，COMP_1）
+    LARS_FIRST_CONV_OPT,    ///< 首层卷积 LARS 优化（trust + update，COMP_2）
+    LARS_DEEP_CONV_OPT,     ///< 深层卷积 LARS 优化（trust + update，COMP_3）
+    COUNT              ///< = 31
 };
 
 // ============================================================================
@@ -136,6 +139,9 @@ inline const char* graph_id_to_string(GraphId gid) noexcept {
         case GraphId::VAL_RESULT_COMM:           return "VAL_RESULT_COMM";
         case GraphId::CLEAR_METRICS:             return "CLEAR_METRICS";
         case GraphId::SIMPLE_TASK_GRAPH:   return "SIMPLE_TASK_GRAPH";
+        case GraphId::LARS_FC_OPT:         return "LARS_FC_OPT";
+        case GraphId::LARS_FIRST_CONV_OPT:  return "LARS_FIRST_CONV_OPT";
+        case GraphId::LARS_DEEP_CONV_OPT:   return "LARS_DEEP_CONV_OPT";
         case GraphId::COUNT:                return "COUNT";
     }
     return "UNKNOWN";
@@ -165,6 +171,9 @@ inline bool is_shape_invariant_graph(GraphId gid) noexcept {
         case GraphId::ACCUM_METRICS_VAL_LAST:
         case GraphId::VAL_RESULT_COMM:
         case GraphId::CLEAR_METRICS:
+        case GraphId::LARS_FC_OPT:
+        case GraphId::LARS_FIRST_CONV_OPT:
+        case GraphId::LARS_DEEP_CONV_OPT:
             return true;
         default:
             return false;
@@ -188,8 +197,11 @@ inline bool is_train_graph(GraphId gid) noexcept {
         case GraphId::FIRST_COMM:
         case GraphId::DEEP_COMM:
         case GraphId::STATS_COMM:
-        // case GraphId::OPTIMIZER:  // 移除：LARS 下节点数依赖层数
+        case GraphId::OPTIMIZER:
         case GraphId::EMA_UPDATE:
+        case GraphId::LARS_FC_OPT:
+        case GraphId::LARS_FIRST_CONV_OPT:
+        case GraphId::LARS_DEEP_CONV_OPT:
         case GraphId::ACCUM_METRICS:
         case GraphId::ACCUM_METRICS_TRAIN_LAST:
         case GraphId::CLEAR_METRICS:

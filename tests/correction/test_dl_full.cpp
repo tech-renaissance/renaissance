@@ -89,7 +89,7 @@ int main(int argc, char** argv) {
         .loss(CrossEntropyLoss())
         .initializer(Initializer().fc(InitKind::KAIMING_UNIFORM).nonlinearity(std::sqrt(5.0f)))
         .total_epochs(4)
-        .optimizer(SGD().momentum(0.9f).weight_decay(0.0f).nesterov(true))
+        .optimizer(LARS().momentum(0.9f).weight_decay(5e-5f).trust_coefficient(0.001f).eps(0.0f).nesterov(true))
         .scheduler(ConstantLR().base_lr(0.1f).step_by_epoch())
         .validate_every(1, 0)
         .early_stop_by_top1(0.999f)
