@@ -29,6 +29,8 @@
 
 using namespace tr;
 
+constexpr int kTotalEpochs = 100;
+
 enum class TestMode { CPU, GPU, AMP };
 
 const char* mode_name(TestMode m) {
@@ -216,7 +218,7 @@ int main(int argc, char** argv) {
               << " Best Top-1: " << result.best_top1 * 100.0f << "%\n"
               << " Best Epoch: " << result.best_epoch << "\n"
               << " Total Time: " << elapsed << " s\n"
-              << " Time per Epoch: " << elapsed / result.best_epoch << " s\n"
+              << " Time per Epoch: " << elapsed / kTotalEpochs << " s\n"
               << "=====================================\n";
 
     // 根据准确率给出评价
