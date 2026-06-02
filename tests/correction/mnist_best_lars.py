@@ -17,7 +17,7 @@ try:
 except AttributeError:
     _HAS_AUTOCONTRAST = False
 
-parser = argparse.ArgumentParser(description="PyTorch MNIST MLP Ultimate benchmark (eager mode, no compile)")
+parser = argparse.ArgumentParser(description="PyTorch MNIST MLP Ultimate benchmark")
 parser.add_argument("--cpu", action="store_true", help="Run on CPU (FP32)")
 parser.add_argument("--gpu", action="store_true", help="Run on GPU (FP32)")
 parser.add_argument("--amp", action="store_true", help="Run on GPU with AMP (FP16)")
@@ -41,7 +41,9 @@ class UltimateMLP(nn.Module):
     def _init_weights(self):
         for m in self.modules():
             if isinstance(m, nn.Linear):
+                # Match TR4: Kaiming Uniform (FAN_IN) for ReLU
                 nn.init.kaiming_uniform_(m.weight, a=0, mode='fan_in')
+                # Match TR4: bias is initialized to ZEROS (initializer.cpp is_bias_region -> ZEROS)
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
 
@@ -103,6 +105,8 @@ if __name__ == '__main__':
 
     # -----------------------------------------------------------------------
     # Transforms: match TR4 as closely as possible
+    # TR4 order: Pad -> RandomRotation -> RandomScale -> RandomCrop
+    #            -> RandomAutocontrast -> (ToTensor + Normalize + RandomErasing)
     # -----------------------------------------------------------------------
     train_transform_list = [
         transforms.Pad((2, 2, 2, 2), fill=0),
@@ -129,11 +133,14 @@ if __name__ == '__main__':
 
     pin_mem = (device.type == "cuda")
     train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True,
-                              pin_memory=pin_mem, num_workers=4, persistent_workers=False)
+                              pin_memory=pin_mem, num_workers=8, persistent_workers=True)
     val_loader   = DataLoader(val_set,   batch_size=batch_size, shuffle=False,
-                              pin_memory=pin_mem, num_workers=4, persistent_workers=False)
+                              pin_memory=pin_mem, num_workers=8, persistent_workers=True)
 
     model = UltimateMLP().to(device)
+
+    if hasattr(torch, "compile") and device.type == "cuda":
+        model = torch.compile(model, mode="max-autotune")
 
     criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
 
@@ -243,6 +250,85 @@ if __name__ == '__main__':
     scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=warmup_cosine_lambda)
 
     scaler = torch.amp.GradScaler("cuda") if use_amp else None
+
+    # ====================================================================
+    # WARMUP  (GPU / AMP only)
+    #
+    # Purpose: trigger torch.compile(max-autotune) so compilation finishes
+    #          BEFORE the timed 100-epoch loop starts.
+    # After warmup: re-seed + re-init.  torch.compile FX-graph cache makes
+    #               the second compilation near-instant.
+    # ====================================================================
+    if hasattr(torch, "compile") and device.type == "cuda":
+        print("\n--- Warmup: triggering max-autotune compilation ---", flush=True)
+        tw0 = time.perf_counter()
+
+        dummy_data  = torch.randn(batch_size, 1, 28, 28, device=device)
+        dummy_label = torch.randint(0, 10, (batch_size,), device=device)
+
+        model.train()
+        optimizer.zero_grad()
+        if use_amp:
+            with torch.amp.autocast("cuda"):
+                out = model(dummy_data)
+                l = criterion(out, dummy_label)
+            scaler.scale(l).backward()
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            out = model(dummy_data)
+            l = criterion(out, dummy_label)
+            l.backward()
+            optimizer.step()
+
+        model.eval()
+        with torch.no_grad():
+            if use_amp:
+                with torch.amp.autocast("cuda"):
+                    _ = model(dummy_data)
+            else:
+                _ = model(dummy_data)
+
+        torch.cuda.synchronize()
+        tw1 = time.perf_counter()
+        print(f"    warmup done in {tw1 - tw0:.3f}s", flush=True)
+
+        # Re-initialize everything so the timed run is pure training cost
+        torch.manual_seed(123)
+        model = UltimateMLP().to(device)
+        model = torch.compile(model, mode="max-autotune")
+
+        # 重新分组参数
+        weight_params = []
+        bn_bias_params = []
+        for name, param in model.named_parameters():
+            if not param.requires_grad:
+                continue
+            if 'bn' in name or 'bias' in name or len(param.shape) == 1:
+                bn_bias_params.append(param)
+            else:
+                weight_params.append(param)
+
+        param_groups = [
+            {
+                'params': weight_params,
+                'weight_decay': WEIGHT_DECAY,
+                'trust_coefficient': LARS_TRUST_COEF
+            },
+            {
+                'params': bn_bias_params,
+                'weight_decay': 0.0,
+                'trust_coefficient': 0.0
+            }
+        ]
+
+        optimizer = LARS(param_groups, lr=BASE_LR, momentum=MOMENTUM,
+                         weight_decay=0.0, trust_coefficient=LARS_TRUST_COEF,
+                         eps=LARS_EPS, nesterov=False)
+        scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=warmup_cosine_lambda)
+        if use_amp:
+            scaler = torch.amp.GradScaler("cuda")
+        print("--- Re-initialized.  Timed 100-epoch run begins. ---\n", flush=True)
 
     best_acc = 0.0
     best_epoch = 0

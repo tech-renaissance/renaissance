@@ -23,70 +23,6 @@ parser.add_argument("--gpu", action="store_true", help="Run on GPU (FP32)")
 parser.add_argument("--amp", action="store_true", help="Run on GPU with AMP (FP16)")
 
 
-class LARS(optim.Optimizer):
-    """LARS优化器（与CLOSED.py字节级相同，MNIST适配版）"""
-    def __init__(self, params, lr=1.0, momentum=0.9, weight_decay=0.0,
-                 trust_coefficient=0.001, eps=1e-8, nesterov=False):
-        if lr < 0.0:
-            raise ValueError(f"Invalid learning rate: {lr}")
-        if momentum < 0.0:
-            raise ValueError(f"Invalid momentum value: {momentum}")
-        if weight_decay < 0.0:
-            raise ValueError(f"Invalid weight_decay value: {weight_decay}")
-        defaults = dict(lr=lr, momentum=momentum, weight_decay=weight_decay,
-                        trust_coefficient=trust_coefficient, eps=eps, nesterov=nesterov)
-        super(LARS, self).__init__(params, defaults)
-
-    @torch.no_grad()
-    def step(self, closure=None):
-        loss = None
-        if closure is not None:
-            with torch.enable_grad():
-                loss = closure()
-        for group in self.param_groups:
-            weight_decay = group['weight_decay']
-            momentum = group['momentum']
-            trust_coefficient = group['trust_coefficient']
-            eps = group['eps']
-            lr = group['lr']
-            nesterov = group['nesterov']
-            for p in group['params']:
-                if p.grad is None:
-                    continue
-                grad = p.grad.data
-                # Step 1: Trust Ratio（使用原始梯度）
-                if trust_coefficient > 0:
-                    param_norm = torch.norm(p.data)
-                    grad_norm = torch.norm(grad)
-                    _NUMERICAL_EPS = 1e-12
-                    if param_norm > _NUMERICAL_EPS and grad_norm > _NUMERICAL_EPS:
-                        trust_ratio = trust_coefficient * param_norm / (
-                            grad_norm + weight_decay * param_norm + eps
-                        )
-                        trust_ratio = min(trust_ratio, 100.0)
-                    else:
-                        trust_ratio = 1.0
-                else:
-                    trust_ratio = 1.0
-                # Step 2: Weight Decay
-                if weight_decay != 0:
-                    grad = grad.add(p.data, alpha=weight_decay)
-                # Step 3: Momentum
-                param_state = self.state[p]
-                if 'momentum_buffer' not in param_state:
-                    buf = param_state['momentum_buffer'] = torch.clone(grad).detach() * (lr * trust_ratio)
-                else:
-                    buf = param_state['momentum_buffer']
-                    buf.mul_(momentum).add_(grad, alpha=lr * trust_ratio)
-                # Step 4: Nesterov
-                if nesterov:
-                    update = grad.mul(lr * trust_ratio).add(buf, alpha=momentum)
-                else:
-                    update = buf
-                p.data.add_(update, alpha=-1.0)
-        return loss
-
-
 class UltimateMLP(nn.Module):
     def __init__(self):
         super().__init__()
@@ -160,7 +96,7 @@ if __name__ == '__main__':
     print(f" Device:     {device}", flush=True)
     print(f" Network:    784->1024->512->256->10", flush=True)
     print(f" Activation: ReLU", flush=True)
-    print(f" Optimizer:  LARS (m=0.9, wd=5e-5, tc=0.001, eps=0.0)", flush=True)
+    print(f" Optimizer:  AdamW (beta1=0.9, beta2=0.999, eps=1e-8, wd=1e-4)", flush=True)
     print(f" Scheduler:  CosineAnnealing + Warmup(5)", flush=True)
     if not _HAS_AUTOCONTRAST:
         print(" Warning:    RandomAutocontrast not available (torchvision < 0.10)", flush=True)
@@ -215,9 +151,24 @@ if __name__ == '__main__':
         model = torch.compile(model, mode="max-autotune")
 
     criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
-    optimizer = LARS(model.parameters(), lr=BASE_LR,
-                     momentum=0.9, weight_decay=5e-5,
-                     trust_coefficient=0.001, eps=0.0, nesterov=False)
+
+    # 参数分组：weight 用 AdamW (wd=1e-4)，bias 用 Adam (wd=0.0) 以匹配 CPP 行为
+    weight_params = []
+    bias_params = []
+    for name, param in model.named_parameters():
+        if not param.requires_grad:
+            continue
+        if 'bias' in name or len(param.shape) == 1:
+            bias_params.append(param)
+        else:
+            weight_params.append(param)
+
+    param_groups = [
+        {'params': weight_params, 'weight_decay': 1e-4},
+        {'params': bias_params, 'weight_decay': 0.0}
+    ]
+    optimizer = optim.AdamW(param_groups, lr=BASE_LR,
+                            betas=(0.9, 0.999), eps=1e-8)
     scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=warmup_cosine_lambda)
 
     scaler = torch.amp.GradScaler("cuda") if use_amp else None
@@ -268,9 +219,24 @@ if __name__ == '__main__':
         torch.manual_seed(123)
         model = UltimateMLP().to(device)
         model = torch.compile(model, mode="max-autotune")
-        optimizer = LARS(model.parameters(), lr=BASE_LR,
-                         momentum=0.9, weight_decay=5e-5,
-                         trust_coefficient=0.001, eps=0.0, nesterov=False)
+
+        # 重新分组参数
+        weight_params = []
+        bias_params = []
+        for name, param in model.named_parameters():
+            if not param.requires_grad:
+                continue
+            if 'bias' in name or len(param.shape) == 1:
+                bias_params.append(param)
+            else:
+                weight_params.append(param)
+
+        param_groups = [
+            {'params': weight_params, 'weight_decay': 1e-4},
+            {'params': bias_params, 'weight_decay': 0.0}
+        ]
+        optimizer = optim.AdamW(param_groups, lr=BASE_LR,
+                                betas=(0.9, 0.999), eps=1e-8)
         scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=warmup_cosine_lambda)
         if use_amp:
             scaler = torch.amp.GradScaler("cuda")

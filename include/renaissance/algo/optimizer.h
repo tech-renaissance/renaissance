@@ -119,14 +119,12 @@ struct AdamConfig : public OptimizerConfig {
     float beta2         = 0.999f;   ///< 二阶矩估计指数衰减率
     float eps           = 1e-8f;    ///< 数值稳定小量
     float weight_decay  = 0.0f;     ///< L2 权重衰减（非 decoupled）
-    bool  amsgrad       = false;    ///< 是否使用 AMSGrad 变体（一期默认关闭）
 
     // 参数设置标记
     bool beta1_set         = false;
     bool beta2_set         = false;
     bool eps_set           = false;
     bool weight_decay_set  = false;
-    bool amsgrad_set       = false;
 
     AdamConfig() = default;
 
@@ -146,14 +144,12 @@ struct AdamWConfig : public OptimizerConfig {
     float beta2         = 0.999f;   ///< 二阶矩估计指数衰减率
     float eps           = 1e-8f;    ///< 数值稳定小量
     float weight_decay  = 0.0f;     ///< Decoupled 权重衰减系数
-    bool  amsgrad       = false;    ///< 是否使用 AMSGrad 变体（一期默认关闭）
 
     // 参数设置标记
     bool beta1_set         = false;
     bool beta2_set         = false;
     bool eps_set           = false;
     bool weight_decay_set  = false;
-    bool amsgrad_set       = false;
 
     AdamWConfig() = default;
 
@@ -435,12 +431,6 @@ public:
     Adam& weight_decay(float v);
 
     /**
-     * @brief 设置是否使用 AMSGrad
-     * @param v true=启用 AMSGrad
-     */
-    Adam& amsgrad(bool v);
-
-    /**
      * @brief 隐式转换为 Optimizer（值语义）
      */
     operator Optimizer() const;
@@ -489,12 +479,6 @@ public:
      * @param v 衰减系数，必须 >= 0
      */
     AdamW& weight_decay(float v);
-
-    /**
-     * @brief 设置是否使用 AMSGrad
-     * @param v true=启用 AMSGrad
-     */
-    AdamW& amsgrad(bool v);
 
     /**
      * @brief 隐式转换为 Optimizer（值语义）

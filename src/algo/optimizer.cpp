@@ -79,7 +79,6 @@ std::string AdamConfig::to_string() const {
         << ", beta2=" << beta2
         << ", eps=" << eps
         << ", weight_decay=" << weight_decay
-        << ", amsgrad=" << (amsgrad ? "true" : "false")
         << "}";
     return oss.str();
 }
@@ -98,7 +97,6 @@ std::string AdamWConfig::to_string() const {
         << ", beta2=" << beta2
         << ", eps=" << eps
         << ", weight_decay=" << weight_decay
-        << ", amsgrad=" << (amsgrad ? "true" : "false")
         << "}";
     return oss.str();
 }
@@ -254,12 +252,6 @@ Adam& Adam::weight_decay(float v) {
     return *this;
 }
 
-Adam& Adam::amsgrad(bool v) {
-    config_.amsgrad = v;
-    config_.amsgrad_set = true;
-    return *this;
-}
-
 Adam::operator Optimizer() const {
     return Optimizer(std::make_unique<AdamConfig>(config_));
 }
@@ -297,12 +289,6 @@ AdamW& AdamW::weight_decay(float v) {
              "AdamW weight_decay must be non-negative, got " << v);
     config_.weight_decay = v;
     config_.weight_decay_set = true;
-    return *this;
-}
-
-AdamW& AdamW::amsgrad(bool v) {
-    config_.amsgrad = v;
-    config_.amsgrad_set = true;
     return *this;
 }
 
