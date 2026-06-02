@@ -222,7 +222,6 @@ int main(int argc, char** argv) {
     DTensor d_x  = task.alloc(shape, dtype, feat_region);
     DTensor d_y  = task.alloc(shape, dtype, feat_region);
     DTensor d_dy = task.alloc(shape, dtype, feat_region);
-    DTensor d_dx = task.alloc(shape, dtype, feat_region);
     task.finalize_memory();
 
     ComputationGraph g;
