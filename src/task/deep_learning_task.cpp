@@ -1988,9 +1988,9 @@ void DeepLearningTask::log_epoch_results(float train_loss, float val_loss,
 }
 
 void DeepLearningTask::log_final_summary(double total_time_sec) const {
-    int hours = static_cast<int>(total_time_sec) / 3600;
-    int minutes = (static_cast<int>(total_time_sec) % 3600) / 60;
-    int seconds = static_cast<int>(total_time_sec) % 60;
+    // int hours = static_cast<int>(total_time_sec) / 3600;
+    // int minutes = (static_cast<int>(total_time_sec) % 3600) / 60;
+    // int seconds = static_cast<int>(total_time_sec) % 60;
 
     // std::cout << "==================================================" << '\n' << std::flush;
     // std::cout << " Training Complete" << '\n' << std::flush;
