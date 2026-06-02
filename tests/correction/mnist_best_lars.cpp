@@ -172,7 +172,7 @@ int main(int argc, char** argv) {
             .fc(InitKind::KAIMING_UNIFORM)
             .fan(FanMode::FAN_IN))
 
-        .total_epochs(100)                     // 充分训练轮数
+        .total_epochs(kTotalEpochs)           // 充分训练轮数
 
         // 优化器：LARS（MLPerf Closed配置）
         .optimizer(LARS()
