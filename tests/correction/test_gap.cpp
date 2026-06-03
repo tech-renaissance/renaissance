@@ -95,8 +95,7 @@ struct TestConfig {
     int batch = 8;
     int H = 7, W = 7, C = 2048;
     int seed = 42;
-    int iterations = 20;
-    int warmup = 5;
+    bool no_gen = false;
 };
 
 TestConfig parse_cli(int argc, char** argv) {
@@ -131,6 +130,8 @@ TestConfig parse_cli(int argc, char** argv) {
             c.C = std::stoi(argv[++i]);
         } else if (a == "--seed" && i + 1 < argc) {
             c.seed = std::stoi(argv[++i]);
+        } else if (a == "--no-gen") {
+            c.no_gen = true;
         } else if (a == "--help") {
             std::cout << "Usage: " << argv[0] << " --cpu|--gpu|--amp [options]\n\n"
                 << "Mode flags (required, exactly one):\n"
@@ -143,6 +144,7 @@ TestConfig parse_cli(int argc, char** argv) {
                 << "  --W N        Spatial width (default: 7)\n"
                 << "  --C N        Channels (default: 2048)\n"
                 << "  --seed N     Random seed (default: 42)\n"
+                << "  --no-gen     Skip Python reference data generation\n"
                 << "  --help       Show this message\n";
             std::exit(0);
         } else {
@@ -198,9 +200,13 @@ int main(int argc, char** argv) {
        << " --workspace \"" << ws << "\""
        << " --dtype " << py_dtype;
 
-    std::cout << "Generating reference data: " << py.str() << std::endl;
-    TR_CHECK(std::system(py.str().c_str()) == 0, RuntimeError,
-             "Python failed. Command: " << py.str());
+    if (!cfg.no_gen) {
+        std::cout << "Generating reference data: " << py.str() << std::endl;
+        TR_CHECK(std::system(py.str().c_str()) == 0, RuntimeError,
+                 "Python failed. Command: " + py.str());
+    } else {
+        std::cout << "Skipping reference generation (--no-gen)." << std::endl;
+    }
 
     // 加载参考数据
     Tensor h_x  = Tensor::load_tensor(ws + "/x_gap"  + tsr_sfx + ".tsr");
@@ -225,7 +231,7 @@ int main(int argc, char** argv) {
     DTensor d_x  = task.alloc(in_shape, dtype, feat_region);   // 输入 [N,H,W,C]
     DTensor d_y  = task.alloc(out_shape, dtype, feat_region);   // 前向输出 [N,1,1,C]
     DTensor d_dy = task.alloc(out_shape, dtype, feat_region);   // 反向输入 [N,1,1,C]
-    DTensor d_dx = task.alloc(in_shape, dtype, feat_region);   // 反向输出 [N,H,W,C]
+    // BWD 采用 in-place：dX 直接覆盖 X 的内存（FWD 完成后 X 不再使用）
 
     task.finalize_memory();
 
@@ -235,10 +241,10 @@ int main(int argc, char** argv) {
     g_fwd.append(fwd_op, {d_x.id}, {d_y.id});
     task.add_graph("fwd", std::move(g_fwd), StreamKind::COMP_1);
 
-    // 构建 BWD 图
+    // 构建 BWD 图（dX 覆盖 X，in-place）
     ComputationGraph g_bwd;
     ComputeOp bwd_op = is_amp ? ComputeOp::GAP_AMP_BWD : ComputeOp::GAP_FP32_BWD;
-    g_bwd.append(bwd_op, {d_dy.id}, {d_dx.id});
+    g_bwd.append(bwd_op, {d_dy.id}, {d_x.id});
     task.add_graph("bwd", std::move(g_bwd), StreamKind::COMP_1);
 
     task.compile();
@@ -253,23 +259,11 @@ int main(int argc, char** argv) {
 
     // ── 运行 FWD ──
     std::cout << "\n===== GAP FWD [" << mode_name(cfg.mode) << "] =====\n";
-
-    task.run_iter("fwd", cfg.warmup);
-    auto t0 = std::chrono::high_resolution_clock::now();
-    task.run_iter("fwd", cfg.iterations);
-    auto t1 = std::chrono::high_resolution_clock::now();
-    double avg_us_fwd = std::chrono::duration<double, std::micro>(t1 - t0).count()
-                       / cfg.iterations;
+    task.run("fwd");
 
     // ── 运行 BWD ──
     std::cout << "\n===== GAP BWD [" << mode_name(cfg.mode) << "] =====\n";
-
-    task.run_iter("bwd", cfg.warmup);
-    auto t2 = std::chrono::high_resolution_clock::now();
-    task.run_iter("bwd", cfg.iterations);
-    auto t3 = std::chrono::high_resolution_clock::now();
-    double avg_us_bwd = std::chrono::duration<double, std::micro>(t3 - t2).count()
-                       / cfg.iterations;
+    task.run("bwd");
 
     // ── 验证：MSE 对比 ──
     bool all_pass = true;
@@ -286,7 +280,8 @@ int main(int argc, char** argv) {
         if (mse_y > mse_thr) { std::cout << "  FAIL"; all_pass = false; }
         std::cout << std::endl;
 
-        Tensor h_dx_out = task.fetch_from_rank(d_dx, rank);
+        // dX 覆盖 X，所以从 d_x 取回
+        Tensor h_dx_out = task.fetch_from_rank(d_x, rank);
         double mse_dx = is_amp ? compute_mse_fp16(h_dx_out, h_dx)
                                : compute_mse_fp32(h_dx_out, h_dx);
         max_mse = (mse_dx > max_mse) ? mse_dx : max_mse;
@@ -299,8 +294,6 @@ int main(int argc, char** argv) {
     std::cout << "\n===== GAP FWD+BWD " << mode_name(cfg.mode)
               << " (" << num_ranks << " rank(s)): "
               << (all_pass ? "PASS" : "FAIL") << " =====\n"
-              << "  FWD Avg: " << std::fixed << std::setprecision(2) << avg_us_fwd << " us/iter\n"
-              << "  BWD Avg: " << std::fixed << std::setprecision(2) << avg_us_bwd << " us/iter\n"
               << "  MaxMSE:  " << std::scientific << max_mse << std::endl;
 
     return all_pass ? 0 : 1;
