@@ -265,35 +265,8 @@ void ArchPlan::merge_pattern_triple(
 }
 
 void ArchPlan::step8_merge_quadruple() {
-    std::array<LayerKind, 4> pat = {LayerKind::Conv,
-        LayerKind::Bn2d, LayerKind::ReLU, LayerKind::MaxPool};
-    std::vector<bool> merged(layers_.size(), false);
-    for (size_t i = 0; i + 4 <= layers_.size(); ) {
-        if (layers_[i].kind == pat[0] && layers_[i+1].kind == pat[1] &&
-            layers_[i+2].kind == pat[2] && layers_[i+3].kind == pat[3]) {
-            for (size_t j = 0; j < 4; ++j) merged[i+j] = true;
-            i += 4;
-        } else { ++i; }
-    }
-    if (!std::any_of(merged.begin(), merged.end(), [](bool v) { return v; })) return;
-
-    std::vector<ArchLayer> result;
-    result.reserve(layers_.size());
-    for (size_t i = 0; i < layers_.size(); ) {
-        if (merged[i]) {
-            auto& cp = std::get<ConvLayerParams>(layers_[i].params);
-            auto& pp = std::get<PoolLayerParams>(layers_[i + 3].params);
-            CBRPLayerParams cbpp{cp.out_ch, cp.k, cp.s, cp.p, pp.k, pp.s, pp.p};
-            ArchLayer fused{LayerKind::ConvBNReLUMaxPool, cbpp, "cbrp"};
-            fused.in_shape = layers_[i].in_shape;
-            result.push_back(std::move(fused));
-            i += 4;
-        } else {
-            result.push_back(std::move(layers_[i++]));
-        }
-    }
-    layers_ = std::move(result);
-    recompute_shapes_from(0);
+    // CBRP fusion removed: Conv + Bn2d + ReLU + MaxPool no longer fused into ConvBNReLUMaxPool.
+    // The layers remain as separate layers.
 }
 
 void ArchPlan::step9_merge_triple() {
@@ -304,24 +277,12 @@ void ArchPlan::step9_merge_triple() {
     auto build_fbr = [](const ArchLayer& fc, const ArchLayer&, const ArchLayer&) -> LayerParam {
         return FBRLayerParams{std::get<FCLayerParams>(fc.params).out_features, std::get<FCLayerParams>(fc.params).bias};
     };
-    auto build_cbrp_upgrade = [](const ArchLayer& cbr, const ArchLayer& pool, const ArchLayer&) -> LayerParam {
-        auto& cp = std::get<CBRLayerParams>(cbr.params);
-        auto& pp = std::get<PoolLayerParams>(pool.params);
-        return CBRPLayerParams{cp.out_ch, cp.k, cp.s, cp.p, pp.k, pp.s, pp.p};
-    };
-
     merge_pattern_triple(LayerKind::Conv, LayerKind::Bn2d, LayerKind::ReLU,
         LayerKind::ConvBNReLU, build_cbr);
     merge_pattern_triple(LayerKind::FC, LayerKind::Bn1d, LayerKind::ReLU,
         LayerKind::FCBNReLU, build_fbr);
 
-    merge_pattern_binary(LayerKind::ConvBNReLU, LayerKind::MaxPool,
-        LayerKind::ConvBNReLUMaxPool,
-        [](const ArchLayer& cbr, const ArchLayer& pool) -> LayerParam {
-            auto& cp = std::get<CBRLayerParams>(cbr.params);
-            auto& pp = std::get<PoolLayerParams>(pool.params);
-            return CBRPLayerParams{cp.out_ch, cp.k, cp.s, cp.p, pp.k, pp.s, pp.p};
-        });
+    // CBRP upgrade removed: ConvBNReLU + MaxPool no longer fused into ConvBNReLUMaxPool
 }
 
 void ArchPlan::step10_merge_binary_and_mark() {

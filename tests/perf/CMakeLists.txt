@@ -183,3 +183,47 @@ else()
     target_compile_options(test_check_nan_perf PRIVATE -Wall -Wextra -Wpedantic -Wno-unused-function)
 endif()
 message(STATUS "  - test_check_nan_perf: RANGE_CHECK_NAN performance test")
+
+# MaxPool 性能测试
+add_executable(test_maxpool_perf test_maxpool_perf.cpp)
+target_link_libraries(test_maxpool_perf PRIVATE renaissance)
+target_compile_definitions(test_maxpool_perf PRIVATE TR_LOG_LEVEL=1)
+
+if(TR_USE_CUDA)
+    setup_gpu_runtime_env(test_maxpool_perf)
+endif()
+
+set_target_properties(test_maxpool_perf PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/perf
+    WIN32_EXECUTABLE FALSE
+)
+
+if(MSVC)
+    target_compile_options(test_maxpool_perf PRIVATE /W4 /utf-8 /wd4244 /wd4505 /wd4458 /wd4127)
+else()
+    target_compile_options(test_maxpool_perf PRIVATE -Wall -Wextra -Wpedantic -Wno-unused-function)
+endif()
+
+message(STATUS "  - test_maxpool_perf: MaxPool FWD+BWD+INF performance test")
+
+# Dropout 性能测试
+add_executable(test_dropout_perf test_dropout_perf.cpp)
+target_link_libraries(test_dropout_perf PRIVATE renaissance)
+target_compile_definitions(test_dropout_perf PRIVATE TR_LOG_LEVEL=1)
+
+if(TR_USE_CUDA)
+    setup_gpu_runtime_env(test_dropout_perf)
+endif()
+
+set_target_properties(test_dropout_perf PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/perf
+    WIN32_EXECUTABLE FALSE
+)
+
+if(MSVC)
+    target_compile_options(test_dropout_perf PRIVATE /W4 /utf-8 /wd4244 /wd4505 /wd4458 /wd4127)
+else()
+    target_compile_options(test_dropout_perf PRIVATE -Wall -Wextra -Wpedantic -Wno-unused-function)
+endif()
+
+message(STATUS "  - test_dropout_perf: Dropout FWD+BWD+INF performance test")

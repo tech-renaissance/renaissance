@@ -63,6 +63,8 @@ void register_default_ops() {
     register_op_range_grad_scaling();
     register_op_range_accum_metrics();
     register_op_adam_bc();
+    register_op_maxpool();
+    register_op_dropout();
 }
 
 #ifdef TR_USE_CUDA
@@ -77,7 +79,8 @@ bool require_warmup(ComputeOp op) noexcept {
         case ComputeOp::BN2D_AMP_FWD:   case ComputeOp::BN2D_AMP_BWD:   case ComputeOp::BN2D_AMP_INF:
         case ComputeOp::BN1D_FP32_FWD:  case ComputeOp::BN1D_FP32_BWD:  case ComputeOp::BN1D_FP32_INF:
         case ComputeOp::BN2D_FP32_FWD:  case ComputeOp::BN2D_FP32_BWD:  case ComputeOp::BN2D_FP32_INF:
-        case ComputeOp::MAXPOOL_FWD:    case ComputeOp::MAXPOOL_BWD:
+        case ComputeOp::MAXPOOL_FP32_FWD: case ComputeOp::MAXPOOL_AMP_FWD:
+        case ComputeOp::MAXPOOL_FP32_INF: case ComputeOp::MAXPOOL_AMP_INF:
         case ComputeOp::GAP_FP32_FWD:
         case ComputeOp::GAP_AMP_FWD:
         case ComputeOp::GAP_FP32_BWD:
@@ -90,7 +93,6 @@ bool require_warmup(ComputeOp op) noexcept {
         case ComputeOp::SOFTMAX_CE_AMP_INF:
         case ComputeOp::CONV_BN_RELU_AMP_FWD: case ComputeOp::CONV_BN_RELU_AMP_BWD: case ComputeOp::CONV_BN_RELU_AMP_INF:
         case ComputeOp::CBR_AMP_FWD:    case ComputeOp::CBR_AMP_BWD:    case ComputeOp::CBR_AMP_INF:
-        case ComputeOp::CBRP_AMP_FWD:   case ComputeOp::CBRP_AMP_BWD:   case ComputeOp::CBRP_AMP_INF:
         case ComputeOp::BOTTLENECK_AMP_FWD: case ComputeOp::BOTTLENECK_AMP_BWD: case ComputeOp::BOTTLENECK_AMP_INF:
         case ComputeOp::BASICBLOCK_AMP_FWD: case ComputeOp::BASICBLOCK_AMP_BWD: case ComputeOp::BASICBLOCK_AMP_INF:
         case ComputeOp::INVRESIDUAL_AMP_FWD: case ComputeOp::INVRESIDUAL_AMP_BWD: case ComputeOp::INVRESIDUAL_AMP_INF:

@@ -81,6 +81,9 @@ list(APPEND RENAISSANCE_SOURCES
     backend/ops/dtensor/flatten_op.cu
     backend/ops/dtensor/gap_op.cpp
     backend/ops/dtensor/gap_op.cu
+    backend/ops/dtensor/maxpool_op.cpp
+    backend/ops/dtensor/dropout_op.cpp
+    backend/ops/dtensor/dropout_op.cu
     backend/ops/dtensor/softmax_ce_op.cpp
     backend/ops/dtensor/softmax_ce_op.cu
     backend/ops/dtensor/axpy_op.cpp

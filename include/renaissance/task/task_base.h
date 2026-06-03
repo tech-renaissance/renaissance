@@ -127,6 +127,13 @@ public:
     void init_all();
 
     /**
+     * @brief 设置 Dropout per-RANK seed 的 DTensor ID
+     * @param id 已分配的 seed DTensor ID（应在 S_SCALAR_INT32 区域，shape {1,1,1,2}）
+     * @note 用于 SimpleTask 测试场景，补充 baseline 注入
+     */
+    void set_dropout_seed_id(int32_t id) { memory_plan_.set_baseline_dropout_seed(id); }
+
+    /**
      * @brief 从指定逻辑rank取回数据到CPU
      * @param dtensor 分布式张量
      * @param rank 源逻辑rank，会自动映射到物理GPU ID

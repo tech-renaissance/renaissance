@@ -51,14 +51,6 @@ void ArchPlan::recompute_shapes_from(size_t start_idx) {
             cur = {1, (cur.h() - 1) / s + 1, (cur.w() - 1) / s + 1, p.out_ch};
             break;
         }
-        case LayerKind::ConvBNReLUMaxPool: {
-            auto& p = std::get<CBRPLayerParams>(layer.params);
-            int oh = (cur.h() + 2 * p.conv_p - p.conv_k) / p.conv_s + 1;
-            int ow = (cur.w() + 2 * p.conv_p - p.conv_k) / p.conv_s + 1;
-            cur = {1, (oh + 2 * p.pool_p - p.pool_k) / p.pool_s + 1,
-                      (ow + 2 * p.pool_p - p.pool_k) / p.pool_s + 1, p.out_ch};
-            break;
-        }
         case LayerKind::BasicBlockIdentity:
             break;
         case LayerKind::BasicBlockProjection: {

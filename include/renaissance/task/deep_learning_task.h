@@ -279,7 +279,6 @@ protected:
                 case LayerKind::ReLU:
                 case LayerKind::MaxPool:
                 case LayerKind::ConvBNReLU:
-                case LayerKind::ConvBNReLUMaxPool:
                 case LayerKind::BNReLU:
                 case LayerKind::ConvReLU:
                 case LayerKind::FCBNReLU:

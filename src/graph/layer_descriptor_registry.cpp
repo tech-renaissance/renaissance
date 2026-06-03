@@ -372,7 +372,7 @@ std::vector<TensorDesc> infer_maxpool_tensors(
     const Shape& input, const OpParams& params, const InferContext& ctx)
 {
     DType feat_dt = ctx.enable_amp ? DType::FP16 : DType::FP32;
-    Shape out = input;  // 默认pass-through，实际需从params计算
+    Shape out = input;
     if (std::holds_alternative<PoolParams>(params.data)) {
         const auto& pp = std::get<PoolParams>(params.data);
         int oh = (input.h() + 2 * pp.pad_h - pp.kernel_h) / pp.stride_h + 1;
@@ -381,16 +381,15 @@ std::vector<TensorDesc> infer_maxpool_tensors(
     }
     return {
         TensorDesc{"pool_output", out,  select_feature_region(ctx), feat_dt},
-        TensorDesc{"pool_index",  out,  Region::S_MASK,        DType::INT32},
-        TensorDesc{"pool_grad_slot", out, select_feature_region(ctx), feat_dt}
+        TensorDesc{"pool_mask",   out,  Region::S_MASK,        DType::INT8}
     };
 }
 
 SubgraphPattern build_maxpool_forward(const OpParams&, const std::vector<TensorDesc>& descs) {
     SubgraphPattern p;
-    if (descs.size() < 3) return p;
+    if (descs.size() < 2) return p;
     SubgraphPattern::Node n;
-    n.op = ComputeOp::MAXPOOL_FWD;
+    n.op = GlobalRegistry::instance().using_amp() ? ComputeOp::MAXPOOL_AMP_FWD : ComputeOp::MAXPOOL_FP32_FWD;
     n.output_indices = {0, 1};
     p.nodes.push_back(n);
     return p;
@@ -398,11 +397,11 @@ SubgraphPattern build_maxpool_forward(const OpParams&, const std::vector<TensorD
 
 SubgraphPattern build_maxpool_backward(const OpParams&, const std::vector<TensorDesc>& descs) {
     SubgraphPattern p;
-    if (descs.size() < 3) return p;
+    if (descs.size() < 2) return p;
     SubgraphPattern::Node n;
-    n.op = ComputeOp::MAXPOOL_BWD;
-    n.input_indices  = {0, 1};
-    n.output_indices = {2};
+    n.op = GlobalRegistry::instance().using_amp() ? ComputeOp::MAXPOOL_AMP_BWD : ComputeOp::MAXPOOL_FP32_BWD;
+    n.input_indices  = {0, 1};   // pool_output, pool_mask
+    n.output_indices = {};         // dX in-place (compiler routes to X)
     p.nodes.push_back(n);
     return p;
 }
@@ -411,8 +410,8 @@ SubgraphPattern build_maxpool_inference(const OpParams&, const std::vector<Tenso
     SubgraphPattern p;
     if (descs.size() < 2) return p;
     SubgraphPattern::Node n;
-    n.op = ComputeOp::MAXPOOL_FWD;
-    n.output_indices = {0};
+    n.op = GlobalRegistry::instance().using_amp() ? ComputeOp::MAXPOOL_AMP_INF : ComputeOp::MAXPOOL_FP32_INF;
+    n.output_indices = {0, 1};  // Y + mask (mask allocated but not consumed)
     p.nodes.push_back(n);
     return p;
 }
@@ -1000,65 +999,49 @@ SubgraphPattern build_convbn_inference(const OpParams&, const std::vector<Tensor
 }
 
 // ============================================================================
-// ConvBNReLUMaxPool — Conv(6) + BN(11) + Pool(2) = 19张量
+// Dropout — 2张量 (output Y, mask INT8), dX in-place
 // ============================================================================
 
-std::vector<TensorDesc> infer_convbnrelump_tensors(
-    const Shape& input, const OpParams& params, const InferContext& ctx)
+std::vector<TensorDesc> infer_dropout_tensors(
+    const Shape& input, const OpParams&, const InferContext& ctx)
 {
-    std::vector<TensorDesc> descs;
-    if (!std::holds_alternative<CBRPParams>(params.data)) {
-        LOG_WARN << "infer_convbnrelump_tensors: params is not CBRPParams";
-        return descs;
-    }
-    const auto& cbrp = std::get<CBRPParams>(params.data);
-
-    OpParams conv_op{ConvParams{cbrp.conv}};
-    auto conv_d = infer_conv_tensors(input, conv_op, ctx);
-    descs.insert(descs.end(), conv_d.begin(), conv_d.end());
-
-    Shape conv_out = compute_conv_output(input, cbrp.conv);
-    OpParams bn_op{BNParams{cbrp.bn}};
-    auto bn_d = infer_bn_tensors(conv_out, bn_op, ctx);
-    descs.insert(descs.end(), bn_d.begin(), bn_d.end());
-
-    Shape bn_out = conv_out;
-    OpParams pool_op{PoolParams{cbrp.pool}};
-    auto pool_d = infer_maxpool_tensors(bn_out, pool_op, ctx);
-    descs.insert(descs.end(), pool_d.begin(), pool_d.end());
-
-    return descs;
+    TR_CHECK(input.h() == 1 && input.w() == 1, ShapeError,
+             "Dropout only supports [N,1,1,C] input, got [" << input.n() << ","
+             << input.c() << "," << input.h() << "," << input.w() << "]");
+    DType feat_dt = ctx.enable_amp ? DType::FP16 : DType::FP32;
+    return {
+        TensorDesc{"dropout_output", input, select_feature_region(ctx), feat_dt},
+        TensorDesc{"dropout_mask",   input, Region::S_MASK,        DType::INT8}
+    };
 }
 
-SubgraphPattern build_convbnrelump_forward(const OpParams&, const std::vector<TensorDesc>& descs) {
+SubgraphPattern build_dropout_forward(const OpParams&, const std::vector<TensorDesc>& descs) {
     SubgraphPattern p;
-    if (descs.size() < 19) return p;
+    if (descs.size() < 2) return p;
     SubgraphPattern::Node n;
-    n.op = ComputeOp::CBRP_AMP_FWD;
-    n.input_indices  = {0, 6, 7, 9, 10};   // conv_weight, bn_weight, bn_bias, bn_prev_mean, bn_prev_var (P0-3修复)
-    n.output_indices = {1, 8, 17, 18};
+    n.op = GlobalRegistry::instance().using_amp() ? ComputeOp::DROPOUT_AMP_FWD : ComputeOp::DROPOUT_FP32_FWD;
+    n.output_indices = {0, 1};
     p.nodes.push_back(n);
     return p;
 }
 
-SubgraphPattern build_convbnrelump_backward(const OpParams&, const std::vector<TensorDesc>& descs) {
+SubgraphPattern build_dropout_backward(const OpParams&, const std::vector<TensorDesc>& descs) {
     SubgraphPattern p;
-    if (descs.size() < 19) return p;
+    if (descs.size() < 2) return p;
     SubgraphPattern::Node n;
-    n.op = ComputeOp::CBRP_AMP_BWD;
-    n.input_indices  = {0, 1, 2, 6, 7, 8, 9, 10, 17, 18};  // conv_w, conv_out, grad_slot, bn_w, bn_b, bn_out, bn_mean, bn_var, relu_mask, pool_out (P0-4修复)
-    n.output_indices = {2, 3, 13, 14};  // conv_grad_slot(dX), conv_weight_grad, bn_weight_grad, bn_bias_grad
+    n.op = GlobalRegistry::instance().using_amp() ? ComputeOp::DROPOUT_AMP_BWD : ComputeOp::DROPOUT_FP32_BWD;
+    n.input_indices  = {1};   // dropout_mask
+    n.output_indices = {};     // dX in-place
     p.nodes.push_back(n);
     return p;
 }
 
-SubgraphPattern build_convbnrelump_inference(const OpParams&, const std::vector<TensorDesc>& descs) {
+SubgraphPattern build_dropout_inference(const OpParams&, const std::vector<TensorDesc>& descs) {
     SubgraphPattern p;
-    if (descs.size() < 19) return p;
+    if (descs.size() < 2) return p;
     SubgraphPattern::Node n;
-    n.op = ComputeOp::CBRP_AMP_INF;
-    n.input_indices  = {0, 6, 7};
-    n.output_indices = {17};
+    n.op = GlobalRegistry::instance().using_amp() ? ComputeOp::DROPOUT_AMP_INF : ComputeOp::DROPOUT_FP32_INF;
+    n.output_indices = {0, 1};
     p.nodes.push_back(n);
     return p;
 }
@@ -2009,8 +1992,8 @@ Shape get_output_shape(LayerKind kind, const std::vector<TensorDesc>& descs)
         case LayerKind::BNReLU:        return find(2);   // BN output
         case LayerKind::ConvBNReLU:    return find(8);   // BN output (index 6+2=8)
         case LayerKind::ConvBN:        return find(8);   // BN output (same)
-        case LayerKind::ConvBNReLUMaxPool: return find(17); // pool output
         case LayerKind::ConvReLU:      return find(1);   // conv output
+        case LayerKind::Dropout:       return find(0);   // dropout output
         case LayerKind::FCBNReLU:      return find(9);   // BN output (FC7+2=9)
         case LayerKind::GapFC:         return find(3);   // fc output (gap[0] + fc_weight[1] + fc_bias[2] + fc_output[3])
         // Block fusions: output is the last sub-layer's BN output
@@ -2049,7 +2032,7 @@ const LayerDescriptor& get_layer_descriptor(LayerKind kind) {
     static const LayerDescriptor add2_desc   = { infer_add2_tensors,      build_add2_forward,      build_add2_backward,      build_add2_inference };
     static const LayerDescriptor cbr_desc    = { infer_convbnrelu_tensors, build_convbnrelu_forward, build_convbnrelu_backward, build_convbnrelu_inference };
     static const LayerDescriptor cb_desc     = { infer_convbn_tensors,     build_convbn_forward,    build_convbn_backward,     build_convbn_inference };
-    static const LayerDescriptor cbrp_desc   = { infer_convbnrelump_tensors, build_convbnrelump_forward, build_convbnrelump_backward, build_convbnrelump_inference };
+    static const LayerDescriptor dropout_desc = { infer_dropout_tensors,   build_dropout_forward,   build_dropout_backward,   build_dropout_inference };
     static const LayerDescriptor cr_desc     = { infer_convrelu_tensors,   build_convrelu_forward,   build_convrelu_backward,   build_convrelu_inference };
     static const LayerDescriptor fbr_desc    = { infer_fcbnrelu_tensors,   build_fcbnrelu_forward,   build_fcbnrelu_backward,   build_fcbnrelu_inference };
     static const LayerDescriptor gapfc_desc  = { infer_gapfc_tensors,      build_gapfc_forward,      build_gapfc_backward,      build_gapfc_inference };
@@ -2090,7 +2073,7 @@ const LayerDescriptor& get_layer_descriptor(LayerKind kind) {
         case LayerKind::BNReLU:               return bnr_desc;
         case LayerKind::ConvBNReLU:           return cbr_desc;
         case LayerKind::ConvBN:               return cb_desc;
-        case LayerKind::ConvBNReLUMaxPool:    return cbrp_desc;
+        case LayerKind::Dropout:              return dropout_desc;
         case LayerKind::ConvReLU:             return cr_desc;
         case LayerKind::FCBNReLU:             return fbr_desc;
         case LayerKind::GapFC:                return gapfc_desc;

@@ -107,6 +107,33 @@ inline void finalize_cudnn_graph(fe::graph::Graph* graph, cudnnHandle_t handle) 
     TR_CUDNN_FE_CHECK(graph->build_plans(fe::BuildPlanPolicy_t::HEURISTICS_CHOICE), "build plans");
 }
 
+// ─────────────────────────────────────────────────────────
+// DType ↔ cuDNN Legacy DataType 转换
+// ─────────────────────────────────────────────────────────
+
+inline cudnnDataType_t to_cudnn_dtype(DType dtype) {
+    switch (dtype) {
+        case DType::FP32:  return CUDNN_DATA_FLOAT;
+        case DType::FP16:  return CUDNN_DATA_HALF;
+        case DType::INT8:  return CUDNN_DATA_INT8;
+        case DType::INT32: return CUDNN_DATA_INT32;
+        default:
+            TR_TYPE_ERROR("Unsupported DType for cuDNN Legacy API");
+    }
+}
+
+// ─────────────────────────────────────────────────────────
+// TR4 cuDNN Legacy 错误检查宏
+// ─────────────────────────────────────────────────────────
+
+#define TR_CUDNN_CHECK(call) \
+    do { \
+        cudnnStatus_t err = (call); \
+        if (err != CUDNN_STATUS_SUCCESS) { \
+            TR_DEVICE_ERROR("cuDNN Legacy [" #call "] failed: " << cudnnGetErrorString(err)); \
+        } \
+    } while(0)
+
 } // namespace tr
 
 #endif // TR_USE_CUDA

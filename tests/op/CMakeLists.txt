@@ -459,3 +459,75 @@ if(TR_USE_CUDA)
 
     message(STATUS "  - test_relu_cudnn_bitmask: ReLU cuDNN Frontend BOOLEAN bitmask implementation")
 endif()
+
+# ============================================================================
+# MaxPool FWD+BWD 串接测试 — MaxPool 算子验证
+# ============================================================================
+add_executable(test_maxpool_fwd_bwd test_maxpool_fwd_bwd.cpp)
+target_link_libraries(test_maxpool_fwd_bwd PRIVATE renaissance)
+target_compile_definitions(test_maxpool_fwd_bwd PRIVATE TR_LOG_LEVEL=1)
+
+if(TR_USE_CUDA)
+    setup_gpu_runtime_env(test_maxpool_fwd_bwd)
+endif()
+
+set_target_properties(test_maxpool_fwd_bwd PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/op
+    WIN32_EXECUTABLE FALSE
+)
+
+if(MSVC)
+    target_compile_options(test_maxpool_fwd_bwd PRIVATE /W4 /utf-8 /wd4244 /wd4505 /wd4458 /wd4127)
+else()
+    target_compile_options(test_maxpool_fwd_bwd PRIVATE -Wall -Wextra -Wpedantic -Wno-unused-function)
+endif()
+
+message(STATUS "  - test_maxpool_fwd_bwd: MaxPool FWD+BWD correctness test")
+
+# ============================================================================
+# MaxPool Visual 测试 — 可视化调试工具
+# ============================================================================
+add_executable(test_maxpool_visual test_maxpool_visual.cpp)
+target_link_libraries(test_maxpool_visual PRIVATE renaissance)
+target_compile_definitions(test_maxpool_visual PRIVATE TR_LOG_LEVEL=1)
+
+if(TR_USE_CUDA)
+    setup_gpu_runtime_env(test_maxpool_visual)
+endif()
+
+set_target_properties(test_maxpool_visual PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/op
+    WIN32_EXECUTABLE FALSE
+)
+
+if(MSVC)
+    target_compile_options(test_maxpool_visual PRIVATE /W4 /utf-8 /wd4244 /wd4505 /wd4458 /wd4127)
+else()
+    target_compile_options(test_maxpool_visual PRIVATE -Wall -Wextra -Wpedantic -Wno-unused-function)
+endif()
+
+message(STATUS "  - test_maxpool_visual: MaxPool visual debugging test")
+
+# ============================================================================
+# Dropout FWD+BWD+INF 数学属性测试 — 与 PyTorch 无关，自包含验证
+# ============================================================================
+add_executable(test_dropout test_dropout.cpp)
+target_link_libraries(test_dropout PRIVATE renaissance)
+target_compile_definitions(test_dropout PRIVATE TR_LOG_LEVEL=1)
+
+if(TR_USE_CUDA)
+    setup_gpu_runtime_env(test_dropout)
+endif()
+
+set_target_properties(test_dropout PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/op
+    WIN32_EXECUTABLE FALSE
+)
+
+if(MSVC)
+    target_compile_options(test_dropout PRIVATE /W4 /utf-8 /wd4244 /wd4505 /wd4458 /wd4127)
+else()
+    target_compile_options(test_dropout PRIVATE -Wall -Wextra -Wpedantic -Wno-unused-function)
+endif()
+
+message(STATUS "  - test_dropout: Dropout FWD+BWD+INF property test")

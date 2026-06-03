@@ -407,6 +407,12 @@ void MemoryPlan::alloc_baseline_dtensors(const Shape& label_shape,
         baseline_.tc  = alloc_impl(scalar_shape, DType::FP32, Region::S_SCALAR_FP32).id;
         baseline_.eps = alloc_impl(scalar_shape, DType::FP32, Region::S_SCALAR_FP32).id;
     }
+
+    // Step 6: Dropout per-RANK seed (shape {1,1,1,2}, DType::INT32)
+    Shape seed_shape{1, 1, 1, 2};
+    auto seed_dt = alloc_impl(seed_shape, DType::INT32, Region::S_SCALAR_INT32);
+    set_init_config(seed_dt.id, InitConfig{0.0f, InitKind::NONE, FanMode::FAN_IN});
+    baseline_.dropout_seed = seed_dt.id;
 }
 
 void MemoryPlan::alloc_baseline_dtensors(
@@ -469,6 +475,12 @@ void MemoryPlan::alloc_baseline_dtensors(
         baseline_.tc  = alloc_impl(scalar_shape, DType::FP32, Region::S_SCALAR_FP32).id;
         baseline_.eps = alloc_impl(scalar_shape, DType::FP32, Region::S_SCALAR_FP32).id;
     }
+
+    // Step 6: Dropout per-RANK seed (shape {1,1,1,2}, DType::INT32)
+    Shape seed_shape{1, 1, 1, 2};
+    auto seed_dt = alloc_impl(seed_shape, DType::INT32, Region::S_SCALAR_INT32);
+    set_init_config(seed_dt.id, InitConfig{0.0f, InitKind::NONE, FanMode::FAN_IN});
+    baseline_.dropout_seed = seed_dt.id;
 }
 
 // F-Series

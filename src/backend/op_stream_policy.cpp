@@ -28,10 +28,15 @@ StreamKind get_op_default_stream(ComputeOp op) noexcept {
         case ComputeOp::CONV_AMP_BWD:
             return StreamKind::COMP_3;
 
-        // ===== 池化类（GAP / MaxPool）→ COMP_2 =====
+        // ===== 池化类（GAP / MaxPool / Dropout）→ COMP_2 =====
         case ComputeOp::GAP_FP32_FWD: case ComputeOp::GAP_AMP_FWD:
         case ComputeOp::GAP_FP32_BWD: case ComputeOp::GAP_AMP_BWD:
-        case ComputeOp::MAXPOOL_FWD:  case ComputeOp::MAXPOOL_BWD:
+        case ComputeOp::MAXPOOL_FP32_FWD: case ComputeOp::MAXPOOL_FP32_BWD:
+        case ComputeOp::MAXPOOL_FP32_INF: case ComputeOp::MAXPOOL_AMP_FWD:
+        case ComputeOp::MAXPOOL_AMP_BWD: case ComputeOp::MAXPOOL_AMP_INF:
+        case ComputeOp::DROPOUT_FP32_FWD: case ComputeOp::DROPOUT_FP32_BWD:
+        case ComputeOp::DROPOUT_FP32_INF: case ComputeOp::DROPOUT_AMP_FWD:
+        case ComputeOp::DROPOUT_AMP_BWD: case ComputeOp::DROPOUT_AMP_INF:
             return StreamKind::COMP_2;
 
         // ===== BN 类 → COMP_2 =====

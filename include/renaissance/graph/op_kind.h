@@ -86,11 +86,9 @@ struct CBRParams {
     BNParams bn;
 };
 
-/** @brief Conv+BN+ReLU+Pool 融合参数（首层） */
-struct CBRPParams {
-    ConvParams conv;
-    BNParams bn;
-    PoolParams pool;
+/** @brief Dropout 参数（Inverted Dropout） */
+struct DropoutParams {
+    float p = 0.5f;  // 丢弃率 [0.0, 1.0)
 };
 
 /** @brief Bottleneck 融合参数
@@ -210,8 +208,12 @@ enum class ComputeOp : uint16_t {
     BN2D_FP32_FWD,      BN2D_FP32_BWD,      BN2D_FP32_INF,
 
     // === 池化（类型多态）===
-    MAXPOOL_FWD,
-    MAXPOOL_BWD,
+    MAXPOOL_FP32_FWD,
+    MAXPOOL_FP32_BWD,
+    MAXPOOL_FP32_INF,
+    MAXPOOL_AMP_FWD,
+    MAXPOOL_AMP_BWD,
+    MAXPOOL_AMP_INF,
     GAP_FP32_FWD,
     GAP_FP32_BWD,
     GAP_AMP_FWD,
@@ -231,7 +233,6 @@ enum class ComputeOp : uint16_t {
     FC_BN_RELU_AMP_FWD, FC_BN_RELU_AMP_BWD, FC_BN_RELU_AMP_INF,
     CONV_BN_RELU_AMP_FWD, CONV_BN_RELU_AMP_BWD, CONV_BN_RELU_AMP_INF,
     CBR_AMP_FWD,        CBR_AMP_BWD,        CBR_AMP_INF,
-    CBRP_AMP_FWD,       CBRP_AMP_BWD,       CBRP_AMP_INF,
     BOTTLENECK_AMP_FWD, BOTTLENECK_AMP_BWD, BOTTLENECK_AMP_INF,
     BASICBLOCK_AMP_FWD, BASICBLOCK_AMP_BWD, BASICBLOCK_AMP_INF,
     INVRESIDUAL_AMP_FWD, INVRESIDUAL_AMP_BWD, INVRESIDUAL_AMP_INF,
@@ -354,9 +355,9 @@ struct OpParams {
         CastParams,
         FlattenParams,
         CBRParams,
-        CBRPParams,
         BottleneckParams,
-        GapFCParams
+        GapFCParams,
+        DropoutParams
     > data = std::monostate{};
 
     OpParams() = default;
@@ -371,10 +372,10 @@ struct OpParams {
     explicit OpParams(AxpyParams p)       : data(std::move(p)) {}
     explicit OpParams(CastParams p)       : data(std::move(p)) {}
     explicit OpParams(CBRParams p)        : data(std::move(p)) {}
-    explicit OpParams(CBRPParams p)       : data(std::move(p)) {}
     explicit OpParams(BottleneckParams p) : data(std::move(p)) {}
     explicit OpParams(GapFCParams p)      : data(std::move(p)) {}
     explicit OpParams(FlattenParams p)    : data(std::move(p)) {}
+    explicit OpParams(DropoutParams p)    : data(std::move(p)) {}
 
     bool is_empty() const { return std::holds_alternative<std::monostate>(data); }
 
@@ -390,9 +391,9 @@ struct OpParams {
     const CastParams& cast() const       { return std::get<CastParams>(data); }
     const FlattenParams& flatten() const { return std::get<FlattenParams>(data); }
     const CBRParams& cbr() const         { return std::get<CBRParams>(data); }
-    const CBRPParams& cbrp() const       { return std::get<CBRPParams>(data); }
     const BottleneckParams& bottleneck() const { return std::get<BottleneckParams>(data); }
     const GapFCParams& gap_fc() const    { return std::get<GapFCParams>(data); }
+    const DropoutParams& dropout() const  { return std::get<DropoutParams>(data); }
 };
 
 // Utility functions

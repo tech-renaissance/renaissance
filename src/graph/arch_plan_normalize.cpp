@@ -94,8 +94,6 @@ int ArchPlan::get_effective_output_c_at(size_t idx, int default_c) const {
             return std::get<BottleneckProjectionLayerParams>(layers_[j].params).out_ch;
         case LayerKind::BasicBlockProjection:
             return std::get<BasicBlockProjectionLayerParams>(layers_[j].params).out_ch;
-        case LayerKind::ConvBNReLUMaxPool:
-            return std::get<CBRPLayerParams>(layers_[j].params).out_ch;
         case LayerKind::InvResidualNoShortcut:
         case LayerKind::InvResidualIdentity:
             return std::get<InvResidualLayerParams>(layers_[j].params).out_ch;
@@ -114,6 +112,7 @@ int ArchPlan::get_effective_output_c_at(size_t idx, int default_c) const {
         case LayerKind::Bn1d:
         case LayerKind::Bn2d:
         case LayerKind::MaxPool:
+        case LayerKind::Dropout:
         case LayerKind::GAP:
         case LayerKind::Identity:
         case LayerKind::Flatten:

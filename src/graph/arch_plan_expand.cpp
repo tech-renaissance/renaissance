@@ -88,6 +88,8 @@ static void expand_primitive_impl(const Layer::Node& node, std::vector<ArchLayer
         break;
     }
     case NodeKind::Dropout: {
+        auto& p = std::get<DropoutParam>(node.payload);
+        out.push_back({LayerKind::Dropout, DropoutLayerParams{p.p}, "dropout", {}, {}, false, false, src_id});
         break;
     }
     case NodeKind::CBR: {
@@ -100,23 +102,16 @@ static void expand_primitive_impl(const Layer::Node& node, std::vector<ArchLayer
     }
     case NodeKind::CBRP: {
         auto& p = std::get<CBRPParam>(node.payload);
-        if (fuse) {
-            out.push_back({LayerKind::ConvBNReLUMaxPool,
-                tr::CBRPLayerParams{p.out_ch, p.conv_k, p.conv_s, p.conv_p,
-                                    p.pool_k, p.pool_s, p.pool_p},
-                "cbrp", {}, {}, false, false, src_id});
-        } else {
-            out.push_back({LayerKind::Conv,
-                ConvLayerParams{p.out_ch, p.conv_k, p.conv_s, p.conv_p},
-                "conv_cbrp", {}, {}, false, false, src_id});
-            out.push_back({LayerKind::Bn2d, EmptyParams{},
-                "bn_cbrp", {}, {}, false, false, src_id});
-            out.push_back({LayerKind::ReLU, EmptyParams{},
-                "relu_cbrp", {}, {}, false, false, src_id});
-            out.push_back({LayerKind::MaxPool,
-                PoolLayerParams{p.pool_k, p.pool_s, p.pool_p},
-                "maxpool_cbrp", {}, {}, false, false, src_id});
-        }
+        out.push_back({LayerKind::Conv,
+            ConvLayerParams{p.out_ch, p.conv_k, p.conv_s, p.conv_p},
+            "conv_cbrp", {}, {}, false, false, src_id});
+        out.push_back({LayerKind::Bn2d, EmptyParams{},
+            "bn_cbrp", {}, {}, false, false, src_id});
+        out.push_back({LayerKind::ReLU, EmptyParams{},
+            "relu_cbrp", {}, {}, false, false, src_id});
+        out.push_back({LayerKind::MaxPool,
+            PoolLayerParams{p.pool_k, p.pool_s, p.pool_p},
+            "maxpool_cbrp", {}, {}, false, false, src_id});
         current_c = p.out_ch;
         break;
     }

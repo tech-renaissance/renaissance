@@ -173,6 +173,7 @@ public:
         int32_t bias_corr1 = -1;
         int32_t bias_corr2 = -1;
         int32_t label_smoothing = -1;   // [NEW] Label Smoothing标量
+        int32_t dropout_seed = -1;       // [NEW] Dropout per-RANK seed (shape {1,1,1,2}, DType::INT32)
     };
 
     void alloc_baseline_dtensors(const Shape& label_shape,
@@ -285,6 +286,13 @@ public:
      * @param config 初始化配置（8 字节）
      */
     void set_init_config(int32_t id, const InitConfig& config);
+
+    /**
+     * @brief 设置 Dropout per-RANK seed tensor ID
+     * @param id DTensor ID (shape {1,1,1,2}, DType::INT32, S_SCALAR_INT32)
+     * @note 用于 SimpleTask 测试场景，手动注入 Baseline seed
+     */
+    void set_baseline_dropout_seed(int32_t id) noexcept { baseline_.dropout_seed = id; }
 
     // ===================================================================
     // 五、调试与校验

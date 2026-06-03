@@ -40,7 +40,6 @@ static bool is_bn_like(LayerKind k) {
         case LayerKind::BNReLU:
         case LayerKind::ConvBNReLU:
         case LayerKind::ConvBN:
-        case LayerKind::ConvBNReLUMaxPool:
         case LayerKind::FCBNReLU:
             return true;
         default:
@@ -54,7 +53,6 @@ static bool is_weight_bearing(LayerKind k) {
         case LayerKind::Bn1d: case LayerKind::Bn2d:
         case LayerKind::FC:
         case LayerKind::ConvBNReLU: case LayerKind::ConvBN: case LayerKind::ConvReLU:
-        case LayerKind::ConvBNReLUMaxPool:
         case LayerKind::FCBNReLU: case LayerKind::GapFC:
         case LayerKind::BNReLU:
         case LayerKind::BottleneckProjection:
@@ -246,7 +244,6 @@ private:
                 break;
             case LayerKind::ConvBNReLU:
             case LayerKind::ConvBN:
-            case LayerKind::ConvBNReLUMaxPool:
                 compile_conv(layer);
                 compile_bn(layer, idx);
                 break;
@@ -285,6 +282,7 @@ private:
             case LayerKind::ELU:
             case LayerKind::Sigmoid:
             case LayerKind::MaxPool:
+            case LayerKind::Dropout:
             case LayerKind::GAP:
             case LayerKind::Flatten:
             case LayerKind::Identity:
@@ -451,7 +449,6 @@ private:
         if (std::holds_alternative<CBRLayerParams>(p))    { auto& cp=std::get<CBRLayerParams>(p); return {cp.out_ch, cp.k, cp.s, cp.p}; }
         if (std::holds_alternative<CBLayerParams>(p))     { auto& cp=std::get<CBLayerParams>(p);  return {cp.out_ch, cp.k, cp.s, cp.p}; }
         if (std::holds_alternative<CRLayerParams>(p))     { auto& cp=std::get<CRLayerParams>(p);  return {cp.out_ch, cp.k, cp.s, cp.p}; }
-        if (std::holds_alternative<CBRPLayerParams>(p))   { auto& cp=std::get<CBRPLayerParams>(p); return {cp.out_ch, cp.conv_k, cp.conv_s, cp.conv_p}; }
         Shape in  = layer.in_shape;
         Shape out = layer.out_shape;
         ConvLayerParams fp;
@@ -517,9 +514,13 @@ namespace {
             auto& p = std::get<CRLayerParams>(lp);
             return OpParams{ConvParams{p.out_ch, p.k, p.k, p.s, p.s, p.p, p.p, 1, 1, 1}};
         }
-        if (std::holds_alternative<CBRPLayerParams>(lp)) {
-            auto& p = std::get<CBRPLayerParams>(lp);
-            return OpParams{CBRPParams{ConvParams{p.out_ch, p.conv_k, p.conv_k, p.conv_s, p.conv_s, p.conv_p, p.conv_p, 1, 1, 1}, BNParams{}, PoolParams{p.pool_k, p.pool_k, p.pool_s, p.pool_s, p.pool_p, p.pool_p}}};
+        if (std::holds_alternative<PoolLayerParams>(lp)) {
+            auto& p = std::get<PoolLayerParams>(lp);
+            return OpParams{PoolParams{p.k, p.k, p.s, p.s, p.p, p.p}};
+        }
+        if (std::holds_alternative<DropoutLayerParams>(lp)) {
+            auto& p = std::get<DropoutLayerParams>(lp);
+            return OpParams{DropoutParams{p.p}};
         }
         if (std::holds_alternative<FCLayerParams>(lp)) {
             auto& p = std::get<FCLayerParams>(lp);
@@ -551,12 +552,7 @@ namespace {
         }
         if (std::holds_alternative<InvResidualLayerParams>(lp)) {
             auto& p = std::get<InvResidualLayerParams>(lp);
-            // InvResidual的depthwise卷积groups等于expand_ch
             return OpParams{BottleneckParams{/*in_c*/0, p.expand_ch, p.out_ch, p.stride, p.has_shortcut, /*groups*/p.expand_ch}};
-        }
-        if (std::holds_alternative<PoolLayerParams>(lp)) {
-            auto& p = std::get<PoolLayerParams>(lp);
-            return OpParams{PoolParams{p.k, p.k, p.s, p.s, p.p, p.p}};
         }
         if (std::holds_alternative<SoftmaxCELayerParams>(lp)) {
             auto& p = std::get<SoftmaxCELayerParams>(lp);
@@ -1005,6 +1001,7 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
             case LayerKind::Bn1d: case LayerKind::Bn2d: idx = 2; break;
             case LayerKind::ReLU:               idx = 0; break;
             case LayerKind::MaxPool:            idx = 0; break;
+            case LayerKind::Dropout:           idx = 0; break;
             case LayerKind::GAP:                idx = 0; break;
             case LayerKind::FC:                 idx = 2; break;
             case LayerKind::Flatten:            idx = 0; break;
@@ -1020,7 +1017,6 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
             case LayerKind::Add2Start: case LayerKind::Add2ShortcutEnd: case LayerKind::Add2End: idx = 0; break;
             case LayerKind::ConvBNReLU:         idx = 8; break;
             case LayerKind::ConvBN:             idx = 8; break;
-            case LayerKind::ConvBNReLUMaxPool:  idx = 17; break;
             case LayerKind::ConvReLU:           idx = 1; break;
             case LayerKind::FCBNReLU:           idx = 9; break;  // bn_output (FC7+2=9)
             case LayerKind::GapFC:              idx = 3; break;
@@ -1044,7 +1040,8 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
             case LayerKind::Conv:                idx = 2; break;  // grad_slot
             case LayerKind::Bn1d: case LayerKind::Bn2d: idx = 2; break;  // dX inplace to bn_output
             case LayerKind::ReLU:               idx = -1; break;  // in-place
-            case LayerKind::MaxPool:            idx = 2; break;  // pool_grad_slot
+            case LayerKind::MaxPool:            idx = -1; break;  // in-place dX
+            case LayerKind::Dropout:           idx = -1; break;  // in-place dX
             case LayerKind::GAP:                idx = 1; break;  // gap_grad_slot
             case LayerKind::FC:                 idx = -1; break; // dX in-place to X
             case LayerKind::Flatten:            idx = -1; break; // 梯度写回I_A_DATA，死梯度不往上层传
@@ -1060,7 +1057,6 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
             case LayerKind::Add2Start: case LayerKind::Add2ShortcutEnd: case LayerKind::Add2End: idx = 0; break;  // inplace到第一个input
             case LayerKind::ConvBNReLU:         idx = 2; break;  // 融合层的grad_slot
             case LayerKind::ConvBN:             idx = 2; break;
-            case LayerKind::ConvBNReLUMaxPool:  idx = 2; break;
             case LayerKind::ConvReLU:           idx = 2; break;  // grad_slot
             case LayerKind::FCBNReLU:           idx = -1; break; // dX in-place to X
             case LayerKind::GapFC:              idx = -1; break; // dX in-place to X
@@ -1165,6 +1161,23 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
                     gn.input_ids = {prev_output_id};
                     train_cg.append(graph_id, gn);
                 }
+                continue;
+            }
+
+            // [FIX] 非Flatten首层算子：无显式 input_indices → 显式注入 I_A_DATA / I_B_DATA
+            // 覆盖 MaxPool、ReLU、Tanh、SiLU、Dropout、GAP 等依赖跨层链注入输入的算子
+            if (layer.is_first_layer && gn.input_ids.empty()) {
+                const auto& b = memory_plan.baseline();
+                layer_input_ids[l] = b.data_a;
+
+                GraphNode gn_a = gn;
+                gn_a.input_ids = {b.data_a};
+                train_cg.append(graph_id, gn_a);
+
+                GraphNode gn_b = gn;
+                gn_b.input_ids = {b.data_b};
+                train_cg.append(graph_id_b, gn_b);
+
                 continue;
             }
 
@@ -1292,10 +1305,34 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
                 gn.compute_op == ComputeOp::LEAKY_RELU_FP32_BWD || gn.compute_op == ComputeOp::LEAKY_RELU_AMP_BWD ||
                 gn.compute_op == ComputeOp::HARDSWISH_FP32_BWD || gn.compute_op == ComputeOp::HARDSWISH_AMP_BWD ||
                 gn.compute_op == ComputeOp::ELU_FP32_BWD || gn.compute_op == ComputeOp::ELU_AMP_BWD ||
-                gn.compute_op == ComputeOp::SIGMOID_FP32_BWD || gn.compute_op == ComputeOp::SIGMOID_AMP_BWD) {
+                gn.compute_op == ComputeOp::SIGMOID_FP32_BWD || gn.compute_op == ComputeOp::SIGMOID_AMP_BWD ||
+                gn.compute_op == ComputeOp::DROPOUT_FP32_BWD || gn.compute_op == ComputeOp::DROPOUT_AMP_BWD) {
                 auto it = layer_input_ids.find(l);
                 if (it != layer_input_ids.end() && it->second >= 0) {
                     gn.output_ids = {it->second};  // dX in-place to X (dX covers X)
+                }
+            }
+            if (gn.compute_op == ComputeOp::MAXPOOL_FP32_BWD || gn.compute_op == ComputeOp::MAXPOOL_AMP_BWD) {
+                if (layer.is_first_layer) {
+                    const auto& b = memory_plan.baseline();
+
+                    GraphNode gn_a = gn;
+                    gn_a.input_ids.push_back(b.data_a);
+                    gn_a.output_ids = {b.data_a};
+                    train_cg.append(GraphId::FIRST_LAYER_BWD_A, gn_a);
+
+                    GraphNode gn_b = gn;
+                    gn_b.input_ids.push_back(b.data_b);
+                    gn_b.output_ids = {b.data_b};
+                    train_cg.append(GraphId::FIRST_LAYER_BWD_B, gn_b);
+
+                    continue;
+                } else {
+                    auto it = layer_input_ids.find(l);
+                    if (it != layer_input_ids.end() && it->second >= 0) {
+                        gn.input_ids.push_back(it->second);  // X (original input, needed by cuDNN Legacy API)
+                        gn.output_ids = {it->second};         // dX in-place to X
+                    }
                 }
             }
 
@@ -1341,6 +1378,7 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
         // FC dX in-place：梯度直接写入X张量（前一层输出），追踪该张量ID
         if (grad_id < 0 && (layer.kind == LayerKind::FC ||
             layer.kind == LayerKind::FCBNReLU || layer.kind == LayerKind::GapFC ||
+            layer.kind == LayerKind::MaxPool || layer.kind == LayerKind::Dropout ||
             layer.kind == LayerKind::Tanh || layer.kind == LayerKind::ReLU ||
             layer.kind == LayerKind::SiLU || layer.kind == LayerKind::ReLU6 ||
             layer.kind == LayerKind::LeakyReLU || layer.kind == LayerKind::Hardswish ||
@@ -1464,6 +1502,21 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
                 continue;
             }
 
+            // [FIX] 非Flatten首层算子推理图：无显式 input_indices → 注入 I_A_DATA / I_B_DATA
+            if (layer.is_first_layer && gn.input_ids.empty()) {
+                const auto& b = memory_plan.baseline();
+
+                GraphNode gn_a = gn;
+                gn_a.input_ids = {b.data_a};
+                infer_cg.append(infer_graph_id, gn_a);
+
+                GraphNode gn_b = gn;
+                gn_b.input_ids = {b.data_b};
+                infer_cg.append(infer_graph_id_b, gn_b);
+
+                continue;
+            }
+
             if (prev_inf_output_id >= 0) {
                 gn.input_ids.insert(gn.input_ids.begin(), prev_inf_output_id);
             }
@@ -1557,7 +1610,7 @@ void Compiler::build_auxiliary_graphs(ComputationGraph& train_cg, const MemoryPl
     for (const auto& layer : arch.layers()) {
         auto k = layer.kind;
         if (k == LayerKind::ConvBN || k == LayerKind::ConvBNReLU ||
-            k == LayerKind::ConvBNReLUMaxPool || k == LayerKind::BNReLU ||
+            k == LayerKind::BNReLU ||
             k == LayerKind::Bn1d || k == LayerKind::Bn2d) {
             has_bn = true;
             break;

@@ -36,13 +36,13 @@ static LayerKind kind_from_name(const std::string& name) {
     if (name == "BasicBlockIdentity") return LayerKind::BasicBlockIdentity;
     if (name == "InvResidualNoShortcut") return LayerKind::InvResidualNoShortcut;
     if (name == "InvResidualIdentity") return LayerKind::InvResidualIdentity;
-    if (name == "ConvBNReLUMaxPool") return LayerKind::ConvBNReLUMaxPool;
     if (name == "ConvBNReLU") return LayerKind::ConvBNReLU;
     if (name == "FCBNReLU") return LayerKind::FCBNReLU;
     if (name == "ConvBN") return LayerKind::ConvBN;
     if (name == "BNReLU") return LayerKind::BNReLU;
     if (name == "ConvReLU") return LayerKind::ConvReLU;
     if (name == "GapFC") return LayerKind::GapFC;
+    if (name == "Dropout") return LayerKind::Dropout;
     TR_VALUE_ERROR("kind_from_name: unknown kind: " + name);
     return LayerKind::Conv;
 }
@@ -128,16 +128,14 @@ std::string ArchPlan::to_yaml() const {
             pnode["stride"] = p.stride; pnode["has_shortcut"] = p.has_shortcut;
             break;
         }
-        case LayerKind::ConvBNReLUMaxPool: {
-            auto& p = std::get<CBRPLayerParams>(l.params);
-            pnode["out_ch"] = p.out_ch;
-            pnode["conv_k"] = p.conv_k; pnode["conv_s"] = p.conv_s; pnode["conv_p"] = p.conv_p;
-            pnode["pool_k"] = p.pool_k; pnode["pool_s"] = p.pool_s; pnode["pool_p"] = p.pool_p;
-            break;
-        }
         case LayerKind::ConvBNReLU: {
             auto& p = std::get<CBRLayerParams>(l.params);
             pnode["out_ch"] = p.out_ch; pnode["k"] = p.k; pnode["s"] = p.s; pnode["p"] = p.p;
+            break;
+        }
+        case LayerKind::Dropout: {
+            auto& p = std::get<DropoutLayerParams>(l.params);
+            pnode["p"] = p.p;
             break;
         }
         case LayerKind::FCBNReLU: {
@@ -258,16 +256,13 @@ ArchPlan ArchPlan::from_yaml(const std::string& yaml) {
                     pnode["expand_ch"].get_value<int>(), pnode["out_ch"].get_value<int>(),
                     pnode["stride"].get_value<int>(), pnode["has_shortcut"].get_value<bool>()};
                 break;
-            case LayerKind::ConvBNReLUMaxPool:
-                layer.params = CBRPLayerParams{
-                    pnode["out_ch"].get_value<int>(),
-                    pnode["conv_k"].get_value<int>(), pnode["conv_s"].get_value<int>(), pnode["conv_p"].get_value<int>(),
-                    pnode["pool_k"].get_value<int>(), pnode["pool_s"].get_value<int>(), pnode["pool_p"].get_value<int>()};
-                break;
             case LayerKind::ConvBNReLU:
                 layer.params = CBRLayerParams{
                     pnode["out_ch"].get_value<int>(), pnode["k"].get_value<int>(),
                     pnode["s"].get_value<int>(), pnode["p"].get_value<int>()};
+                break;
+            case LayerKind::Dropout:
+                layer.params = DropoutLayerParams{pnode["p"].get_value<float>()};
                 break;
             case LayerKind::FCBNReLU:
                 layer.params = FBRLayerParams{

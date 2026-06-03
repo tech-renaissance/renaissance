@@ -12,6 +12,7 @@
 #include "renaissance/core/initializer.h"
 #include "renaissance/core/tr_exception.h"
 #include "renaissance/core/global_registry.h"
+#include "renaissance/core/rng.h"
 #include "renaissance/core/logger.h"
 #include "renaissance/graph/captured_graph.h"
 #include "renaissance/graph/capture_multi_stream.h"
@@ -1402,6 +1403,27 @@ void TaskBase::init_all() {
         if (debug_mode_) {
             std::cout << "[DRY RUN] ZERO_GAMMA: " << initializer_.bn3_weight_ids().size()
                       << " BN3 weights overridden to CONSTANTS(0.0)\n";
+        }
+    }
+
+    // 第 3 步：初始化 per-RANK dropout seed
+    if (active_memory_plan_->baseline().dropout_seed >= 0) {
+        uint64_t global_seed = get_default_generator().seed();
+        for (int rank = 0; rank < num_gpus_; ++rank) {
+            uint64_t z = global_seed + static_cast<uint64_t>(rank) + 0x9e3779b97f4a7c15ULL;
+            z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9ULL;
+            z = (z ^ (z >> 27)) * 0x94d049bb133111ebULL;
+            uint64_t rank_seed = z ^ (z >> 31);
+
+            int32_t seed_data[2] = {
+                static_cast<int32_t>(rank_seed & 0xFFFFFFFFULL),
+                static_cast<int32_t>(rank_seed >> 32)
+            };
+
+            Tensor host_seed(Shape{1, 1, 1, 2}, DType::INT32);
+            memcpy(host_seed.data(), seed_data, sizeof(seed_data));
+            transfer_to_rank(host_seed, active_memory_plan_->get_dtensor(
+                active_memory_plan_->baseline().dropout_seed), rank);
         }
     }
 }

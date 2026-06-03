@@ -27,7 +27,7 @@ class Layer;
 enum class LayerKind : uint16_t {
     // 基础原语
     Conv, Bn1d, Bn2d, ReLU, Tanh, SiLU, ReLU6, LeakyReLU, Hardswish, ELU, Sigmoid, MaxPool, GAP, FC,
-    Flatten, Identity, SoftmaxCE,
+    Flatten, Identity, SoftmaxCE, Dropout,
 
     // Add2 结构标记
     Add2Start, Add2ShortcutEnd, Add2End,
@@ -36,9 +36,6 @@ enum class LayerKind : uint16_t {
     BottleneckProjection, BottleneckIdentity,
     BasicBlockProjection, BasicBlockIdentity,
     InvResidualNoShortcut, InvResidualIdentity,
-
-    // 四元融合
-    ConvBNReLUMaxPool,
 
     // 三元融合
     ConvBNReLU, FCBNReLU,
@@ -60,6 +57,11 @@ struct FCLayerParams {
     int out_features;
     bool bias = true;
     bool operator==(const FCLayerParams& o) const { return out_features == o.out_features && bias == o.bias; }
+};
+/** @brief Dropout 层参数 */
+struct DropoutLayerParams {
+    float p = 0.5f;
+    bool operator==(const DropoutLayerParams& o) const { return p == o.p; }
 };
 struct SoftmaxCELayerParams {
     int num_classes;
@@ -88,13 +90,6 @@ struct InvResidualLayerParams {
     bool has_shortcut;
     bool operator==(const InvResidualLayerParams& o) const {
         return expand_ch == o.expand_ch && out_ch == o.out_ch && stride == o.stride && has_shortcut == o.has_shortcut;
-    }
-};
-struct CBRPLayerParams {
-    int out_ch, conv_k, conv_s, conv_p, pool_k, pool_s, pool_p;
-    bool operator==(const CBRPLayerParams& o) const {
-        return out_ch == o.out_ch && conv_k == o.conv_k && conv_s == o.conv_s && conv_p == o.conv_p
-            && pool_k == o.pool_k && pool_s == o.pool_s && pool_p == o.pool_p;
     }
 };
 struct CBRLayerParams {
@@ -127,10 +122,11 @@ const char* kind_name(LayerKind k);
 
 using LayerParam = std::variant<
     ConvLayerParams, PoolLayerParams, FCLayerParams, SoftmaxCELayerParams,
+    DropoutLayerParams,
     BottleneckIdentityLayerParams, BottleneckProjectionLayerParams,
     BasicBlockIdentityLayerParams, BasicBlockProjectionLayerParams,
     InvResidualLayerParams,
-    CBRPLayerParams, CBRLayerParams, FBRLayerParams,
+    CBRLayerParams, FBRLayerParams,
     CBLayerParams, CRLayerParams, GapFCLayerParams,
     EmptyParams
 >;

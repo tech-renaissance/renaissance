@@ -90,8 +90,12 @@ std::string compute_op_to_string(ComputeOp op) {
         case ComputeOp::BN2D_FP32_INF:        return "BN2D_FP32_INF";
 
         // === 池化（类型多态）===
-        case ComputeOp::MAXPOOL_FWD:           return "MAXPOOL_FWD";
-        case ComputeOp::MAXPOOL_BWD:           return "MAXPOOL_BWD";
+        case ComputeOp::MAXPOOL_FP32_FWD:      return "MAXPOOL_FP32_FWD";
+        case ComputeOp::MAXPOOL_FP32_BWD:      return "MAXPOOL_FP32_BWD";
+        case ComputeOp::MAXPOOL_FP32_INF:      return "MAXPOOL_FP32_INF";
+        case ComputeOp::MAXPOOL_AMP_FWD:       return "MAXPOOL_AMP_FWD";
+        case ComputeOp::MAXPOOL_AMP_BWD:       return "MAXPOOL_AMP_BWD";
+        case ComputeOp::MAXPOOL_AMP_INF:       return "MAXPOOL_AMP_INF";
         case ComputeOp::GAP_FP32_FWD:          return "GAP_FP32_FWD";
         case ComputeOp::GAP_FP32_BWD:          return "GAP_FP32_BWD";
         case ComputeOp::GAP_AMP_FWD:           return "GAP_AMP_FWD";
@@ -115,13 +119,10 @@ std::string compute_op_to_string(ComputeOp op) {
         case ComputeOp::CONV_BN_RELU_AMP_FWD:      return "CONV_BN_RELU_AMP_FWD";
         case ComputeOp::CONV_BN_RELU_AMP_BWD:      return "CONV_BN_RELU_AMP_BWD";
         case ComputeOp::CONV_BN_RELU_AMP_INF:      return "CONV_BN_RELU_AMP_INF";
-        case ComputeOp::CBR_AMP_FWD:           return "CBR_AMP_FWD";
-        case ComputeOp::CBR_AMP_BWD:           return "CBR_AMP_BWD";
-        case ComputeOp::CBR_AMP_INF:           return "CBR_AMP_INF";
-        case ComputeOp::CBRP_AMP_FWD:          return "CBRP_AMP_FWD";
-        case ComputeOp::CBRP_AMP_BWD:          return "CBRP_AMP_BWD";
-        case ComputeOp::CBRP_AMP_INF:          return "CBRP_AMP_INF";
-        case ComputeOp::BOTTLENECK_AMP_FWD:    return "BOTTLENECK_AMP_FWD";
+        case ComputeOp::CBR_AMP_FWD:                  return "CBR_AMP_FWD";
+        case ComputeOp::CBR_AMP_BWD:                  return "CBR_AMP_BWD";
+        case ComputeOp::CBR_AMP_INF:                  return "CBR_AMP_INF";
+        case ComputeOp::BOTTLENECK_AMP_FWD:           return "BOTTLENECK_AMP_FWD";
         case ComputeOp::BOTTLENECK_AMP_BWD:    return "BOTTLENECK_AMP_BWD";
         case ComputeOp::BOTTLENECK_AMP_INF:    return "BOTTLENECK_AMP_INF";
         case ComputeOp::BASICBLOCK_AMP_FWD:   return "BASICBLOCK_AMP_FWD";
@@ -251,26 +252,27 @@ std::string format_params(ComputeOp op, const OpParams& p) {
             }
             break;
         }
-        case ComputeOp::CBRP_AMP_FWD:
-        case ComputeOp::CBRP_AMP_BWD:
-        case ComputeOp::CBRP_AMP_INF: {
-            if (auto* cp = std::get_if<CBRPParams>(&p.data)) {
-                oss << "conv:out_ch=" << cp->conv.out_channels
-                    << ",kernel=" << cp->conv.kernel_h << "x" << cp->conv.kernel_w
-                    << ",stride=" << cp->conv.stride_h << "x" << cp->conv.stride_w
-                    << ",pad=" << cp->conv.pad_h << "x" << cp->conv.pad_w
-                    << ",bn:eps=" << cp->bn.eps
-                    << ",pool:kernel=" << cp->pool.kernel_h << "x" << cp->pool.kernel_w
-                    << ",stride=" << cp->pool.stride_h << "x" << cp->pool.stride_w;
+        case ComputeOp::MAXPOOL_FP32_FWD:
+        case ComputeOp::MAXPOOL_FP32_BWD:
+        case ComputeOp::MAXPOOL_FP32_INF:
+        case ComputeOp::MAXPOOL_AMP_FWD:
+        case ComputeOp::MAXPOOL_AMP_BWD:
+        case ComputeOp::MAXPOOL_AMP_INF: {
+            if (auto* pp = std::get_if<PoolParams>(&p.data)) {
+                oss << "k=" << pp->kernel_h
+                    << ",s=" << pp->stride_h
+                    << ",p=" << pp->pad_h;
             }
             break;
         }
-        case ComputeOp::MAXPOOL_FWD:
-        case ComputeOp::MAXPOOL_BWD: {
-            if (auto* pp = std::get_if<PoolParams>(&p.data)) {
-                oss << "kernel=" << pp->kernel_h << "x" << pp->kernel_w
-                    << ",stride=" << pp->stride_h << "x" << pp->stride_w
-                    << ",pad=" << pp->pad_h << "x" << pp->pad_w;
+        case ComputeOp::DROPOUT_FP32_FWD:
+        case ComputeOp::DROPOUT_FP32_BWD:
+        case ComputeOp::DROPOUT_FP32_INF:
+        case ComputeOp::DROPOUT_AMP_FWD:
+        case ComputeOp::DROPOUT_AMP_BWD:
+        case ComputeOp::DROPOUT_AMP_INF: {
+            if (auto* dp = std::get_if<DropoutParams>(&p.data)) {
+                oss << "p=" << dp->p;
             }
             break;
         }

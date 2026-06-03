@@ -347,6 +347,11 @@ public:
     using TaskBase::init_all;
 
     /**
+     * @brief 设置 Dropout seed DTensor ID（SimpleTask 测试场景）
+     */
+    using TaskBase::set_dropout_seed_id;
+
+    /**
      * @brief 配置初始化策略（链式API）
      * @note 样例：task.initializer(Initializer().conv(TRUNC_NORMAL).bn().fc(FIXED_NORMAL));
      */
