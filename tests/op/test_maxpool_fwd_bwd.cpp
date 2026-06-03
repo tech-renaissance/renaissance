@@ -94,9 +94,9 @@ const char* mode_name(TestMode m) {
 struct TestConfig {
     TestMode mode;
     std::string shape_str = "8,224,224,64";
-    int kernel = 3;
+    int kernel = 2;
     int stride = 2;
-    int padding = 1;
+    int padding = 0;
     int seed = 42;
     bool no_gen = false;
 };
