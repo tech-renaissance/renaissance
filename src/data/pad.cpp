@@ -1,4 +1,4 @@
-﻿/*
+/*
  * @file pad.cpp
  * @brief Padding operation implementation
  * @version 1.0.0
@@ -76,11 +76,9 @@ void Pad::execute(
     // Auto-calculate output_stride
     if (output_stride == 0) {
         if (forced_compact_output) {
-            output_stride = output_width * num_channels_;
+            output_stride = compact_output_stride_;
         } else {
-            constexpr size_t ALIGNMENT = 64;
-            size_t raw_stride = static_cast<size_t>(output_width) * num_channels_;
-            output_stride = ((raw_stride + ALIGNMENT - 1) / ALIGNMENT) * ALIGNMENT;
+            output_stride = output_stride_;
         }
     }
 

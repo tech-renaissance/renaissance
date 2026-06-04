@@ -224,6 +224,14 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/perf AND IS_DIRECTORY ${CMAKE_CURRENT_SOUR
 endif()
 
 # ============================================================================
+# integration 子目录（端到端集成测试）
+# ============================================================================
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/integration AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/integration)
+    add_subdirectory(integration)
+    message(STATUS "Including integration tests")
+endif()
+
+# ============================================================================
 # op 子目录（算子数学正确性验证测试）
 # ============================================================================
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/op AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/op)

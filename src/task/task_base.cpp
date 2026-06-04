@@ -327,22 +327,22 @@ void TaskBase::compile_impl(bool debug_mode) {
         #endif
 
         // ========== 诊断打印：ArchPlan / MemoryPlan / ComputationGraph ==========
-        // LOG_INFO << "\n========== COMPILE DIAGNOSTICS ==========";
-        // LOG_INFO << "--- ArchPlan ---";
-        // LOG_INFO << dl->arch_plan_.to_string();
-        // LOG_INFO << "--- MemoryPlan ---";
+        std::cout << "\n========== COMPILE DIAGNOSTICS ==========" << std::endl;
+        std::cout << "--- ArchPlan ---" << std::endl;
+        std::cout << dl->arch_plan_.to_string() << std::endl;
+        std::cout << "--- MemoryPlan ---" << std::endl;
         if (dl->active_memory_plan_) {
-            // LOG_INFO << dl->active_memory_plan_->dump_layout();
+            std::cout << dl->active_memory_plan_->dump_layout() << std::endl;
         }
-        // LOG_INFO << "--- Train ComputationGraph ---";
+        std::cout << "--- Train ComputationGraph ---" << std::endl;
         if (dl->train_cg_) {
-            // LOG_INFO << dl->train_cg_->debug_dump(true);
+            std::cout << dl->train_cg_->debug_dump(true) << std::endl;
         }
-        // LOG_INFO << "--- Inference ComputationGraph ---";
+        std::cout << "--- Inference ComputationGraph ---" << std::endl;
         if (dl->infer_cg_) {
-            // LOG_INFO << dl->infer_cg_->debug_dump(true);
+            std::cout << dl->infer_cg_->debug_dump(true) << std::endl;
         }
-        // LOG_INFO << "=========================================\n";
+        std::cout << "=========================================\n" << std::endl;
     }
 }
 

@@ -28,6 +28,14 @@
 #include <memory>
 #include <functional>
 
+#ifdef TR_USE_EIGEN
+#  if __has_include(<Eigen/Core>)
+#    include <Eigen/Core>
+#  elif __has_include(<eigen3/Eigen/Core>)
+#    include <eigen3/Eigen/Core>
+#  endif
+#endif
+
 #ifdef TR_USE_XNNPACK
 #include <xnnpack.h>
 #endif
@@ -623,7 +631,7 @@ static void launch_conv_fwd_cpu(CpuOpContext* op_ctx) {
 
 // ── BWD CPU Naive ──────────────────────────────────────────────────────────
 
-static void launch_conv_bwd_cpu(CpuOpContext* op_ctx) {
+static void launch_conv_bwd_cpu_naive(CpuOpContext* op_ctx) {
     const auto* p = std::get_if<ConvParams>(&op_ctx->params.data);
     TR_CHECK(p != nullptr, ValueError, "CONV_FP32_BWD CPU missing ConvParams");
     TR_CHECK(op_ctx->num_inputs >= 3, ShapeError,
@@ -729,6 +737,255 @@ static void launch_conv_bwd_cpu(CpuOpContext* op_ctx) {
             }
         }
     }
+}
+
+// ── BWD CPU Eigen（仅当 TR_USE_EIGEN 定义时编译）────────────────────────────
+
+#ifdef TR_USE_EIGEN
+
+static void launch_conv_bwd_cpu_eigen(CpuOpContext* op_ctx) {
+    const auto* p = std::get_if<ConvParams>(&op_ctx->params.data);
+    TR_CHECK(p != nullptr, ValueError, "CONV_FP32_BWD CPU EIGEN missing ConvParams");
+
+    const float* dY = static_cast<const float*>(
+        const_cast<DeviceContext*>(op_ctx->ctx)->ptr_at(op_ctx->input_ids[0]));
+    const float* W_ptr = static_cast<const float*>(
+        const_cast<DeviceContext*>(op_ctx->ctx)->ptr_at(op_ctx->input_ids[1]));
+    const float* X = static_cast<const float*>(
+        const_cast<DeviceContext*>(op_ctx->ctx)->ptr_at(op_ctx->input_ids[2]));
+    float* dX = static_cast<float*>(
+        const_cast<DeviceContext*>(op_ctx->ctx)->ptr_at(op_ctx->output_ids[0]));
+    float* dW = static_cast<float*>(
+        const_cast<DeviceContext*>(op_ctx->ctx)->ptr_at(op_ctx->output_ids[1]));
+
+    int N = op_ctx->input_shape.n;
+    int OH = op_ctx->input_shape.h;
+    int OW = op_ctx->input_shape.w;
+    int H  = op_ctx->output_shape.h;
+    int IW = op_ctx->output_shape.w;
+    int C  = op_ctx->output_shape.c;
+    int K = p->out_channels;
+    int R = p->kernel_h, S = p->kernel_w;
+    int stride_h = p->stride_h, stride_w = p->stride_w;
+    int pad_h = p->pad_h, pad_w = p->pad_w;
+    int groups = p->groups;
+    int Cpg = C / groups;
+    int Kpg = K / groups;
+
+    int M = N * OH * OW;
+    int RSC = R * S * C;
+    int RSCg = R * S * Cpg;
+
+    const DeviceContext* ctx = op_ctx->ctx;
+
+    using MatrixXfRow = Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
+    using StrideDyn   = Eigen::Stride<Eigen::Dynamic, Eigen::Dynamic>;
+
+    // ═══════════════════════════════════════════════════════════════
+    //  PATH A: groups == 1（最优路径，零拷贝 + tiled im2col）
+    // ═══════════════════════════════════════════════════════════════
+    if (groups == 1) {
+        // ── workspace: 16MB 上限，反推 tile_M ──
+        constexpr size_t kMaxWsBytes = 16 * 1024 * 1024;
+        int tile_M = M;
+        if (RSC > 0) {
+            tile_M = static_cast<int>(kMaxWsBytes / (static_cast<size_t>(RSC) * sizeof(float)));
+            tile_M = std::max(tile_M, 64);
+            tile_M = std::min(tile_M, M);
+        }
+        size_t ws_needed = static_cast<size_t>(tile_M) * RSC * sizeof(float);
+        constexpr size_t kAlign = 64;
+        ws_needed = (ws_needed + kAlign - 1) & ~(kAlign - 1);
+        ctx->ensure_cpu_workspace_grow(ws_needed);
+        float* col = static_cast<float*>(ctx->cpu_workspace());
+
+        // ── wgrad: dW = dY^T · im2col(X) (tiled) ──
+        std::memset(dW, 0, static_cast<size_t>(K) * RSC * sizeof(float));
+        Eigen::Map<MatrixXfRow> dW_mat(dW, K, RSC);
+
+        for (int t = 0; t < M; t += tile_M) {
+            int tm = std::min(tile_M, M - t);
+
+            // 1. im2col: X[t : t+tm] → col
+            std::memset(col, 0, static_cast<size_t>(tm) * RSC * sizeof(float));
+            for (int m = 0; m < tm; ++m) {
+                int global_m = t + m;
+                int n  = global_m / (OH * OW);
+                int rem = global_m % (OH * OW);
+                int oh = rem / OW;
+                int ow = rem % OW;
+
+                float* col_row = col + m * RSC;
+                for (int r = 0; r < R; ++r) {
+                    int ih = oh * stride_h + r - pad_h;
+                    if (ih < 0 || ih >= H) continue;
+                    for (int s = 0; s < S; ++s) {
+                        int iw = ow * stride_w + s - pad_w;
+                        if (iw < 0 || iw >= IW) continue;
+                        const float* x_ptr = X + ((n * H + ih) * IW + iw) * C;
+                        float* col_ptr = col_row + (r * S + s) * C;
+                        std::memcpy(col_ptr, x_ptr, static_cast<size_t>(C) * sizeof(float));
+                    }
+                }
+            }
+
+            // 2. GEMM: dW += dY_tile^T · col_tile
+            Eigen::Map<const MatrixXfRow> dY_tile(dY + t * K, tm, K);
+            Eigen::Map<const MatrixXfRow> col_tile(col, tm, RSC);
+            dW_mat.noalias() += dY_tile.transpose() * col_tile;
+        }
+
+        // ── dgrad: col = dY · W, 再 col2im (tiled) ──
+        std::memset(dX, 0, static_cast<size_t>(N) * H * IW * C * sizeof(float));
+        Eigen::Map<const MatrixXfRow> W_mat(const_cast<float*>(W_ptr), K, RSC);
+
+        for (int t = 0; t < M; t += tile_M) {
+            int tm = std::min(tile_M, M - t);
+
+            // 1. GEMM: col = dY_tile · W（复用 col buffer）
+            Eigen::Map<const MatrixXfRow> dY_tile(dY + t * K, tm, K);
+            Eigen::Map<MatrixXfRow> col_tile(col, tm, RSC);
+            col_tile.noalias() = dY_tile * W_mat;
+
+            // 2. col2im: col → dX（scatter 累加，向量化 C 维）
+            for (int m = 0; m < tm; ++m) {
+                int global_m = t + m;
+                int n  = global_m / (OH * OW);
+                int rem = global_m % (OH * OW);
+                int oh = rem / OW;
+                int ow = rem % OW;
+
+                const float* col_row = col + m * RSC;
+                for (int r = 0; r < R; ++r) {
+                    int ih = oh * stride_h + r - pad_h;
+                    if (ih < 0 || ih >= H) continue;
+                    for (int s = 0; s < S; ++s) {
+                        int iw = ow * stride_w + s - pad_w;
+                        if (iw < 0 || iw >= IW) continue;
+                        float* dx_ptr = dX + ((n * H + ih) * IW + iw) * C;
+                        const float* col_ptr = col_row + (r * S + s) * C;
+                        Eigen::Map<Eigen::VectorXf>(dx_ptr, C) +=
+                            Eigen::Map<const Eigen::VectorXf>(col_ptr, C);
+                    }
+                }
+            }
+        }
+        return;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  PATH B: groups > 1（Strided dY + 双缓冲）
+    // ═══════════════════════════════════════════════════════════════
+    // workspace: col_buffer [OH·OW, RSCg] + mat_buffer [Kpg, RSCg]
+    size_t col_elems = static_cast<size_t>(OH) * OW * RSCg;
+    size_t mat_elems = static_cast<size_t>(Kpg) * RSCg;
+    size_t ws_needed = (col_elems + mat_elems) * sizeof(float);
+    constexpr size_t kAlign = 64;
+    ws_needed = (ws_needed + kAlign - 1) & ~(kAlign - 1);
+    ctx->ensure_cpu_workspace_grow(ws_needed);
+    float* ws = static_cast<float*>(ctx->cpu_workspace());
+
+    float* acc  = ws;                        // mat_buffer: dW_g 累加器 / W_g 重排
+    float* colg = ws + mat_elems;            // col_buffer: [OH·OW, RSCg]
+
+    std::memset(dX, 0, static_cast<size_t>(N) * H * IW * C * sizeof(float));
+    std::memset(dW, 0, static_cast<size_t>(K) * R * S * C * sizeof(float));
+
+    for (int g = 0; g < groups; ++g) {
+        int k0 = g * Kpg;
+        int c0 = g * Cpg;
+
+        // ── wgrad ──
+        std::memset(acc, 0, mat_elems * sizeof(float));
+        Eigen::Map<MatrixXfRow> dW_g(acc, Kpg, RSCg);
+
+        for (int n = 0; n < N; ++n) {
+            // 1. im2col: X[n, :, :, c0:c0+Cpg) → colg
+            for (int oh = 0; oh < OH; ++oh) {
+                for (int ow = 0; ow < OW; ++ow) {
+                    int row = oh * OW + ow;
+                    for (int r = 0; r < R; ++r) {
+                        int ih = oh * stride_h + r - pad_h;
+                        if (ih < 0 || ih >= H) continue;
+                        for (int s = 0; s < S; ++s) {
+                            int iw = ow * stride_w + s - pad_w;
+                            if (iw < 0 || iw >= IW) continue;
+                            const float* src = X + ((n * H + ih) * IW + iw) * C + c0;
+                            float* dst = colg + row * RSCg + (r * S + s) * Cpg;
+                            std::memcpy(dst, src, static_cast<size_t>(Cpg) * sizeof(float));
+                        }
+                    }
+                }
+            }
+
+            // 2. GEMM: dW_g += dY_n_g^T · colg
+            Eigen::Map<const MatrixXfRow, Eigen::Unaligned, StrideDyn>
+                dY_n(dY + n * OH * OW * K + k0, OH * OW, Kpg, StrideDyn(K, 1));
+            Eigen::Map<const MatrixXfRow> col_mat(colg, OH * OW, RSCg);
+            dW_g.noalias() += dY_n.transpose() * col_mat;
+        }
+
+        // 3. 写回 dW（KRSC 中 group slice 不连续，逐块 memcpy）
+        for (int k = 0; k < Kpg; ++k)
+            for (int r = 0; r < R; ++r)
+                for (int s = 0; s < S; ++s) {
+                    int dw_off = (((k0 + k) * R + r) * S + s) * C + c0;
+                    int acc_off = k * RSCg + (r * S + s) * Cpg;
+                    std::memcpy(&dW[dw_off], &acc[acc_off],
+                                static_cast<size_t>(Cpg) * sizeof(float));
+                }
+
+        // ── dgrad ──
+        // 1. 重排 W_g → [Kpg, RSCg] RowMajor（复用 acc）
+        for (int k = 0; k < Kpg; ++k)
+            for (int r = 0; r < R; ++r)
+                for (int s = 0; s < S; ++s) {
+                    int w_src = (((k0 + k) * R + r) * S + s) * C + c0;
+                    int w_dst = k * RSCg + (r * S + s) * Cpg;
+                    std::memcpy(&acc[w_dst], &W_ptr[w_src],
+                                static_cast<size_t>(Cpg) * sizeof(float));
+                }
+        Eigen::Map<const MatrixXfRow> W_g(acc, Kpg, RSCg);
+
+        for (int n = 0; n < N; ++n) {
+            // 2. GEMM: colg = dY_n_g · W_g
+            Eigen::Map<const MatrixXfRow, Eigen::Unaligned, StrideDyn>
+                dY_n(dY + n * OH * OW * K + k0, OH * OW, Kpg, StrideDyn(K, 1));
+            Eigen::Map<MatrixXfRow> col_mat(colg, OH * OW, RSCg);
+            col_mat.noalias() = dY_n * W_g;
+
+            // 3. col2im → dX（向量化 Cpg 维）
+            for (int oh = 0; oh < OH; ++oh) {
+                for (int ow = 0; ow < OW; ++ow) {
+                    int row = oh * OW + ow;
+                    for (int r = 0; r < R; ++r) {
+                        int ih = oh * stride_h + r - pad_h;
+                        if (ih < 0 || ih >= H) continue;
+                        for (int s = 0; s < S; ++s) {
+                            int iw = ow * stride_w + s - pad_w;
+                            if (iw < 0 || iw >= IW) continue;
+                            float* dx_ptr = dX + ((n * H + ih) * IW + iw) * C + c0;
+                            const float* col_ptr = colg + row * RSCg + (r * S + s) * Cpg;
+                            Eigen::Map<Eigen::VectorXf>(dx_ptr, Cpg) +=
+                                Eigen::Map<const Eigen::VectorXf>(col_ptr, Cpg);
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#endif // TR_USE_EIGEN
+
+// ── BWD CPU 入口分发 ────────────────────────────────────────────────────────
+
+static void launch_conv_bwd_cpu(CpuOpContext* op_ctx) {
+#ifdef TR_USE_EIGEN
+    launch_conv_bwd_cpu_eigen(op_ctx);
+#else
+    launch_conv_bwd_cpu_naive(op_ctx);
+#endif
 }
 
 // ── AMP CPU 不支持 ─────────────────────────────────────────────────────────

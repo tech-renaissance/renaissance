@@ -446,7 +446,7 @@ void FusedNormalization::execute(
     bool forced_compact_output
 ) {
     (void)execute_from_full;
-    (void)input_stride;
+    // input_stride is used below for row offset calculation
     (void)forced_compact_output;
 
     output_width = input_width;
@@ -494,9 +494,10 @@ void FusedNormalization::execute(
         float* dst = reinterpret_cast<float*>(output_ptr);
 
         for (std::size_t h = 0; h < H; ++h) {
+            const std::uint8_t* row = input_ptr + h * input_stride;
             for (std::size_t w = 0; w < W; ++w) {
                 std::size_t src_w = do_flip ? (W - 1 - w) : w;
-                const std::uint8_t* pixel = input_ptr + (h * W + src_w) * C;
+                const std::uint8_t* pixel = row + src_w * C;
                 for (std::size_t c = 0; c < C; ++c) {
                     float val = static_cast<float>(pixel[c]) * kInv255;
                     *dst++ = (val - mean[c]) / stddev[c];
@@ -521,32 +522,33 @@ void FusedNormalization::execute(
             __m128 mul_v = _mm_set_ps(0.0f, mul[2], mul[1], mul[0]);
             __m128 sub_v = _mm_set_ps(0.0f, sub[2], sub[1], sub[0]);
             for (std::size_t h = 0; h < H; ++h) {
-                simd_row_c3_noflip(input_ptr + h * W * 3, dst + h * W * 4, W, mul_v, sub_v, mul, sub);
+                simd_row_c3_noflip(input_ptr + h * input_stride, dst + h * W * 4, W, mul_v, sub_v, mul, sub);
             }
         } else if (C == 3 && do_flip) {
             __m128 mul_v = _mm_set_ps(0.0f, mul[2], mul[1], mul[0]);
             __m128 sub_v = _mm_set_ps(0.0f, sub[2], sub[1], sub[0]);
             for (std::size_t h = 0; h < H; ++h) {
-                simd_row_c3_flip(input_ptr + h * W * 3, dst + h * W * 4, W, mul_v, sub_v, mul, sub);
+                simd_row_c3_flip(input_ptr + h * input_stride, dst + h * W * 4, W, mul_v, sub_v, mul, sub);
             }
         } else if (C == 1 && !do_flip) {
             __m128 mul_v = _mm_set1_ps(mul[0]);
             __m128 sub_v = _mm_set1_ps(sub[0]);
             for (std::size_t h = 0; h < H; ++h) {
-                simd_row_c1_noflip(input_ptr + h * W, dst + h * W * 4, W, mul_v, sub_v, mul[0], sub[0]);
+                simd_row_c1_noflip(input_ptr + h * input_stride, dst + h * W * 4, W, mul_v, sub_v, mul[0], sub[0]);
             }
         } else if (C == 1 && do_flip) {
             __m128 mul_v = _mm_set1_ps(mul[0]);
             __m128 sub_v = _mm_set1_ps(sub[0]);
             for (std::size_t h = 0; h < H; ++h) {
-                simd_row_c1_flip(input_ptr + h * W, dst + h * W * 4, W, mul_v, sub_v, mul[0], sub[0]);
+                simd_row_c1_flip(input_ptr + h * input_stride, dst + h * W * 4, W, mul_v, sub_v, mul[0], sub[0]);
             }
         } else {
             // Generic scalar path
             for (std::size_t h = 0; h < H; ++h) {
-                for (std::size_t w = 0; w < W; ++w) {
-                    std::size_t src_w = do_flip ? (W - 1 - w) : w;
-                    const std::uint8_t* pixel = input_ptr + (h * W + src_w) * C;
+                    const std::uint8_t* row = input_ptr + h * input_stride;
+                    for (std::size_t w = 0; w < W; ++w) {
+                        std::size_t src_w = do_flip ? (W - 1 - w) : w;
+                        const std::uint8_t* pixel = row + src_w * C;
                     for (std::size_t c = 0; c < C; ++c) {
                         float val = static_cast<float>(pixel[c]) * kInv255;
                         dst[c] = fp32_to_half((val - mean[c]) / stddev[c]);
@@ -567,9 +569,11 @@ void FusedNormalization::execute(
     // Eigen3 路径：FP32 only
     const std::uint8_t* src = input_ptr;
 
-    // 随机水平翻转：memcpy整图到flip_buffer后原地swap
+    // 随机水平翻转：逐行拷贝到flip_buffer后原地swap
     if (do_flip) {
-        std::memcpy(flip_buffer_, input_ptr, H * W * C);
+        for (std::size_t h = 0; h < H; ++h) {
+            std::memcpy(flip_buffer_ + h * W * C, input_ptr + h * input_stride, W * C);
+        }
         for (std::size_t h = 0; h < H; ++h) {
             std::uint8_t* row = flip_buffer_ + h * W * C;
             for (std::size_t w = 0; w < W / 2; ++w) {
@@ -579,6 +583,7 @@ void FusedNormalization::execute(
             }
         }
         src = flip_buffer_;
+        input_stride = W * C;   // flip_buffer_ is compact layout
     }
 
     float* dst = reinterpret_cast<float*>(output_ptr);
@@ -586,7 +591,7 @@ void FusedNormalization::execute(
     if (C == 3) {
         for (std::size_t h = 0; h < H; ++h) {
             Eigen::Map<const Eigen::Matrix<std::uint8_t, Eigen::Dynamic, 3, Eigen::RowMajor>>
-                src_map(src + h * W * 3, static_cast<Eigen::Index>(W), 3);
+                src_map(src + h * input_stride, static_cast<Eigen::Index>(W), 3);
             Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, 3, Eigen::RowMajor>>
                 dst_map(dst + h * W * 3, static_cast<Eigen::Index>(W), 3);
             dst_map.col(0) = (src_map.col(0).cast<float>().array() * kInv255 - mean_[0]) / stddev_[0];
@@ -596,7 +601,7 @@ void FusedNormalization::execute(
     } else if (C == 1) {
         for (std::size_t h = 0; h < H; ++h) {
             Eigen::Map<const Eigen::Matrix<std::uint8_t, Eigen::Dynamic, 1>>
-                src_map(src + h * W, static_cast<Eigen::Index>(W));
+                src_map(src + h * input_stride, static_cast<Eigen::Index>(W));
             Eigen::Map<Eigen::Matrix<float, Eigen::Dynamic, 1>>
                 dst_map(dst + h * W, static_cast<Eigen::Index>(W));
             dst_map = (src_map.cast<float>().array() * kInv255 - mean_[0]) / stddev_[0];
