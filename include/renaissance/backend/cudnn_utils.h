@@ -93,8 +93,9 @@ inline Shape shape_from_fe_dim(const std::vector<int64_t>& fe_dim) {
 
 inline std::shared_ptr<fe::graph::Graph> create_cudnn_graph(DType dtype) {
     auto graph = std::make_shared<fe::graph::Graph>();
-    // TODO: 临时将 AMP (FP16) 的 intermediate_data_type 改为 HALF 以与
-    //       cbr_bwd_fp16.cpp 对齐，测试验证后会评估是否恢复为 FLOAT。
+    // 注：试验证明 intermediate_data_type 设为 FLOAT 或 HALF 均不影响精度。
+    //     原因在于当前 graph 中每个张量的 data_type 已通过 set_data_type() 显式指定，
+    //     intermediate_data_type 实际上未被使用。为节省内存/带宽，AMP 场景仍用 HALF。
     auto intermediate_dt = (dtype == DType::FP16)
         ? fe::DataType_t::HALF
         : fe::DataType_t::FLOAT;
