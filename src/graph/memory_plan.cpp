@@ -764,7 +764,7 @@ MemoryPlan::resolve_region_bounds(Region start, Region end) const
     uint64_t offset = si.base_offset;
     uint64_t size   = ei.base_offset + ei.total_bytes - si.base_offset;
 
-    TR_CHECK(offset < ei.base_offset + ei.total_bytes, RuntimeError,
+    TR_CHECK(offset <= ei.base_offset + ei.total_bytes, RuntimeError,
              "resolve_region_bounds: Region range [" << static_cast<int>(start)
              << ", " << static_cast<int>(end) << "] offset overflow");
 

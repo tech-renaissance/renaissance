@@ -1858,52 +1858,58 @@ void Compiler::build_auxiliary_graphs(ComputationGraph& train_cg, const MemoryPl
                 }
             }
 
-            // 2. 从 MemoryPlan 直接查询 Region 范围，替代 get_range_op_range()
-            MemRange w_range = memory_plan.region_range(
-                Region::W_FC_WEIGHT, Region::W_DEEP_CONV);
-            MemRange g_range = memory_plan.region_range(
-                Region::G_FC_WEIGHT, Region::G_DEEP_CONV);
-            GraphNode node;
-            node.kind = GraphNode::Kind::RANGE;
-            node.range_op = weight_op;
-            node.input_ranges.push_back(w_range);
-            node.input_ranges.push_back(g_range);
-            node.output_ranges.push_back(w_range);
+            // 检查是否有任何可训练权重
+            if (memory_plan.is_region_populated(Region::W_FC_WEIGHT) ||
+                memory_plan.is_region_populated(Region::W_FIRST_CONV) ||
+                memory_plan.is_region_populated(Region::W_DEEP_CONV)) {
+                // 2. 从 MemoryPlan 直接查询 Region 范围，替代 get_range_op_range()
+                MemRange w_range = memory_plan.region_range(
+                    Region::W_FC_WEIGHT, Region::W_DEEP_CONV);
+                MemRange g_range = memory_plan.region_range(
+                    Region::G_FC_WEIGHT, Region::G_DEEP_CONV);
+                GraphNode node;
+                node.kind = GraphNode::Kind::RANGE;
+                node.range_op = weight_op;
+                node.input_ranges.push_back(w_range);
+                node.input_ranges.push_back(g_range);
+                node.output_ranges.push_back(w_range);
 
-            if (weight_needs_m) {
-                MemRange m_range = memory_plan.region_range(
-                    Region::M_FC_WEIGHT, Region::M_DEEP_CONV);
-                node.input_ranges.push_back(m_range);
-                node.output_ranges.push_back(m_range);
-            }
-            if (weight_needs_v) {
-                MemRange v_range = memory_plan.region_range(
-                    Region::V_FC_WEIGHT, Region::V_DEEP_CONV);
-                node.input_ranges.push_back(v_range);
-                node.output_ranges.push_back(v_range);
-            }
+                if (weight_needs_m) {
+                    MemRange m_range = memory_plan.region_range(
+                        Region::M_FC_WEIGHT, Region::M_DEEP_CONV);
+                    node.input_ranges.push_back(m_range);
+                    node.output_ranges.push_back(m_range);
+                }
+                if (weight_needs_v) {
+                    MemRange v_range = memory_plan.region_range(
+                        Region::V_FC_WEIGHT, Region::V_DEEP_CONV);
+                    node.input_ranges.push_back(v_range);
+                    node.output_ranges.push_back(v_range);
+                }
 
-            node.input_ids.push_back(scalar_ids.lr);
-            node.input_ids.push_back(scalar_ids.wd);
-            if (weight_needs_m) {
-                node.input_ids.push_back(scalar_ids.beta);
-            }
-            if (weight_needs_v) {
-                node.input_ids.push_back(scalar_ids.beta2);
-                node.input_ids.push_back(scalar_ids.eps);
-            }
-            node.input_ids.push_back(scalar_ids.scaling);
-            if (opt == OptimizerKind::ADAM || opt == OptimizerKind::ADAMW) {
-                node.input_ids.push_back(scalar_ids.bias_corr1);
-                node.input_ids.push_back(scalar_ids.bias_corr2);
-            }
-            node.input_ids.push_back(scalar_ids.has_nan);
+                node.input_ids.push_back(scalar_ids.lr);
+                node.input_ids.push_back(scalar_ids.wd);
+                if (weight_needs_m) {
+                    node.input_ids.push_back(scalar_ids.beta);
+                }
+                if (weight_needs_v) {
+                    node.input_ids.push_back(scalar_ids.beta2);
+                    node.input_ids.push_back(scalar_ids.eps);
+                }
+                node.input_ids.push_back(scalar_ids.scaling);
+                if (opt == OptimizerKind::ADAM || opt == OptimizerKind::ADAMW) {
+                    node.input_ids.push_back(scalar_ids.bias_corr1);
+                    node.input_ids.push_back(scalar_ids.bias_corr2);
+                }
+                node.input_ids.push_back(scalar_ids.has_nan);
 
-            train_cg.append(GraphId::OPTIMIZER, node);
+                train_cg.append(GraphId::OPTIMIZER, node);
+            }
         }
 
         // --- Bias 更新（所有优化器均用 RangeOp，LARS 的 tc=0 退化为普通动量）---
-        {
+        if (memory_plan.is_region_populated(Region::W_BN_BIAS) ||
+            memory_plan.is_region_populated(Region::W_FC_BIAS)) {
             RangeOp bias_op;
             bool bias_needs_m = false, bias_needs_v = false;
             switch (opt) {
@@ -1970,7 +1976,9 @@ void Compiler::build_auxiliary_graphs(ComputationGraph& train_cg, const MemoryPl
 
     // 6-2. CAST_MAIN_FP32_TO_FP16 图：主模型 FP32 权重 → FP16 权重
     //       用于 AMP 模式，在每次优化器更新后将 FP32 master weights 同步到 FP16 working weights
-    if (amp_on) {
+    if (amp_on && (memory_plan.is_region_populated(Region::W_FC_WEIGHT) ||
+                   memory_plan.is_region_populated(Region::W_FIRST_CONV) ||
+                   memory_plan.is_region_populated(Region::W_DEEP_CONV))) {
         MemRange in_mr = memory_plan.region_range(
             Region::W_FC_WEIGHT, Region::W_DEEP_CONV);
         MemRange out_mr = memory_plan.region_range(

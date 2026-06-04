@@ -128,3 +128,24 @@ else()
 endif()
 
 message(STATUS "  - mlp_adamw_median2: MNIST MLP 28x28 with Resize val end-to-end accuracy test (AdamW)")
+
+add_executable(conv_conv_conv_gap conv_conv_conv_gap.cpp)
+target_link_libraries(conv_conv_conv_gap PRIVATE renaissance)
+target_compile_definitions(conv_conv_conv_gap PRIVATE TR_LOG_LEVEL=1)
+
+if(TR_USE_CUDA)
+    setup_gpu_runtime_env(conv_conv_conv_gap)
+endif()
+
+set_target_properties(conv_conv_conv_gap PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/integration
+    WIN32_EXECUTABLE FALSE
+)
+
+if(MSVC)
+    target_compile_options(conv_conv_conv_gap PRIVATE /W4 /utf-8 /wd4244 /wd4505 /wd4458 /wd4127)
+else()
+    target_compile_options(conv_conv_conv_gap PRIVATE -Wall -Wextra -Wpedantic -Wno-unused-function)
+endif()
+
+message(STATUS "  - conv_conv_conv_gap: MNIST Conv end-to-end accuracy test (AdamW)")
