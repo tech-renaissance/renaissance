@@ -312,6 +312,54 @@ endif()
 message(STATUS "  - test_fc_fwd_bwd: FC FWD+BWD correctness test")
 
 # ============================================================================
+# Conv FWD+BWD 测试
+# ============================================================================
+add_executable(test_conv_fwd_bwd test_conv_fwd_bwd.cpp)
+target_link_libraries(test_conv_fwd_bwd PRIVATE renaissance)
+target_compile_definitions(test_conv_fwd_bwd PRIVATE TR_LOG_LEVEL=1)
+
+if(TR_USE_CUDA)
+    setup_gpu_runtime_env(test_conv_fwd_bwd)
+endif()
+
+set_target_properties(test_conv_fwd_bwd PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/op
+    WIN32_EXECUTABLE FALSE
+)
+
+if(MSVC)
+    target_compile_options(test_conv_fwd_bwd PRIVATE /W4 /utf-8 /wd4244 /wd4505 /wd4458 /wd4127)
+else()
+    target_compile_options(test_conv_fwd_bwd PRIVATE -Wall -Wextra -Wpedantic -Wno-unused-function)
+endif()
+
+message(STATUS "  - test_conv_fwd_bwd: Conv FWD+BWD correctness test")
+
+# ============================================================================
+# Conv INF 推理测试
+# ============================================================================
+add_executable(test_conv_inf test_conv_inf.cpp)
+target_link_libraries(test_conv_inf PRIVATE renaissance)
+target_compile_definitions(test_conv_inf PRIVATE TR_LOG_LEVEL=1)
+
+if(TR_USE_CUDA)
+    setup_gpu_runtime_env(test_conv_inf)
+endif()
+
+set_target_properties(test_conv_inf PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/op
+    WIN32_EXECUTABLE FALSE
+)
+
+if(MSVC)
+    target_compile_options(test_conv_inf PRIVATE /W4 /utf-8 /wd4244 /wd4505 /wd4458 /wd4127)
+else()
+    target_compile_options(test_conv_inf PRIVATE -Wall -Wextra -Wpedantic -Wno-unused-function)
+endif()
+
+message(STATUS "  - test_conv_inf: Conv INF correctness test")
+
+# ============================================================================
 # FC AMP 性能测试 —— 专用耗时测试
 # ============================================================================
 add_executable(test_fc_amp test_fc_amp.cpp)

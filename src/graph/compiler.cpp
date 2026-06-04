@@ -1037,7 +1037,7 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
     auto get_grad_output_id = [](LayerKind kind, const std::vector<int32_t>& tids) -> int32_t {
         int idx = -1;
         switch (kind) {
-            case LayerKind::Conv:                idx = 2; break;  // grad_slot
+            case LayerKind::Conv:                idx = -1; break;  // dX in-place to X, handled by layer_input_ids
             case LayerKind::Bn1d: case LayerKind::Bn2d: idx = 2; break;  // dX inplace to bn_output
             case LayerKind::ReLU:               idx = -1; break;  // in-place
             case LayerKind::MaxPool:            idx = -1; break;  // in-place dX
@@ -1181,6 +1181,24 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
                 continue;
             }
 
+            // [FIX] 首层 Conv/FC 等有显式 input_indices（weight/bn_stats）的算子
+            // 显式注入 I_A_DATA / I_B_DATA 作为输入数据 X
+            if (layer.is_first_layer && !gn.input_ids.empty() &&
+                (layer.kind == LayerKind::Conv || layer.kind == LayerKind::FC)) {
+                const auto& b = memory_plan.baseline();
+                layer_input_ids[l] = b.data_a;
+
+                GraphNode gn_a = gn;
+                gn_a.input_ids.insert(gn_a.input_ids.begin(), b.data_a);
+                train_cg.append(graph_id, gn_a);
+
+                GraphNode gn_b = gn;
+                gn_b.input_ids.insert(gn_b.input_ids.begin(), b.data_b);
+                train_cg.append(graph_id_b, gn_b);
+
+                continue;
+            }
+
             // 跨层输入链：注入前一层输出DTensor ID
             if (prev_output_id >= 0) {
                 gn.input_ids.insert(gn.input_ids.begin(), prev_output_id);
@@ -1298,6 +1316,30 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
                 }
             }
 
+            if (gn.compute_op == ComputeOp::CONV_FP32_BWD || gn.compute_op == ComputeOp::CONV_AMP_BWD) {
+                if (layer.is_first_layer) {
+                    const auto& b = memory_plan.baseline();
+
+                    GraphNode gn_a = gn;
+                    gn_a.input_ids.push_back(b.data_a);
+                    gn_a.output_ids.insert(gn_a.output_ids.begin(), b.data_a);
+                    train_cg.append(GraphId::FIRST_LAYER_BWD_A, gn_a);
+
+                    GraphNode gn_b = gn;
+                    gn_b.input_ids.push_back(b.data_b);
+                    gn_b.output_ids.insert(gn_b.output_ids.begin(), b.data_b);
+                    train_cg.append(GraphId::FIRST_LAYER_BWD_B, gn_b);
+
+                    continue;
+                } else {
+                    auto it = layer_input_ids.find(l);
+                    if (it != layer_input_ids.end() && it->second >= 0) {
+                        gn.input_ids.push_back(it->second);                      // 追加 X
+                        gn.output_ids.insert(gn.output_ids.begin(), it->second); // dX in-place to X (output_ids[0])
+                    }
+                }
+            }
+
             if (gn.compute_op == ComputeOp::TANH_FP32_BWD || gn.compute_op == ComputeOp::TANH_AMP_BWD ||
                 gn.compute_op == ComputeOp::RELU_FP32_BWD || gn.compute_op == ComputeOp::RELU_AMP_BWD ||
                 gn.compute_op == ComputeOp::SILU_FP32_BWD || gn.compute_op == ComputeOp::SILU_AMP_BWD ||
@@ -1377,6 +1419,7 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
         int32_t grad_id = get_grad_output_id(layer.kind, tensor_ids);
         // FC dX in-place：梯度直接写入X张量（前一层输出），追踪该张量ID
         if (grad_id < 0 && (layer.kind == LayerKind::FC ||
+            layer.kind == LayerKind::Conv ||
             layer.kind == LayerKind::FCBNReLU || layer.kind == LayerKind::GapFC ||
             layer.kind == LayerKind::MaxPool || layer.kind == LayerKind::Dropout ||
             layer.kind == LayerKind::Tanh || layer.kind == LayerKind::ReLU ||
@@ -1512,6 +1555,22 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
 
                 GraphNode gn_b = gn;
                 gn_b.input_ids = {b.data_b};
+                infer_cg.append(infer_graph_id_b, gn_b);
+
+                continue;
+            }
+
+            // [FIX] 首层 Conv/FC 推理图：显式 input_indices → 注入 I_A_DATA / I_B_DATA
+            if (layer.is_first_layer && !gn.input_ids.empty() &&
+                (layer.kind == LayerKind::Conv || layer.kind == LayerKind::FC)) {
+                const auto& b = memory_plan.baseline();
+
+                GraphNode gn_a = gn;
+                gn_a.input_ids.insert(gn_a.input_ids.begin(), b.data_a);
+                infer_cg.append(infer_graph_id, gn_a);
+
+                GraphNode gn_b = gn;
+                gn_b.input_ids.insert(gn_b.input_ids.begin(), b.data_b);
                 infer_cg.append(infer_graph_id_b, gn_b);
 
                 continue;

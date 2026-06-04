@@ -230,6 +230,12 @@ enum class OptimizerKind : uint8_t {
     ADAMW            ///< Adam with decoupled weight decay
 };
 
+/// 卷积搜索模式枚举
+enum class ConvSearchMode : uint8_t {
+    HEURISTIC_B = 0,   ///< 默认启发式搜索
+    EXHAUSTIVE_C = 1   ///< 穷举搜索（仅 AMP Conv，仅 A100/RTX5090）
+};
+
 // ============================================================================
 // 显存区域铁律（65个Region，低地址→高地址，001-065）
 // 基于REGION_FINAL.md V2.9规范，技术觉醒团队2026-05-12

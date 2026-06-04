@@ -19,6 +19,8 @@ StreamKind get_op_default_stream(ComputeOp op) noexcept {
         case ComputeOp::FC_AMP_FWD:
         case ComputeOp::CONV_FP32_FWD:
         case ComputeOp::CONV_AMP_FWD:
+        case ComputeOp::CONV_FP32_INF:
+        case ComputeOp::CONV_AMP_INF:
             return StreamKind::COMP_1;
 
         // ===== FC/CONV BWD → COMP_3（代表流 = dX 输出流，下游依赖）=====

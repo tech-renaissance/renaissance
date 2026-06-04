@@ -100,37 +100,56 @@ std::vector<TensorDesc> infer_conv_tensors(
     return descs;
 }
 
+std::vector<TensorDesc> infer_conv_tensors_with_bn_stats(
+    const Shape& input, const OpParams& params, const InferContext& ctx)
+{
+    auto descs = infer_conv_tensors(input, params, ctx);  // 0-5
+    const auto& cp = std::get<ConvParams>(params.data);
+    // 6: bn_stats → T_TEMP_FP32, 形状 {1,1,1,2*K}
+    descs.push_back(TensorDesc{"conv_bn_stats",
+        Shape{1, 1, 1, cp.out_channels * 2},
+        Region::T_TEMP_FP32, DType::FP32});
+    return descs;
+}
+
 SubgraphPattern build_conv_forward(const OpParams&, const std::vector<TensorDesc>& descs) {
     SubgraphPattern p;
-    if (descs.size() < 6) return p;
-    // Conv FWD: 前一层输出(不在descs中) + 0=weight → 1=output
-    // 跨层输入由Compiler在Phase 4补充
+    if (descs.size() < 7) return p;
+    bool amp = GlobalRegistry::instance().using_amp();
     SubgraphPattern::Node n;
-    n.op = ComputeOp::CONV_AMP_FWD;
-    n.input_indices  = {0};   // weight (数据输入由跨层链补充)
-    n.output_indices = {1};   // output
+    n.op = amp ? ComputeOp::CONV_AMP_FWD : ComputeOp::CONV_FP32_FWD;
+    n.input_indices  = amp ? std::vector<size_t>{4, 6} : std::vector<size_t>{0, 6};
+    //   [weight(AMP:fp16/FP32:fp32), bn_stats]
+    n.output_indices = {1};
+    //   Y(1)
     p.nodes.push_back(n);
     return p;
 }
 
 SubgraphPattern build_conv_backward(const OpParams&, const std::vector<TensorDesc>& descs) {
     SubgraphPattern p;
-    if (descs.size() < 6) return p;
+    if (descs.size() < 7) return p;
+    bool amp = GlobalRegistry::instance().using_amp();
     SubgraphPattern::Node n;
-    n.op = ComputeOp::CONV_AMP_BWD;
-    n.input_indices  = {0, 1, 2};   // weight, output, grad_slot
-    n.output_indices = {2, 3};   // grad_slot(in-place grad), weight_grad
+    n.op = amp ? ComputeOp::CONV_AMP_BWD : ComputeOp::CONV_FP32_BWD;
+    n.input_indices  = amp ? std::vector<size_t>{4} : std::vector<size_t>{0};
+    //   [weight]；dY 由 Compiler 注入到 input_ids[0]，X 由 Compiler 追加到 input_ids[2]
+    n.output_indices = amp ? std::vector<size_t>{5} : std::vector<size_t>{3};
+    //   [dW(weight_grad)]；dX 由 Compiler 注入为 output_ids[0]（in-place 到 X）
     p.nodes.push_back(n);
     return p;
 }
 
 SubgraphPattern build_conv_inference(const OpParams&, const std::vector<TensorDesc>& descs) {
     SubgraphPattern p;
-    if (descs.size() < 6) return p;
+    if (descs.size() < 7) return p;
+    bool amp = GlobalRegistry::instance().using_amp();
     SubgraphPattern::Node n;
-    n.op = ComputeOp::CONV_AMP_FWD;
-    n.input_indices  = {0};
+    n.op = amp ? ComputeOp::CONV_AMP_INF : ComputeOp::CONV_FP32_INF;
+    n.input_indices  = amp ? std::vector<size_t>{4, 6} : std::vector<size_t>{0, 6};
+    //   [weight(AMP:fp16/FP32:fp32), bn_stats]
     n.output_indices = {1};
+    //   Y(1)
     p.nodes.push_back(n);
     return p;
 }
@@ -2013,7 +2032,7 @@ Shape get_output_shape(LayerKind kind, const std::vector<TensorDesc>& descs)
 // ============================================================================
 
 const LayerDescriptor& get_layer_descriptor(LayerKind kind) {
-    static const LayerDescriptor conv_desc   = { infer_conv_tensors,      build_conv_forward,      build_conv_backward,      build_conv_inference };
+    static const LayerDescriptor conv_desc   = { infer_conv_tensors_with_bn_stats, build_conv_forward,      build_conv_backward,      build_conv_inference };
     static const LayerDescriptor bn_desc     = { infer_bn_tensors,        build_bn_forward,        build_bn_backward,        build_bn_inference };
     static const LayerDescriptor fc_desc     = { infer_fc_tensors,        build_fc_forward,        build_fc_backward,        build_fc_inference };
     static const LayerDescriptor relu_desc   = { infer_relu_tensors,      build_relu_forward,      build_relu_backward,      build_relu_inference };

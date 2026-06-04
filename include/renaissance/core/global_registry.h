@@ -895,6 +895,19 @@ public:
     InitKind bn_init_kind() const;
 
     /**
+     * @brief 设置卷积搜索模式
+     * @param mode 搜索模式（HEURISTIC_B 或 EXHAUSTIVE_C）
+     * @throws TRException::ValueError 如果已初始化后修改或非幂等赋值
+     */
+    void set_conv_search_mode(ConvSearchMode mode);
+
+    /**
+     * @brief 获取卷积搜索模式
+     * @return 当前搜索模式，未设置时返回 HEURISTIC_B
+     */
+    ConvSearchMode conv_search_mode() const;
+
+    /**
      * @brief 设置Fan模式（FAN_IN/FAN_OUT/FAN_AVG）
      * @param mode Fan计算模式
      * @throws TRException::ValueError 如果已初始化后修改或非幂等赋值
@@ -1137,6 +1150,7 @@ private:
     std::atomic<int> fixed_conv_init_kind_{-1}; ///< 卷积层初始化策略（-1=未设置）
     std::atomic<int> fixed_fc_init_kind_{-1};   ///< 全连接层初始化策略（-1=未设置，由Initializer首次设置决定）
     std::atomic<int> fixed_bn_init_kind_{-1};       ///< 批归一化层初始化策略（-1=未设置）
+    std::atomic<int> fixed_conv_search_mode_{-1};       ///< 卷积搜索模式（-1=未设置，默认 HEURISTIC_B）
     std::atomic<int> fixed_fan_mode_{static_cast<int>(FanMode::FAN_IN)};              ///< Fan计算模式
 
     // =========================================================================

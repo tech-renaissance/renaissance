@@ -2374,6 +2374,29 @@ InitKind GlobalRegistry::bn_init_kind() const {
     return static_cast<InitKind>(fixed_bn_init_kind_.load());
 }
 
+void GlobalRegistry::set_conv_search_mode(ConvSearchMode mode) {
+    int value = static_cast<int>(mode);
+    int old = fixed_conv_search_mode_.load(std::memory_order_relaxed);
+
+    if (old == -1) {
+        fixed_conv_search_mode_.store(value, std::memory_order_release);
+        return;
+    }
+    if (initialized_.load(std::memory_order_acquire)) {
+        TR_VALUE_ERROR("Cannot modify conv_search_mode after initialization. "
+                      "Current value: " << old << ", Attempted value: " << value);
+    }
+    if (old == value) return;  // 幂等允许
+    TR_VALUE_ERROR("Cannot modify conv_search_mode after first assignment. "
+                  "Current value: " << old << ", Attempted value: " << value);
+}
+
+ConvSearchMode GlobalRegistry::conv_search_mode() const {
+    int v = fixed_conv_search_mode_.load(std::memory_order_relaxed);
+    if (v == -1) return ConvSearchMode::HEURISTIC_B;
+    return static_cast<ConvSearchMode>(v);
+}
+
 void GlobalRegistry::set_fan_mode(FanMode mode) {
     TR_CHECK(!initialized_, ValueError, "set_fan_mode: cannot modify after initialization");
     int value = static_cast<int>(mode);

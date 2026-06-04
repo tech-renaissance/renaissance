@@ -72,8 +72,12 @@ std::string compute_op_to_string(ComputeOp op) {
         case ComputeOp::DROPOUT_FP32_INF:     return "DROPOUT_FP32_INF";
 
         // === 卷积（AMP 影响 workspace）===
+        case ComputeOp::CONV_FP32_FWD:         return "CONV_FP32_FWD";
+        case ComputeOp::CONV_FP32_BWD:         return "CONV_FP32_BWD";
+        case ComputeOp::CONV_FP32_INF:         return "CONV_FP32_INF";
         case ComputeOp::CONV_AMP_FWD:          return "CONV_AMP_FWD";
         case ComputeOp::CONV_AMP_BWD:          return "CONV_AMP_BWD";
+        case ComputeOp::CONV_AMP_INF:          return "CONV_AMP_INF";
 
         // === BatchNorm（AMP 影响 workspace）===
         case ComputeOp::BN1D_AMP_FWD:         return "BN1D_AMP_FWD";
@@ -230,8 +234,12 @@ std::string format_params(ComputeOp op, const OpParams& p) {
     std::ostringstream oss;
 
     switch (op) {
+        case ComputeOp::CONV_FP32_FWD:
+        case ComputeOp::CONV_FP32_BWD:
+        case ComputeOp::CONV_FP32_INF:
         case ComputeOp::CONV_AMP_FWD:
-        case ComputeOp::CONV_AMP_BWD: {
+        case ComputeOp::CONV_AMP_BWD:
+        case ComputeOp::CONV_AMP_INF: {
             if (auto* cp = std::get_if<ConvParams>(&p.data)) {
                 oss << "out_ch=" << cp->out_channels
                     << ",kernel=" << cp->kernel_h << "x" << cp->kernel_w

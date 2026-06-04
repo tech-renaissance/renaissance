@@ -1,11 +1,12 @@
 /**
  * @file conv_op.cpp
- * @brief CONV算子实现：FP32版本，使用cuDNN（CUDA）和XNNPACK/朴素（CPU）
- * @version 4.21.0
- * @date 2026-05-16
+ * @brief CONV算子实现：6个算子变体（FP32_FWD/BWD/INF + AMP_FWD/BWD/INF）
+ * @version 5.0.0
+ * @date 2026-06-03
  * @author 技术觉醒团队
- * @note 依赖项: op_registry.h, device_context.h, memory_plan.h, cudnn_utils.h
+ * @note 依赖项: op_registry.h, device_context.h, cudnn_utils.h
  * @note 所属系列: backend/ops/dtensor
+ * @note cuDNN FE Graph 构建函数在 conv_op_impl.cpp（#include 方式编译）
  */
 
 #include "renaissance/backend/op_registry.h"
@@ -23,203 +24,409 @@
 #include <variant>
 #include <cstring>
 #include <limits>
+#include <unordered_map>
+#include <memory>
+#include <functional>
 
 #ifdef TR_USE_XNNPACK
 #include <xnnpack.h>
 #endif
 
-namespace tr {
-
-// CUDA Graph构建函数声明（在conv_op.cu中实现）
 #ifdef TR_USE_CUDA
-std::shared_ptr<cudnn_frontend::graph::Graph> build_conv_fwd_graph(
-    const std::vector<std::shared_ptr<cudnn_frontend::graph::Tensor_attributes>>& inputs,
-    const std::vector<Shape>& input_shapes,
-    const std::vector<DTensor>& dtensors,
-    const OpParams& params,
-    cudnnHandle_t handle);
-
-std::shared_ptr<cudnn_frontend::graph::Graph> build_conv_bwd_graph(
-    const std::vector<std::shared_ptr<cudnn_frontend::graph::Tensor_attributes>>& inputs,
-    const std::vector<Shape>& input_shapes,
-    const std::vector<DTensor>& dtensors,
-    const OpParams& params,
-    cudnnHandle_t handle);
+#include <cudnn_frontend.h>
+#include <cudnn_frontend/graph_interface.h>
+#include <cuda_runtime.h>
 #endif
 
 // ============================================================================
-// CUDA Launch函数
+// cuDNN FE Graph 构建函数、缓存结构、辅助函数
+// 由 conv_op_impl.cpp 提供（#include 方式编译，共享 static 缓存）
+// 注意：conv_op_impl.cpp 自带 namespace tr { ... }，
+//       所以先打开 namespace tr，CUDA 路径下关闭-包含-重开避免嵌套。
+// ============================================================================
+namespace tr {
+#ifdef TR_USE_CUDA
+} // 临时关闭 namespace tr，让 conv_op_impl.cpp 打开自己的 namespace tr
+#include "conv_op_impl.cpp"
+namespace tr {  // 重新打开供后续代码使用
+#endif
+
+// ============================================================================
+// CUDA Launch 函数
 // ============================================================================
 #ifdef TR_USE_CUDA
 
-static void launch_conv_fwd_cuda(
+// ── 5.4 CONV_FP32_FWD ──────────────────────────────────────────────────────
+
+static void launch_conv_fp32_fwd_cuda(
     const GraphNode& node,
     const MemoryPlan& mp,
     const DeviceContext& ctx,
     MultiStreamCaptureState& state)
 {
-    const auto* p = std::get_if<ConvParams>(&node.params.data);
-    TR_CHECK(p != nullptr, ValueError, "CONV_FP32_FWD missing ConvParams");
-    TR_CHECK(node.input_ids.size() >= 2, ShapeError,
-             "CONV_FP32_FWD requires at least 2 inputs (X, W)");
-    TR_CHECK(node.output_ids.size() >= 1, ShapeError,
-             "CONV_FP32_FWD requires at least 1 output (Y)");
-
+    const auto& cp = node.params.conv();
     const DTensor& dt_x = mp.get_dtensor(node.input_ids[0]);
     const DTensor& dt_w = mp.get_dtensor(node.input_ids[1]);
+    const DTensor& dt_y = mp.get_dtensor(node.output_ids[0]);
 
-    const float* X = static_cast<const float*>(ctx.ptr_at(node.input_ids[0]));
-    const float* W_ptr = static_cast<const float*>(ctx.ptr_at(node.input_ids[1]));
-    float* Y = static_cast<float*>(ctx.ptr_at(node.output_ids[0]));
+    StreamKind sk = StreamKind::COMP_1;
+    cudaStream_t s = static_cast<cudaStream_t>(ctx.stream(sk));
+    cudnnHandle_t h = static_cast<cudnnHandle_t>(ctx.cudnn_handle(sk));
+    int si = state.get_or_register(s);
 
-    int N = dt_x.shape.n(), H = dt_x.shape.h(), IW = dt_x.shape.w(), C = dt_x.shape.c();
-    int K = p->out_channels;
-    int R = p->kernel_h, S = p->kernel_w;
-
-    std::vector<std::shared_ptr<cudnn_frontend::graph::Tensor_attributes>> in_attrs;
-    std::vector<Shape> in_shapes = {dt_x.shape, dt_w.shape};
-    std::vector<DTensor> dtensors = {dt_x, dt_w};
-
-    int64_t uid_x = 100;
-    auto attr_x = std::make_shared<cudnn_frontend::graph::Tensor_attributes>();
-    attr_x->set_dim({N, C, H, IW})
-           .set_stride({dt_x.n_stride_cuda(), dt_x.c_stride_cuda(),
-                        dt_x.h_stride_cuda(), dt_x.w_stride_cuda()})
-           .set_data_type(cudnn_frontend::DataType_t::FLOAT)
-           .set_uid(uid_x);
-    in_attrs.push_back(attr_x);
-
-    int64_t uid_w = 101;
-    auto attr_w = std::make_shared<cudnn_frontend::graph::Tensor_attributes>();
-    attr_w->set_dim({K, C, R, S})
-           .set_stride({dt_w.n_stride_cuda(), dt_w.c_stride_cuda(),
-                        dt_w.h_stride_cuda(), dt_w.w_stride_cuda()})
-           .set_data_type(cudnn_frontend::DataType_t::FLOAT)
-           .set_uid(uid_w);
-    in_attrs.push_back(attr_w);
-
-    cudnnHandle_t handle = static_cast<cudnnHandle_t>(
-        ctx.cudnn_handle(StreamKind::COMP_1));
-    cudaStream_t stream = static_cast<cudaStream_t>(
-        ctx.stream(StreamKind::COMP_1));
-    cudnnSetStream(handle, stream);
-
-    auto graph = build_conv_fwd_graph(in_attrs, in_shapes, dtensors, node.params, handle);
-
-    std::unordered_map<int64_t, void*> vp;
-    vp[uid_x] = const_cast<float*>(X);
-    vp[uid_w] = const_cast<float*>(W_ptr);
-    vp[102] = static_cast<void*>(Y);
-
-    int64_t ws_bytes = graph->get_workspace_size();
-    void* temp_ws = nullptr;
-    if (ws_bytes > 0) {
-        cudaError_t err = cudaMalloc(&temp_ws, static_cast<size_t>(ws_bytes));
-        if (err != cudaSuccess) {
-            TR_DEVICE_ERROR("cuDNN workspace alloc failed: " << cudaGetErrorString(err));
-        }
+    // 等待前序
+    if (state.output_stream_idx >= 0) {
+        cudaStreamWaitEvent(s,
+            state.streams[state.output_stream_idx].last_done_event, 0);
     }
 
-    TR_CUDNN_FE_CHECK(graph->execute(handle, vp, temp_ws), "CONV_FP32_FWD execute");
+    // Cache lookup / build
+    ConvGraphCacheKey key{
+        reinterpret_cast<uint64_t>(h),
+        dt_x.n(), dt_x.h(), dt_x.w(), dt_x.c(),
+        dt_w.n(), dt_w.h(), dt_w.w(),
+        cp.pad_h, cp.pad_w, cp.stride_h, cp.stride_w,
+        false, ComputeOp::CONV_FP32_FWD
+    };
+    auto& cache = get_or_build_cache(s_conv_fwd_cache, key, [&]() {
+        return build_conv_fp32_fwd_graph(dt_x, dt_w, dt_y, cp, h);
+    });
 
-    if (temp_ws) cudaFree(temp_ws);
+    // Workspace（复用 DeviceContext per-stream workspace）
+    ctx.ensure_workspace_grow(sk, cache.workspace_size);
+    void* ws = ctx.workspace(sk);
 
-    int si = state.get_or_register(stream);
+    // Variant Pack
+    std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> vp;
+    for (const auto& [ta, tid] : cache.tensor_to_id) {
+        vp[ta] = ctx.ptr_at(static_cast<int>(tid));
+    }
+
+    // Execute
+    TR_CUDNN_FE_CHECK(cache.graph->execute(h, vp, ws),
+                      "CONV_FP32_FWD execute");
+
     state.output_stream_idx = si;
     state.streams[si].has_pending_work = true;
-    cudaEventRecord(state.streams[si].last_done_event, stream);
+    cudaEventRecord(state.streams[si].last_done_event, s);
 }
 
-static void launch_conv_bwd_cuda(
+// ── 5.4 CONV_FP32_INF（复用 FWD graph 构建，cache key 区分） ──────────────
+
+static void launch_conv_fp32_inf_cuda(
     const GraphNode& node,
     const MemoryPlan& mp,
     const DeviceContext& ctx,
     MultiStreamCaptureState& state)
 {
-    const auto* p = std::get_if<ConvParams>(&node.params.data);
-    TR_CHECK(p != nullptr, ValueError, "CONV_FP32_BWD missing ConvParams");
-    TR_CHECK(node.input_ids.size() >= 3, ShapeError,
-             "CONV_FP32_BWD requires 3 inputs (dY, X, W)");
-    TR_CHECK(node.output_ids.size() >= 2, ShapeError,
-             "CONV_FP32_BWD requires 2 outputs (dX, dW)");
+    const auto& cp = node.params.conv();
+    const DTensor& dt_x = mp.get_dtensor(node.input_ids[0]);
+    const DTensor& dt_w = mp.get_dtensor(node.input_ids[1]);
+    const DTensor& dt_y = mp.get_dtensor(node.output_ids[0]);
 
-    const DTensor& dt_dy = mp.get_dtensor(node.input_ids[0]);
-    const DTensor& dt_x  = mp.get_dtensor(node.input_ids[1]);
-    const DTensor& dt_w  = mp.get_dtensor(node.input_ids[2]);
+    StreamKind sk = StreamKind::COMP_1;
+    cudaStream_t s = static_cast<cudaStream_t>(ctx.stream(sk));
+    cudnnHandle_t h = static_cast<cudnnHandle_t>(ctx.cudnn_handle(sk));
+    int si = state.get_or_register(s);
 
-    const float* dY_ptr = static_cast<const float*>(ctx.ptr_at(node.input_ids[0]));
-    const float* X      = static_cast<const float*>(ctx.ptr_at(node.input_ids[1]));
-    const float* W_ptr   = static_cast<const float*>(ctx.ptr_at(node.input_ids[2]));
-    float* dX = static_cast<float*>(ctx.ptr_at(node.output_ids[0]));
-    float* dW = static_cast<float*>(ctx.ptr_at(node.output_ids[1]));
-
-    int N = dt_x.shape.n(), H_in = dt_x.shape.h(), W_in = dt_x.shape.w(), C = dt_x.shape.c();
-    int K = p->out_channels;
-    int R = p->kernel_h, S = p->kernel_w;
-
-    std::vector<std::shared_ptr<cudnn_frontend::graph::Tensor_attributes>> in_attrs;
-    std::vector<Shape> in_shapes = {dt_dy.shape, dt_x.shape, dt_w.shape};
-    std::vector<DTensor> dtensors = {dt_dy, dt_x, dt_w};
-
-    int64_t uid_dy = 200;
-    auto attr_dy = std::make_shared<cudnn_frontend::graph::Tensor_attributes>();
-    attr_dy->set_dim({N, K, dt_dy.shape.h(), dt_dy.shape.w()})
-            .set_stride({dt_dy.n_stride_cuda(), dt_dy.c_stride_cuda(),
-                         dt_dy.h_stride_cuda(), dt_dy.w_stride_cuda()})
-            .set_data_type(cudnn_frontend::DataType_t::FLOAT)
-            .set_uid(uid_dy);
-    in_attrs.push_back(attr_dy);
-
-    int64_t uid_x = 201;
-    auto attr_x = std::make_shared<cudnn_frontend::graph::Tensor_attributes>();
-    attr_x->set_dim({N, C, H_in, W_in})
-            .set_stride({dt_x.n_stride_cuda(), dt_x.c_stride_cuda(),
-                         dt_x.h_stride_cuda(), dt_x.w_stride_cuda()})
-            .set_data_type(cudnn_frontend::DataType_t::FLOAT)
-            .set_uid(uid_x);
-    in_attrs.push_back(attr_x);
-
-    int64_t uid_w = 202;
-    auto attr_w = std::make_shared<cudnn_frontend::graph::Tensor_attributes>();
-    attr_w->set_dim({K, C, R, S})
-            .set_stride({dt_w.n_stride_cuda(), dt_w.c_stride_cuda(),
-                         dt_w.h_stride_cuda(), dt_w.w_stride_cuda()})
-            .set_data_type(cudnn_frontend::DataType_t::FLOAT)
-            .set_uid(uid_w);
-    in_attrs.push_back(attr_w);
-
-    cudnnHandle_t handle = static_cast<cudnnHandle_t>(
-        ctx.cudnn_handle(StreamKind::COMP_1));
-    cudaStream_t stream = static_cast<cudaStream_t>(
-        ctx.stream(StreamKind::COMP_1));
-    cudnnSetStream(handle, stream);
-
-    auto graph = build_conv_bwd_graph(in_attrs, in_shapes, dtensors, node.params, handle);
-
-    std::unordered_map<int64_t, void*> vp;
-    vp[uid_dy] = const_cast<float*>(dY_ptr);
-    vp[uid_x]  = const_cast<float*>(X);
-    vp[uid_w]  = const_cast<float*>(W_ptr);
-    vp[203] = static_cast<void*>(dX);
-    vp[204] = static_cast<void*>(dW);
-
-    int64_t ws_bytes = graph->get_workspace_size();
-    void* temp_ws = nullptr;
-    if (ws_bytes > 0) {
-        cudaError_t err = cudaMalloc(&temp_ws, static_cast<size_t>(ws_bytes));
-        if (err != cudaSuccess) {
-            TR_DEVICE_ERROR("cuDNN workspace alloc failed: " << cudaGetErrorString(err));
-        }
+    if (state.output_stream_idx >= 0) {
+        cudaStreamWaitEvent(s,
+            state.streams[state.output_stream_idx].last_done_event, 0);
     }
 
-    TR_CUDNN_FE_CHECK(graph->execute(handle, vp, temp_ws), "CONV_FP32_BWD execute");
+    ConvGraphCacheKey key{
+        reinterpret_cast<uint64_t>(h),
+        dt_x.n(), dt_x.h(), dt_x.w(), dt_x.c(),
+        dt_w.n(), dt_w.h(), dt_w.w(),
+        cp.pad_h, cp.pad_w, cp.stride_h, cp.stride_w,
+        false, ComputeOp::CONV_FP32_FWD
+    };
+    // INF 与 FWD 共用 graph 构建函数和 cache map
+    auto& cache = get_or_build_cache(s_conv_fwd_cache, key, [&]() {
+        return build_conv_fp32_fwd_graph(dt_x, dt_w, dt_y, cp, h);
+    });
 
-    if (temp_ws) cudaFree(temp_ws);
+    ctx.ensure_workspace_grow(sk, cache.workspace_size);
+    void* ws = ctx.workspace(sk);
 
-    int si = state.get_or_register(stream);
+    std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> vp;
+    for (const auto& [ta, tid] : cache.tensor_to_id) {
+        vp[ta] = ctx.ptr_at(static_cast<int>(tid));
+    }
+
+    TR_CUDNN_FE_CHECK(cache.graph->execute(h, vp, ws),
+                      "CONV_FP32_INF execute");
+
     state.output_stream_idx = si;
     state.streams[si].has_pending_work = true;
-    cudaEventRecord(state.streams[si].last_done_event, stream);
+    cudaEventRecord(state.streams[si].last_done_event, s);
+}
+
+// ── 5.5 CONV_FP32_BWD（双图 + 跨流同步） ───────────────────────────────────
+
+static void launch_conv_fp32_bwd_cuda(
+    const GraphNode& node,
+    const MemoryPlan& mp,
+    const DeviceContext& ctx,
+    MultiStreamCaptureState& state)
+{
+    const auto& cp = node.params.conv();
+    // input_ids: [0]=dY, [1]=W, [2]=X (Compiler 追加)
+    const DTensor& dt_dy = mp.get_dtensor(node.input_ids[0]);
+    const DTensor& dt_w  = mp.get_dtensor(node.input_ids[1]);
+    const DTensor& dt_x  = mp.get_dtensor(node.input_ids[2]);
+    // output_ids: [0]=dX (Compiler 注入，in-place to X), [1]=dW
+    const DTensor& dt_dx = mp.get_dtensor(node.output_ids[0]);
+    const DTensor& dt_dw = mp.get_dtensor(node.output_ids[1]);
+
+    cudaStream_t s_dw = static_cast<cudaStream_t>(ctx.stream(StreamKind::COMP_1));
+    cudaStream_t s_dx = static_cast<cudaStream_t>(ctx.stream(StreamKind::COMP_3));
+    cudnnHandle_t h_dw = static_cast<cudnnHandle_t>(ctx.cudnn_handle(StreamKind::COMP_1));
+    cudnnHandle_t h_dx = static_cast<cudnnHandle_t>(ctx.cudnn_handle(StreamKind::COMP_3));
+    int i_dw = state.get_or_register(s_dw);
+    int i_dx = state.get_or_register(s_dx);
+
+    // 等待前序（两流都 wait）
+    int out_idx = state.output_stream_idx;
+    if (out_idx >= 0) {
+        cudaStreamWaitEvent(s_dw, state.streams[out_idx].last_done_event, 0);
+        cudaStreamWaitEvent(s_dx, state.streams[out_idx].last_done_event, 0);
+    }
+
+    // === COMP_1: WGrad ===
+    ConvGraphCacheKey key_w{
+        reinterpret_cast<uint64_t>(h_dw),
+        dt_x.n(), dt_x.h(), dt_x.w(), dt_x.c(),
+        dt_w.n(), dt_w.h(), dt_w.w(),
+        cp.pad_h, cp.pad_w, cp.stride_h, cp.stride_w,
+        false, ComputeOp::CONV_FP32_BWD
+    };
+    auto& cache_w = get_or_build_cache(s_conv_wgrad_cache, key_w, [&]() {
+        return build_conv_fp32_wgrad_graph(dt_dy, dt_x, dt_dw, cp, h_dw);
+    });
+    ctx.ensure_workspace_grow(StreamKind::COMP_1, cache_w.workspace_size);
+
+    std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> vp_w;
+    for (const auto& [ta, tid] : cache_w.tensor_to_id) {
+        vp_w[ta] = ctx.ptr_at(static_cast<int>(tid));
+    }
+    TR_CUDNN_FE_CHECK(cache_w.graph->execute(h_dw, vp_w, ctx.workspace(StreamKind::COMP_1)),
+                      "CONV_FP32_BWD wgrad execute");
+    cudaEventRecord(state.streams[i_dw].last_done_event, s_dw);
+    state.streams[i_dw].has_pending_work = true;
+
+    // === COMP_3: DGrad（等待 WGrad 完成，保护 X 不被覆盖） ===
+    cudaStreamWaitEvent(s_dx, state.streams[i_dw].last_done_event, 0);
+
+    ConvGraphCacheKey key_x{
+        reinterpret_cast<uint64_t>(h_dx),
+        dt_x.n(), dt_x.h(), dt_x.w(), dt_x.c(),
+        dt_w.n(), dt_w.h(), dt_w.w(),
+        cp.pad_h, cp.pad_w, cp.stride_h, cp.stride_w,
+        false, ComputeOp::CONV_FP32_BWD
+    };
+    auto& cache_x = get_or_build_cache(s_conv_dgrad_cache, key_x, [&]() {
+        return build_conv_fp32_dgrad_graph(dt_dy, dt_w, dt_dx, cp, h_dx);
+    });
+    ctx.ensure_workspace_grow(StreamKind::COMP_3, cache_x.workspace_size);
+
+    std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> vp_x;
+    for (const auto& [ta, tid] : cache_x.tensor_to_id) {
+        vp_x[ta] = ctx.ptr_at(static_cast<int>(tid));
+    }
+    TR_CUDNN_FE_CHECK(cache_x.graph->execute(h_dx, vp_x, ctx.workspace(StreamKind::COMP_3)),
+                      "CONV_FP32_BWD dgrad execute");
+    cudaEventRecord(state.streams[i_dx].last_done_event, s_dx);
+    state.streams[i_dx].has_pending_work = true;
+
+    state.output_stream_idx = i_dx;
+}
+
+// ── 5.6 CONV_AMP_FWD（Conv + GenStats） ────────────────────────────────────
+
+static void launch_conv_amp_fwd_cuda(
+    const GraphNode& node,
+    const MemoryPlan& mp,
+    const DeviceContext& ctx,
+    MultiStreamCaptureState& state)
+{
+    const auto& cp = node.params.conv();
+    // input_ids: [0]=X, [1]=W_fp16, [2]=bn_stats
+    const DTensor& dt_x  = mp.get_dtensor(node.input_ids[0]);
+    const DTensor& dt_w  = mp.get_dtensor(node.input_ids[1]);
+    const DTensor& dt_bn = mp.get_dtensor(node.input_ids[2]);
+    const DTensor& dt_y  = mp.get_dtensor(node.output_ids[0]);
+
+    StreamKind sk = StreamKind::COMP_1;
+    cudaStream_t s = static_cast<cudaStream_t>(ctx.stream(sk));
+    cudnnHandle_t h = static_cast<cudnnHandle_t>(ctx.cudnn_handle(sk));
+    int si = state.get_or_register(s);
+
+    if (state.output_stream_idx >= 0) {
+        cudaStreamWaitEvent(s,
+            state.streams[state.output_stream_idx].last_done_event, 0);
+    }
+
+    ConvGraphCacheKey key{
+        reinterpret_cast<uint64_t>(h),
+        dt_x.n(), dt_x.h(), dt_x.w(), dt_x.c(),
+        dt_w.n(), dt_w.h(), dt_w.w(),
+        cp.pad_h, cp.pad_w, cp.stride_h, cp.stride_w,
+        true, ComputeOp::CONV_AMP_FWD
+    };
+    auto& cache = get_or_build_cache(s_conv_fwd_cache, key, [&]() {
+        return build_conv_amp_fwd_graph(dt_x, dt_w, dt_y, dt_bn, cp, h);
+    });
+
+    ctx.ensure_workspace_grow(sk, cache.workspace_size);
+    void* ws = ctx.workspace(sk);
+
+    // Variant Pack：bn_stats 的 sq_sum 需要偏移
+    std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> vp;
+    for (const auto& [ta, tid] : cache.tensor_to_id) {
+        void* ptr = ctx.ptr_at(static_cast<int>(tid));
+        if (tid == dt_bn.id && cache.bn_stats_offset > 0 &&
+            ta->get_name() == "sq_sum") {
+            ptr = static_cast<float*>(ptr) + cache.bn_stats_offset;
+        }
+        vp[ta] = ptr;
+    }
+
+    TR_CUDNN_FE_CHECK(cache.graph->execute(h, vp, ws),
+                      "CONV_AMP_FWD execute");
+
+    state.output_stream_idx = si;
+    state.streams[si].has_pending_work = true;
+    cudaEventRecord(state.streams[si].last_done_event, s);
+}
+
+// ── 5.8 CONV_AMP_INF（纯 conv_fprop，无 GenStats） ──────────────────────────
+
+static void launch_conv_amp_inf_cuda(
+    const GraphNode& node,
+    const MemoryPlan& mp,
+    const DeviceContext& ctx,
+    MultiStreamCaptureState& state)
+{
+    const auto& cp = node.params.conv();
+    const DTensor& dt_x = mp.get_dtensor(node.input_ids[0]);
+    const DTensor& dt_w = mp.get_dtensor(node.input_ids[1]);
+    const DTensor& dt_y = mp.get_dtensor(node.output_ids[0]);
+
+    StreamKind sk = StreamKind::COMP_1;
+    cudaStream_t s = static_cast<cudaStream_t>(ctx.stream(sk));
+    cudnnHandle_t h = static_cast<cudnnHandle_t>(ctx.cudnn_handle(sk));
+    int si = state.get_or_register(s);
+
+    if (state.output_stream_idx >= 0) {
+        cudaStreamWaitEvent(s,
+            state.streams[state.output_stream_idx].last_done_event, 0);
+    }
+
+    ConvGraphCacheKey key{
+        reinterpret_cast<uint64_t>(h),
+        dt_x.n(), dt_x.h(), dt_x.w(), dt_x.c(),
+        dt_w.n(), dt_w.h(), dt_w.w(),
+        cp.pad_h, cp.pad_w, cp.stride_h, cp.stride_w,
+        true, ComputeOp::CONV_AMP_INF
+    };
+    auto& cache = get_or_build_cache(s_conv_fwd_cache, key, [&]() {
+        return build_conv_amp_inf_graph(dt_x, dt_w, dt_y, cp, h);
+    });
+
+    ctx.ensure_workspace_grow(sk, cache.workspace_size);
+    void* ws = ctx.workspace(sk);
+
+    std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> vp;
+    for (const auto& [ta, tid] : cache.tensor_to_id) {
+        vp[ta] = ctx.ptr_at(static_cast<int>(tid));
+    }
+
+    TR_CUDNN_FE_CHECK(cache.graph->execute(h, vp, ws),
+                      "CONV_AMP_INF execute");
+
+    state.output_stream_idx = si;
+    state.streams[si].has_pending_work = true;
+    cudaEventRecord(state.streams[si].last_done_event, s);
+}
+
+// ── 5.7 CONV_AMP_BWD（双图 + 跨流同步 + FP16 dW） ──────────────────────────
+
+static void launch_conv_amp_bwd_cuda(
+    const GraphNode& node,
+    const MemoryPlan& mp,
+    const DeviceContext& ctx,
+    MultiStreamCaptureState& state)
+{
+    const auto& cp = node.params.conv();
+    // input_ids: [0]=dY, [1]=W_fp16, [2]=X (Compiler 追加)
+    const DTensor& dt_dy = mp.get_dtensor(node.input_ids[0]);
+    const DTensor& dt_w  = mp.get_dtensor(node.input_ids[1]);
+    const DTensor& dt_x  = mp.get_dtensor(node.input_ids[2]);
+    // output_ids: [0]=dX (Compiler 注入), [1]=dW_fp16
+    const DTensor& dt_dx = mp.get_dtensor(node.output_ids[0]);
+    const DTensor& dt_dw = mp.get_dtensor(node.output_ids[1]);
+
+    cudaStream_t s_dw = static_cast<cudaStream_t>(ctx.stream(StreamKind::COMP_1));
+    cudaStream_t s_dx = static_cast<cudaStream_t>(ctx.stream(StreamKind::COMP_3));
+    cudnnHandle_t h_dw = static_cast<cudnnHandle_t>(ctx.cudnn_handle(StreamKind::COMP_1));
+    cudnnHandle_t h_dx = static_cast<cudnnHandle_t>(ctx.cudnn_handle(StreamKind::COMP_3));
+    int i_dw = state.get_or_register(s_dw);
+    int i_dx = state.get_or_register(s_dx);
+
+    int out_idx = state.output_stream_idx;
+    if (out_idx >= 0) {
+        cudaStreamWaitEvent(s_dw, state.streams[out_idx].last_done_event, 0);
+        cudaStreamWaitEvent(s_dx, state.streams[out_idx].last_done_event, 0);
+    }
+
+    // === COMP_1: WGrad (FP16) ===
+    ConvGraphCacheKey key_w{
+        reinterpret_cast<uint64_t>(h_dw),
+        dt_x.n(), dt_x.h(), dt_x.w(), dt_x.c(),
+        dt_w.n(), dt_w.h(), dt_w.w(),
+        cp.pad_h, cp.pad_w, cp.stride_h, cp.stride_w,
+        true, ComputeOp::CONV_AMP_BWD
+    };
+    auto& cache_w = get_or_build_cache(s_conv_wgrad_cache, key_w, [&]() {
+        return build_conv_amp_wgrad_graph(dt_dy, dt_x, dt_dw, cp, h_dw);
+    });
+    ctx.ensure_workspace_grow(StreamKind::COMP_1, cache_w.workspace_size);
+
+    std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> vp_w;
+    for (const auto& [ta, tid] : cache_w.tensor_to_id) {
+        vp_w[ta] = ctx.ptr_at(static_cast<int>(tid));
+    }
+    TR_CUDNN_FE_CHECK(cache_w.graph->execute(h_dw, vp_w, ctx.workspace(StreamKind::COMP_1)),
+                      "CONV_AMP_BWD wgrad execute");
+    cudaEventRecord(state.streams[i_dw].last_done_event, s_dw);
+    state.streams[i_dw].has_pending_work = true;
+
+    // === COMP_3: DGrad（等待 WGrad 完成） ===
+    cudaStreamWaitEvent(s_dx, state.streams[i_dw].last_done_event, 0);
+
+    ConvGraphCacheKey key_x{
+        reinterpret_cast<uint64_t>(h_dx),
+        dt_x.n(), dt_x.h(), dt_x.w(), dt_x.c(),
+        dt_w.n(), dt_w.h(), dt_w.w(),
+        cp.pad_h, cp.pad_w, cp.stride_h, cp.stride_w,
+        true, ComputeOp::CONV_AMP_BWD
+    };
+    auto& cache_x = get_or_build_cache(s_conv_dgrad_cache, key_x, [&]() {
+        return build_conv_amp_dgrad_graph(dt_dy, dt_w, dt_dx, cp, h_dx);
+    });
+    ctx.ensure_workspace_grow(StreamKind::COMP_3, cache_x.workspace_size);
+
+    std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> vp_x;
+    for (const auto& [ta, tid] : cache_x.tensor_to_id) {
+        vp_x[ta] = ctx.ptr_at(static_cast<int>(tid));
+    }
+    TR_CUDNN_FE_CHECK(cache_x.graph->execute(h_dx, vp_x, ctx.workspace(StreamKind::COMP_3)),
+                      "CONV_AMP_BWD dgrad execute");
+    cudaEventRecord(state.streams[i_dx].last_done_event, s_dx);
+    state.streams[i_dx].has_pending_work = true;
+
+    state.output_stream_idx = i_dx;
 }
 
 #endif // TR_USE_CUDA
@@ -227,6 +434,8 @@ static void launch_conv_bwd_cuda(
 // ============================================================================
 // CPU 实现
 // ============================================================================
+
+// ── FWD XNNPACK ────────────────────────────────────────────────────────────
 
 #ifdef TR_USE_XNNPACK
 
@@ -277,7 +486,6 @@ static void launch_conv_fwd_cpu_xnnpack(CpuOpContext* op_ctx) {
                                      nullptr, 0, XNN_VALUE_FLAG_EXTERNAL_INPUT, &input_id);
     TR_CHECK(status == xnn_status_success, RuntimeError, "xnn_define_tensor_value(input) failed");
 
-    // XNNPACK NHWC卷积的filter格式为KRSC={K,R,S,C}，与TR4权重布局一致
     uint32_t filter_id = 0;
     size_t filter_dims[] = {static_cast<size_t>(K), static_cast<size_t>(R),
                              static_cast<size_t>(S), static_cast<size_t>(C)};
@@ -287,18 +495,8 @@ static void launch_conv_fwd_cpu_xnnpack(CpuOpContext* op_ctx) {
     TR_CHECK(status == xnn_status_success, RuntimeError, "xnn_define_tensor_value(filter) failed");
 
     uint32_t bias_id = XNN_INVALID_VALUE_ID;
-    if (op_ctx->num_inputs >= 3) {
-        const float* B = static_cast<const float*>(
-            const_cast<DeviceContext*>(op_ctx->ctx)->ptr_at(op_ctx->input_ids[2]));
-        if (B != nullptr) {
-            size_t bias_dims[] = {static_cast<size_t>(K)};
-            status = xnn_define_tensor_value(subgraph, xnn_datatype_fp32, 1, bias_dims,
-                                             const_cast<float*>(B), XNN_INVALID_VALUE_ID, 0,
-                                             &bias_id);
-            TR_CHECK(status == xnn_status_success, RuntimeError,
-                     "xnn_define_tensor_value(bias) failed");
-        }
-    }
+    // 框架不支持卷积 bias，跳过 num_inputs >= 3 的 bias 注入
+    // （第 3 个输入是 bn_stats，不应被误用为 bias）
 
     uint32_t output_id = 0;
     size_t output_dims[] = {static_cast<size_t>(N), static_cast<size_t>(OH),
@@ -344,6 +542,8 @@ static void launch_conv_fwd_cpu_xnnpack(CpuOpContext* op_ctx) {
 
 #endif // TR_USE_XNNPACK
 
+// ── FWD Naive ──────────────────────────────────────────────────────────────
+
 static void launch_conv_fwd_cpu_naive(CpuOpContext* op_ctx) {
     const auto* p = std::get_if<ConvParams>(&op_ctx->params.data);
     TR_CHECK(p != nullptr, ValueError, "CONV_FP32_FWD CPU naive missing ConvParams");
@@ -358,12 +558,6 @@ static void launch_conv_fwd_cpu_naive(CpuOpContext* op_ctx) {
         const_cast<DeviceContext*>(op_ctx->ctx)->ptr_at(op_ctx->input_ids[1]));
     float* Y = static_cast<float*>(
         const_cast<DeviceContext*>(op_ctx->ctx)->ptr_at(op_ctx->output_ids[0]));
-
-    const float* B = nullptr;
-    if (op_ctx->num_inputs >= 3) {
-        B = static_cast<const float*>(
-            const_cast<DeviceContext*>(op_ctx->ctx)->ptr_at(op_ctx->input_ids[2]));
-    }
 
     int N = op_ctx->input_shape.n;
     int H = op_ctx->input_shape.h;
@@ -408,7 +602,6 @@ static void launch_conv_fwd_cpu_naive(CpuOpContext* op_ctx) {
                             }
                         }
 
-                        if (B) sum += B[k_global];
                         int y_off = ((n * OH + oh) * OW + ow) * K + k_global;
                         Y[y_off] = sum;
                     }
@@ -418,6 +611,8 @@ static void launch_conv_fwd_cpu_naive(CpuOpContext* op_ctx) {
     }
 }
 
+// ── FWD CPU 入口 ───────────────────────────────────────────────────────────
+
 static void launch_conv_fwd_cpu(CpuOpContext* op_ctx) {
 #ifdef TR_USE_XNNPACK
     launch_conv_fwd_cpu_xnnpack(op_ctx);
@@ -425,6 +620,8 @@ static void launch_conv_fwd_cpu(CpuOpContext* op_ctx) {
     launch_conv_fwd_cpu_naive(op_ctx);
 #endif
 }
+
+// ── BWD CPU Naive ──────────────────────────────────────────────────────────
 
 static void launch_conv_bwd_cpu(CpuOpContext* op_ctx) {
     const auto* p = std::get_if<ConvParams>(&op_ctx->params.data);
@@ -435,28 +632,29 @@ static void launch_conv_bwd_cpu(CpuOpContext* op_ctx) {
              "CONV_FP32_BWD CPU requires 2 outputs (dX, dW)");
 
     const float* dY = static_cast<const float*>(
-        const_cast<DeviceContext*>(op_ctx->ctx)->ptr_at(op_ctx->input_ids[0]));
-    const float* X = static_cast<const float*>(
-        const_cast<DeviceContext*>(op_ctx->ctx)->ptr_at(op_ctx->input_ids[1]));
+        const_cast<DeviceContext*>(op_ctx->ctx)->ptr_at(op_ctx->input_ids[0]));   // dY
     const float* W_ptr = static_cast<const float*>(
-        const_cast<DeviceContext*>(op_ctx->ctx)->ptr_at(op_ctx->input_ids[2]));
+        const_cast<DeviceContext*>(op_ctx->ctx)->ptr_at(op_ctx->input_ids[1]));   // W
+    const float* X = static_cast<const float*>(
+        const_cast<DeviceContext*>(op_ctx->ctx)->ptr_at(op_ctx->input_ids[2]));   // X
     float* dX = static_cast<float*>(
         const_cast<DeviceContext*>(op_ctx->ctx)->ptr_at(op_ctx->output_ids[0]));
     float* dW = static_cast<float*>(
         const_cast<DeviceContext*>(op_ctx->ctx)->ptr_at(op_ctx->output_ids[1]));
 
-    int N = op_ctx->input_shape.n;
-    int H = op_ctx->input_shape.h;
-    int IW = op_ctx->input_shape.w;
-    int C = op_ctx->input_shape.c;
+    int N = op_ctx->input_shape.n;   // dY 的 batch（与 X 的 batch 相同）
+    int OH = op_ctx->input_shape.h;  // dY 的 spatial H
+    int OW = op_ctx->input_shape.w;  // dY 的 spatial W
+
+    // ★ H / IW / C 必须从 output_shape（dX）获取，因为 input_shape 是 dY 的 shape
+    int H  = op_ctx->output_shape.h;
+    int IW = op_ctx->output_shape.w;
+    int C  = op_ctx->output_shape.c;
     int K = p->out_channels;
     int R = p->kernel_h, S = p->kernel_w;
     int pad_h = p->pad_h, pad_w = p->pad_w;
     int stride_h = p->stride_h, stride_w = p->stride_w;
     int groups = p->groups;
-
-    int OH = (H + 2 * pad_h - R) / stride_h + 1;
-    int OW = (IW + 2 * pad_w - S) / stride_w + 1;
 
     int C_per_group = C / groups;
     int K_per_group = K / groups;
@@ -533,31 +731,74 @@ static void launch_conv_bwd_cpu(CpuOpContext* op_ctx) {
     }
 }
 
+// ── AMP CPU 不支持 ─────────────────────────────────────────────────────────
+
+static void launch_conv_amp_cpu_not_supported(CpuOpContext* op_ctx) {
+    (void)op_ctx;
+    TR_TYPE_ERROR("Conv AMP operators do not support CPU execution");
+}
+
 // ============================================================================
 // 算子注册
 // ============================================================================
 void register_op_conv() {
     // CONV_FP32_FWD
     {
-        auto& entry = g_compute_op_table[static_cast<size_t>(ComputeOp::CONV_FP32_FWD)];
-        entry.op = ComputeOp::CONV_FP32_FWD;
-        entry.launch_cpu = launch_conv_fwd_cpu;
+        auto& e = g_compute_op_table[static_cast<size_t>(ComputeOp::CONV_FP32_FWD)];
+        e.op = ComputeOp::CONV_FP32_FWD;
+        e.launch_cpu = launch_conv_fwd_cpu;
 #ifdef TR_USE_CUDA
-        entry.launch_cuda = launch_conv_fwd_cuda;
+        e.launch_cuda = launch_conv_fp32_fwd_cuda;
 #endif
     }
 
     // CONV_FP32_BWD
     {
-        auto& entry = g_compute_op_table[static_cast<size_t>(ComputeOp::CONV_FP32_BWD)];
-        entry.op = ComputeOp::CONV_FP32_BWD;
-        entry.launch_cpu = launch_conv_bwd_cpu;
+        auto& e = g_compute_op_table[static_cast<size_t>(ComputeOp::CONV_FP32_BWD)];
+        e.op = ComputeOp::CONV_FP32_BWD;
+        e.launch_cpu = launch_conv_bwd_cpu;
 #ifdef TR_USE_CUDA
-        entry.launch_cuda = launch_conv_bwd_cuda;
+        e.launch_cuda = launch_conv_fp32_bwd_cuda;
 #endif
     }
 
-    TR_LOG_DEBUG("backend") << "CONV_FP32 operators registered (FP32, CPU+CUDA)";
+    // CONV_FP32_INF（复用 FWD 的 CPU + GPU launch）
+    {
+        auto& e = g_compute_op_table[static_cast<size_t>(ComputeOp::CONV_FP32_INF)];
+        e.op = ComputeOp::CONV_FP32_INF;
+        e.launch_cpu = launch_conv_fwd_cpu;
+#ifdef TR_USE_CUDA
+        e.launch_cuda = launch_conv_fp32_inf_cuda;
+#endif
+    }
+
+#ifdef TR_USE_CUDA
+    // CONV_AMP_FWD
+    {
+        auto& e = g_compute_op_table[static_cast<size_t>(ComputeOp::CONV_AMP_FWD)];
+        e.op = ComputeOp::CONV_AMP_FWD;
+        e.launch_cpu = launch_conv_amp_cpu_not_supported;
+        e.launch_cuda = launch_conv_amp_fwd_cuda;
+    }
+
+    // CONV_AMP_BWD
+    {
+        auto& e = g_compute_op_table[static_cast<size_t>(ComputeOp::CONV_AMP_BWD)];
+        e.op = ComputeOp::CONV_AMP_BWD;
+        e.launch_cpu = launch_conv_amp_cpu_not_supported;
+        e.launch_cuda = launch_conv_amp_bwd_cuda;
+    }
+
+    // CONV_AMP_INF
+    {
+        auto& e = g_compute_op_table[static_cast<size_t>(ComputeOp::CONV_AMP_INF)];
+        e.op = ComputeOp::CONV_AMP_INF;
+        e.launch_cpu = launch_conv_amp_cpu_not_supported;
+        e.launch_cuda = launch_conv_amp_inf_cuda;
+    }
+#endif
+
+    TR_LOG_DEBUG("backend") << "CONV operators registered (FP32_FWD/BWD/INF + AMP_FWD/BWD/INF)";
 }
 
 } // namespace tr

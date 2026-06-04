@@ -194,10 +194,12 @@ enum class ComputeOp : uint16_t {
     // === 卷积（FP32 精度，独立 dgrad / wgrad）===
     CONV_FP32_FWD,
     CONV_FP32_BWD,      // 双输出 [dX, dW]
+    CONV_FP32_INF,      // 推理（与 FWD 共用 cuDNN graph）
 
     // === 卷积（AMP 影响 workspace）===
     CONV_AMP_FWD,
     CONV_AMP_BWD,       // 合并 dgrad + wgrad，双输出
+    CONV_AMP_INF,       // 推理（纯 conv_fprop，无 GenStats）
 
     // === BatchNorm（AMP 影响 workspace）===
     BN1D_AMP_FWD,       BN1D_AMP_BWD,       BN1D_AMP_INF,
