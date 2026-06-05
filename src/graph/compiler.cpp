@@ -1044,7 +1044,7 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
             case LayerKind::Dropout:           idx = -1; break;  // in-place dX
             case LayerKind::GAP:                idx = 1; break;  // gap_grad_slot
             case LayerKind::FC:                 idx = -1; break; // dX in-place to X
-            case LayerKind::Flatten:            idx = -1; break; // 梯度写回I_A_DATA，死梯度不往上层传
+            case LayerKind::Flatten:            idx = -1; break; // dX reshape写回前层输出（layer_input_ids），由fallback追踪
             case LayerKind::SoftmaxCE:          idx = 0; break;  // ce_output (gradient in-place覆写)
             case LayerKind::Identity:           idx = -1; break;  // in-place
             case LayerKind::Tanh:               idx = -1; break;  // dX in-place to x (handled by prev_grad_id tracking)
@@ -1425,7 +1425,8 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
             layer.kind == LayerKind::Tanh || layer.kind == LayerKind::ReLU ||
             layer.kind == LayerKind::SiLU || layer.kind == LayerKind::ReLU6 ||
             layer.kind == LayerKind::LeakyReLU || layer.kind == LayerKind::Hardswish ||
-            layer.kind == LayerKind::ELU || layer.kind == LayerKind::Sigmoid)) {
+            layer.kind == LayerKind::ELU || layer.kind == LayerKind::Sigmoid ||
+            layer.kind == LayerKind::Flatten)) {
             auto it = layer_input_ids.find(l);
             if (it != layer_input_ids.end() && it->second >= 0) grad_id = it->second;
         }

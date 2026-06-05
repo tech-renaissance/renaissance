@@ -109,6 +109,7 @@ inline void finalize_cudnn_graph(fe::graph::Graph* graph, cudnnHandle_t handle) 
     TR_CUDNN_FE_CHECK(graph->validate(),                "graph validate");
     TR_CUDNN_FE_CHECK(graph->build_operation_graph(handle), "build op graph");
     TR_CUDNN_FE_CHECK(graph->create_execution_plans({fe::HeurMode_t::B, fe::HeurMode_t::FALLBACK}), "create exec plans");
+    graph->deselect_numeric_notes({fe::NumericalNote_t::NONDETERMINISTIC});
     TR_CUDNN_FE_CHECK(graph->check_support(handle),       "check support");
     TR_CUDNN_FE_CHECK(graph->build_plans(fe::BuildPlanPolicy_t::HEURISTICS_CHOICE), "build plans");
 }

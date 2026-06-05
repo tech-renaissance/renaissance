@@ -106,6 +106,7 @@ static void launch_conv_fp32_fwd_cuda(
     void* ws = ctx.workspace(sk);
 
     // Variant Pack
+    update_conv_tensor_to_id(cache, dt_x.id, dt_w.id, dt_y.id);
     std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> vp;
     for (const auto& [ta, tid] : cache.tensor_to_id) {
         vp[ta] = ctx.ptr_at(static_cast<int>(tid));
@@ -159,6 +160,7 @@ static void launch_conv_fp32_inf_cuda(
     ctx.ensure_workspace_grow(sk, cache.workspace_size);
     void* ws = ctx.workspace(sk);
 
+    update_conv_tensor_to_id(cache, dt_x.id, dt_w.id, dt_y.id);
     std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> vp;
     for (const auto& [ta, tid] : cache.tensor_to_id) {
         vp[ta] = ctx.ptr_at(static_cast<int>(tid));
@@ -216,6 +218,7 @@ static void launch_conv_fp32_bwd_cuda(
     });
     ctx.ensure_workspace_grow(StreamKind::COMP_1, cache_w.workspace_size);
 
+    update_conv_tensor_to_id(cache_w, dt_x.id, dt_w.id, -1, dt_dy.id, -1, dt_dw.id);
     std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> vp_w;
     for (const auto& [ta, tid] : cache_w.tensor_to_id) {
         vp_w[ta] = ctx.ptr_at(static_cast<int>(tid));
@@ -240,6 +243,7 @@ static void launch_conv_fp32_bwd_cuda(
     });
     ctx.ensure_workspace_grow(StreamKind::COMP_3, cache_x.workspace_size);
 
+    update_conv_tensor_to_id(cache_x, dt_x.id, dt_w.id, -1, dt_dy.id, dt_dx.id, -1);
     std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> vp_x;
     for (const auto& [ta, tid] : cache_x.tensor_to_id) {
         vp_x[ta] = ctx.ptr_at(static_cast<int>(tid));
@@ -293,6 +297,7 @@ static void launch_conv_amp_fwd_cuda(
     void* ws = ctx.workspace(sk);
 
     // Variant Pack：bn_stats 的 sq_sum 需要偏移
+    update_conv_tensor_to_id(cache, dt_x.id, dt_w.id, dt_y.id, -1, -1, -1, dt_bn.id);
     std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> vp;
     for (const auto& [ta, tid] : cache.tensor_to_id) {
         void* ptr = ctx.ptr_at(static_cast<int>(tid));
@@ -349,6 +354,7 @@ static void launch_conv_amp_inf_cuda(
     ctx.ensure_workspace_grow(sk, cache.workspace_size);
     void* ws = ctx.workspace(sk);
 
+    update_conv_tensor_to_id(cache, dt_x.id, dt_w.id, dt_y.id);
     std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> vp;
     for (const auto& [ta, tid] : cache.tensor_to_id) {
         vp[ta] = ctx.ptr_at(static_cast<int>(tid));
@@ -405,6 +411,7 @@ static void launch_conv_amp_bwd_cuda(
     });
     ctx.ensure_workspace_grow(StreamKind::COMP_1, cache_w.workspace_size);
 
+    update_conv_tensor_to_id(cache_w, dt_x.id, dt_w.id, -1, dt_dy.id, -1, dt_dw.id);
     std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> vp_w;
     for (const auto& [ta, tid] : cache_w.tensor_to_id) {
         vp_w[ta] = ctx.ptr_at(static_cast<int>(tid));
@@ -429,6 +436,7 @@ static void launch_conv_amp_bwd_cuda(
     });
     ctx.ensure_workspace_grow(StreamKind::COMP_3, cache_x.workspace_size);
 
+    update_conv_tensor_to_id(cache_x, dt_x.id, dt_w.id, -1, dt_dy.id, dt_dx.id, -1);
     std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> vp_x;
     for (const auto& [ta, tid] : cache_x.tensor_to_id) {
         vp_x[ta] = ctx.ptr_at(static_cast<int>(tid));

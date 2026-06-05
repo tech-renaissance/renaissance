@@ -79,6 +79,9 @@ double compute_mse_fp16(const Tensor& a, const Tensor& b) {
 }
 
 double compute_mse_fp32(const Tensor& a, const Tensor& b) {
+    std::cout << "DEBUG MSE: a.shape=" << a.shape().n() << "x" << a.shape().h() << "x" << a.shape().w() << "x" << a.shape().c() << std::endl;
+    std::cout << "DEBUG MSE: b.shape=" << b.shape().n() << "x" << b.shape().h() << "x" << b.shape().w() << "x" << b.shape().c() << std::endl;
+    std::cout << "DEBUG MSE: a.dtype=" << static_cast<int>(a.dtype()) << " b.dtype=" << static_cast<int>(b.dtype()) << std::endl;
     TR_CHECK(a.shape() == b.shape(), ShapeError, "MSE shape mismatch");
     int64_t n = a.numel();
     double sum = 0.0;
@@ -104,11 +107,11 @@ const char* mode_name(TestMode m) {
 
 struct TestConfig {
     TestMode mode;
-    int batch  = 4;
-    int IH     = 32;
-    int IW     = 32;
-    int C      = 16;
-    int K      = 32;
+    int batch  = 128;
+    int IH     = 28;
+    int IW     = 28;
+    int C      = 1;
+    int K      = 6;
     int kernel = 3;
     int stride = 1;
     int pad    = 1;
@@ -165,11 +168,11 @@ TestConfig parse_cli(int argc, char** argv) {
                 << "  --gpu     Run on GPU, FP32\n"
                 << "  --amp     Run on GPU, AMP FP16\n\n"
                 << "Options:\n"
-                << "  --batch N          Batch size (default: 4)\n"
-                << "  --IH N             Input height (default: 32)\n"
-                << "  --IW N             Input width (default: 32)\n"
-                << "  --C N              Input channels (default: 16)\n"
-                << "  --K N              Output channels (default: 32)\n"
+                << "  --batch N          Batch size (default: 128)\n"
+                << "  --IH N             Input height (default: 28)\n"
+                << "  --IW N             Input width (default: 28)\n"
+                << "  --C N              Input channels (default: 1)\n"
+                << "  --K N              Output channels (default: 6)\n"
                 << "  --kernel N         Kernel size (default: 3)\n"
                 << "  --stride N         Stride (default: 1)\n"
                 << "  --pad N            Padding (default: 1)\n"
@@ -360,6 +363,12 @@ int main(int argc, char** argv) {
     for (int rank = 0; rank < num_ranks; ++rank) {
         // FWD: Y
         Tensor h_y_out = task.fetch_from_rank(d_y, rank);
+        std::cout << "  Rank " << rank << " h_y_out shape: [" << h_y_out.shape().n() << ", "
+                  << h_y_out.shape().h() << ", " << h_y_out.shape().w() << ", "
+                  << h_y_out.shape().c() << "]" << std::endl;
+        std::cout << "  Rank " << rank << " h_y ref shape: [" << h_y.shape().n() << ", "
+                  << h_y.shape().h() << ", " << h_y.shape().w() << ", "
+                  << h_y.shape().c() << "]" << std::endl;
         double mse_y = is_amp ? compute_mse_fp16(h_y_out, h_y)
                               : compute_mse_fp32(h_y_out, h_y);
         max_mse = (mse_y > max_mse) ? mse_y : max_mse;

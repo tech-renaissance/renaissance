@@ -127,6 +127,32 @@ static ConvGraphCache& get_or_build_cache(
     return inserted_it->second;
 }
 
+/**
+ * @brief 根据当前 capture variant 的实际 DTensor，更新共享 cache 中的 tensor_to_id 映射。
+ *
+ * 背景：A/B 双缓冲共享同一个 cache entry 和同一个 fe::graph::Graph 对象，但各自
+ * 的 input/output buffer 不同（I_A_DATA vs I_B_DATA）。在 capture 阶段，必须在
+ * execute() 之前更新 tensor_to_id，确保 variant pack 中的指针指向正确的 buffer。
+ */
+static void update_conv_tensor_to_id(
+    ConvGraphCache& cache,
+    int64_t x_id, int64_t w_id, int64_t y_id,
+    int64_t dy_id = -1, int64_t dx_id = -1, int64_t dw_id = -1,
+    int64_t bn_id = -1)
+{
+    for (auto& [ta, tid] : cache.tensor_to_id) {
+        const std::string& name = ta->get_name();
+        if (name == "X")       tid = x_id;
+        else if (name == "W")  tid = w_id;
+        else if (name == "Y")  tid = y_id;
+        else if (name == "dY") tid = dy_id;
+        else if (name == "dX") tid = dx_id;
+        else if (name == "dW") tid = dw_id;
+        else if (name == "sum")     tid = bn_id;
+        else if (name == "sq_sum")  tid = bn_id;
+    }
+}
+
 // ============================================================================
 // FP32 Graph 构建函数
 // ============================================================================

@@ -212,3 +212,24 @@ else()
 endif()
 
 message(STATUS "  - mlp_dual_maxpool: MNIST MLP with dual MaxPool end-to-end accuracy test (AdamW)")
+
+add_executable(mlp_maxpool_conv mlp_maxpool_conv.cpp)
+target_link_libraries(mlp_maxpool_conv PRIVATE renaissance)
+target_compile_definitions(mlp_maxpool_conv PRIVATE TR_LOG_LEVEL=1)
+
+if(TR_USE_CUDA)
+    setup_gpu_runtime_env(mlp_maxpool_conv)
+endif()
+
+set_target_properties(mlp_maxpool_conv PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/integration
+    WIN32_EXECUTABLE FALSE
+)
+
+if(MSVC)
+    target_compile_options(mlp_maxpool_conv PRIVATE /W4 /utf-8 /wd4244 /wd4505 /wd4458 /wd4127)
+else()
+    target_compile_options(mlp_maxpool_conv PRIVATE -Wall -Wextra -Wpedantic -Wno-unused-function)
+endif()
+
+message(STATUS "  - mlp_maxpool_conv: MNIST MLP MaxPool+Conv end-to-end accuracy test (AdamW)")

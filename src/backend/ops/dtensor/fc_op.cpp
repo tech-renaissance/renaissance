@@ -224,6 +224,29 @@ FcAmpFwdCache build_fc_amp_fwd_conv_graph(
 
 } // namespace
 
+/**
+ * @brief 根据当前 capture variant 的实际 DTensor，更新共享 cache 中的 tensor_to_id 映射。
+ *
+ * 与 Conv 的 update_conv_tensor_to_id 同理。FC AMP FWD 使用 cuDNN FE Graph，
+ * A/B 双缓冲共享同一个 cache entry，但 X/W/B/Y 的 DTensor ID 可能不同。
+ * 在 capture 阶段必须在 execute() 之前更新 tensor_to_id。
+ */
+static void update_fc_amp_tensor_to_id(
+    FcAmpFwdCache& cache,
+    int64_t x_id, int64_t w_id, int64_t y_id,
+    int64_t b_id = -1)
+{
+    for (auto& [ta, tid] : cache.tensor_to_id) {
+        const std::string& name = ta->get_name();
+        if (name == "X")          tid = x_id;
+        else if (name == "W")     tid = w_id;
+        else if (name == "B")     tid = b_id;
+        else if (name == "Y")     tid = y_id;
+        else if (name == "clamp_min") tid = -1;   // 保持不变
+        else if (name == "clamp_max") tid = -2;   // 保持不变
+    }
+}
+
 // ===== FC_AMP_FWD CUDA Launch =====
 
 static void launch_fc_amp_fwd_cuda(
@@ -276,13 +299,16 @@ static void launch_fc_amp_fwd_cuda(
                 has_bias ? &mp.get_dtensor(node.input_ids[2]) : nullptr,
                 dt_y, has_bias)).first;
     }
-    const FcAmpFwdCache& cache = it->second;
+    FcAmpFwdCache& cache = it->second;
 
     // 复用DeviceContext workspace（warmup阶段动态增长，capture后固定）
     ctx.ensure_workspace_grow(sk, cache.workspace_size);
     void* workspace = ctx.workspace(sk);
 
     // 构建variant pack（指针映射）
+    update_fc_amp_tensor_to_id(cache,
+        dt_x.id, dt_w.id, dt_y.id,
+        has_bias ? mp.get_dtensor(node.input_ids[2]).id : -1);
     std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> variant_pack;
     for (const auto& [tensor_attr, dt_id] : cache.tensor_to_id) {
         if (dt_id == -1) {

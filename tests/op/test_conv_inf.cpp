@@ -105,11 +105,11 @@ const char* mode_name(TestMode m) {
 
 struct TestConfig {
     TestMode mode;
-    int batch  = 4;
-    int IH     = 32;
-    int IW     = 32;
-    int C      = 16;
-    int K      = 32;
+    int batch  = 128;
+    int IH     = 28;
+    int IW     = 28;
+    int C      = 1;
+    int K      = 6;
     int kernel = 3;
     int stride = 1;
     int pad    = 1;
@@ -166,11 +166,11 @@ TestConfig parse_cli(int argc, char** argv) {
                 << "  --gpu     Run on GPU, FP32\n"
                 << "  --amp     Run on GPU, AMP FP16\n\n"
                 << "Options:\n"
-                << "  --batch N          Batch size (default: 4)\n"
-                << "  --IH N             Input height (default: 32)\n"
-                << "  --IW N             Input width (default: 32)\n"
-                << "  --C N              Input channels (default: 16)\n"
-                << "  --K N              Output channels (default: 32)\n"
+                << "  --batch N          Batch size (default: 128)\n"
+                << "  --IH N             Input height (default: 28)\n"
+                << "  --IW N             Input width (default: 28)\n"
+                << "  --C N              Input channels (default: 1)\n"
+                << "  --K N              Output channels (default: 6)\n"
                 << "  --kernel N         Kernel size (default: 3)\n"
                 << "  --stride N         Stride (default: 1)\n"
                 << "  --pad N            Padding (default: 1)\n"
