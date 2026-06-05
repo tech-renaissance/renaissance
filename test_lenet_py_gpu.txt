@@ -1,0 +1,158 @@
+===========================================
+ PyTorch MNIST LeNet-5 Benchmark
+===========================================
+ Mode:       GPU
+ Device:     cuda
+ Network:    LeNet-5 (2 conv + 3 fc)
+   C1: conv(6,5,1,2) -> activation -> maxpool(2,2,0)
+   C3: conv(16,5,1,0) -> activation -> maxpool(2,2,0)
+   Flatten(400) -> fc(120) -> activation -> fc(84) -> activation -> fc(10)
+ Conv bias:  false
+ FC bias:    true
+ Activation: relu
+ Optimizer:  AdamW (beta1=0.9, beta2=0.999, eps=1e-8, wd=1e-4)
+ Scheduler:  CosineAnnealing + Warmup(5)
+===========================================
+
+--- Warmup: triggering max-autotune compilation ---
+W0606 00:20:24.350000 29064 site-packages\torch\_inductor\utils.py:1731] [0/0] Not enough SMs to use max_autotune_gemm mode
+B:\Softwares\miniconda3\envs\py313\Lib\site-packages\torch\_inductor\select_algorithm.py:3686: UserWarning: TypedStorage is deprecated. It will be removed in the future and UntypedStorage will be the only storage class. This should only matter to you if you are using storages directly.  To access UntypedStorage directly, use tensor.untyped_storage() instead of tensor.storage()
+  current_out_size = out_base.storage().size()
+Autotune Choices Stats:
+{"num_choices": 2, "num_triton_choices": 0, "best_kernel": "addmm", "best_time": 0.009216000325977802}
+AUTOTUNE addmm(128x10, 128x84, 84x10)
+strides: [0, 1], [84, 1], [1, 84]
+dtypes: torch.float32, torch.float32, torch.float32
+  addmm 0.0092 ms 100.0% 
+  bias_addmm 0.0102 ms 90.0% 
+SingleProcess AUTOTUNE benchmarking takes 0.0651 seconds and 0.0002 seconds precompiling for 2 choices
+    warmup done in 56.812s
+--- Re-initialized.  Timed 100-epoch run begins. ---
+
+Autotune Choices Stats:
+{"num_choices": 2, "num_triton_choices": 0, "best_kernel": "addmm", "best_time": 0.009216000325977802}
+AUTOTUNE addmm(96x10, 96x84, 84x10)
+strides: [0, 1], [84, 1], [1, 84]
+dtypes: torch.float32, torch.float32, torch.float32
+  addmm 0.0092 ms 100.0% 
+  bias_addmm 0.0102 ms 90.0% 
+SingleProcess AUTOTUNE benchmarking takes 0.0682 seconds and 0.0001 seconds precompiling for 2 choices
+Autotune Choices Stats:
+{"num_choices": 2, "num_triton_choices": 0, "best_kernel": "bias_addmm", "best_time": 0.03788800165057182}
+AUTOTUNE addmm(16x10, 16x84, 84x10)
+strides: [0, 1], [84, 1], [1, 84]
+dtypes: torch.float32, torch.float32, torch.float32
+  bias_addmm 0.0379 ms 100.0% 
+  addmm 0.0430 ms 88.1% 
+SingleProcess AUTOTUNE benchmarking takes 0.1635 seconds and 0.0001 seconds precompiling for 2 choices
+Epoch   1: train_loss=4.800965  val_loss=5.101269  val_top1=8.73%  lr=0.000000  time=33.5s
+Epoch   2: train_loss=1.589026  val_loss=0.827294  val_top1=90.85%  lr=0.000200  time=4.5s
+Epoch   3: train_loss=1.086058  val_loss=0.750567  val_top1=94.36%  lr=0.000400  time=4.7s
+Epoch   4: train_loss=0.961377  val_loss=0.691057  val_top1=96.27%  lr=0.000600  time=4.7s
+Epoch   5: train_loss=0.890224  val_loss=0.654925  val_top1=97.25%  lr=0.000800  time=4.6s
+Epoch   6: train_loss=0.837023  val_loss=0.625811  val_top1=97.98%  lr=0.001000  time=3.6s
+Epoch   7: train_loss=0.800389  val_loss=0.611415  val_top1=98.01%  lr=0.001000  time=3.6s
+Epoch   8: train_loss=0.776910  val_loss=0.591002  val_top1=98.32%  lr=0.000999  time=3.5s
+Epoch   9: train_loss=0.757519  val_loss=0.581151  val_top1=98.44%  lr=0.000998  time=3.3s
+Epoch  10: train_loss=0.740973  val_loss=0.580863  val_top1=98.33%  lr=0.000996  time=3.3s
+Epoch  11: train_loss=0.728579  val_loss=0.568932  val_top1=98.52%  lr=0.000993  time=3.5s
+Epoch  12: train_loss=0.715094  val_loss=0.560679  val_top1=98.75%  lr=0.000990  time=4.0s
+Epoch  13: train_loss=0.708314  val_loss=0.560909  val_top1=98.75%  lr=0.000987  time=4.6s
+Epoch  14: train_loss=0.698411  val_loss=0.557781  val_top1=98.79%  lr=0.000983  time=3.8s
+Epoch  15: train_loss=0.691283  val_loss=0.550075  val_top1=98.88%  lr=0.000978  time=3.1s
+Epoch  16: train_loss=0.683405  val_loss=0.549091  val_top1=98.98%  lr=0.000973  time=3.1s
+Epoch  17: train_loss=0.683001  val_loss=0.545639  val_top1=99.01%  lr=0.000967  time=3.1s
+Epoch  18: train_loss=0.676399  val_loss=0.542779  val_top1=99.04%  lr=0.000961  time=3.1s
+Epoch  19: train_loss=0.671361  val_loss=0.540820  val_top1=99.10%  lr=0.000955  time=3.1s
+Epoch  20: train_loss=0.667672  val_loss=0.538300  val_top1=99.22%  lr=0.000947  time=3.0s
+Epoch  21: train_loss=0.662874  val_loss=0.535903  val_top1=99.12%  lr=0.000940  time=3.0s
+Epoch  22: train_loss=0.658039  val_loss=0.536017  val_top1=99.15%  lr=0.000932  time=3.0s
+Epoch  23: train_loss=0.659406  val_loss=0.536758  val_top1=99.00%  lr=0.000923  time=3.1s
+Epoch  24: train_loss=0.653266  val_loss=0.534628  val_top1=99.15%  lr=0.000914  time=3.2s
+Epoch  25: train_loss=0.651243  val_loss=0.531362  val_top1=99.19%  lr=0.000905  time=3.2s
+Epoch  26: train_loss=0.647844  val_loss=0.533113  val_top1=99.20%  lr=0.000895  time=4.1s
+Epoch  27: train_loss=0.646552  val_loss=0.529375  val_top1=99.23%  lr=0.000884  time=4.5s
+Epoch  28: train_loss=0.642579  val_loss=0.530996  val_top1=99.32%  lr=0.000874  time=3.5s
+Epoch  29: train_loss=0.641503  val_loss=0.529485  val_top1=99.20%  lr=0.000862  time=3.1s
+Epoch  30: train_loss=0.641150  val_loss=0.530836  val_top1=99.15%  lr=0.000851  time=3.0s
+Epoch  31: train_loss=0.642324  val_loss=0.526541  val_top1=99.39%  lr=0.000839  time=3.0s
+Epoch  32: train_loss=0.637310  val_loss=0.526344  val_top1=99.44%  lr=0.000826  time=3.1s
+Epoch  33: train_loss=0.637253  val_loss=0.528265  val_top1=99.26%  lr=0.000814  time=3.1s
+Epoch  34: train_loss=0.633843  val_loss=0.529260  val_top1=99.25%  lr=0.000801  time=3.0s
+Epoch  35: train_loss=0.633303  val_loss=0.525838  val_top1=99.36%  lr=0.000787  time=3.0s
+Epoch  36: train_loss=0.630271  val_loss=0.525064  val_top1=99.27%  lr=0.000774  time=3.1s
+Epoch  37: train_loss=0.629867  val_loss=0.525973  val_top1=99.29%  lr=0.000760  time=3.1s
+Epoch  38: train_loss=0.627400  val_loss=0.524432  val_top1=99.40%  lr=0.000745  time=3.1s
+Epoch  39: train_loss=0.628494  val_loss=0.523130  val_top1=99.33%  lr=0.000731  time=3.9s
+Epoch  40: train_loss=0.626406  val_loss=0.527109  val_top1=99.35%  lr=0.000716  time=4.5s
+Epoch  41: train_loss=0.626647  val_loss=0.523883  val_top1=99.38%  lr=0.000701  time=3.5s
+Epoch  42: train_loss=0.626480  val_loss=0.523676  val_top1=99.29%  lr=0.000686  time=3.0s
+Epoch  43: train_loss=0.623735  val_loss=0.523396  val_top1=99.34%  lr=0.000670  time=3.1s
+Epoch  44: train_loss=0.620415  val_loss=0.524917  val_top1=99.27%  lr=0.000655  time=3.0s
+Epoch  45: train_loss=0.621576  val_loss=0.523055  val_top1=99.39%  lr=0.000639  time=3.1s
+Epoch  46: train_loss=0.621745  val_loss=0.521829  val_top1=99.34%  lr=0.000623  time=3.0s
+Epoch  47: train_loss=0.617648  val_loss=0.521401  val_top1=99.31%  lr=0.000607  time=3.1s
+Epoch  48: train_loss=0.617596  val_loss=0.521768  val_top1=99.37%  lr=0.000591  time=3.1s
+Epoch  49: train_loss=0.617983  val_loss=0.521504  val_top1=99.33%  lr=0.000575  time=3.0s
+Epoch  50: train_loss=0.616154  val_loss=0.521310  val_top1=99.39%  lr=0.000558  time=3.1s
+Epoch  51: train_loss=0.617645  val_loss=0.521045  val_top1=99.33%  lr=0.000542  time=3.1s
+Epoch  52: train_loss=0.617827  val_loss=0.520552  val_top1=99.38%  lr=0.000525  time=3.0s
+Epoch  53: train_loss=0.614732  val_loss=0.519966  val_top1=99.45%  lr=0.000509  time=3.0s
+Epoch  54: train_loss=0.613769  val_loss=0.519277  val_top1=99.44%  lr=0.000492  time=3.0s
+Epoch  55: train_loss=0.611642  val_loss=0.519434  val_top1=99.46%  lr=0.000476  time=3.1s
+Epoch  56: train_loss=0.615467  val_loss=0.519502  val_top1=99.41%  lr=0.000459  time=3.1s
+Epoch  57: train_loss=0.613495  val_loss=0.519896  val_top1=99.44%  lr=0.000443  time=3.1s
+Epoch  58: train_loss=0.611087  val_loss=0.519265  val_top1=99.40%  lr=0.000426  time=3.0s
+Epoch  59: train_loss=0.610805  val_loss=0.517254  val_top1=99.44%  lr=0.000410  time=3.1s
+Epoch  60: train_loss=0.609808  val_loss=0.518766  val_top1=99.45%  lr=0.000394  time=3.0s
+Epoch  61: train_loss=0.612505  val_loss=0.517274  val_top1=99.47%  lr=0.000378  time=3.1s
+Epoch  62: train_loss=0.611018  val_loss=0.518952  val_top1=99.39%  lr=0.000362  time=3.0s
+Epoch  63: train_loss=0.604798  val_loss=0.517779  val_top1=99.45%  lr=0.000346  time=3.0s
+Epoch  64: train_loss=0.609726  val_loss=0.517344  val_top1=99.45%  lr=0.000331  time=3.1s
+Epoch  65: train_loss=0.607064  val_loss=0.517420  val_top1=99.44%  lr=0.000315  time=3.1s
+Epoch  66: train_loss=0.608546  val_loss=0.516795  val_top1=99.44%  lr=0.000300  time=3.0s
+Epoch  67: train_loss=0.605791  val_loss=0.516640  val_top1=99.41%  lr=0.000285  time=3.1s
+Epoch  68: train_loss=0.605510  val_loss=0.516222  val_top1=99.49%  lr=0.000270  time=3.1s
+Epoch  69: train_loss=0.601980  val_loss=0.517318  val_top1=99.39%  lr=0.000256  time=3.3s
+Epoch  70: train_loss=0.602821  val_loss=0.516545  val_top1=99.46%  lr=0.000241  time=4.5s
+Epoch  71: train_loss=0.602835  val_loss=0.515929  val_top1=99.44%  lr=0.000227  time=4.5s
+Epoch  72: train_loss=0.605717  val_loss=0.516368  val_top1=99.47%  lr=0.000214  time=3.6s
+Epoch  73: train_loss=0.602185  val_loss=0.516937  val_top1=99.43%  lr=0.000200  time=3.0s
+Epoch  74: train_loss=0.604408  val_loss=0.516685  val_top1=99.41%  lr=0.000187  time=3.1s
+Epoch  75: train_loss=0.602467  val_loss=0.516027  val_top1=99.47%  lr=0.000175  time=3.1s
+Epoch  76: train_loss=0.599860  val_loss=0.516326  val_top1=99.43%  lr=0.000162  time=3.1s
+Epoch  77: train_loss=0.602205  val_loss=0.515806  val_top1=99.44%  lr=0.000150  time=3.1s
+Epoch  78: train_loss=0.602513  val_loss=0.515614  val_top1=99.50%  lr=0.000139  time=3.1s
+Epoch  79: train_loss=0.601367  val_loss=0.515115  val_top1=99.52%  lr=0.000127  time=3.1s
+Epoch  80: train_loss=0.598982  val_loss=0.515494  val_top1=99.45%  lr=0.000117  time=3.1s
+Epoch  81: train_loss=0.600604  val_loss=0.515677  val_top1=99.46%  lr=0.000106  time=3.0s
+Epoch  82: train_loss=0.602347  val_loss=0.515349  val_top1=99.47%  lr=0.000096  time=3.1s
+Epoch  83: train_loss=0.599796  val_loss=0.515358  val_top1=99.49%  lr=0.000087  time=3.1s
+Epoch  84: train_loss=0.600047  val_loss=0.515812  val_top1=99.43%  lr=0.000078  time=3.1s
+Epoch  85: train_loss=0.598326  val_loss=0.515234  val_top1=99.41%  lr=0.000069  time=3.0s
+Epoch  86: train_loss=0.596463  val_loss=0.515335  val_top1=99.49%  lr=0.000061  time=3.0s
+Epoch  87: train_loss=0.600957  val_loss=0.515402  val_top1=99.43%  lr=0.000054  time=3.1s
+Epoch  88: train_loss=0.597064  val_loss=0.515182  val_top1=99.50%  lr=0.000046  time=3.2s
+Epoch  89: train_loss=0.598542  val_loss=0.514954  val_top1=99.51%  lr=0.000040  time=3.6s
+Epoch  90: train_loss=0.598776  val_loss=0.515128  val_top1=99.51%  lr=0.000034  time=4.5s
+Epoch  91: train_loss=0.597844  val_loss=0.514988  val_top1=99.52%  lr=0.000028  time=4.6s
+Epoch  92: train_loss=0.597678  val_loss=0.514980  val_top1=99.52%  lr=0.000023  time=3.6s
+Epoch  93: train_loss=0.597232  val_loss=0.515011  val_top1=99.47%  lr=0.000018  time=3.1s
+Epoch  94: train_loss=0.597496  val_loss=0.515004  val_top1=99.49%  lr=0.000014  time=3.1s
+Epoch  95: train_loss=0.597096  val_loss=0.514935  val_top1=99.47%  lr=0.000011  time=3.1s
+Epoch  96: train_loss=0.597436  val_loss=0.514869  val_top1=99.47%  lr=0.000008  time=3.1s
+Epoch  97: train_loss=0.596056  val_loss=0.514787  val_top1=99.49%  lr=0.000005  time=3.1s
+Epoch  98: train_loss=0.596197  val_loss=0.514812  val_top1=99.50%  lr=0.000003  time=3.1s
+Epoch  99: train_loss=0.596815  val_loss=0.514801  val_top1=99.50%  lr=0.000002  time=3.1s
+Epoch 100: train_loss=0.599253  val_loss=0.514787  val_top1=99.50%  lr=0.000001  time=4.0s
+
+===========================================
+ Mode:       GPU
+ Best Top-1: 99.52%
+ Best Epoch: 79
+ Total Time: 363.66 s
+ Time/Epoch: 3.64 s
+===========================================
+EXCELLENT! Accuracy >= 98.5%
+Target achieved: Goal met!
+===========================================
