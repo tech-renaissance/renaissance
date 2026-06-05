@@ -469,27 +469,6 @@ endif()
 
 message(STATUS "  - mnist_best_dropout: MNIST MLP with Dropout ultimate accuracy test")
 
-add_executable(mnist_best_maxpool mnist_best_maxpool.cpp)
-target_link_libraries(mnist_best_maxpool PRIVATE renaissance)
-target_compile_definitions(mnist_best_maxpool PRIVATE TR_LOG_LEVEL=1)
-
-if(TR_USE_CUDA)
-    setup_gpu_runtime_env(mnist_best_maxpool)
-endif()
-
-set_target_properties(mnist_best_maxpool PROPERTIES
-    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/correction
-    WIN32_EXECUTABLE FALSE
-)
-
-if(MSVC)
-    target_compile_options(mnist_best_maxpool PRIVATE /W4 /utf-8 /wd4244 /wd4505 /wd4458 /wd4127)
-else()
-    target_compile_options(mnist_best_maxpool PRIVATE -Wall -Wextra -Wpedantic -Wno-unused-function)
-endif()
-
-message(STATUS "  - mnist_best_maxpool: MNIST MLP with MaxPool ultimate accuracy test")
-
 add_executable(test_lenet test_lenet.cpp)
 target_link_libraries(test_lenet PRIVATE renaissance)
 target_compile_definitions(test_lenet PRIVATE TR_LOG_LEVEL=1)

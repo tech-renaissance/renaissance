@@ -149,3 +149,45 @@ else()
 endif()
 
 message(STATUS "  - conv_conv_conv_gap: MNIST Conv end-to-end accuracy test (AdamW)")
+
+add_executable(mlp_single_maxpool mlp_single_maxpool.cpp)
+target_link_libraries(mlp_single_maxpool PRIVATE renaissance)
+target_compile_definitions(mlp_single_maxpool PRIVATE TR_LOG_LEVEL=1)
+
+if(TR_USE_CUDA)
+    setup_gpu_runtime_env(mlp_single_maxpool)
+endif()
+
+set_target_properties(mlp_single_maxpool PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/integration
+    WIN32_EXECUTABLE FALSE
+)
+
+if(MSVC)
+    target_compile_options(mlp_single_maxpool PRIVATE /W4 /utf-8 /wd4244 /wd4505 /wd4458 /wd4127)
+else()
+    target_compile_options(mlp_single_maxpool PRIVATE -Wall -Wextra -Wpedantic -Wno-unused-function)
+endif()
+
+message(STATUS "  - mlp_single_maxpool: MNIST MLP with MaxPool end-to-end accuracy test (AdamW)")
+
+add_executable(mlp_dual_maxpool mlp_dual_maxpool.cpp)
+target_link_libraries(mlp_dual_maxpool PRIVATE renaissance)
+target_compile_definitions(mlp_dual_maxpool PRIVATE TR_LOG_LEVEL=1)
+
+if(TR_USE_CUDA)
+    setup_gpu_runtime_env(mlp_dual_maxpool)
+endif()
+
+set_target_properties(mlp_dual_maxpool PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/integration
+    WIN32_EXECUTABLE FALSE
+)
+
+if(MSVC)
+    target_compile_options(mlp_dual_maxpool PRIVATE /W4 /utf-8 /wd4244 /wd4505 /wd4458 /wd4127)
+else()
+    target_compile_options(mlp_dual_maxpool PRIVATE -Wall -Wextra -Wpedantic -Wno-unused-function)
+endif()
+
+message(STATUS "  - mlp_dual_maxpool: MNIST MLP with dual MaxPool end-to-end accuracy test (AdamW)")
