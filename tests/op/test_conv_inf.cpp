@@ -11,8 +11,9 @@
  *
  * 注意：
  *   --cpu / --gpu / --amp 必须指定其一，且只能指定一个。
- *   卷积不支持 bias，输入只有 {X, W}。
- *   INF 模式不计算 GenStats，bn_stats 不需要。
+ *   卷积不支持 bias，输入为 {X, W}，输出为 {Y, bn_stats}。
+ *   INF 模式不计算 GenStats，bn_stats 不被填充，
+ *   但作为统一接口的 output 需要保留占位。
  *
  * 关键特性：
  *   - 使用 torch.nn.functional.conv2d 生成 PyTorch 参考数据（.tsr 文件）
@@ -264,6 +265,7 @@ int main(int argc, char** argv) {
     DTensor d_x   = task.alloc(h_x.shape(), dtype, feat_region);     // X  [B, IH, IW, C]
     DTensor d_w   = task.alloc(h_w.shape(), dtype, w_region);        // W  [K, R, S, C]
     DTensor d_y   = task.alloc(Shape{cfg.batch, OH, OW, cfg.K}, dtype, feat_region);  // Y  [B, OH, OW, K]
+    DTensor d_bn  = task.alloc(Shape{1, 1, 1, cfg.K * 2}, DType::FP32, Region::T_TEMP_FP32);  // bn_stats
 
     // FP32 模式下需分配 G_DEEP_CONV 以满足 memory_plan W/G 层数校验（推理不实际使用）
     if (!is_amp) {
@@ -287,8 +289,8 @@ int main(int argc, char** argv) {
     conv_params.pad_w    = cfg.pad;
     OpParams conv_op_params{conv_params};
 
-    // INF: {X, W} -> {Y}（推理模式，不计算梯度，不需要 bn_stats）
-    g_inf.append(inf_op, {d_x.id, d_w.id}, {d_y.id}, conv_op_params);
+    // INF: {X, W} -> {Y, bn_stats}（bn_stats 为预留输出，INF 不填充但保留接口）
+    g_inf.append(inf_op, {d_x.id, d_w.id}, {d_y.id, d_bn.id}, conv_op_params);
 
     task.add_graph("inf", std::move(g_inf), StreamKind::COMP_1);
 

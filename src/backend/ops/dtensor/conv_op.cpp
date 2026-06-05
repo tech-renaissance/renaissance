@@ -76,6 +76,7 @@ static void launch_conv_fp32_fwd_cuda(
     const DTensor& dt_x = mp.get_dtensor(node.input_ids[0]);
     const DTensor& dt_w = mp.get_dtensor(node.input_ids[1]);
     const DTensor& dt_y = mp.get_dtensor(node.output_ids[0]);
+    // output_ids[0] = Y, output_ids[1] = bn_stats (reserved, unused in FP32 FWD)
 
     StreamKind sk = StreamKind::COMP_1;
     cudaStream_t s = static_cast<cudaStream_t>(ctx.stream(sk));
@@ -131,6 +132,7 @@ static void launch_conv_fp32_inf_cuda(
     const DTensor& dt_x = mp.get_dtensor(node.input_ids[0]);
     const DTensor& dt_w = mp.get_dtensor(node.input_ids[1]);
     const DTensor& dt_y = mp.get_dtensor(node.output_ids[0]);
+    // output_ids[0] = Y, output_ids[1] = bn_stats (reserved, unused in FP32 INF)
 
     StreamKind sk = StreamKind::COMP_1;
     cudaStream_t s = static_cast<cudaStream_t>(ctx.stream(sk));
@@ -259,11 +261,12 @@ static void launch_conv_amp_fwd_cuda(
     MultiStreamCaptureState& state)
 {
     const auto& cp = node.params.conv();
-    // input_ids: [0]=X, [1]=W_fp16, [2]=bn_stats
+    // input_ids: [0]=X, [1]=W_fp16
+    // output_ids: [0]=Y, [1]=bn_stats
     const DTensor& dt_x  = mp.get_dtensor(node.input_ids[0]);
     const DTensor& dt_w  = mp.get_dtensor(node.input_ids[1]);
-    const DTensor& dt_bn = mp.get_dtensor(node.input_ids[2]);
     const DTensor& dt_y  = mp.get_dtensor(node.output_ids[0]);
+    const DTensor& dt_bn = mp.get_dtensor(node.output_ids[1]);
 
     StreamKind sk = StreamKind::COMP_1;
     cudaStream_t s = static_cast<cudaStream_t>(ctx.stream(sk));
@@ -320,6 +323,7 @@ static void launch_conv_amp_inf_cuda(
     const DTensor& dt_x = mp.get_dtensor(node.input_ids[0]);
     const DTensor& dt_w = mp.get_dtensor(node.input_ids[1]);
     const DTensor& dt_y = mp.get_dtensor(node.output_ids[0]);
+    // output_ids[0] = Y, output_ids[1] = bn_stats (reserved, unused in AMP INF)
 
     StreamKind sk = StreamKind::COMP_1;
     cudaStream_t s = static_cast<cudaStream_t>(ctx.stream(sk));
@@ -503,8 +507,8 @@ static void launch_conv_fwd_cpu_xnnpack(CpuOpContext* op_ctx) {
     TR_CHECK(status == xnn_status_success, RuntimeError, "xnn_define_tensor_value(filter) failed");
 
     uint32_t bias_id = XNN_INVALID_VALUE_ID;
-    // 框架不支持卷积 bias，跳过 num_inputs >= 3 的 bias 注入
-    // （第 3 个输入是 bn_stats，不应被误用为 bias）
+    // 框架不支持卷积 bias。
+    // bn_stats 作为 output_ids[1] 保留，CPU FWD/INF 不填充它。
 
     uint32_t output_id = 0;
     size_t output_dims[] = {static_cast<size_t>(N), static_cast<size_t>(OH),

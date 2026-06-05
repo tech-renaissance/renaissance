@@ -11,7 +11,8 @@
  *
  * 注意：
  *   --cpu / --gpu / --amp 必须指定其一，且只能指定一个。
- *   卷积不支持 bias，输入只有 {X, W, bn_stats}。
+ *   卷积不支持 bias，输入为 {X, W}，输出为 {Y, bn_stats}。
+ *   bn_stats 为保留接口（仅 AMP FWD 写入，其余模式输出但不消费）。
  *
  * 关键特性：
  *   - 使用 torch.nn.functional.conv2d 生成 PyTorch 参考数据（.tsr 文件）
@@ -304,8 +305,8 @@ int main(int argc, char** argv) {
     conv_params.pad_w    = cfg.pad;
     OpParams conv_op_params{conv_params};
 
-    // FWD: {X, W, bn_stats} -> {Y}
-    g_fwd.append(fwd_op, {d_x.id, d_w.id, d_bn.id}, {d_y.id}, conv_op_params);
+    // FWD: {X, W} -> {Y, bn_stats}
+    g_fwd.append(fwd_op, {d_x.id, d_w.id}, {d_y.id, d_bn.id}, conv_op_params);
 
     task.add_graph("fwd", std::move(g_fwd), StreamKind::COMP_1);
 

@@ -212,7 +212,7 @@ inline Layer dropout(float p) {
     return Layer(std::make_shared<Layer::Node>(
         detail::NodeKind::Dropout, detail::DropoutParam{p}));
 }
-inline Layer flatten(int start_dim) {
+inline Layer flatten(int start_dim = 1) {
     return Layer(std::make_shared<Layer::Node>(
         detail::NodeKind::Flatten, detail::FlattenParam{start_dim}));
 }

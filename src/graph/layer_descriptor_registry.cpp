@@ -118,10 +118,10 @@ SubgraphPattern build_conv_forward(const OpParams&, const std::vector<TensorDesc
     bool amp = GlobalRegistry::instance().using_amp();
     SubgraphPattern::Node n;
     n.op = amp ? ComputeOp::CONV_AMP_FWD : ComputeOp::CONV_FP32_FWD;
-    n.input_indices  = amp ? std::vector<size_t>{4, 6} : std::vector<size_t>{0, 6};
-    //   [weight(AMP:fp16/FP32:fp32), bn_stats]
-    n.output_indices = {1};
-    //   Y(1)
+    n.input_indices  = amp ? std::vector<size_t>{4} : std::vector<size_t>{0};
+    //   [weight(AMP:fp16/FP32:fp32)]
+    n.output_indices = {1, 6};
+    //   Y(1), bn_stats(6)
     p.nodes.push_back(n);
     return p;
 }
@@ -146,10 +146,10 @@ SubgraphPattern build_conv_inference(const OpParams&, const std::vector<TensorDe
     bool amp = GlobalRegistry::instance().using_amp();
     SubgraphPattern::Node n;
     n.op = amp ? ComputeOp::CONV_AMP_INF : ComputeOp::CONV_FP32_INF;
-    n.input_indices  = amp ? std::vector<size_t>{4, 6} : std::vector<size_t>{0, 6};
-    //   [weight(AMP:fp16/FP32:fp32), bn_stats]
-    n.output_indices = {1};
-    //   Y(1)
+    n.input_indices  = amp ? std::vector<size_t>{4} : std::vector<size_t>{0};
+    //   [weight(AMP:fp16/FP32:fp32)]
+    n.output_indices = {1, 6};
+    //   Y(1), bn_stats(6)
     p.nodes.push_back(n);
     return p;
 }
