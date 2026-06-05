@@ -77,13 +77,13 @@ static void launch_range_h2d_copy_cuda(
     size_t per_zone = reg.staging_memory_size() / 2;
     size_t label_aligned = get_label_aligned();
 
-    std::cerr << "[H2D_DEBUG] rank=" << rank
-              << " staging_base=" << (void*)staging_base
-              << " per_zone=" << per_zone
-              << " label_aligned=" << label_aligned
-              << " block_size=" << reg.staging_memory_size()
-              << " num_output_ranges=" << node.output_ranges.size()
-              << std::endl;
+    // std::cerr << "[H2D_DEBUG] rank=" << rank
+    //           << " staging_base=" << (void*)staging_base
+    //           << " per_zone=" << per_zone
+    //           << " label_aligned=" << label_aligned
+    //           << " block_size=" << reg.staging_memory_size()
+    //           << " num_output_ranges=" << node.output_ranges.size()
+    //           << std::endl;
 
     for (size_t ri = 0; ri < node.output_ranges.size(); ++ri) {
         const auto& range = node.output_ranges[ri];
@@ -91,12 +91,12 @@ static void launch_range_h2d_copy_cuda(
             static_cast<Region>(range.start_region_id),
             static_cast<Region>(range.end_region_id));
 
-        std::cerr << "[H2D_DEBUG] range[" << ri << "]"
-                  << " start_region=" << range.start_region_id
-                  << " end_region=" << range.end_region_id
-                  << " dst_off=" << dst_off
-                  << " dst_size=" << dst_size
-                  << std::endl;
+        // std::cerr << "[H2D_DEBUG] range[" << ri << "]"
+        //           << " start_region=" << range.start_region_id
+        //           << " end_region=" << range.end_region_id
+        //           << " dst_off=" << dst_off
+        //           << " dst_size=" << dst_size
+        //           << std::endl;
 
         if (dst_size == 0) continue;
 
@@ -114,11 +114,11 @@ static void launch_range_h2d_copy_cuda(
                                 << static_cast<int>(start_region));
         }
 
-        std::cerr << "[H2D_DEBUG]   -> dst=" << dst
-                  << " src=" << src
-                  << " src_end=" << (void*)((uint8_t*)src + dst_size)
-                  << " stream=" << stream
-                  << std::endl;
+        // std::cerr << "[H2D_DEBUG]   -> dst=" << dst
+        //           << " src=" << src
+        //           << " src_end=" << (void*)((uint8_t*)src + dst_size)
+        //           << " stream=" << stream
+        //           << std::endl;
 
         cudaError_t err = cudaMemcpyAsync(dst, src, dst_size,
                                           cudaMemcpyHostToDevice, stream);

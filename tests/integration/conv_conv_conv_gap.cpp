@@ -154,11 +154,11 @@ int main(int argc, char** argv) {
     // 采用AWY_FINAL的选择：三层隐藏层 + bias=true
 
     BluePrint ultimate_mlp = seq(
-        conv(16, 3, 1, 1),
+        conv(128, 3, 1, 1),
         make_activation(cfg.activation),
-        conv(16, 3, 1, 1),
+        conv(128, 3, 1, 1),
         make_activation(cfg.activation),
-        conv(10, 3, 1, 1),
+        conv(10, 1, 1, 0),
         gap()
     );
 
