@@ -36,6 +36,9 @@ StreamKind get_op_default_stream(ComputeOp op) noexcept {
         case ComputeOp::MAXPOOL_FP32_FWD: case ComputeOp::MAXPOOL_FP32_BWD:
         case ComputeOp::MAXPOOL_FP32_INF: case ComputeOp::MAXPOOL_AMP_FWD:
         case ComputeOp::MAXPOOL_AMP_BWD: case ComputeOp::MAXPOOL_AMP_INF:
+        case ComputeOp::AVGPOOL_FP32_FWD: case ComputeOp::AVGPOOL_FP32_BWD:
+        case ComputeOp::AVGPOOL_FP32_INF: case ComputeOp::AVGPOOL_AMP_FWD:
+        case ComputeOp::AVGPOOL_AMP_BWD: case ComputeOp::AVGPOOL_AMP_INF:
         case ComputeOp::DROPOUT_FP32_FWD: case ComputeOp::DROPOUT_FP32_BWD:
         case ComputeOp::DROPOUT_FP32_INF: case ComputeOp::DROPOUT_AMP_FWD:
         case ComputeOp::DROPOUT_AMP_BWD: case ComputeOp::DROPOUT_AMP_INF:

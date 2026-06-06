@@ -27,6 +27,7 @@ const char* kind_name(LayerKind k) {
     case LayerKind::ELU: return "ELU";
     case LayerKind::Sigmoid: return "Sigmoid";
     case LayerKind::MaxPool: return "MaxPool";
+    case LayerKind::AvgPool: return "AvgPool";
     case LayerKind::GAP: return "GAP";
     case LayerKind::FC: return "FC";
     case LayerKind::Flatten: return "Flatten";
@@ -66,7 +67,8 @@ static std::string params_str(const ArchLayer& l) {
         snprintf(buf, sizeof(buf), "out=%d k=%d s=%d p=%d", p.out_ch, p.k, p.s, p.p);
         break;
     }
-    case LayerKind::MaxPool: {
+    case LayerKind::MaxPool:
+    case LayerKind::AvgPool: {
         auto& p = std::get<PoolLayerParams>(l.params);
         snprintf(buf, sizeof(buf), "k=%d s=%d p=%d", p.k, p.s, p.p);
         break;

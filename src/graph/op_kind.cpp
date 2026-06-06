@@ -100,6 +100,12 @@ std::string compute_op_to_string(ComputeOp op) {
         case ComputeOp::MAXPOOL_AMP_FWD:       return "MAXPOOL_AMP_FWD";
         case ComputeOp::MAXPOOL_AMP_BWD:       return "MAXPOOL_AMP_BWD";
         case ComputeOp::MAXPOOL_AMP_INF:       return "MAXPOOL_AMP_INF";
+        case ComputeOp::AVGPOOL_FP32_FWD:      return "AVGPOOL_FP32_FWD";
+        case ComputeOp::AVGPOOL_FP32_BWD:      return "AVGPOOL_FP32_BWD";
+        case ComputeOp::AVGPOOL_FP32_INF:      return "AVGPOOL_FP32_INF";
+        case ComputeOp::AVGPOOL_AMP_FWD:       return "AVGPOOL_AMP_FWD";
+        case ComputeOp::AVGPOOL_AMP_BWD:       return "AVGPOOL_AMP_BWD";
+        case ComputeOp::AVGPOOL_AMP_INF:       return "AVGPOOL_AMP_INF";
         case ComputeOp::GAP_FP32_FWD:          return "GAP_FP32_FWD";
         case ComputeOp::GAP_FP32_BWD:          return "GAP_FP32_BWD";
         case ComputeOp::GAP_AMP_FWD:           return "GAP_AMP_FWD";
@@ -265,7 +271,10 @@ std::string format_params(ComputeOp op, const OpParams& p) {
         case ComputeOp::MAXPOOL_FP32_INF:
         case ComputeOp::MAXPOOL_AMP_FWD:
         case ComputeOp::MAXPOOL_AMP_BWD:
-        case ComputeOp::MAXPOOL_AMP_INF: {
+        case ComputeOp::MAXPOOL_AMP_INF:
+        case ComputeOp::AVGPOOL_FP32_FWD: case ComputeOp::AVGPOOL_FP32_BWD:
+        case ComputeOp::AVGPOOL_FP32_INF: case ComputeOp::AVGPOOL_AMP_FWD:
+        case ComputeOp::AVGPOOL_AMP_BWD: case ComputeOp::AVGPOOL_AMP_INF: {
             if (auto* pp = std::get_if<PoolParams>(&p.data)) {
                 oss << "k=" << pp->kernel_h
                     << ",s=" << pp->stride_h

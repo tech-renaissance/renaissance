@@ -64,6 +64,7 @@ void register_default_ops() {
     register_op_range_accum_metrics();
     register_op_adam_bc();
     register_op_maxpool();
+    register_op_avgpool();
     register_op_dropout();
 }
 
@@ -83,6 +84,8 @@ bool require_warmup(ComputeOp op) noexcept {
         case ComputeOp::BN2D_FP32_FWD:  case ComputeOp::BN2D_FP32_BWD:  case ComputeOp::BN2D_FP32_INF:
         case ComputeOp::MAXPOOL_FP32_FWD: case ComputeOp::MAXPOOL_AMP_FWD:
         case ComputeOp::MAXPOOL_FP32_INF: case ComputeOp::MAXPOOL_AMP_INF:
+        case ComputeOp::AVGPOOL_FP32_FWD: case ComputeOp::AVGPOOL_AMP_FWD:
+        case ComputeOp::AVGPOOL_FP32_INF: case ComputeOp::AVGPOOL_AMP_INF:
         case ComputeOp::GAP_FP32_FWD:
         case ComputeOp::GAP_AMP_FWD:
         case ComputeOp::GAP_FP32_BWD:

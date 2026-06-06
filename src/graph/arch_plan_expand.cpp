@@ -39,6 +39,11 @@ static void expand_primitive_impl(const Layer::Node& node, std::vector<ArchLayer
         out.push_back({LayerKind::MaxPool, PoolLayerParams{p.k, p.s, p.p}, "maxpool", {}, {}, false, false, src_id});
         break;
     }
+    case NodeKind::AvgPool: {
+        auto& p = std::get<AvgPoolParam>(node.payload);
+        out.push_back({LayerKind::AvgPool, PoolLayerParams{p.k, p.s, p.p}, "avgpool", {}, {}, false, false, src_id});
+        break;
+    }
     case NodeKind::GAP: {
         out.push_back({LayerKind::GAP, EmptyParams{}, "gap", {}, {}, false, false, src_id});
         break;
@@ -389,6 +394,7 @@ void ArchPlan::expand_tree(const Layer& root, std::vector<ArchLayer>& out,
     case NodeKind::BN:
     case NodeKind::ReLU:
     case NodeKind::MaxPool:
+    case NodeKind::AvgPool:
     case NodeKind::GAP:
     case NodeKind::FC:
     case NodeKind::Flatten:

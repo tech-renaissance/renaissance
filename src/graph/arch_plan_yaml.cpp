@@ -22,6 +22,7 @@ static LayerKind kind_from_name(const std::string& name) {
     if (name == "ReLU") return LayerKind::ReLU;
     if (name == "Tanh") return LayerKind::Tanh;
     if (name == "MaxPool") return LayerKind::MaxPool;
+    if (name == "AvgPool") return LayerKind::AvgPool;
     if (name == "GAP") return LayerKind::GAP;
     if (name == "FC") return LayerKind::FC;
     if (name == "Flatten") return LayerKind::Flatten;
@@ -85,7 +86,8 @@ std::string ArchPlan::to_yaml() const {
             pnode["out_ch"] = p.out_ch; pnode["k"] = p.k; pnode["s"] = p.s; pnode["p"] = p.p;
             break;
         }
-        case LayerKind::MaxPool: {
+        case LayerKind::MaxPool:
+        case LayerKind::AvgPool: {
             auto& p = std::get<PoolLayerParams>(l.params);
             pnode["k"] = p.k; pnode["s"] = p.s; pnode["p"] = p.p;
             break;
@@ -222,6 +224,7 @@ ArchPlan ArchPlan::from_yaml(const std::string& yaml) {
                     pnode["s"].get_value<int>(), pnode["p"].get_value<int>()};
                 break;
             case LayerKind::MaxPool:
+            case LayerKind::AvgPool:
                 layer.params = PoolLayerParams{
                     pnode["k"].get_value<int>(), pnode["s"].get_value<int>(),
                     pnode["p"].get_value<int>()};

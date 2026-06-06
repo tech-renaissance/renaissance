@@ -282,6 +282,7 @@ private:
             case LayerKind::ELU:
             case LayerKind::Sigmoid:
             case LayerKind::MaxPool:
+            case LayerKind::AvgPool:
             case LayerKind::Dropout:
             case LayerKind::GAP:
             case LayerKind::Flatten:
@@ -1001,6 +1002,7 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
             case LayerKind::Bn1d: case LayerKind::Bn2d: idx = 2; break;
             case LayerKind::ReLU:               idx = 0; break;
             case LayerKind::MaxPool:            idx = 0; break;
+            case LayerKind::AvgPool:            idx = 0; break;
             case LayerKind::Dropout:           idx = 0; break;
             case LayerKind::GAP:                idx = 0; break;
             case LayerKind::FC:                 idx = 2; break;
@@ -1041,6 +1043,7 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
             case LayerKind::Bn1d: case LayerKind::Bn2d: idx = 2; break;  // dX inplace to bn_output
             case LayerKind::ReLU:               idx = -1; break;  // in-place
             case LayerKind::MaxPool:            idx = -1; break;  // in-place dX
+            case LayerKind::AvgPool:            idx = -1; break;  // in-place dX
             case LayerKind::Dropout:           idx = -1; break;  // in-place dX
             case LayerKind::GAP:                idx = 1; break;  // gap_grad_slot
             case LayerKind::FC:                 idx = -1; break; // dX in-place to X
@@ -1378,6 +1381,26 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
                 }
             }
 
+            // AvgPool BWD：独立块，显式处理 A/B 双缓冲（不追加 X，手写 kernel 不需要）
+            if (gn.compute_op == ComputeOp::AVGPOOL_FP32_BWD || gn.compute_op == ComputeOp::AVGPOOL_AMP_BWD) {
+                if (layer.is_first_layer) {
+                    const auto& b = memory_plan.baseline();
+                    GraphNode gn_a = gn;
+                    gn_a.output_ids = {b.data_a};  // dX in-place to I_A_DATA
+                    train_cg.append(GraphId::FIRST_LAYER_BWD_A, gn_a);
+
+                    GraphNode gn_b = gn;
+                    gn_b.output_ids = {b.data_b};  // dX in-place to I_B_DATA
+                    train_cg.append(GraphId::FIRST_LAYER_BWD_B, gn_b);
+                    continue;
+                } else {
+                    auto it = layer_input_ids.find(l);
+                    if (it != layer_input_ids.end() && it->second >= 0) {
+                        gn.output_ids = {it->second};  // dX in-place to X
+                    }
+                }
+            }
+
             if (gn.compute_op == ComputeOp::ADD_BWD && prev_grad_id >= 0) {
                 gn.output_ids.push_back(prev_grad_id);
             }
@@ -1421,7 +1444,7 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
         if (grad_id < 0 && (layer.kind == LayerKind::FC ||
             layer.kind == LayerKind::Conv ||
             layer.kind == LayerKind::FCBNReLU || layer.kind == LayerKind::GapFC ||
-            layer.kind == LayerKind::MaxPool || layer.kind == LayerKind::Dropout ||
+            layer.kind == LayerKind::MaxPool || layer.kind == LayerKind::AvgPool || layer.kind == LayerKind::Dropout ||
             layer.kind == LayerKind::Tanh || layer.kind == LayerKind::ReLU ||
             layer.kind == LayerKind::SiLU || layer.kind == LayerKind::ReLU6 ||
             layer.kind == LayerKind::LeakyReLU || layer.kind == LayerKind::Hardswish ||

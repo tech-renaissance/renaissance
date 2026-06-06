@@ -436,6 +436,60 @@ SubgraphPattern build_maxpool_inference(const OpParams&, const std::vector<Tenso
 }
 
 // ============================================================================
+// AvgPool — 1张量（无 mask）
+// ============================================================================
+
+std::vector<TensorDesc> infer_avgpool_tensors(
+    const Shape& input, const OpParams& params, const InferContext& ctx)
+{
+    DType feat_dt = ctx.enable_amp ? DType::FP16 : DType::FP32;
+    Shape out = input;
+    if (std::holds_alternative<PoolParams>(params.data)) {
+        const auto& pp = std::get<PoolParams>(params.data);
+        int oh = (input.h() + 2 * pp.pad_h - pp.kernel_h) / pp.stride_h + 1;
+        int ow = (input.w() + 2 * pp.pad_w - pp.kernel_w) / pp.stride_w + 1;
+        out = Shape{input.n(), oh, ow, input.c()};
+    }
+    return {
+        TensorDesc{"avgpool_output", out, select_feature_region(ctx), feat_dt}
+    };
+}
+
+SubgraphPattern build_avgpool_forward(const OpParams&, const std::vector<TensorDesc>& descs) {
+    SubgraphPattern p;
+    if (descs.empty()) return p;
+    SubgraphPattern::Node n;
+    n.op = GlobalRegistry::instance().using_amp()
+         ? ComputeOp::AVGPOOL_AMP_FWD : ComputeOp::AVGPOOL_FP32_FWD;
+    n.output_indices = {0};
+    p.nodes.push_back(n);
+    return p;
+}
+
+SubgraphPattern build_avgpool_backward(const OpParams&, const std::vector<TensorDesc>& descs) {
+    SubgraphPattern p;
+    if (descs.empty()) return p;
+    SubgraphPattern::Node n;
+    n.op = GlobalRegistry::instance().using_amp()
+         ? ComputeOp::AVGPOOL_AMP_BWD : ComputeOp::AVGPOOL_FP32_BWD;
+    n.input_indices  = {};   // 不声明额外输入（只有 dY，由 Compiler prepend）
+    n.output_indices = {};   // dX in-place，Compiler 路由到 X 的 DTensor ID
+    p.nodes.push_back(n);
+    return p;
+}
+
+SubgraphPattern build_avgpool_inference(const OpParams&, const std::vector<TensorDesc>& descs) {
+    SubgraphPattern p;
+    if (descs.empty()) return p;
+    SubgraphPattern::Node n;
+    n.op = GlobalRegistry::instance().using_amp()
+         ? ComputeOp::AVGPOOL_AMP_INF : ComputeOp::AVGPOOL_FP32_INF;
+    n.output_indices = {0};
+    p.nodes.push_back(n);
+    return p;
+}
+
+// ============================================================================
 // GAP — 1张量
 // ============================================================================
 
@@ -1994,6 +2048,7 @@ Shape get_output_shape(LayerKind kind, const std::vector<TensorDesc>& descs)
         case LayerKind::FC:            return find(2);   // output at index 2
         case LayerKind::ReLU:          return find(0);   // output at index 0
         case LayerKind::MaxPool:       return find(0);   // output at index 0
+        case LayerKind::AvgPool:       return find(0);   // output at index 0
         case LayerKind::GAP:           return find(0);   // output at index 0
         case LayerKind::Flatten:       return find(0);   // output at index 0
         case LayerKind::Identity:
@@ -2037,6 +2092,7 @@ const LayerDescriptor& get_layer_descriptor(LayerKind kind) {
     static const LayerDescriptor fc_desc     = { infer_fc_tensors,        build_fc_forward,        build_fc_backward,        build_fc_inference };
     static const LayerDescriptor relu_desc   = { infer_relu_tensors,      build_relu_forward,      build_relu_backward,      build_relu_inference };
     static const LayerDescriptor pool_desc   = { infer_maxpool_tensors,   build_maxpool_forward,   build_maxpool_backward,   build_maxpool_inference };
+    static const LayerDescriptor avgpool_desc = { infer_avgpool_tensors,   build_avgpool_forward,   build_avgpool_backward,   build_avgpool_inference };
     static const LayerDescriptor gap_desc    = { infer_gap_tensors,       build_gap_forward,       build_gap_backward,       build_gap_inference };
     static const LayerDescriptor flat_desc   = { infer_flatten_tensors,   build_flatten_forward,   build_flatten_backward,   build_flatten_inference };
     static const LayerDescriptor ce_desc     = { infer_softmaxce_tensors, build_softmaxce_forward, build_softmaxce_backward, build_softmaxce_inference };
@@ -2075,6 +2131,7 @@ const LayerDescriptor& get_layer_descriptor(LayerKind kind) {
         case LayerKind::FC:                   return fc_desc;
         case LayerKind::ReLU:                 return relu_desc;
         case LayerKind::MaxPool:              return pool_desc;
+        case LayerKind::AvgPool:              return avgpool_desc;
         case LayerKind::GAP:                  return gap_desc;
         case LayerKind::Flatten:              return flat_desc;
         case LayerKind::SoftmaxCE:            return ce_desc;

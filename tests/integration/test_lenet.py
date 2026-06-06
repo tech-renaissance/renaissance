@@ -50,20 +50,20 @@ class LeNet5(nn.Module):
             raise ValueError(f"Unknown activation: {activation}")
 
         # LeNet-5 架构
-        # C1: conv(6,5,1,2) -> activation -> maxpool(2,2,0)
-        # C3: conv(16,5,1,0) -> activation -> maxpool(2,2,0)
+        # C1: conv(6,5,1,2) -> activation -> avgpool(2,2,0)
+        # C3: conv(16,5,1,0) -> activation -> avgpool(2,2,0)
         # Flatten -> fc(120) -> activation -> fc(84) -> activation -> fc(10)
         self.features = nn.Sequential(
             # C1: 6通道 5x5 卷积, padding=2 → 28x28x6
             nn.Conv2d(1, 6, kernel_size=5, stride=1, padding=2, bias=False),
             act,
-            # S2: 2x2 MaxPool, stride=2 → 14x14x6
-            nn.MaxPool2d(kernel_size=2, stride=2, padding=0),
+            # S2: 2x2 AvgPool, stride=2 → 14x14x6
+            nn.AvgPool2d(kernel_size=2, stride=2, padding=0),
             # C3: 16通道 5x5 卷积, padding=0 → 10x10x16
             nn.Conv2d(6, 16, kernel_size=5, stride=1, padding=0, bias=False),
             act,
-            # S4: 2x2 MaxPool, stride=2 → 5x5x16
-            nn.MaxPool2d(kernel_size=2, stride=2, padding=0),
+            # S4: 2x2 AvgPool, stride=2 → 5x5x16
+            nn.AvgPool2d(kernel_size=2, stride=2, padding=0),
         )
 
         self.classifier = nn.Sequential(
@@ -140,8 +140,8 @@ if __name__ == '__main__':
     print(f" Mode:       {mode}", flush=True)
     print(f" Device:     {device}", flush=True)
     print(f" Network:    LeNet-5 (2 conv + 3 fc)", flush=True)
-    print(f"   C1: conv(6,5,1,2) -> activation -> maxpool(2,2,0)", flush=True)
-    print(f"   C3: conv(16,5,1,0) -> activation -> maxpool(2,2,0)", flush=True)
+    print(f"   C1: conv(6,5,1,2) -> activation -> avgpool(2,2,0)", flush=True)
+    print(f"   C3: conv(16,5,1,0) -> activation -> avgpool(2,2,0)", flush=True)
     print(f"   Flatten(400) -> fc(120) -> activation -> fc(84) -> activation -> fc(10)", flush=True)
     print(f" Conv bias:  false", flush=True)
     print(f" FC bias:    true", flush=True)

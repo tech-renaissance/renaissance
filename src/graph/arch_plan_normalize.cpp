@@ -112,6 +112,7 @@ int ArchPlan::get_effective_output_c_at(size_t idx, int default_c) const {
         case LayerKind::Bn1d:
         case LayerKind::Bn2d:
         case LayerKind::MaxPool:
+        case LayerKind::AvgPool:
         case LayerKind::Dropout:
         case LayerKind::GAP:
         case LayerKind::Identity:

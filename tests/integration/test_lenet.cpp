@@ -7,11 +7,11 @@
  *
  * 核心策略：
  * - 网络结构：标准 LeNet-5（2 卷积 + 3 全连接）
- *   conv(6,5,1,2) → activation → maxpool(2,2,0)
- *   → conv(16,5,1,0) → activation → maxpool(2,2,0)
+ *   conv(6,5,1,2) → activation → avgpool(2,2,0)
+ *   → conv(16,5,1,0) → activation → avgpool(2,2,0)
  *   → flatten → fc(120) → activation → fc(84) → activation → fc(10)
  * - 卷积层：无 bias（框架 conv 默认无 bias）
- * - 池化层：MaxPool 2×2
+ * - 池化层：AvgPool 2x2
  * - 激活函数：可定制（默认 ReLU）
  * - 全连接层：有 bias
  * - 优化器：AdamW with weight_decay=1e-4
@@ -151,10 +151,10 @@ int main(int argc, char** argv) {
     BluePrint lenet5 = seq(
         conv(6, 5, 1, 2),                  // C1: 6通道 5x5 卷积, padding=2 → 28x28x6
         make_activation(cfg.activation),
-        maxpool(2, 2, 0),                  // S2: 2x2 MaxPool, stride=2 → 14x14x6
+        avgpool(2, 2, 0),                  // S2: 2x2 AvgPool, stride=2 → 14x14x6
         conv(16, 5, 1, 0),                 // C3: 16通道 5x5 卷积, padding=0 → 10x10x16
         make_activation(cfg.activation),
-        maxpool(2, 2, 0),                  // S4: 2x2 MaxPool, stride=2 → 5x5x16
+        avgpool(2, 2, 0),                  // S4: 2x2 AvgPool, stride=2 → 5x5x16
         flatten(),                         // flatten 5x5x16 = 400
         fc(120, true),                     // C5/F5: 120单元全连接, 有bias
         make_activation(cfg.activation),
@@ -196,8 +196,8 @@ int main(int argc, char** argv) {
               << " Mode: " << mode_name(cfg.mode) << "\n"
               << "=====================================\n"
               << "Network: LeNet-5 (2 conv + 3 fc)\n"
-              << "  conv(6,5,1,2) → activation → maxpool(2,2,0)\n"
-              << "  → conv(16,5,1,0) → activation → maxpool(2,2,0)\n"
+              << "  conv(6,5,1,2) → activation → avgpool(2,2,0)\n"
+              << "  → conv(16,5,1,0) → activation → avgpool(2,2,0)\n"
               << "  → flatten(400) → fc(120) → activation\n"
               << "  → fc(84) → activation → fc(10)\n"
               << "Conv bias: false (default) | FC bias: true\n"

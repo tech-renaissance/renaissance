@@ -124,6 +124,7 @@ void register_op_range_grad_scaling();
 void register_op_range_accum_metrics();
 void register_op_adam_bc();
 void register_op_maxpool();
+void register_op_avgpool();
 void register_op_dropout();
 
 } // namespace tr
