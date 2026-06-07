@@ -938,25 +938,33 @@ void MemoryPlan::validate_layer_correspondence() const {
 
     auto cnt = [this](R r) { return region_dt_ids_[static_cast<size_t>(r)].size(); };
 
-    size_t w_fp32 = cnt(R::W_BN_BIAS) + cnt(R::W_BN_WEIGHT) + cnt(R::W_FC_BIAS)
-                  + cnt(R::W_FC_WEIGHT) + cnt(R::W_FIRST_CONV) + cnt(R::W_DEEP_CONV);
+    // w_fp32/g_fp32: 只统计有 FP16 对应版本的 FC/CONV Weight
+    size_t w_fp32 = cnt(R::W_FC_WEIGHT) + cnt(R::W_FIRST_CONV) + cnt(R::W_DEEP_CONV);
     size_t w_all = w_fp32 + cnt(R::A_FC_WEIGHT) + cnt(R::A_FIRST_CONV) + cnt(R::A_DEEP_CONV);
 
-    size_t g_fp32 = cnt(R::G_BN_BIAS) + cnt(R::G_BN_WEIGHT) + cnt(R::G_FC_BIAS)
-                  + cnt(R::G_FC_WEIGHT) + cnt(R::G_FIRST_CONV) + cnt(R::G_DEEP_CONV);
+    size_t g_fp32 = cnt(R::G_FC_WEIGHT) + cnt(R::G_FIRST_CONV) + cnt(R::G_DEEP_CONV);
     size_t g_fp16 = cnt(R::G_FC_WEIGHT_FP16) + cnt(R::G_FIRST_CONV_FP16) + cnt(R::G_DEEP_CONV_FP16);
 
-    if (w_fp32 > 0) {
-        TR_CHECK(g_fp32 == w_fp32, ValueError,
-                 "W/G FP32 layer count mismatch: " << w_fp32 << " vs " << g_fp32);
-        if (GlobalRegistry::instance().using_amp()) {
-            TR_CHECK(g_fp16 == w_fp32 - cnt(R::W_BN_BIAS) - cnt(R::W_BN_WEIGHT)
-                                - cnt(R::W_FC_BIAS) - cnt(R::W_EQ_BIAS) - cnt(R::W_EQ_SCALE),
-                     ValueError, "W/G FP16 layer count mismatch");
-        }
-    }
+    // 没有 FP16 版本的可训练参数（BN 权重/偏置、FC 偏置）
+    // EQ_SCALE/EQ_BIAS 是 INF 中间结果，不是可训练参数，不计入
+    size_t w_no_fp16 = cnt(R::W_BN_BIAS) + cnt(R::W_BN_WEIGHT) + cnt(R::W_FC_BIAS);
+    size_t g_no_fp16 = cnt(R::G_BN_BIAS) + cnt(R::G_BN_WEIGHT) + cnt(R::G_FC_BIAS);
 
-    if (w_fp32 > 0) {
+    if (w_fp32 > 0 || w_no_fp16 > 0) {
+        // FC/CONV Weight 的 W/G 匹配
+        if (w_fp32 > 0) {
+            TR_CHECK(g_fp32 == w_fp32, ValueError,
+                     "W/G FP32 layer count mismatch: " << w_fp32 << " vs " << g_fp32);
+            if (GlobalRegistry::instance().using_amp()) {
+                TR_CHECK(g_fp16 == w_fp32, ValueError, "W/G FP16 layer count mismatch");
+            }
+        }
+        // 无 FP16 版参数的 W/G 匹配
+        if (w_no_fp16 > 0) {
+            TR_CHECK(g_no_fp16 == w_no_fp16, ValueError,
+                     "W/G no-FP16 layer count mismatch: " << w_no_fp16 << " vs " << g_no_fp16);
+        }
+
         int opt_raw = GlobalRegistry::instance().optimizer_kind_raw();
         if (opt_raw != -1) {
             auto kind = static_cast<OptimizerKind>(opt_raw);
@@ -969,18 +977,20 @@ void MemoryPlan::validate_layer_correspondence() const {
             bool need_v = (kind == OptimizerKind::ADAM ||
                            kind == OptimizerKind::ADAMW);
 
+            size_t w_total = w_fp32 + w_no_fp16;
+
             if (need_m) {
                 size_t m_cnt = cnt(R::M_BN_BIAS) + cnt(R::M_BN_WEIGHT) + cnt(R::M_FC_BIAS)
                              + cnt(R::M_FC_WEIGHT) + cnt(R::M_FIRST_CONV) + cnt(R::M_DEEP_CONV);
-                TR_CHECK(m_cnt == w_fp32, ValueError,
-                         "W/M layer count mismatch: " << w_fp32 << " vs " << m_cnt);
+                TR_CHECK(m_cnt == w_total, ValueError,
+                         "W/M layer count mismatch: " << w_total << " vs " << m_cnt);
             }
 
             if (need_v) {
                 size_t v_cnt = cnt(R::V_BN_BIAS) + cnt(R::V_BN_WEIGHT) + cnt(R::V_FC_BIAS)
                              + cnt(R::V_FC_WEIGHT) + cnt(R::V_FIRST_CONV) + cnt(R::V_DEEP_CONV);
-                TR_CHECK(v_cnt == w_fp32, ValueError,
-                         "W/V layer count mismatch: " << w_fp32 << " vs " << v_cnt);
+                TR_CHECK(v_cnt == w_total, ValueError,
+                         "W/V layer count mismatch: " << w_total << " vs " << v_cnt);
             }
 
             // N-Series 校验（LARS 专用）
