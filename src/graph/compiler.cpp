@@ -47,6 +47,16 @@ static bool is_bn_like(LayerKind k) {
     }
 }
 
+inline bool is_bn_fwd_op(ComputeOp op) {
+    return op == ComputeOp::BN1D_FP32_FWD || op == ComputeOp::BN1D_AMP_FWD ||
+           op == ComputeOp::BN2D_FP32_FWD || op == ComputeOp::BN2D_AMP_FWD;
+}
+
+inline bool is_bn_inf_op(ComputeOp op) {
+    return op == ComputeOp::BN1D_FP32_INF || op == ComputeOp::BN1D_AMP_INF ||
+           op == ComputeOp::BN2D_FP32_INF || op == ComputeOp::BN2D_AMP_INF;
+}
+
 static bool is_weight_bearing(LayerKind k) {
     switch (k) {
         case LayerKind::Conv:
@@ -1040,7 +1050,7 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
         int idx = -1;
         switch (kind) {
             case LayerKind::Conv:                idx = -1; break;  // dX in-place to X, handled by layer_input_ids
-            case LayerKind::Bn1d: case LayerKind::Bn2d: idx = 2; break;  // dX inplace to bn_output
+            case LayerKind::Bn1d: case LayerKind::Bn2d: idx = -1; break;  // dX in-place to X, handled by special logic
             case LayerKind::ReLU:               idx = -1; break;  // in-place
             case LayerKind::MaxPool:            idx = -1; break;  // in-place dX
             case LayerKind::AvgPool:            idx = -1; break;  // in-place dX
@@ -1240,6 +1250,13 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
                 gn.output_ids.push_back(b.top5);
             }
 
+            // BN FWD: 注入全局标量 bn_epsilon 和 bn_momentum
+            if (is_bn_fwd_op(gn.compute_op)) {
+                const auto& b = memory_plan.baseline();
+                if (b.bn_epsilon >= 0)  gn.input_ids.push_back(b.bn_epsilon);
+                if (b.bn_momentum >= 0) gn.input_ids.push_back(b.bn_momentum);
+            }
+
             train_cg.append(graph_id, gn);
             // 双缓冲：首层同时填充 A/B 桶
             if (layer.is_first_layer) {
@@ -1431,6 +1448,16 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
                 gn.input_ids.push_back(b.label_smoothing);   // [NEW] → ids_in[5]
             }
 
+            // BN BWD: 追加原始输入 X，dX in-place 覆盖 X
+            if (gn.compute_op == ComputeOp::BN1D_FP32_BWD || gn.compute_op == ComputeOp::BN1D_AMP_BWD ||
+                gn.compute_op == ComputeOp::BN2D_FP32_BWD || gn.compute_op == ComputeOp::BN2D_AMP_BWD) {
+                auto it = layer_input_ids.find(l);
+                if (it != layer_input_ids.end() && it->second >= 0) {
+                    gn.input_ids.push_back(it->second);                      // 追加 X
+                    gn.output_ids.insert(gn.output_ids.begin(), it->second); // dX in-place to X (output_ids[0])
+                }
+            }
+
             train_cg.append(backward_graph_id, gn);
             if (layer.is_first_layer) {
                 train_cg.append(GraphId::FIRST_LAYER_BWD_B, gn);
@@ -1443,6 +1470,7 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
         // FC dX in-place：梯度直接写入X张量（前一层输出），追踪该张量ID
         if (grad_id < 0 && (layer.kind == LayerKind::FC ||
             layer.kind == LayerKind::Conv ||
+            layer.kind == LayerKind::Bn1d || layer.kind == LayerKind::Bn2d ||  // [NEW]
             layer.kind == LayerKind::FCBNReLU || layer.kind == LayerKind::GapFC ||
             layer.kind == LayerKind::MaxPool || layer.kind == LayerKind::AvgPool || layer.kind == LayerKind::Dropout ||
             layer.kind == LayerKind::Tanh || layer.kind == LayerKind::ReLU ||
@@ -1619,6 +1647,12 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
                 gn.output_ids.push_back(b.top5);
             }
 
+            // BN INF: 注入全局标量 bn_epsilon（用于 eq_scale/eq_bias 惰性生成）
+            if (is_bn_inf_op(gn.compute_op)) {
+                const auto& b = memory_plan.baseline();
+                if (b.bn_epsilon >= 0) gn.input_ids.push_back(b.bn_epsilon);
+            }
+
             infer_cg.append(infer_graph_id, gn);
             infer_cg.append(infer_graph_id_b, gn);  // 双缓冲：同时填充 B 桶
         }
@@ -1700,6 +1734,24 @@ void Compiler::build_auxiliary_graphs(ComputationGraph& train_cg, const MemoryPl
         }
     }
 
+    // BN 不同层 epsilon/momentum 一致性校验
+    if (has_bn) {
+        float first_eps = -1.0f, first_mom = -1.0f;
+        for (const auto& layer : arch.layers()) {
+            if (layer.kind == LayerKind::Bn1d || layer.kind == LayerKind::Bn2d) {
+                if (std::holds_alternative<BNParams>(layer.params)) {
+                    const auto& bp = std::get<BNParams>(layer.params);
+                    if (first_eps < 0) { first_eps = bp.eps; first_mom = bp.momentum; }
+                    else if (bp.eps != first_eps || bp.momentum != first_mom) {
+                        TR_CHECK(false, ValueError,
+                                 "All BN layers must share the same epsilon and momentum "
+                                 "for RANGE OP batch operations.");
+                    }
+                }
+            }
+        }
+    }
+
     // 1. TRANSFER_A 图：异步 H2D 传输 A 区
     {
         auto append_h2d = [&](GraphId gid, Region label_region, Region data_region) {
@@ -1739,12 +1791,14 @@ void Compiler::build_auxiliary_graphs(ComputationGraph& train_cg, const MemoryPl
             {r_deep}, {r_deep});
     }
 
-    // 5. STATS_COMM 图：BN 统计量 AllReduce（Region 范围直接指定）
+    // 5. STATS_COMM 图：BN 统计量 AllReduce（覆盖 B_PREV 与 B_NEXT 四个区）
     if (has_bn) {
-        MemRange r_bn = memory_plan.region_range(
+        MemRange r_prev = memory_plan.region_range(
+            Region::B_PREV_MEAN, Region::B_PREV_VAR);
+        MemRange r_next = memory_plan.region_range(
             Region::B_NEXT_MEAN, Region::B_NEXT_VAR);
         train_cg.append_range(GraphId::STATS_COMM,
-            RangeOp::RANGE_BN_STATS_ALLREDUCE, {r_bn}, {r_bn});
+            RangeOp::RANGE_BN_STATS_ALLREDUCE, {r_prev, r_next}, {r_prev, r_next});
     }
 
     // 6. OPTIMIZER 图：参数更新（优化器感知重构）

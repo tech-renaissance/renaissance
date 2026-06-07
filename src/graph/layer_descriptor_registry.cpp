@@ -155,18 +155,20 @@ SubgraphPattern build_conv_inference(const OpParams&, const std::vector<TensorDe
 }
 
 // ============================================================================
-// BN — 11张量
+// BN — 13张量
 //   0: weight        W_BN_WEIGHT        FP32
 //   1: bias          W_BN_BIAS          FP32
-//   2: output        F_FEATURE_FP32     varies
+//   2: output        F_FEATURE_FP*      varies
 //   3: prev_mean     B_PREV_MEAN        FP32
 //   4: prev_var      B_PREV_VAR         FP32
 //   5: next_mean     B_NEXT_MEAN        FP32
 //   6: next_var      B_NEXT_VAR         FP32
 //   7: weight_grad   G_BN_WEIGHT        FP32
 //   8: bias_grad     G_BN_BIAS          FP32
-//   9: eq_bias       W_EQ_BIAS          FP32 (placeholder if !bn_folded)
-//  10: eq_scale      W_EQ_SCALE         FP32 (placeholder if !bn_folded)
+//   9: eq_bias       W_EQ_BIAS          FP32
+//  10: eq_scale      W_EQ_SCALE         FP32
+//  11: saved_mean    T_TEMP_FP32        FP32  (FWD→BWD桥接)
+//  12: saved_inv_var T_TEMP_FP32        FP32  (FWD→BWD桥接)
 // ============================================================================
 
 std::vector<TensorDesc> infer_bn_tensors(
@@ -192,20 +194,19 @@ std::vector<TensorDesc> infer_bn_tensors(
     // 7-8: gradients
     { TensorDesc d; d.name="bn_weight_grad"; d.shape=pshape; d.region=Region::G_BN_WEIGHT; d.dtype=DType::FP32; descs.push_back(d); }
     { TensorDesc d; d.name="bn_bias_grad";   d.shape=pshape; d.region=Region::G_BN_BIAS;   d.dtype=DType::FP32; descs.push_back(d); }
-    // 9-10: eq_bias/eq_scale (BN折叠产物)
-    { descs.push_back(ctx.bn_folded
-        ? TensorDesc{"bn_eq_bias", pshape, Region::W_EQ_BIAS, DType::FP32}
-        : make_placeholder("bn_eq_bias", Region::W_EQ_BIAS)); }
-    { descs.push_back(ctx.bn_folded
-        ? TensorDesc{"bn_eq_scale", pshape, Region::W_EQ_SCALE, DType::FP32}
-        : make_placeholder("bn_eq_scale", Region::W_EQ_SCALE)); }
+    // 9-10: eq_bias/eq_scale（始终为真实张量，推理必需）
+    { TensorDesc d; d.name="bn_eq_bias";  d.shape=pshape; d.region=Region::W_EQ_BIAS;  d.dtype=DType::FP32; descs.push_back(d); }
+    { TensorDesc d; d.name="bn_eq_scale"; d.shape=pshape; d.region=Region::W_EQ_SCALE; d.dtype=DType::FP32; descs.push_back(d); }
+    // 11-12: saved_mean / saved_inv_var（FWD→BWD桥接，T_TEMP_FP32）
+    { TensorDesc d; d.name="bn_saved_mean";    d.shape=pshape; d.region=Region::T_TEMP_FP32; d.dtype=DType::FP32; descs.push_back(d); }
+    { TensorDesc d; d.name="bn_saved_inv_var"; d.shape=pshape; d.region=Region::T_TEMP_FP32; d.dtype=DType::FP32; descs.push_back(d); }
 
-    return descs;
+    return descs;  // 共 13 张量
 }
 
 SubgraphPattern build_bn_forward(const OpParams&, const std::vector<TensorDesc>& descs) {
     SubgraphPattern p;
-    if (descs.size() < 11) return p;
+    if (descs.size() < 13) return p;
     bool is_1d = (descs[2].shape.h() == 1 && descs[2].shape.w() == 1);
     bool amp = GlobalRegistry::instance().using_amp();
     SubgraphPattern::Node n;
@@ -214,15 +215,17 @@ SubgraphPattern build_bn_forward(const OpParams&, const std::vector<TensorDesc>&
     } else {
         n.op = is_1d ? ComputeOp::BN1D_FP32_FWD : ComputeOp::BN2D_FP32_FWD;
     }
-    n.input_indices  = {0, 1, 3, 4};   // weight, bias, prev_mean, prev_var
-    n.output_indices = {2};      // output
+    n.input_indices  = {0, 1, 5, 6};   // weight, bias, next_mean, next_var
+    // Compiler 在 begin 注入 X（前层输出），在末尾注入 bn_epsilon 和 bn_momentum
+    n.output_indices = {2, 11, 12};    // output, saved_mean, saved_inv_var
+    // next_mean(5) 和 next_var(6) 由 cuDNN 原地更新
     p.nodes.push_back(n);
     return p;
 }
 
 SubgraphPattern build_bn_backward(const OpParams&, const std::vector<TensorDesc>& descs) {
     SubgraphPattern p;
-    if (descs.size() < 11) return p;
+    if (descs.size() < 13) return p;
     bool is_1d = (descs[2].shape.h() == 1 && descs[2].shape.w() == 1);
     bool amp = GlobalRegistry::instance().using_amp();
     SubgraphPattern::Node n;
@@ -231,15 +234,17 @@ SubgraphPattern build_bn_backward(const OpParams&, const std::vector<TensorDesc>
     } else {
         n.op = is_1d ? ComputeOp::BN1D_FP32_BWD : ComputeOp::BN2D_FP32_BWD;
     }
-    n.input_indices  = {0, 1, 2, 3, 4}; // weight, bias, output, prev_mean, prev_var
-    n.output_indices = {2, 7, 8};   // dX(inplace to bn_output), weight_grad, bias_grad
+    n.input_indices  = {0, 11, 12}; // weight, saved_mean, saved_inv_var
+    // Compiler 在 begin 注入 dY（prev_grad_id），在末尾追加 X（layer_input_ids[l]）
+    n.output_indices = {7, 8};      // weight_grad, bias_grad
+    // dX 由 Compiler 特殊处理插入到 output_ids[0]（layer_input_ids[l]）
     p.nodes.push_back(n);
     return p;
 }
 
 SubgraphPattern build_bn_inference(const OpParams&, const std::vector<TensorDesc>& descs) {
     SubgraphPattern p;
-    if (descs.size() < 11) return p;
+    if (descs.size() < 13) return p;
     bool is_1d = (descs[2].shape.h() == 1 && descs[2].shape.w() == 1);
     bool amp = GlobalRegistry::instance().using_amp();
     SubgraphPattern::Node n;
@@ -248,8 +253,11 @@ SubgraphPattern build_bn_inference(const OpParams&, const std::vector<TensorDesc
     } else {
         n.op = is_1d ? ComputeOp::BN1D_FP32_INF : ComputeOp::BN2D_FP32_INF;
     }
-    n.input_indices  = {0, 1, 3, 4}; // weight, bias, prev_mean, prev_var
-    n.output_indices = {2};
+    // input_indices: eq_scale(10), eq_bias(9), gamma(0), beta(1), next_mean(5), next_var(6)
+    // gamma/beta/running stats 供 INF 算子首次执行时预计算 eq_scale/eq_bias
+    n.input_indices  = {10, 9, 0, 1, 5, 6};
+    // Compiler 在 begin 注入 X
+    n.output_indices = {2};      // output
     p.nodes.push_back(n);
     return p;
 }
@@ -943,11 +951,7 @@ SubgraphPattern build_add2_inference(const OpParams&, const std::vector<TensorDe
 }
 
 // ============================================================================
-// 融合层: ConvBNReLU — Conv(6) + BN(11) = 17张量（ReLU的output复用BN output，mask独立）
-//   融合不缩减中间张量：conv_output保留，bn_output=conv_output形状
-//   实际上ReLU output与BN output共享同一张量槽（用户补充：无分支结构下特征图梯度可覆盖正向特征图）
-//   所以只加ReLU mask = 18张量
-// 实际: Conv(6) + BN(11) + ReLU的mask(1) = 18
+// 融合层: ConvBNReLU — Conv(6) + BN(13) + ReLU mask(1) = 20张量
 // ============================================================================
 
 std::vector<TensorDesc> infer_convbnrelu_tensors(
@@ -980,22 +984,22 @@ std::vector<TensorDesc> infer_convbnrelu_tensors(
 
 SubgraphPattern build_convbnrelu_forward(const OpParams&, const std::vector<TensorDesc>& descs) {
     SubgraphPattern p;
-    if (descs.size() < 18) return p;
+    if (descs.size() < 20) return p;
     // Conv FWD + BN FWD + ReLU FWD 融合 → 单CBR_AMP_FWD节点
     SubgraphPattern::Node n;
     n.op = ComputeOp::CBR_AMP_FWD;
     n.input_indices  = {0, 6, 7, 9, 10};   // conv_weight, bn_weight, bn_bias, bn_prev_mean, bn_prev_var (P0-3修复)
-    n.output_indices = {1, 8, 17};         // conv_out, bn_out, relu_mask
+    n.output_indices = {1, 8, 19};         // conv_out, bn_out, relu_mask
     p.nodes.push_back(n);
     return p;
 }
 
 SubgraphPattern build_convbnrelu_backward(const OpParams&, const std::vector<TensorDesc>& descs) {
     SubgraphPattern p;
-    if (descs.size() < 18) return p;
+    if (descs.size() < 20) return p;
     SubgraphPattern::Node n;
     n.op = ComputeOp::CBR_AMP_BWD;
-    n.input_indices  = {0, 1, 2, 6, 7, 8, 9, 10, 17};  // conv_w, conv_out, grad_slot, bn_w, bn_b, bn_out, bn_mean, bn_var, relu_mask (P0-4修复)
+    n.input_indices  = {0, 1, 2, 6, 7, 8, 9, 10, 19};  // conv_w, conv_out, grad_slot, bn_w, bn_b, bn_out, bn_mean, bn_var, relu_mask (P0-4修复)
     n.output_indices = {2, 3, 13, 14};      // conv_grad_slot(dX), conv_weight_grad, bn_weight_grad, bn_bias_grad
     p.nodes.push_back(n);
     return p;
@@ -1003,7 +1007,7 @@ SubgraphPattern build_convbnrelu_backward(const OpParams&, const std::vector<Ten
 
 SubgraphPattern build_convbnrelu_inference(const OpParams&, const std::vector<TensorDesc>& descs) {
     SubgraphPattern p;
-    if (descs.size() < 18) return p;
+    if (descs.size() < 20) return p;
     SubgraphPattern::Node n;
     n.op = ComputeOp::CBR_AMP_INF;
     n.input_indices  = {0, 6, 7};
@@ -1013,7 +1017,7 @@ SubgraphPattern build_convbnrelu_inference(const OpParams&, const std::vector<Te
 }
 
 // ============================================================================
-// ConvBN — Conv(6) + BN(11) = 17张量
+// ConvBN — Conv(6) + BN(13) = 19张量
 // ============================================================================
 
 std::vector<TensorDesc> infer_convbn_tensors(
@@ -1040,7 +1044,7 @@ std::vector<TensorDesc> infer_convbn_tensors(
 
 SubgraphPattern build_convbn_forward(const OpParams&, const std::vector<TensorDesc>& descs) {
     SubgraphPattern p;
-    if (descs.size() < 17) return p;
+    if (descs.size() < 19) return p;
     SubgraphPattern::Node n;
     n.op = ComputeOp::CBR_AMP_FWD;
     n.input_indices  = {0, 6, 7, 9, 10};   // conv_weight, bn_weight, bn_bias, bn_prev_mean, bn_prev_var (P0-3修复)
@@ -1051,7 +1055,7 @@ SubgraphPattern build_convbn_forward(const OpParams&, const std::vector<TensorDe
 
 SubgraphPattern build_convbn_backward(const OpParams&, const std::vector<TensorDesc>& descs) {
     SubgraphPattern p;
-    if (descs.size() < 17) return p;
+    if (descs.size() < 19) return p;
     SubgraphPattern::Node n;
     n.op = ComputeOp::CBR_AMP_BWD;
     n.input_indices  = {0, 1, 2, 6, 7, 8, 9, 10};  // conv_w, conv_out, grad_slot, bn_w, bn_b, bn_out, bn_mean, bn_var (P0-4修复)
@@ -1062,7 +1066,7 @@ SubgraphPattern build_convbn_backward(const OpParams&, const std::vector<TensorD
 
 SubgraphPattern build_convbn_inference(const OpParams&, const std::vector<TensorDesc>& descs) {
     SubgraphPattern p;
-    if (descs.size() < 17) return p;
+    if (descs.size() < 19) return p;
     SubgraphPattern::Node n;
     n.op = ComputeOp::CBR_AMP_INF;
     n.input_indices  = {0, 6, 7};
@@ -1178,7 +1182,7 @@ SubgraphPattern build_convrelu_inference(const OpParams&, const std::vector<Tens
 }
 
 // ============================================================================
-// FCBNReLU — FC(7) + BN(11) + ReLU mask(1) = 19张量
+// FCBNReLU — FC(7) + BN(13) + ReLU mask(1) = 21张量
 // ============================================================================
 
 std::vector<TensorDesc> infer_fcbnrelu_tensors(
@@ -1208,21 +1212,21 @@ std::vector<TensorDesc> infer_fcbnrelu_tensors(
 
 SubgraphPattern build_fcbnrelu_forward(const OpParams&, const std::vector<TensorDesc>& descs) {
     SubgraphPattern p;
-    if (descs.size() < 19) return p;  // FC(7) + BN(11) + mask(1) = 19
+    if (descs.size() < 21) return p;  // FC(7) + BN(13) + mask(1) = 21
     SubgraphPattern::Node n;
     n.op = ComputeOp::FC_BN_RELU_AMP_FWD;
     n.input_indices  = {0, 1, 7, 8, 10, 11};  // fc_w, fc_b, bn_w, bn_b, bn_mean, bn_var
-    n.output_indices = {2, 9, 18};  // fc_out, bn_out, mask
+    n.output_indices = {2, 9, 20};  // fc_out, bn_out, mask
     p.nodes.push_back(n);
     return p;
 }
 
 SubgraphPattern build_fcbnrelu_backward(const OpParams&, const std::vector<TensorDesc>& descs) {
     SubgraphPattern p;
-    if (descs.size() < 19) return p;  // FC(7) + BN(11) + mask(1) = 19张量
+    if (descs.size() < 21) return p;  // FC(7) + BN(13) + mask(1) = 21张量
     SubgraphPattern::Node n;
     n.op = ComputeOp::FC_AMP_BWD;
-    n.input_indices  = {0, 1, 2, 7, 8, 9, 10, 11, 18};  // fc_w, fc_b, fc_out, bn_w, bn_b, bn_out, bn_mean, bn_var, relu_mask
+    n.input_indices  = {0, 1, 2, 7, 8, 9, 10, 11, 20};  // fc_w, fc_b, fc_out, bn_w, bn_b, bn_out, bn_mean, bn_var, relu_mask
     n.output_indices = {3, 4, 14, 15};  // dW, db, dW_bn, db_bn (dX in-place via Phase 4)
     p.nodes.push_back(n);
     return p;
@@ -1230,7 +1234,7 @@ SubgraphPattern build_fcbnrelu_backward(const OpParams&, const std::vector<Tenso
 
 SubgraphPattern build_fcbnrelu_inference(const OpParams&, const std::vector<TensorDesc>& descs) {
     SubgraphPattern p;
-    if (descs.size() < 19) return p;  // FC(7) + BN(11) + mask(1) = 19张量
+    if (descs.size() < 21) return p;  // FC(7) + BN(13) + mask(1) = 21张量
     SubgraphPattern::Node n;
     n.op = ComputeOp::FC_AMP_FWD;
     n.input_indices  = {0, 1, 6, 7};
@@ -1302,7 +1306,7 @@ SubgraphPattern build_gapfc_inference(const OpParams&, const std::vector<TensorD
 }
 
 // ============================================================================
-// BNReLU — BN(11) + ReLU mask(1) = 12张量 (output shared)
+// BNReLU — BN(13) + ReLU mask(1) = 14张量 (output shared)
 // ============================================================================
 
 std::vector<TensorDesc> infer_bnrelu_tensors(
@@ -1325,7 +1329,7 @@ std::vector<TensorDesc> infer_bnrelu_tensors(
 
 SubgraphPattern build_bnrelu_forward(const OpParams&, const std::vector<TensorDesc>& descs) {
     SubgraphPattern p;
-    if (descs.size() < 12) return p;
+    if (descs.size() < 14) return p;
     bool is_1d = (descs[2].shape.h() == 1 && descs[2].shape.w() == 1);
     bool amp = GlobalRegistry::instance().using_amp();
     SubgraphPattern::Node n;
@@ -1335,14 +1339,14 @@ SubgraphPattern build_bnrelu_forward(const OpParams&, const std::vector<TensorDe
         n.op = is_1d ? ComputeOp::BN1D_FP32_FWD : ComputeOp::BN2D_FP32_FWD;
     }
     n.input_indices  = {0, 1, 3, 4};  // bn_weight, bn_bias, bn_prev_mean, bn_prev_var
-    n.output_indices = {2, 11};        // bn_output, relu_mask
+    n.output_indices = {2, 13};        // bn_output, relu_mask
     p.nodes.push_back(n);
     return p;
 }
 
 SubgraphPattern build_bnrelu_backward(const OpParams&, const std::vector<TensorDesc>& descs) {
     SubgraphPattern p;
-    if (descs.size() < 12) return p;
+    if (descs.size() < 14) return p;
     bool is_1d = (descs[2].shape.h() == 1 && descs[2].shape.w() == 1);
     bool amp = GlobalRegistry::instance().using_amp();
     SubgraphPattern::Node n;
@@ -1351,7 +1355,7 @@ SubgraphPattern build_bnrelu_backward(const OpParams&, const std::vector<TensorD
     } else {
         n.op = is_1d ? ComputeOp::BN1D_FP32_BWD : ComputeOp::BN2D_FP32_BWD;
     }
-    n.input_indices  = {0, 1, 2, 3, 4, 11};  // w, b, output, mean, var, mask
+    n.input_indices  = {0, 1, 2, 3, 4, 13};  // w, b, output, mean, var, mask
     n.output_indices = {2, 7, 8};   // dX(inplace bn_output), weight_grad, bias_grad
     p.nodes.push_back(n);
     return p;
@@ -1377,14 +1381,14 @@ namespace {
 
 // ============================================================================
 // BottleneckProjection — shortcut(Conv+BN) + stem(CBR+CBR+CB) + ReLU mask
-//   张量布局（71张量）:
+//   张量布局（79张量）:
 //     shortcut_conv:   0-5   (6)
-//     shortcut_bn:     6-16  (11)
-//     conv1_cbr:      17-34  (6+11+1=18)
-//     conv2_cbr:      35-52  (6+11+1=18)
-//     conv3_cb:       53-69  (6+11=17)
-//     branch_grad:    70     (1)
-//   Total = 17+18+18+17+1 = 71
+//     shortcut_bn:     6-18  (13)
+//     conv1_cbr:      19-38  (6+13+1=20)
+//     conv2_cbr:      39-58  (6+13+1=20)
+//     conv3_cb:       59-77  (6+13=19)
+//     branch_grad:    78     (1)
+//   Total = 19+20+20+19+1 = 79
 // ============================================================================
 
 std::vector<TensorDesc> infer_bottleneck_proj_tensors(
@@ -1462,7 +1466,7 @@ std::vector<TensorDesc> infer_bottleneck_proj_tensors(
 
 SubgraphPattern build_bottleneck_proj_forward(const OpParams&, const std::vector<TensorDesc>& descs) {
     SubgraphPattern p;
-    if (descs.size() < 71) return p;
+    if (descs.size() < 79) return p;
     SubgraphPattern::Node n;
     n.op = ComputeOp::BOTTLENECK_AMP_FWD;
     n.input_indices  = {0, 6, 7, 9, 10, 17, 23, 24, 26, 27, 35, 41, 42, 44, 45, 53, 59, 60, 62, 63};  // 添加所有BN的prev_mean和prev_var (P0-3修复)
@@ -1473,7 +1477,7 @@ SubgraphPattern build_bottleneck_proj_forward(const OpParams&, const std::vector
 
 SubgraphPattern build_bottleneck_proj_backward(const OpParams&, const std::vector<TensorDesc>& descs) {
     SubgraphPattern p;
-    if (descs.size() < 71) return p;
+    if (descs.size() < 79) return p;
     SubgraphPattern::Node n;
     n.op = ComputeOp::BOTTLENECK_AMP_BWD;
     // Complete input indices for all required tensors
@@ -1511,7 +1515,7 @@ SubgraphPattern build_bottleneck_proj_backward(const OpParams&, const std::vecto
 
 SubgraphPattern build_bottleneck_proj_inference(const OpParams&, const std::vector<TensorDesc>& descs) {
     SubgraphPattern p;
-    if (descs.size() < 71) return p;
+    if (descs.size() < 79) return p;
     SubgraphPattern::Node n;
     n.op = ComputeOp::BOTTLENECK_AMP_INF;
     n.input_indices  = {0, 6, 7, 17, 23, 24, 35, 41, 42, 53, 59, 60};
@@ -1522,12 +1526,12 @@ SubgraphPattern build_bottleneck_proj_inference(const OpParams&, const std::vect
 
 // ============================================================================
 // BottleneckIdentity — stem(CBR+CBR+CB) + ReLU mask
-//   张量布局（54张量）:
-//     conv1_cbr:   0-17  (18)
-//     conv2_cbr:  18-35  (18)
-//     conv3_cb:   36-52  (17)
-//     branch_grad: 53    (1)
-//   Total = 54
+//   张量布局（60张量）:
+//     conv1_cbr:   0-19  (20)
+//     conv2_cbr:  20-39  (20)
+//     conv3_cb:   40-58  (19)
+//     branch_grad: 59    (1)
+//   Total = 60
 // ============================================================================
 
 std::vector<TensorDesc> infer_bottleneck_id_tensors(
@@ -1585,7 +1589,7 @@ std::vector<TensorDesc> infer_bottleneck_id_tensors(
 
 SubgraphPattern build_bottleneck_id_forward(const OpParams&, const std::vector<TensorDesc>& descs) {
     SubgraphPattern p;
-    if (descs.size() < 54) return p;
+    if (descs.size() < 60) return p;
     SubgraphPattern::Node n;
     n.op = ComputeOp::BOTTLENECK_AMP_FWD;
     n.input_indices  = {0, 6, 7, 9, 10, 18, 24, 25, 27, 28, 36, 42, 43, 45, 46};  // 添加所有BN的prev_mean和prev_var (P0-3修复)
@@ -1596,7 +1600,7 @@ SubgraphPattern build_bottleneck_id_forward(const OpParams&, const std::vector<T
 
 SubgraphPattern build_bottleneck_id_backward(const OpParams&, const std::vector<TensorDesc>& descs) {
     SubgraphPattern p;
-    if (descs.size() < 54) return p;
+    if (descs.size() < 60) return p;
     SubgraphPattern::Node n;
     n.op = ComputeOp::BOTTLENECK_AMP_BWD;
     // Complete input indices for all required tensors
@@ -1633,7 +1637,7 @@ SubgraphPattern build_bottleneck_id_backward(const OpParams&, const std::vector<
 
 SubgraphPattern build_bottleneck_id_inference(const OpParams&, const std::vector<TensorDesc>& descs) {
     SubgraphPattern p;
-    if (descs.size() < 54) return p;
+    if (descs.size() < 60) return p;
     SubgraphPattern::Node n;
     n.op = ComputeOp::BOTTLENECK_AMP_INF;
     n.input_indices  = {0, 6, 7, 18, 24, 25, 36, 42, 43};
@@ -1644,13 +1648,13 @@ SubgraphPattern build_bottleneck_id_inference(const OpParams&, const std::vector
 
 // ============================================================================
 // BasicBlockProjection — shortcut(Conv+BN) + stem(Conv+BN+ReLU + Conv+BN) + ReLU mask
-//   张量布局（54张量）:
-//     conv1_cbr:      0-17  (18)
-//     conv2_cb:      18-34  (17)
-//     shortcut_cb:   35-51  (17)
-//     branch_grad:    52    (1)
-//     relu_mask:      53    (1)
-//   Total = 18+17+17+1+1 = 54
+//   张量布局（60张量）:
+//     conv1_cbr:      0-19  (20)
+//     conv2_cb:      20-38  (19)
+//     shortcut_cb:   39-57  (19)
+//     branch_grad:    58    (1)
+//     relu_mask:      59    (1)
+//   Total = 20+19+19+1+1 = 60
 // ============================================================================
 
 std::vector<TensorDesc> infer_basicblock_proj_tensors(
@@ -1720,7 +1724,7 @@ std::vector<TensorDesc> infer_basicblock_proj_tensors(
 
 SubgraphPattern build_basicblock_proj_forward(const OpParams&, const std::vector<TensorDesc>& descs) {
     SubgraphPattern p;
-    if (descs.size() < 54) return p;
+    if (descs.size() < 60) return p;
     SubgraphPattern::Node n;
     n.op = ComputeOp::BASICBLOCK_AMP_FWD;
     n.input_indices  = {0, 6, 7, 18, 24, 25, 35, 41, 42};
@@ -1731,7 +1735,7 @@ SubgraphPattern build_basicblock_proj_forward(const OpParams&, const std::vector
 
 SubgraphPattern build_basicblock_proj_backward(const OpParams&, const std::vector<TensorDesc>& descs) {
     SubgraphPattern p;
-    if (descs.size() < 54) return p;
+    if (descs.size() < 60) return p;
     SubgraphPattern::Node n;
     n.op = ComputeOp::BASICBLOCK_AMP_BWD;
     // Complete input indices for all required tensors
@@ -1768,7 +1772,7 @@ SubgraphPattern build_basicblock_proj_backward(const OpParams&, const std::vecto
 
 SubgraphPattern build_basicblock_proj_inference(const OpParams&, const std::vector<TensorDesc>& descs) {
     SubgraphPattern p;
-    if (descs.size() < 54) return p;
+    if (descs.size() < 60) return p;
     SubgraphPattern::Node n;
     n.op = ComputeOp::BASICBLOCK_AMP_INF;
     n.input_indices  = {0, 6, 7, 18, 24, 25, 35, 41, 42};
@@ -1779,12 +1783,12 @@ SubgraphPattern build_basicblock_proj_inference(const OpParams&, const std::vect
 
 // ============================================================================
 // BasicBlockIdentity — stem(Conv+BN+ReLU + Conv+BN) + ReLU mask
-//   张量布局（37张量）:
-//     conv1_cbr:   0-17  (18)
-//     conv2_cb:   18-34  (17)
-//     branch_grad: 35    (1)
-//     relu_mask:   36    (1)
-//   Total = 37
+//   张量布局（41张量）:
+//     conv1_cbr:   0-19  (20)
+//     conv2_cb:   20-38  (19)
+//     branch_grad: 39    (1)
+//     relu_mask:   40    (1)
+//   Total = 41
 // ============================================================================
 
 std::vector<TensorDesc> infer_basicblock_id_tensors(
@@ -1838,7 +1842,7 @@ std::vector<TensorDesc> infer_basicblock_id_tensors(
 
 SubgraphPattern build_basicblock_id_forward(const OpParams&, const std::vector<TensorDesc>& descs) {
     SubgraphPattern p;
-    if (descs.size() < 37) return p;
+    if (descs.size() < 41) return p;
     SubgraphPattern::Node n;
     n.op = ComputeOp::BASICBLOCK_AMP_FWD;
     n.input_indices  = {0, 6, 7, 18, 24, 25};
@@ -1849,7 +1853,7 @@ SubgraphPattern build_basicblock_id_forward(const OpParams&, const std::vector<T
 
 SubgraphPattern build_basicblock_id_backward(const OpParams&, const std::vector<TensorDesc>& descs) {
     SubgraphPattern p;
-    if (descs.size() < 37) return p;
+    if (descs.size() < 41) return p;
     SubgraphPattern::Node n;
     n.op = ComputeOp::BASICBLOCK_AMP_BWD;
     // Complete input indices for all required tensors
@@ -1880,7 +1884,7 @@ SubgraphPattern build_basicblock_id_backward(const OpParams&, const std::vector<
 
 SubgraphPattern build_basicblock_id_inference(const OpParams&, const std::vector<TensorDesc>& descs) {
     SubgraphPattern p;
-    if (descs.size() < 37) return p;
+    if (descs.size() < 41) return p;
     SubgraphPattern::Node n;
     n.op = ComputeOp::BASICBLOCK_AMP_INF;
     n.input_indices  = {0, 6, 7, 18, 24, 25};
@@ -1891,12 +1895,12 @@ SubgraphPattern build_basicblock_id_inference(const OpParams&, const std::vector
 
 // ============================================================================
 // InvResidual — expand(CBR) + depthwise(CBR) + projection(CB)
-//   张量布局（54张量）:
-//     expand_cbr:   0-17  (18)
-//     dw_cbr:      18-35  (18)
-//     proj_cb:     36-52  (17)
-//     branch_grad:  53    (1)
-//   Total = 54
+//   张量布局（60张量）:
+//     expand_cbr:   0-19  (20)
+//     dw_cbr:      20-39  (20)
+//     proj_cb:     40-58  (19)
+//     branch_grad:  59    (1)
+//   Total = 60
 //   InvResidualNoShortcut 与 InvResidualIdentity 共用此布局
 //   （NoShortcut 的 branch_grad 为占位符，保持张量数恒定）
 // ============================================================================
@@ -1971,7 +1975,7 @@ std::vector<TensorDesc> infer_invresidual_id_tensors(const Shape& i, const OpPar
 
 SubgraphPattern build_invresidual_forward(const OpParams&, const std::vector<TensorDesc>& descs) {
     SubgraphPattern p;
-    if (descs.size() < 54) return p;
+    if (descs.size() < 60) return p;
     SubgraphPattern::Node n;
     n.op = ComputeOp::INVRESIDUAL_AMP_FWD;
     n.input_indices  = {0, 6, 7, 18, 24, 25, 36, 42, 43};
@@ -1982,7 +1986,7 @@ SubgraphPattern build_invresidual_forward(const OpParams&, const std::vector<Ten
 
 SubgraphPattern build_invresidual_backward(const OpParams&, const std::vector<TensorDesc>& descs) {
     SubgraphPattern p;
-    if (descs.size() < 54) return p;
+    if (descs.size() < 60) return p;
     SubgraphPattern::Node n;
     n.op = ComputeOp::INVRESIDUAL_AMP_BWD;
     // Complete input indices for all required tensors
@@ -2018,7 +2022,7 @@ SubgraphPattern build_invresidual_backward(const OpParams&, const std::vector<Te
 
 SubgraphPattern build_invresidual_inference(const OpParams&, const std::vector<TensorDesc>& descs) {
     SubgraphPattern p;
-    if (descs.size() < 54) return p;
+    if (descs.size() < 60) return p;
     SubgraphPattern::Node n;
     n.op = ComputeOp::INVRESIDUAL_AMP_INF;
     n.input_indices  = {0, 6, 7, 18, 24, 25, 36, 42, 43};
@@ -2071,12 +2075,12 @@ Shape get_output_shape(LayerKind kind, const std::vector<TensorDesc>& descs)
         case LayerKind::FCBNReLU:      return find(9);   // BN output (FC7+2=9)
         case LayerKind::GapFC:         return find(3);   // fc output (gap[0] + fc_weight[1] + fc_bias[2] + fc_output[3])
         // Block fusions: output is the last sub-layer's BN output
-        case LayerKind::BottleneckProjection: return find(61); // conv3_bn_out (53+6+2)
-        case LayerKind::BottleneckIdentity:   return find(44); // conv3_bn_out
-        case LayerKind::BasicBlockProjection: return find(26); // conv2_bn_out (Add result, inplace to main branch)
-        case LayerKind::BasicBlockIdentity:   return find(26); // conv2_bn_out
+        case LayerKind::BottleneckProjection: return find(67); // conv3_bn_out (59+8)
+        case LayerKind::BottleneckIdentity:   return find(48); // conv3_bn_out (40+8)
+        case LayerKind::BasicBlockProjection: return find(28); // conv2_bn_out (20+8, Add result inplace to main branch)
+        case LayerKind::BasicBlockIdentity:   return find(28); // conv2_bn_out (20+8)
         case LayerKind::InvResidualNoShortcut:
-        case LayerKind::InvResidualIdentity:  return find(44); // proj_bn_out
+        case LayerKind::InvResidualIdentity:  return find(48); // proj_bn_out (40+8)
         default:
             return descs.empty() ? Shape{} : descs.back().shape;
     }

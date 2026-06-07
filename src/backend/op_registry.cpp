@@ -66,6 +66,7 @@ void register_default_ops() {
     register_op_maxpool();
     register_op_avgpool();
     register_op_dropout();
+    register_op_bn();
 }
 
 #ifdef TR_USE_CUDA

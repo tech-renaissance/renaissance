@@ -174,6 +174,8 @@ public:
         int32_t bias_corr2 = -1;
         int32_t label_smoothing = -1;   // [NEW] Label Smoothing标量
         int32_t dropout_seed = -1;       // [NEW] Dropout per-RANK seed (shape {1,1,1,2}, DType::INT32)
+        int32_t bn_epsilon  = -1;       // [NEW] 全局 BN epsilon，S_SCALAR_FP32
+        int32_t bn_momentum = -1;       // [NEW] 全局 BN momentum，S_SCALAR_FP32
     };
 
     void alloc_baseline_dtensors(const Shape& label_shape,

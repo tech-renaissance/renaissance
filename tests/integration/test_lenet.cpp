@@ -149,7 +149,7 @@ int main(int argc, char** argv) {
         .commit();
 
     BluePrint lenet5 = seq(
-        conv(6, 5, 1, 2),                  // C1: 6通道 5x5 卷积, padding=2 → 28x28x6
+        conv(8, 5, 1, 2),                  // TODO: 为了测试AMP，临时把6改为8，测完恢复
         make_activation(cfg.activation),
         avgpool(2, 2, 0),                  // S2: 2x2 AvgPool, stride=2 → 14x14x6
         conv(16, 5, 1, 0),                 // C3: 16通道 5x5 卷积, padding=0 → 10x10x16

@@ -42,6 +42,13 @@ struct FCParams {
 struct BNParams {
     float eps = 1e-5f;
     float momentum = 0.1f;
+
+    bool operator==(const BNParams& o) const noexcept {
+        return eps == o.eps && momentum == o.momentum;
+    }
+    bool operator!=(const BNParams& o) const noexcept {
+        return !(*this == o);
+    }
 };
 
 struct LossParams {

@@ -171,6 +171,14 @@ InitConfig Initializer::derive(Region region) const {
     // ====================
     // 第二段：非参数区 → NONE
     // ====================
+    // BN running mean 初始化为 0.0（标准做法）
+    if (region == Region::B_PREV_MEAN || region == Region::B_NEXT_MEAN) {
+        return InitConfig{0.0f, InitKind::CONSTANTS, FanMode::FAN_IN};
+    }
+    // BN running variance 初始化为 1.0（标准做法）
+    if (region == Region::B_PREV_VAR || region == Region::B_NEXT_VAR) {
+        return InitConfig{1.0f, InitKind::CONSTANTS, FanMode::FAN_IN};
+    }
     if (!is_param_region(region)) {
         return InitConfig{1.0f, InitKind::NONE, FanMode::FAN_IN};
     }
@@ -179,9 +187,9 @@ InitConfig Initializer::derive(Region region) const {
     // 第三段：权重区 → 按层类型分发
     // ====================
 
-    // EQ scale → CONSTANTS(1.0)
+    // EQ scale → CONSTANTS(0.0)（首次推理时由 INF 算子重新计算）
     if (region == Region::W_EQ_SCALE) {
-        return InitConfig{1.0f, InitKind::CONSTANTS, FanMode::FAN_IN};
+        return InitConfig{0.0f, InitKind::CONSTANTS, FanMode::FAN_IN};
     }
 
     // BN weight → CONSTANTS(1.0)

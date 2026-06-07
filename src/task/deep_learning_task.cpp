@@ -692,6 +692,20 @@ void DeepLearningTask::init_variant_scalars() {
 
     const auto& b = active_memory_plan_->baseline();
 
+    // 从 ArchPlan 中提取 BN 全局参数（所有 BN 层共享相同的 eps/momentum）
+    float bn_eps = 1e-5f;
+    float bn_mom = 0.1f;
+    for (const auto& layer : arch_plan_.layers()) {
+        if (layer.kind == LayerKind::Bn1d || layer.kind == LayerKind::Bn2d) {
+            if (std::holds_alternative<BNParams>(layer.params)) {
+                const auto& bp = std::get<BNParams>(layer.params);
+                bn_eps = bp.eps;
+                bn_mom = bp.momentum;
+                break;
+            }
+        }
+    }
+
     for (int rank = 0; rank < num_gpus_; ++rank) {
         DeviceContext& ctx = context(rank);
         cudaSetDevice(ctx.device_id());
@@ -709,6 +723,12 @@ void DeepLearningTask::init_variant_scalars() {
                            cudaMemcpyHostToDevice);
             if (b.last_val_batch_size >= 0)
                 cudaMemcpy(ctx.ptr_at(b.last_val_batch_size), &val_last_bs, sizeof(int32_t),
+                           cudaMemcpyHostToDevice);
+            if (b.bn_epsilon >= 0)
+                cudaMemcpy(ctx.ptr_at(b.bn_epsilon), &bn_eps, sizeof(float),
+                           cudaMemcpyHostToDevice);
+            if (b.bn_momentum >= 0)
+                cudaMemcpy(ctx.ptr_at(b.bn_momentum), &bn_mom, sizeof(float),
                            cudaMemcpyHostToDevice);
         }
 

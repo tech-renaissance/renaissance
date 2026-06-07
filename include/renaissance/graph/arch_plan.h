@@ -12,6 +12,7 @@
 #pragma once
 
 #include "renaissance/core/types.h"
+#include "renaissance/graph/op_kind.h"
 #include <array>
 #include <cstdint>
 #include <functional>
@@ -122,7 +123,7 @@ const char* kind_name(LayerKind k);
 
 using LayerParam = std::variant<
     ConvLayerParams, PoolLayerParams, FCLayerParams, SoftmaxCELayerParams,
-    DropoutLayerParams,
+    DropoutLayerParams, BNParams,
     BottleneckIdentityLayerParams, BottleneckProjectionLayerParams,
     BasicBlockIdentityLayerParams, BasicBlockProjectionLayerParams,
     InvResidualLayerParams,

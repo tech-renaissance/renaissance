@@ -413,6 +413,10 @@ void MemoryPlan::alloc_baseline_dtensors(const Shape& label_shape,
     auto seed_dt = alloc_impl(seed_shape, DType::INT32, Region::S_SCALAR_INT32);
     set_init_config(seed_dt.id, InitConfig{0.0f, InitKind::NONE, FanMode::FAN_IN});
     baseline_.dropout_seed = seed_dt.id;
+
+    // Step 7: BN 全局标量（无条件申请，开销极小）
+    baseline_.bn_epsilon  = alloc_impl(scalar_shape, DType::FP32, Region::S_SCALAR_FP32).id;
+    baseline_.bn_momentum = alloc_impl(scalar_shape, DType::FP32, Region::S_SCALAR_FP32).id;
 }
 
 void MemoryPlan::alloc_baseline_dtensors(
@@ -481,6 +485,10 @@ void MemoryPlan::alloc_baseline_dtensors(
     auto seed_dt = alloc_impl(seed_shape, DType::INT32, Region::S_SCALAR_INT32);
     set_init_config(seed_dt.id, InitConfig{0.0f, InitKind::NONE, FanMode::FAN_IN});
     baseline_.dropout_seed = seed_dt.id;
+
+    // Step 7: BN 全局标量（无条件申请，开销极小）
+    baseline_.bn_epsilon  = alloc_impl(scalar_shape, DType::FP32, Region::S_SCALAR_FP32).id;
+    baseline_.bn_momentum = alloc_impl(scalar_shape, DType::FP32, Region::S_SCALAR_FP32).id;
 }
 
 // F-Series
