@@ -270,12 +270,15 @@ void ArchPlan::step8_merge_quadruple() {
 }
 
 void ArchPlan::step9_merge_triple() {
-    auto build_cbr = [](const ArchLayer& conv, const ArchLayer&, const ArchLayer&) -> LayerParam {
+    auto build_cbr = [](const ArchLayer& conv, const ArchLayer& bn, const ArchLayer&) -> LayerParam {
         auto& cp = std::get<ConvLayerParams>(conv.params);
-        return CBRLayerParams{cp.out_ch, cp.k, cp.s, cp.p};
+        auto& bp = std::get<BNParams>(bn.params);
+        return CBRLayerParams{cp.out_ch, cp.k, cp.s, cp.p, bp};
     };
-    auto build_fbr = [](const ArchLayer& fc, const ArchLayer&, const ArchLayer&) -> LayerParam {
-        return FBRLayerParams{std::get<FCLayerParams>(fc.params).out_features, std::get<FCLayerParams>(fc.params).bias};
+    auto build_fbr = [](const ArchLayer& fc, const ArchLayer& bn, const ArchLayer&) -> LayerParam {
+        auto& fp = std::get<FCLayerParams>(fc.params);
+        auto& bp = std::get<BNParams>(bn.params);
+        return FBRLayerParams{fp.out_features, fp.bias, bp};
     };
     merge_pattern_triple(LayerKind::Conv, LayerKind::Bn2d, LayerKind::ReLU,
         LayerKind::ConvBNReLU, build_cbr);
@@ -289,16 +292,17 @@ void ArchPlan::step10_merge_binary_and_mark() {
     auto build_gapfc = [](const ArchLayer&, const ArchLayer& fc) -> LayerParam {
         return GapFCLayerParams{std::get<FCLayerParams>(fc.params).out_features, std::get<FCLayerParams>(fc.params).bias};
     };
-    auto build_cb = [](const ArchLayer& conv, const ArchLayer&) -> LayerParam {
+    auto build_cb = [](const ArchLayer& conv, const ArchLayer& bn) -> LayerParam {
         auto& cp = std::get<ConvLayerParams>(conv.params);
-        return CBLayerParams{cp.out_ch, cp.k, cp.s, cp.p};
+        auto& bp = std::get<BNParams>(bn.params);
+        return CBLayerParams{cp.out_ch, cp.k, cp.s, cp.p, bp};
     };
     auto build_cr = [](const ArchLayer& conv, const ArchLayer&) -> LayerParam {
         auto& cp = std::get<ConvLayerParams>(conv.params);
         return CRLayerParams{cp.out_ch, cp.k, cp.s, cp.p};
     };
-    auto build_empty = [](const ArchLayer&, const ArchLayer&) -> LayerParam {
-        return EmptyParams{};
+    auto build_bn_relu = [](const ArchLayer& bn, const ArchLayer&) -> LayerParam {
+        return BNReLUParams{std::get<BNParams>(bn.params)};
     };
 
     merge_pattern_binary(LayerKind::GAP, LayerKind::FC,
@@ -313,9 +317,9 @@ void ArchPlan::step10_merge_binary_and_mark() {
     // merge_pattern_binary(LayerKind::FC, LayerKind::ReLU,
     //     LayerKind::FCReLU, build_fr);
     merge_pattern_binary(LayerKind::Bn2d, LayerKind::ReLU,
-        LayerKind::BNReLU, build_empty);
+        LayerKind::BNReLU, build_bn_relu);
     merge_pattern_binary(LayerKind::Bn1d, LayerKind::ReLU,
-        LayerKind::BNReLU, build_empty);
+        LayerKind::BNReLU, build_bn_relu);
 
     mark_first_layer();
 }

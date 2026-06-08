@@ -142,12 +142,19 @@ MemoryPlan::~MemoryPlan() {
 // ============================================================================
 
 BNStatsBuffers MemoryPlan::alloc_bn_stats(const Shape& shape) {
-    return {
-        alloc_impl(shape, DType::FP32, Region::B_PREV_MEAN),
-        alloc_impl(shape, DType::FP32, Region::B_PREV_VAR),
-        alloc_impl(shape, DType::FP32, Region::B_NEXT_MEAN),
-        alloc_impl(shape, DType::FP32, Region::B_NEXT_VAR),
-    };
+    auto prev_mean = alloc_impl(shape, DType::FP32, Region::B_PREV_MEAN);
+    auto prev_var  = alloc_impl(shape, DType::FP32, Region::B_PREV_VAR);
+    auto next_mean = alloc_impl(shape, DType::FP32, Region::B_NEXT_MEAN);
+    auto next_var  = alloc_impl(shape, DType::FP32, Region::B_NEXT_VAR);
+
+    // BN running mean 初始化为 0.0，running variance 初始化为 1.0（标准做法）
+    // 与 Initializer::derive() 中 B_PREV_MEAN/B_NEXT_MEAN/B_PREV_VAR/B_NEXT_VAR 策略一致
+    set_init_config(prev_mean.id, InitConfig{0.0f, InitKind::CONSTANTS, FanMode::FAN_IN});
+    set_init_config(prev_var.id,  InitConfig{1.0f, InitKind::CONSTANTS, FanMode::FAN_IN});
+    set_init_config(next_mean.id, InitConfig{0.0f, InitKind::CONSTANTS, FanMode::FAN_IN});
+    set_init_config(next_var.id,  InitConfig{1.0f, InitKind::CONSTANTS, FanMode::FAN_IN});
+
+    return {prev_mean, prev_var, next_mean, next_var};
 }
 
 // W-Series
@@ -415,8 +422,15 @@ void MemoryPlan::alloc_baseline_dtensors(const Shape& label_shape,
     baseline_.dropout_seed = seed_dt.id;
 
     // Step 7: BN 全局标量（无条件申请，开销极小）
-    baseline_.bn_epsilon  = alloc_impl(scalar_shape, DType::FP32, Region::S_SCALAR_FP32).id;
-    baseline_.bn_momentum = alloc_impl(scalar_shape, DType::FP32, Region::S_SCALAR_FP32).id;
+    // 设置 CONSTANTS init_config，让 init_all() 在 compile 阶段兜底初始化，
+    // 消除 CPU 路径对 init_variant_scalars() 的隐性依赖。
+    auto bn_eps_dt = alloc_impl(scalar_shape, DType::FP32, Region::S_SCALAR_FP32);
+    set_init_config(bn_eps_dt.id, InitConfig{1e-5f, InitKind::CONSTANTS, FanMode::FAN_IN});
+    baseline_.bn_epsilon = bn_eps_dt.id;
+
+    auto bn_mom_dt = alloc_impl(scalar_shape, DType::FP32, Region::S_SCALAR_FP32);
+    set_init_config(bn_mom_dt.id, InitConfig{0.1f, InitKind::CONSTANTS, FanMode::FAN_IN});
+    baseline_.bn_momentum = bn_mom_dt.id;
 }
 
 void MemoryPlan::alloc_baseline_dtensors(

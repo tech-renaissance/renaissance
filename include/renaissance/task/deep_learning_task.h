@@ -272,7 +272,7 @@ protected:
         arch_plan_.build(GlobalRegistry::instance().num_classes());
         ArchPlan& plan = arch_plan_;
 
-        plan_config_.bn_folded = use_fuse;
+        plan_config_.bn_folded = true;
         bool needs_mask = false;
         for (const auto& layer : plan.layers()) {
             switch (layer.kind) {
@@ -408,6 +408,59 @@ protected:
                 set_scalar_init(active_memory_plan_->eps_id(),   cfg->eps);
             }
         }
+
+        // ===== 为 BN 标量设置 init_config，确保 init_all() 兜底初始化 =====
+        // 即使 init_variant_scalars() 未覆盖某个 variant，标量也不会是垃圾值。
+        // GPU 路径不受影响（cuDNN 硬编码参数），CPU 路径依赖此兜底。
+        {
+            float bn_eps = 1e-5f, bn_mom = 0.1f;
+            for (const auto& layer : arch_plan_.layers()) {
+                if (layer.kind == LayerKind::Bn1d || layer.kind == LayerKind::Bn2d) {
+                    if (std::holds_alternative<BNParams>(layer.params)) {
+                        const auto& bp = std::get<BNParams>(layer.params);
+                        bn_eps = bp.eps;
+                        bn_mom = bp.momentum;
+                        break;
+                    }
+                }
+                if (layer.kind == LayerKind::ConvBNReLU) {
+                    if (std::holds_alternative<CBRLayerParams>(layer.params)) {
+                        const auto& bp = std::get<CBRLayerParams>(layer.params).bn;
+                        bn_eps = bp.eps;
+                        bn_mom = bp.momentum;
+                        break;
+                    }
+                }
+                if (layer.kind == LayerKind::ConvBN) {
+                    if (std::holds_alternative<CBLayerParams>(layer.params)) {
+                        const auto& bp = std::get<CBLayerParams>(layer.params).bn;
+                        bn_eps = bp.eps;
+                        bn_mom = bp.momentum;
+                        break;
+                    }
+                }
+                if (layer.kind == LayerKind::FCBNReLU) {
+                    if (std::holds_alternative<FBRLayerParams>(layer.params)) {
+                        const auto& bp = std::get<FBRLayerParams>(layer.params).bn;
+                        bn_eps = bp.eps;
+                        bn_mom = bp.momentum;
+                        break;
+                    }
+                }
+                if (layer.kind == LayerKind::BNReLU) {
+                    if (std::holds_alternative<BNReLUParams>(layer.params)) {
+                        const auto& bp = std::get<BNReLUParams>(layer.params).bn;
+                        bn_eps = bp.eps;
+                        bn_mom = bp.momentum;
+                        break;
+                    }
+                }
+            }
+            const auto& bl = active_memory_plan_->baseline();
+            set_scalar_init(bl.bn_epsilon,  bn_eps);
+            set_scalar_init(bl.bn_momentum, bn_mom);
+        }
+        // ================================================================
 
         add_graph("train", std::move(result.train_cg), StreamKind::COMP_1);
         add_graph("inference", std::move(result.infer_cg), StreamKind::COMP_1);

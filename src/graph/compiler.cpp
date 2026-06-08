@@ -515,11 +515,11 @@ namespace {
         }
         if (std::holds_alternative<CBRLayerParams>(lp)) {
             auto& p = std::get<CBRLayerParams>(lp);
-            return OpParams{CBRParams{ConvParams{p.out_ch, p.k, p.k, p.s, p.s, p.p, p.p, 1, 1, 1}, BNParams{}}};
+            return OpParams{CBRParams{ConvParams{p.out_ch, p.k, p.k, p.s, p.s, p.p, p.p, 1, 1, 1}, p.bn}};
         }
         if (std::holds_alternative<CBLayerParams>(lp)) {
             auto& p = std::get<CBLayerParams>(lp);
-            return OpParams{CBRParams{ConvParams{p.out_ch, p.k, p.k, p.s, p.s, p.p, p.p, 1, 1, 1}, BNParams{}}};
+            return OpParams{CBRParams{ConvParams{p.out_ch, p.k, p.k, p.s, p.s, p.p, p.p, 1, 1, 1}, p.bn}};
         }
         if (std::holds_alternative<CRLayerParams>(lp)) {
             auto& p = std::get<CRLayerParams>(lp);
@@ -564,6 +564,12 @@ namespace {
         if (std::holds_alternative<InvResidualLayerParams>(lp)) {
             auto& p = std::get<InvResidualLayerParams>(lp);
             return OpParams{BottleneckParams{/*in_c*/0, p.expand_ch, p.out_ch, p.stride, p.has_shortcut, /*groups*/p.expand_ch}};
+        }
+        if (std::holds_alternative<BNParams>(lp)) {
+            return OpParams{std::get<BNParams>(lp)};
+        }
+        if (std::holds_alternative<BNReLUParams>(lp)) {
+            return OpParams{std::get<BNReLUParams>(lp).bn};
         }
         if (std::holds_alternative<SoftmaxCELayerParams>(lp)) {
             auto& p = std::get<SoftmaxCELayerParams>(lp);

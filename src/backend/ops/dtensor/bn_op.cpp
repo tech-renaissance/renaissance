@@ -79,6 +79,8 @@ static void launch_bn_fp32_fwd_cpu(CpuOpContext* op_ctx) {
     float eps = eps_ptr ? *eps_ptr : 1e-5f;
     float momentum = mom_ptr ? *mom_ptr : 0.1f;
 
+
+
     for (int c = 0; c < C; ++c) {
         // 1. batch mean
         double sum = 0.0;
@@ -222,6 +224,18 @@ extern "C" cudaError_t launch_tr_bn_compute_eq_params_kernel(
     float* eq_scale,
     float* eq_bias,
     int C,
+    cudaStream_t stream);
+
+extern "C" cudaError_t launch_tr_bn_inf_kernel(
+    const void* x,
+    const float* gamma,
+    const float* beta,
+    const float* running_mean,
+    const float* running_var,
+    float eps,
+    void* y,
+    int N, int C, int H, int W,
+    bool is_fp16,
     cudaStream_t stream);
 
 // ============================================================================
@@ -605,98 +619,26 @@ static void launch_bn_inf_cuda(
     state.output_stream_idx = si;
     state.streams[si].has_pending_work = true;
 
-    // 每次 INF 调用时重新计算 eq_scale / eq_bias（device-only，无 D2H/H2D）
-    // 内核极轻量（仅 C 次操作），无需惰性标志，开销可忽略
+    // 合并 eq_scale/eq_bias 计算与 BN INF 为单 kernel
     {
         const float* d_gamma = static_cast<const float*>(ctx.ptr_at(node.input_ids[3]));
         const float* d_beta  = static_cast<const float*>(ctx.ptr_at(node.input_ids[4]));
         const float* d_rm    = static_cast<const float*>(ctx.ptr_at(node.input_ids[5]));
         const float* d_rv    = static_cast<const float*>(ctx.ptr_at(node.input_ids[6]));
-        float* d_eq_scale    = static_cast<float*>(ctx.ptr_at(node.input_ids[1]));
-        float* d_eq_bias     = static_cast<float*>(ctx.ptr_at(node.input_ids[2]));
+        void* d_y            = ctx.ptr_at(node.output_ids[0]);
         float eps_val = 1e-5f;
         if (!node.params.is_empty()) {
             eps_val = node.params.bn().eps;
         }
 
-        cudaError_t err = launch_tr_bn_compute_eq_params_kernel(
-            d_gamma, d_beta, d_rm, d_rv, eps_val, d_eq_scale, d_eq_bias, C, stream);
+        cudaError_t err = launch_tr_bn_inf_kernel(
+            ctx.ptr_at(node.input_ids[0]),
+            d_gamma, d_beta, d_rm, d_rv, eps_val,
+            d_y, N, C, H, W, is_fp16, stream);
         if (err != cudaSuccess) {
-            TR_DEVICE_ERROR("BN INF eq_scale/eq_bias kernel failed: " << cudaGetErrorString(err));
+            TR_DEVICE_ERROR("BN INF kernel failed: " << cudaGetErrorString(err));
         }
     }
-
-    cudnnHandle_t handle = static_cast<cudnnHandle_t>(ctx.cudnn_handle(sk));
-    uint64_t handle_bits = reinterpret_cast<uint64_t>(handle);
-
-    BNGraphCacheKey key{handle_bits, N, H, W, C, is_fp16};
-    auto it = s_bn_inf_caches.find(key);
-    if (it == s_bn_inf_caches.end()) {
-        auto graph = create_cudnn_graph(is_fp16 ? DType::FP16 : DType::FP32);
-        auto dt = is_fp16 ? fe::DataType_t::HALF : fe::DataType_t::FLOAT;
-
-        auto X = graph->tensor(fe::graph::Tensor_attributes()
-            .set_name("X")
-            .set_dim({N, C, H, W})
-            .set_stride({dt_x.n_stride_cuda(), dt_x.c_stride_cuda(), dt_x.h_stride_cuda(), dt_x.w_stride_cuda()})
-            .set_data_type(dt));
-
-        auto make_param = [&](const char* name) {
-            return graph->tensor(fe::graph::Tensor_attributes()
-                .set_name(name)
-                .set_dim({1, C, 1, 1})
-                .set_stride({C, 1, C, C})
-                .set_data_type(fe::DataType_t::FLOAT));
-        };
-
-        auto ES = make_param("eq_scale");
-        auto EB = make_param("eq_bias");
-
-        auto mul_attr = fe::graph::Pointwise_attributes()
-            .set_mode(fe::PointwiseMode_t::MUL)
-            .set_compute_data_type(fe::DataType_t::FLOAT);
-        auto scaled = graph->pointwise(X, ES, mul_attr);
-        scaled->set_data_type(dt);
-
-        auto add_attr = fe::graph::Pointwise_attributes()
-            .set_mode(fe::PointwiseMode_t::ADD)
-            .set_compute_data_type(fe::DataType_t::FLOAT);
-        auto Y = graph->pointwise(scaled, EB, add_attr);
-        Y->set_output(true).set_name("Y").set_data_type(dt);
-
-        finalize_cudnn_graph(graph.get(), handle);
-
-        BNGraphCache cache;
-        cache.graph = graph;
-        cache.workspace_size = graph->get_workspace_size();
-        cache.tensor_to_id[X] = -1;
-        cache.tensor_to_id[ES] = -1;
-        cache.tensor_to_id[EB] = -1;
-        cache.tensor_to_id[Y] = -1;
-
-        it = s_bn_inf_caches.emplace(key, std::move(cache)).first;
-    }
-
-    BNGraphCache& cache = it->second;
-
-    std::unordered_map<std::string, int64_t> name_to_id = {
-        {"X", mp.get_dtensor(node.input_ids[0]).id},
-        {"eq_scale", mp.get_dtensor(node.input_ids[1]).id},
-        {"eq_bias", mp.get_dtensor(node.input_ids[2]).id},
-        {"Y", mp.get_dtensor(node.output_ids[0]).id},
-    };
-    update_bn_tensor_to_id(cache, name_to_id);
-
-    ctx.ensure_workspace_grow(sk, cache.workspace_size);
-    void* workspace = ctx.workspace(sk);
-
-    std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> variant_pack;
-    for (const auto& [ta, dt_id] : cache.tensor_to_id) {
-        variant_pack[ta] = ctx.ptr_at(static_cast<int>(dt_id));
-    }
-
-    TR_CUDNN_FE_CHECK(cache.graph->execute(handle, variant_pack, workspace),
-                      "BN INF execute");
 
     cudaEventRecord(state.streams[si].last_done_event, stream);
 }

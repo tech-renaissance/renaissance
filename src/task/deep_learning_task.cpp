@@ -52,6 +52,7 @@ enum class GraphSlot : uint8_t {
     CAST_DEEP_GRAD,
     CAST_FIRST_GRAD,
     NAN_CHECK_GRAD_SCALE,
+    STATS_COMM,
     FIRST_LAYER_FWD_A,
     FIRST_LAYER_FWD_B,
     INF_MAIN_A,
@@ -622,6 +623,7 @@ StreamKind DeepLearningTask::stream_for(GraphId gid) {
         case GraphId::CAST_DEEP_GRAD_FP16_TO_FP32:
         case GraphId::CAST_FIRST_GRAD_FP16_TO_FP32:
         case GraphId::NAN_CHECK_AND_GRAD_SCALING:
+        case GraphId::STATS_COMM:
         case GraphId::OPTIMIZER:
         case GraphId::EMA_UPDATE:
         case GraphId::CAST_MAIN_FP32_TO_FP16:
@@ -682,15 +684,10 @@ void DeepLearningTask::init_all_variant_memory_plans() {
 }
 
 void DeepLearningTask::init_variant_scalars() {
-#ifdef TR_USE_CUDA
-    if (!GlobalRegistry::instance().using_gpu()) return;
-
     auto& registry = GlobalRegistry::instance();
     int32_t bs = registry.get_local_batch_size();
     int32_t last_bs = registry.get_last_train_batch_size();
     int32_t val_last_bs = registry.get_last_val_batch_size();
-
-    const auto& b = active_memory_plan_->baseline();
 
     // 从 ArchPlan 中提取 BN 全局参数（所有 BN 层共享相同的 eps/momentum）
     float bn_eps = 1e-5f;
@@ -704,37 +701,111 @@ void DeepLearningTask::init_variant_scalars() {
                 break;
             }
         }
+        if (layer.kind == LayerKind::ConvBNReLU) {
+            if (std::holds_alternative<CBRLayerParams>(layer.params)) {
+                const auto& bp = std::get<CBRLayerParams>(layer.params).bn;
+                bn_eps = bp.eps;
+                bn_mom = bp.momentum;
+                break;
+            }
+        }
+        if (layer.kind == LayerKind::ConvBN) {
+            if (std::holds_alternative<CBLayerParams>(layer.params)) {
+                const auto& bp = std::get<CBLayerParams>(layer.params).bn;
+                bn_eps = bp.eps;
+                bn_mom = bp.momentum;
+                break;
+            }
+        }
+        if (layer.kind == LayerKind::FCBNReLU) {
+            if (std::holds_alternative<FBRLayerParams>(layer.params)) {
+                const auto& bp = std::get<FBRLayerParams>(layer.params).bn;
+                bn_eps = bp.eps;
+                bn_mom = bp.momentum;
+                break;
+            }
+        }
+        if (layer.kind == LayerKind::BNReLU) {
+            if (std::holds_alternative<BNReLUParams>(layer.params)) {
+                const auto& bp = std::get<BNReLUParams>(layer.params).bn;
+                bn_eps = bp.eps;
+                bn_mom = bp.momentum;
+                break;
+            }
+        }
     }
+
+    bool using_gpu = GlobalRegistry::instance().using_gpu();
 
     for (int rank = 0; rank < num_gpus_; ++rank) {
         DeviceContext& ctx = context(rank);
-        cudaSetDevice(ctx.device_id());
+#ifdef TR_USE_CUDA
+        if (using_gpu) {
+            cudaSetDevice(ctx.device_id());
+        }
+#endif
         const MemoryPlan* old_mp = ctx.memory_plan();
 
         for (size_t v = 0; v < GraphAtlas::kMaxVariants; ++v) {
             if (!variant_memory_plans_[v]) continue;
             ctx.set_memory_plan(variant_memory_plans_[v].get());
+            // 使用每个变体自己的 baseline，避免跨变体 ID 不一致风险
+            const auto& b = variant_memory_plans_[v]->baseline();
 
-            if (b.local_batch_size >= 0)
-                cudaMemcpy(ctx.ptr_at(b.local_batch_size), &bs, sizeof(int32_t),
-                           cudaMemcpyHostToDevice);
-            if (b.last_train_batch_size >= 0)
-                cudaMemcpy(ctx.ptr_at(b.last_train_batch_size), &last_bs, sizeof(int32_t),
-                           cudaMemcpyHostToDevice);
-            if (b.last_val_batch_size >= 0)
-                cudaMemcpy(ctx.ptr_at(b.last_val_batch_size), &val_last_bs, sizeof(int32_t),
-                           cudaMemcpyHostToDevice);
-            if (b.bn_epsilon >= 0)
-                cudaMemcpy(ctx.ptr_at(b.bn_epsilon), &bn_eps, sizeof(float),
-                           cudaMemcpyHostToDevice);
-            if (b.bn_momentum >= 0)
-                cudaMemcpy(ctx.ptr_at(b.bn_momentum), &bn_mom, sizeof(float),
-                           cudaMemcpyHostToDevice);
+            if (b.local_batch_size >= 0) {
+                if (using_gpu) {
+#ifdef TR_USE_CUDA
+                    cudaMemcpy(ctx.ptr_at(b.local_batch_size), &bs, sizeof(int32_t),
+                               cudaMemcpyHostToDevice);
+#endif
+                } else {
+                    *static_cast<int32_t*>(ctx.ptr_at(b.local_batch_size)) = bs;
+                }
+            }
+            if (b.last_train_batch_size >= 0) {
+                if (using_gpu) {
+#ifdef TR_USE_CUDA
+                    cudaMemcpy(ctx.ptr_at(b.last_train_batch_size), &last_bs, sizeof(int32_t),
+                               cudaMemcpyHostToDevice);
+#endif
+                } else {
+                    *static_cast<int32_t*>(ctx.ptr_at(b.last_train_batch_size)) = last_bs;
+                }
+            }
+            if (b.last_val_batch_size >= 0) {
+                if (using_gpu) {
+#ifdef TR_USE_CUDA
+                    cudaMemcpy(ctx.ptr_at(b.last_val_batch_size), &val_last_bs, sizeof(int32_t),
+                               cudaMemcpyHostToDevice);
+#endif
+                } else {
+                    *static_cast<int32_t*>(ctx.ptr_at(b.last_val_batch_size)) = val_last_bs;
+                }
+            }
+            if (b.bn_epsilon >= 0) {
+                if (using_gpu) {
+#ifdef TR_USE_CUDA
+                    cudaMemcpy(ctx.ptr_at(b.bn_epsilon), &bn_eps, sizeof(float),
+                               cudaMemcpyHostToDevice);
+#endif
+                } else {
+                    *static_cast<float*>(ctx.ptr_at(b.bn_epsilon)) = bn_eps;
+                }
+            }
+            if (b.bn_momentum >= 0) {
+                if (using_gpu) {
+#ifdef TR_USE_CUDA
+                    cudaMemcpy(ctx.ptr_at(b.bn_momentum), &bn_mom, sizeof(float),
+                               cudaMemcpyHostToDevice);
+#endif
+                } else {
+                    *static_cast<float*>(ctx.ptr_at(b.bn_momentum)) = bn_mom;
+                }
+            }
         }
 
         ctx.set_memory_plan(old_mp);
     }
-#endif
 }
 
 void DeepLearningTask::build_exec_table() {
@@ -798,6 +869,7 @@ void DeepLearningTask::build_exec_table() {
                 g[S(GraphSlot::CAST_DEEP_GRAD)]     = resolve(GraphId::CAST_DEEP_GRAD_FP16_TO_FP32, rank, v);
                 g[S(GraphSlot::CAST_FIRST_GRAD)]    = resolve(GraphId::CAST_FIRST_GRAD_FP16_TO_FP32, rank, v);
                 g[S(GraphSlot::NAN_CHECK_GRAD_SCALE)] = resolve(GraphId::NAN_CHECK_AND_GRAD_SCALING, rank, v);
+                g[S(GraphSlot::STATS_COMM)]       = resolve(GraphId::STATS_COMM, rank, v);
                 g[S(GraphSlot::FIRST_LAYER_FWD_A)]      = resolve(GraphId::FIRST_LAYER_FWD_A, rank, v);
                 g[S(GraphSlot::FIRST_LAYER_FWD_B)]      = resolve(GraphId::FIRST_LAYER_FWD_B, rank, v);
                 g[S(GraphSlot::CAST_MAIN)]        = resolve(GraphId::CAST_MAIN_FP32_TO_FP16, rank, v);
@@ -1119,6 +1191,7 @@ float DeepLearningTask::run_train_epoch_gpu() {
                 auto n_cdg     = g_n[S(GraphSlot::CAST_DEEP_GRAD)];
                 auto n_cfg     = g_n[S(GraphSlot::CAST_FIRST_GRAD)];
                 auto n_ncg     = g_n[S(GraphSlot::NAN_CHECK_GRAD_SCALE)];
+                auto n_sc      = g_n[S(GraphSlot::STATS_COMM)];
                 auto n_cm      = g_n[S(GraphSlot::CAST_MAIN)];
                 auto n_accum   = g_n[S(GraphSlot::ACCUM_METRICS)];
                 auto n_clear   = g_n[S(GraphSlot::CLEAR_METRICS)];
@@ -1228,6 +1301,9 @@ float DeepLearningTask::run_train_epoch_gpu() {
 
                     if (using_amp && n_ncg) { cudaGraphLaunch(n_ncg, s_up); sync_up(); }
 
+                    if (n_sc) cudaGraphLaunch(n_sc, s_up);
+                    sync_up();
+
                     if (n_wu) cudaGraphLaunch(n_wu, s_up);
                     if (n_lars_fc)  cudaGraphLaunch(n_lars_fc,  s_c1);
                     if (n_lars_fc2) cudaGraphLaunch(n_lars_fc2, s_c2);
@@ -1279,6 +1355,9 @@ float DeepLearningTask::run_train_epoch_gpu() {
                     sync_up();
 
                     if (using_amp && n_ncg) { cudaGraphLaunch(n_ncg, s_up); sync_up(); }
+
+                    if (n_sc) cudaGraphLaunch(n_sc, s_up);
+                    sync_up();
 
                     if (n_wu) cudaGraphLaunch(n_wu, s_up);
                     if (n_lars_fc)  cudaGraphLaunch(n_lars_fc,  s_c1);
@@ -1519,6 +1598,7 @@ float DeepLearningTask::run_train_epoch_cpu() {
     int32_t idx_dar    = idx_for(GraphId::DEEP_COMM, 0);
     int32_t idx_far    = idx_for(GraphId::FIRST_COMM, 0);
     int32_t idx_opt    = idx_for(GraphId::OPTIMIZER, 0);
+    int32_t idx_sc     = idx_for(GraphId::STATS_COMM, 0);
     int32_t idx_clear  = idx_for(GraphId::CLEAR_METRICS, 0);
 
     int32_t idx_lars_fc  = idx_for(GraphId::LARS_FC_OPT, 0);
@@ -1566,6 +1646,7 @@ float DeepLearningTask::run_train_epoch_cpu() {
 
         *static_cast<float*>(lr_ptr) = fetch_lr_for_batch(0);
         launch(idx_far);
+        launch(idx_sc);
         launch(idx_opt);
         launch(idx_lars_fc);
         launch(idx_lars_fc2);
@@ -1608,6 +1689,7 @@ float DeepLearningTask::run_train_epoch_cpu() {
             *static_cast<float*>(lr_ptr) = fetch_lr_for_batch(batch);
         }
         launch(idx_far);
+        launch(idx_sc);
         launch(idx_opt);
         launch(idx_lars_fc);
         launch(idx_lars_fc2);
@@ -1636,6 +1718,7 @@ float DeepLearningTask::run_train_epoch_cpu() {
             *static_cast<float*>(lr_ptr) = fetch_lr_for_batch(batches - 1);
         }
         launch(idx_far);
+        launch(idx_sc);
         launch(idx_opt);
         launch(idx_lars_fc);
         launch(idx_lars_fc2);

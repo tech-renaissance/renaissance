@@ -1,23 +1,47 @@
 /**
- * @file mnist_best.cpp
- * @brief MNIST MLP极限准确率测试 - 最强配置
+ * @file mini_lenet_bn.cpp
+ * @brief MNIST mini-LeNet-BN 准确率测试（含 BatchNorm）
  * @version 1.0.0
  * @date 2026-05-30
  * @author Team Tech-Renaissance
  *
- * 设计原则：
- * - 综合AWY_FINAL.md和AWY_FINAL_K.md两家之长
- * - 仅使用已验证可用的框架功能
- * - 在零框架改动前提下达到最高准确率
- *
  * 核心策略：
- * - 网络结构：1024→512→256（比AWY_FINAL_K更宽，配合Label Smoothing=0.1）
- * - 激活函数：ReLU（全票通过的最优选择）
- * - Bias：true（AWY_FINAL选择，补偿无BN）
- * - 优化器：LARS with weight_decay=5e-5（MLPerf Closed配置）
- * - 学习率：CosineAnnealing+warmup(5)（AWY_FINAL选择，更稳定）
- * - 数据增强：完整6种预处理链（前辈验证的最强组合）
- * - 训练轮数：100 epochs（平衡点）
+ * - 网络结构：conv(8,3,1,1) → bn → 400 → bn → 120 → bn → 84 → bn → 10
+ * - 激活函数：ReLU
+ * - Bias：true
+ * - 优化器：AdamW with weight_decay=1e-4
+ * - 学习率：CosineAnnealing+warmup(5)
+ * - 数据增强：完整6种预处理链
+ * - 训练轮数：100 epochs
+ *
+ * ------------------------------------------------------------------------------
+ * AdamW weight_decay 行为说明（重要，避免反复排查）
+ * ------------------------------------------------------------------------------
+ * 虽然配置 weight_decay(1e-4)，但后端对不同参数类型的处理不同：
+ *
+ *   - Weight 参数（卷积/全连接核）：使用 RANGE_UPDATE_WEIGHT_ADAMW，
+ *     weight_decay=1e-4 以 decoupled 方式生效（见
+ *     src/backend/ops/range/optimizer_op.cu 约第 130 行，w *= (1 - lr*wd)）。
+ *
+ *   - Bias/BN 参数（beta、gamma、fc bias）：graph compiler 将 AdamW 的 bias
+ *     映射到 RANGE_UPDATE_BIAS_ADAM（见 src/graph/compiler.cpp 约第 2012 行）。
+ *     为什么 BN gamma 也会被当作 bias？因为 Region 枚举顺序中
+ *     W_BN_BIAS(007) < W_BN_WEIGHT(008) < W_FC_BIAS(009)，所以
+ *     region_range(W_BN_BIAS, W_FC_BIAS) 把 W_BN_WEIGHT 也包进去了
+ *     （见 include/renaissance/core/types.h 约第 251-258 行）。
+ *
+ *     该 bias kernel 的 wd 参数：CUDA 版传 nullptr（见
+ *     src/backend/ops/range/optimizer_op.cu 约第 245 行），CPU 版传 0.0f
+ *     （见 src/backend/ops/range/optimizer_op.cpp 约第 488 行）。
+ *     kernel 内部均将 nullptr/0.0f 解释为 wd=0.0（见 optimizer_op.cu
+ *     约第 107 行 `float _wd = wd ? *wd : 0.0f;`）。
+ *
+ *     因此：bias/BN 参数（含 gamma 和 beta）的 weight_decay 被硬编码为 0.0。
+ *
+ * 这意味着：C++ 中 weight 参数有 1e-4 的 decay，而 bias/BN 参数不衰减。
+ * 这与 PyTorch 参考脚本 mini_lenet_bn.py 的 timed run 行为一致（该脚本在
+ * 正式计时阶段将 bias/BN 参数的 weight_decay 显式设为 0.0）。
+ * ------------------------------------------------------------------------------
  */
 
 #include "renaissance.h"
@@ -118,11 +142,11 @@ int main(int argc, char** argv) {
     }
 
     GLOBAL_SETTING
-        .manual_seed(123)           // 固定随机种子，确保可复现
-        .global_batch_size(128)     // 全局batch size，自动按world_size缩放
-        .train_resolution(28)      // MNIST标准分辨率
+        .manual_seed(123)
+        .global_batch_size(128)
+        .train_resolution(28)
         .val_resolution(28)
-        .use_tf32(true);           // 启用TF32加速
+        .use_tf32(true);
 
     PREPROCESSOR_SETTING
 #ifdef _WIN32
@@ -131,74 +155,74 @@ int main(int argc, char** argv) {
         .dataset("mnist", "/root/epfs/dataset/mnist")
 #endif
         .color_channels(1)
-        .load_workers(8)           // 数据加载线程数
-        .preprocess_workers(8)     // 预处理线程数
-        .cpu_binding(true)        // CPU核心绑定
+        .load_workers(8)
+        .preprocess_workers(8)
+        .cpu_binding(true)
         .normalization(NormMode::MNIST)
 
-        // 训练时使用前辈验证的最强预处理链
         .train_transforms(
-            Pad(2),                      // 扩展到32x32，为后续操作提供空间
-            RandomRotation(15.0f, 0),       // ±15度旋转
-            RandomScale(0.9f, 1.1f),        // 0.9-1.1倍缩放
-            RandomCrop(28),                 // 裁剪回28x28
-            RandomAutocontrast(0.5f),       // 50%概率自动对比度调整
-            RandomErasing(0.5f)             // 50%概率随机擦除
+            Pad(2),
+            RandomRotation(15.0f, 0),
+            RandomScale(0.9f, 1.1f),
+            RandomCrop(28),
+            RandomAutocontrast(0.5f),
+            RandomErasing(0.5f)
         )
 
-        // 验证时不做增强
         .val_transforms(DoNothing())
         .commit();
 
-    // 网络结构：1024→512→256（比AWY_FINAL_K更宽，补偿无Label Smoothing）
-    // 采用AWY_FINAL的选择：三层隐藏层 + bias=true
-
     BluePrint ultimate_mlp = seq(
-        fc(1024, true),                    // 宽首层，提供充足容量
-        make_activation(cfg.activation),   // 动态选择激活函数
-        fc(512, true),                     // 中间层递减
-        make_activation(cfg.activation),   // 动态选择激活函数
-        fc(256, true),                     // 瓶颈层
-bn(),
-        make_activation(cfg.activation),   // 动态选择激活函数
-        fc(10, true)                       // 输出层
+        conv(8, 3, 1, 1),                  // 首层：8通道 3x3 卷积，padding=1
+        bn(),                               // BatchNorm after conv
+        make_activation(cfg.activation),
+        flatten(),
+        fc(400, true),
+        bn(),                               // BatchNorm after fc (非最后一层)
+        make_activation(cfg.activation),
+        fc(120, true),
+        bn(),                               // BatchNorm after fc (非最后一层)
+        make_activation(cfg.activation),
+        fc(84, true),
+        bn(),                               // BatchNorm after fc (非最后一层)
+        make_activation(cfg.activation),
+        fc(10, true)                        // 最后一层FC，不加BN
     );
 
     DeepLearningTask task;
     task.model(ultimate_mlp)
-        .loss(CrossEntropyLoss().label_smoothing(0.1f))  // Label Smoothing交叉熵损失
+        .loss(CrossEntropyLoss().label_smoothing(0.1f))
 
-        // 初始化：Kaiming Uniform + FAN_IN（ReLU标准初始化）
         .initializer(Initializer()
             .fc(InitKind::KAIMING_UNIFORM)
+            .conv(InitKind::KAIMING_UNIFORM)
+            .bn(InitKind::STANDARD)
             .fan(FanMode::FAN_IN))
 
-        .total_epochs(kTotalEpochs)           // 充分训练轮数
+        .total_epochs(kTotalEpochs)
 
-        // 优化器：AdamW（自适应学习率优化器）
         .optimizer(AdamW()
-            .beta1(0.9f)                      // 标准动量参数
-            .beta2(0.999f)                    // 标准二阶矩参数
-            .eps(1e-8f)                       // 数值稳定性
-            .weight_decay(1e-4f))             // 适中的权重衰减
+            .beta1(0.9f)
+            .beta2(0.999f)
+            .eps(1e-8f)
+            .weight_decay(1e-4f))
 
-        // 学习率调度：CosineAnnealing + warmup
         .scheduler(CosineAnnealingLR()
-            .base_lr(0.001f)                  // AdamW标准初始学习率
-            .eta_min(1e-6f)                   // 最小学习率
-            .warmup(5)                        // 5轮预热
-            .step_by_epoch())                 // 按epoch更新
+            .base_lr(0.001f)
+            .eta_min(1e-6f)
+            .warmup(5)
+            .step_by_epoch())
 
-        .validate_every(1, 1)                // 每轮验证
-        .early_stop_by_top1(0.999f)          // 极高目标早停
+        .validate_every(1, 1)
+        .early_stop_by_top1(0.999f)
         .metrics(Metric::TRAIN_LOSS | Metric::VAL_LOSS | Metric::VAL_TOP1);
 
     std::cout << "\n=====================================\n"
-              << "Renaissance MNIST Ultimate Test\n"
+              << "Renaissance MNIST Ultimate Test (BN)\n"
               << "=====================================\n"
               << " Mode: " << mode_name(cfg.mode) << "\n"
               << "=====================================\n"
-              << "Network: 784→1024→512→256→10\n"
+              << "Network: conv(6,3,1,1)→bn → 400→bn → 120→bn → 84→bn → 10\n"
               << "Activation: " << cfg.activation << "\n"
               << "Optimizer: AdamW (beta1=0.9, beta2=0.999, eps=1e-8, wd=1e-4)\n"
               << "Scheduler: CosineAnnealing + Warmup(5)\n"
@@ -223,7 +247,6 @@ bn(),
               << " Time per Epoch: " << elapsed / kTotalEpochs << " s\n"
               << "=====================================\n";
 
-    // 根据准确率给出评价
     if (result.best_top1 >= 0.985f) {
         std::cout << "EXCELLENT! Accuracy >= 98.5%\n";
         std::cout << "Target achieved: Goal met!\n";
@@ -243,6 +266,5 @@ bn(),
 
     std::cout << "=====================================\n";
 
-    // 返回值：98.5%以上返回0（成功），否则返回1（失败）
     return result.best_top1 >= 0.985f ? 0 : 1;
 }

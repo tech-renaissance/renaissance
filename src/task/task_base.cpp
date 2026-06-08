@@ -274,33 +274,39 @@ void TaskBase::compile_impl(bool debug_mode) {
     compile_mark_compiled();
 
     if (auto* dl = dynamic_cast<DeepLearningTask*>(this)) {
-        #ifdef TR_USE_CUDA
+        // ===== 关键：init_all() 之前全局清零 Arena，清除 warmup 残留 =====
         if (GlobalRegistry::instance().using_gpu()) {
-            // ===== 关键：init_all() 之前全局清零 Arena，清除 warmup 残留 =====
+            #ifdef TR_USE_CUDA
             for (int rank = 0; rank < num_gpus_; ++rank) {
                 cudaSetDevice(backend_->contexts[rank]->device_id());
                 cudaMemset(ArenaKeeper::instance().ptr_at(rank, 0), 0,
                            active_memory_plan_->total_bytes());
                 cudaDeviceSynchronize();
             }
-            // ================================================================
+            #endif
+        } else {
+            for (int rank = 0; rank < num_gpus_; ++rank) {
+                std::memset(ArenaKeeper::instance().ptr_at(rank, 0), 0,
+                            active_memory_plan_->total_bytes());
+            }
         }
-        #endif
+        // ================================================================
 
         init_all();
 
+        // ===== 为所有 variant memory plan 执行 init_all() =====
+        // CPU 模式同样需要：不同变体（如 last-batch 变体）的 DTensor offset 可能不同，
+        // 必须单独初始化，否则切换 MemoryPlan 后会读到垃圾值。
+        dl->init_all_variant_memory_plans();
+        // ======================================================
+
+        // ===== init_all() 之后：为所有 variant 写入运行时标量（batch_size / bn_epsilon 等）=====
+        // CPU/GPU 通用路径：确保所有变体的标量都被正确初始化。
+        dl->init_variant_scalars();
+        // =========================================================
+
         #ifdef TR_USE_CUDA
         if (GlobalRegistry::instance().using_gpu()) {
-            // ===== 为所有 variant memory plan 执行 init_all() =====
-            // 确保每个 variant 的 optimizer scalars (beta/wd/tc/eps/beta2) 都被正确初始化，
-            // 而不是仅依赖 cudaMemset 清零后的零值。
-            dl->init_all_variant_memory_plans();
-            // ======================================================
-
-            // ===== init_all() 之后：为所有 variant 写入运行时标量（batch_size 等）=====
-            dl->init_variant_scalars();
-            // =========================================================
-
             // ========== 诊断：init_all() 后立即读取 scaling / lr ==========
             const auto& b = dl->active_memory_plan_->baseline();
             for (int rank = 0; rank < num_gpus_; ++rank) {

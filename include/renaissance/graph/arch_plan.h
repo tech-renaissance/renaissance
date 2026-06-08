@@ -95,16 +95,19 @@ struct InvResidualLayerParams {
 };
 struct CBRLayerParams {
     int out_ch, k, s, p;
-    bool operator==(const CBRLayerParams& o) const { return out_ch == o.out_ch && k == o.k && s == o.s && p == o.p; }
+    BNParams bn;
+    bool operator==(const CBRLayerParams& o) const { return out_ch == o.out_ch && k == o.k && s == o.s && p == o.p && bn == o.bn; }
 };
 struct FBRLayerParams {
     int out_features;
     bool bias = true;
-    bool operator==(const FBRLayerParams& o) const { return out_features == o.out_features && bias == o.bias; }
+    BNParams bn;
+    bool operator==(const FBRLayerParams& o) const { return out_features == o.out_features && bias == o.bias && bn == o.bn; }
 };
 struct CBLayerParams {
     int out_ch, k, s, p;
-    bool operator==(const CBLayerParams& o) const { return out_ch == o.out_ch && k == o.k && s == o.s && p == o.p; }
+    BNParams bn;
+    bool operator==(const CBLayerParams& o) const { return out_ch == o.out_ch && k == o.k && s == o.s && p == o.p && bn == o.bn; }
 };
 struct CRLayerParams {
     int out_ch, k, s, p;
@@ -119,6 +122,11 @@ struct EmptyParams {
     bool operator==(const EmptyParams&) const { return true; }
 };
 
+struct BNReLUParams {
+    BNParams bn;
+    bool operator==(const BNReLUParams& o) const { return bn == o.bn; }
+};
+
 const char* kind_name(LayerKind k);
 
 using LayerParam = std::variant<
@@ -129,7 +137,7 @@ using LayerParam = std::variant<
     InvResidualLayerParams,
     CBRLayerParams, FBRLayerParams,
     CBLayerParams, CRLayerParams, GapFCLayerParams,
-    EmptyParams
+    BNReLUParams, EmptyParams
 >;
 
 struct ArchLayer {

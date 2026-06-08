@@ -27,7 +27,9 @@ static void expand_primitive_impl(const Layer::Node& node, std::vector<ArchLayer
         break;
     }
     case NodeKind::BN: {
-        out.push_back({LayerKind::Bn2d, EmptyParams{}, "bn", {}, {}, false, false, src_id});
+        auto& p = std::get<BNParam>(node.payload);
+        out.push_back({LayerKind::Bn2d, BNParams{static_cast<float>(p.eps), static_cast<float>(p.momentum)},
+                       "bn", {}, {}, false, false, src_id});
         break;
     }
     case NodeKind::ReLU: {
