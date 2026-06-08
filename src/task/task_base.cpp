@@ -1400,16 +1400,10 @@ void TaskBase::init_all() {
     }
 
     // 第 2 步：ZERO_GAMMA 策略 —— BN3 权重覆盖为 CONSTANTS(0.0)
+    // NOTE: ZERO_GAMMA 当前未完全验证（BasicBlock 的 bn2 被错误标记为 BN3 等
+    // 潜在问题），暂时禁用，待后续修复后再启用。
     if (initializer_.is_zero_gamma()) {
-        InitConfig bn3_cfg{0.0f, InitKind::CONSTANTS, FanMode::FAN_IN};
-        for (int32_t id : initializer_.bn3_weight_ids()) {
-            const DTensor& dt = active_memory_plan_->get_dtensor(id);
-            init(dt, bn3_cfg);
-        }
-        if (debug_mode_) {
-            std::cout << "[DRY RUN] ZERO_GAMMA: " << initializer_.bn3_weight_ids().size()
-                      << " BN3 weights overridden to CONSTANTS(0.0)\n";
-        }
+        TR_NOT_IMPLEMENTED("Zero Gamma is currently NOT supported.");
     }
 
     // 第 3 步：初始化 per-RANK dropout seed

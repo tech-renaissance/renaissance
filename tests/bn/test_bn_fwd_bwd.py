@@ -2,7 +2,7 @@
 """
 BN FWD+BWD+INF 测试 — PyTorch 内置 BatchNorm2d 参考数据生成
 
-与 test_bn_fwd_bwd.py 的关键区别：
+与 legacy 版 test_bn_fwd_bwd.py（tests/op/test_bn_fwd_bwd_legacy.py）的关键区别：
   - FWD: 使用 nn.BatchNorm2d (training=True)，即 PyTorch C++ batch_norm 前向 kernel
   - BWD: 使用 F.batch_norm(training=True) + autograd，即 PyTorch C++ batch_norm_backward kernel
   - INF: 使用 F.batch_norm(training=False)，即 PyTorch eval 模式推理路径

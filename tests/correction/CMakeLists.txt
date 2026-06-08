@@ -384,10 +384,6 @@ add_executable(test_dl_full test_dl_full.cpp)
 setup_dl_test(test_dl_full)
 message(STATUS "  - test_dl_full: DeepLearningTask full training test (CPU/GPU/AMP)")
 
-add_executable(mnist_best_adamw mnist_best_adamw.cpp)
-setup_dl_test(mnist_best_adamw)
-message(STATUS "  - mnist_best_adamw: MNIST MLP ultimate accuracy test (AdamW)")
-
 add_executable(mnist_best_lars mnist_best_lars.cpp)
 setup_dl_test(mnist_best_lars)
 message(STATUS "  - mnist_best_lars: MNIST MLP ultimate accuracy test (LARS reference)")

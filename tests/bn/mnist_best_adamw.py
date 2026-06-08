@@ -141,14 +141,11 @@ if __name__ == '__main__':
 
     pin_mem = (device.type == "cuda")
     train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True,
-                              pin_memory=pin_mem, num_workers=8, persistent_workers=True)
+                              pin_memory=pin_mem, num_workers=4, persistent_workers=True)
     val_loader   = DataLoader(val_set,   batch_size=batch_size, shuffle=False,
-                              pin_memory=pin_mem, num_workers=8, persistent_workers=True)
+                              pin_memory=pin_mem, num_workers=4, persistent_workers=True)
 
     model = UltimateMLP().to(device)
-
-    if hasattr(torch, "compile") and device.type == "cuda":
-        model = torch.compile(model, mode="max-autotune")
 
     criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
 
@@ -176,13 +173,11 @@ if __name__ == '__main__':
     # ====================================================================
     # WARMUP  (GPU / AMP only)
     #
-    # Purpose: trigger torch.compile(max-autotune) so compilation finishes
-    #          BEFORE the timed 100-epoch loop starts.
-    # After warmup: re-seed + re-init.  torch.compile FX-graph cache makes
-    #               the second compilation near-instant.
+    # Purpose: run a dummy forward/backward to warm up CUDA context,
+    #          then re-initialize for a clean timed run.
     # ====================================================================
-    if hasattr(torch, "compile") and device.type == "cuda":
-        print("\n--- Warmup: triggering max-autotune compilation ---", flush=True)
+    if device.type == "cuda":
+        print("\n--- Warmup: eager mode warm-up ---", flush=True)
         tw0 = time.perf_counter()
 
         dummy_data  = torch.randn(batch_size, 1, 28, 28, device=device)
@@ -218,7 +213,6 @@ if __name__ == '__main__':
         # Re-initialize everything so the timed run is pure training cost
         torch.manual_seed(123)
         model = UltimateMLP().to(device)
-        model = torch.compile(model, mode="max-autotune")
 
         # 重新分组参数
         weight_params = []

@@ -232,6 +232,14 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/integration AND IS_DIRECTORY ${CMAKE_CURRE
 endif()
 
 # ============================================================================
+# bn 子目录（BatchNorm 算子数学正确性验证测试）
+# ============================================================================
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/bn AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/bn)
+    add_subdirectory(bn)
+    message(STATUS "Including bn operator correctness tests")
+endif()
+
+# ============================================================================
 # op 子目录（算子数学正确性验证测试）
 # ============================================================================
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/op AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/op)

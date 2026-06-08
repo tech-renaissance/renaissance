@@ -187,9 +187,10 @@ InitConfig Initializer::derive(Region region) const {
     // 第三段：权重区 → 按层类型分发
     // ====================
 
-    // EQ scale → CONSTANTS(0.0)（首次推理时由 INF 算子重新计算）
+    // EQ scale → CONSTANTS(1.0)（理论初始值 gamma/sqrt(running_var+eps) ≈ 1.0；
+    // 实际推理时由 INF 算子重新计算并覆盖，但默认值应与理论值一致）
     if (region == Region::W_EQ_SCALE) {
-        return InitConfig{0.0f, InitKind::CONSTANTS, FanMode::FAN_IN};
+        return InitConfig{1.0f, InitKind::CONSTANTS, FanMode::FAN_IN};
     }
 
     // BN weight → CONSTANTS(1.0)

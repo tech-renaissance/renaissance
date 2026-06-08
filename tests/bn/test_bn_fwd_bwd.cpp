@@ -221,7 +221,7 @@ int main(int argc, char** argv) {
 #else
     py << "python ";
 #endif
-    py << std::string(TR_PROJECT_ROOT) << "/tests/op/test_bn_fwd_bwd.py"
+    py << std::string(TR_PROJECT_ROOT) << "/tests/bn/test_bn_fwd_bwd.py"
        << (cfg.is_bn1d ? " --bn1d" : "")
        << " --batch " << cfg.batch
        << " --H " << cfg.H

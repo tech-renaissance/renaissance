@@ -1,0 +1,510 @@
+Device: GPU [0]
+Random Seed: 0x000000000000007B
+
+=====================================
+Renaissance MNIST Ultimate Test
+=====================================
+ Mode: GPU  [FP32]
+=====================================
+Network: 784→1024→BN→512→BN→256→BN→10
+Activation: leaky_relu
+Optimizer: AdamW (beta1=0.9, beta2=0.999, eps=1e-8, wd=1e-4)
+Scheduler: CosineAnnealing + Warmup(5)
+Augmentation: Pad+Rotation+Scale+Crop+Autocontrast+Erasing
+Training: 100 epochs, batch_size=128
+=====================================
+[2026-06-08 16:33:20.981] [INFO ] [backend] Registered BN1D/BN2D ops (FP32/AMP x FWD/BWD/INF)
+[2026-06-08 16:33:21.164] [INFO ] [backend] DeviceContext 0: workspace for stream 2 grown to 8704 bytes
+
+========== COMPILE DIAGNOSTICS ==========
+--- ArchPlan ---
+ArchPlan: 12 layers, first_layer_index=0
+Input: [1, 28, 28, 1]
+----------------------------------------------------------
+   0  Flatten                  [1, 28, 28, 1]         [1, 1, 1, 784]         [FIRST] 
+   1  FC                       [1, 1, 1, 784]         [1, 1, 1, 1024]         out=1024 bias=1
+   2  Bn1d                     [1, 1, 1, 1024]        [1, 1, 1, 1024]         
+   3  LeakyReLU                [1, 1, 1, 1024]        [1, 1, 1, 1024]         
+   4  FC                       [1, 1, 1, 1024]        [1, 1, 1, 512]          out=512 bias=1
+   5  Bn1d                     [1, 1, 1, 512]         [1, 1, 1, 512]          
+   6  LeakyReLU                [1, 1, 1, 512]         [1, 1, 1, 512]          
+   7  FC                       [1, 1, 1, 512]         [1, 1, 1, 256]          out=256 bias=1
+   8  Bn1d                     [1, 1, 1, 256]         [1, 1, 1, 256]          
+   9  LeakyReLU                [1, 1, 1, 256]         [1, 1, 1, 256]          
+  10  FC                       [1, 1, 1, 256]         [1, 1, 1, 10]           out=10 bias=1
+  11  SoftmaxCE                [1, 1, 1, 10]          [1, 1, 1, 10]           classes=10
+
+--- MemoryPlan ---
+MemoryPlan Layout (total_bytes=27552256)
+===============================================
+Region [B_PREV_MEAN]  ID=0  offset=0  bytes=8704
+-----------------------------------------------
+  Tensor[id=43]: offset=0,  bytes=4608,  dtype=FP32,  shape=[1,1,1,1024]
+  Tensor[id=72]: offset=4608,  bytes=2560,  dtype=FP32,  shape=[1,1,1,512]
+  Tensor[id=101]: offset=7168,  bytes=1536,  dtype=FP32,  shape=[1,1,1,256]
+-----------------------------------------------
+===============================================
+Region [B_PREV_VAR]  ID=1  offset=8704  bytes=8704
+-----------------------------------------------
+  Tensor[id=44]: offset=8704,  bytes=4608,  dtype=FP32,  shape=[1,1,1,1024]
+  Tensor[id=73]: offset=13312,  bytes=2560,  dtype=FP32,  shape=[1,1,1,512]
+  Tensor[id=102]: offset=15872,  bytes=1536,  dtype=FP32,  shape=[1,1,1,256]
+-----------------------------------------------
+===============================================
+Region [B_NEXT_MEAN]  ID=2  offset=17408  bytes=8704
+-----------------------------------------------
+  Tensor[id=45]: offset=17408,  bytes=4608,  dtype=FP32,  shape=[1,1,1,1024]
+  Tensor[id=74]: offset=22016,  bytes=2560,  dtype=FP32,  shape=[1,1,1,512]
+  Tensor[id=103]: offset=24576,  bytes=1536,  dtype=FP32,  shape=[1,1,1,256]
+-----------------------------------------------
+===============================================
+Region [B_NEXT_VAR]  ID=3  offset=26112  bytes=8704
+-----------------------------------------------
+  Tensor[id=46]: offset=26112,  bytes=4608,  dtype=FP32,  shape=[1,1,1,1024]
+  Tensor[id=75]: offset=30720,  bytes=2560,  dtype=FP32,  shape=[1,1,1,512]
+  Tensor[id=104]: offset=33280,  bytes=1536,  dtype=FP32,  shape=[1,1,1,256]
+-----------------------------------------------
+===============================================
+Region [W_EQ_BIAS]  ID=4  offset=34816  bytes=8704
+-----------------------------------------------
+  Tensor[id=49]: offset=34816,  bytes=4608,  dtype=FP32,  shape=[1,1,1,1024]
+  Tensor[id=78]: offset=39424,  bytes=2560,  dtype=FP32,  shape=[1,1,1,512]
+  Tensor[id=107]: offset=41984,  bytes=1536,  dtype=FP32,  shape=[1,1,1,256]
+-----------------------------------------------
+===============================================
+Region [W_EQ_SCALE]  ID=5  offset=43520  bytes=8704
+-----------------------------------------------
+  Tensor[id=50]: offset=43520,  bytes=4608,  dtype=FP32,  shape=[1,1,1,1024]
+  Tensor[id=79]: offset=48128,  bytes=2560,  dtype=FP32,  shape=[1,1,1,512]
+  Tensor[id=108]: offset=50688,  bytes=1536,  dtype=FP32,  shape=[1,1,1,256]
+-----------------------------------------------
+===============================================
+Region [W_BN_BIAS]  ID=6  offset=52224  bytes=8704
+-----------------------------------------------
+  Tensor[id=41]: offset=52224,  bytes=4608,  dtype=FP32,  shape=[1,1,1,1024]
+  Tensor[id=70]: offset=56832,  bytes=2560,  dtype=FP32,  shape=[1,1,1,512]
+  Tensor[id=99]: offset=59392,  bytes=1536,  dtype=FP32,  shape=[1,1,1,256]
+-----------------------------------------------
+===============================================
+Region [W_BN_WEIGHT]  ID=7  offset=60928  bytes=8704
+-----------------------------------------------
+  Tensor[id=40]: offset=60928,  bytes=4608,  dtype=FP32,  shape=[1,1,1,1024]
+  Tensor[id=69]: offset=65536,  bytes=2560,  dtype=FP32,  shape=[1,1,1,512]
+  Tensor[id=98]: offset=68096,  bytes=1536,  dtype=FP32,  shape=[1,1,1,256]
+-----------------------------------------------
+===============================================
+Region [W_FC_BIAS]  ID=8  offset=69632  bytes=9216
+-----------------------------------------------
+  Tensor[id=30]: offset=69632,  bytes=4608,  dtype=FP32,  shape=[1,1,1,1024]
+  Tensor[id=59]: offset=74240,  bytes=2560,  dtype=FP32,  shape=[1,1,1,512]
+  Tensor[id=88]: offset=76800,  bytes=1536,  dtype=FP32,  shape=[1,1,1,256]
+  Tensor[id=117]: offset=78336,  bytes=512,  dtype=FP32,  shape=[1,1,1,10]
+-----------------------------------------------
+===============================================
+Region [W_FC_WEIGHT]  ID=9  offset=78848  bytes=5844992
+-----------------------------------------------
+  Tensor[id=29]: offset=78848,  bytes=3211776,  dtype=FP32,  shape=[1024,1,1,784]
+  Tensor[id=58]: offset=3290624,  bytes=2097664,  dtype=FP32,  shape=[512,1,1,1024]
+  Tensor[id=87]: offset=5388288,  bytes=524800,  dtype=FP32,  shape=[256,1,1,512]
+  Tensor[id=116]: offset=5913088,  bytes=10752,  dtype=FP32,  shape=[10,1,1,256]
+-----------------------------------------------
+===============================================
+Region [G_BN_BIAS]  ID=24  offset=5923840  bytes=8704
+-----------------------------------------------
+  Tensor[id=48]: offset=5923840,  bytes=4608,  dtype=FP32,  shape=[1,1,1,1024]
+  Tensor[id=77]: offset=5928448,  bytes=2560,  dtype=FP32,  shape=[1,1,1,512]
+  Tensor[id=106]: offset=5931008,  bytes=1536,  dtype=FP32,  shape=[1,1,1,256]
+-----------------------------------------------
+===============================================
+Region [G_BN_WEIGHT]  ID=25  offset=5932544  bytes=8704
+-----------------------------------------------
+  Tensor[id=47]: offset=5932544,  bytes=4608,  dtype=FP32,  shape=[1,1,1,1024]
+  Tensor[id=76]: offset=5937152,  bytes=2560,  dtype=FP32,  shape=[1,1,1,512]
+  Tensor[id=105]: offset=5939712,  bytes=1536,  dtype=FP32,  shape=[1,1,1,256]
+-----------------------------------------------
+===============================================
+Region [G_FC_BIAS]  ID=26  offset=5941248  bytes=9216
+-----------------------------------------------
+  Tensor[id=33]: offset=5941248,  bytes=4608,  dtype=FP32,  shape=[1,1,1,1024]
+  Tensor[id=62]: offset=5945856,  bytes=2560,  dtype=FP32,  shape=[1,1,1,512]
+  Tensor[id=91]: offset=5948416,  bytes=1536,  dtype=FP32,  shape=[1,1,1,256]
+  Tensor[id=120]: offset=5949952,  bytes=512,  dtype=FP32,  shape=[1,1,1,10]
+-----------------------------------------------
+===============================================
+Region [G_FC_WEIGHT]  ID=27  offset=5950464  bytes=5844992
+-----------------------------------------------
+  Tensor[id=32]: offset=5950464,  bytes=3211776,  dtype=FP32,  shape=[1024,1,1,784]
+  Tensor[id=61]: offset=9162240,  bytes=2097664,  dtype=FP32,  shape=[512,1,1,1024]
+  Tensor[id=90]: offset=11259904,  bytes=524800,  dtype=FP32,  shape=[256,1,1,512]
+  Tensor[id=119]: offset=11784704,  bytes=10752,  dtype=FP32,  shape=[10,1,1,256]
+-----------------------------------------------
+===============================================
+Region [R_RESULT]  ID=30  offset=11795456  bytes=1536
+-----------------------------------------------
+  Tensor[id=9]: offset=11795456,  bytes=512,  dtype=FP32,  shape=[1,1,1,1]
+  Tensor[id=10]: offset=11795968,  bytes=512,  dtype=FP32,  shape=[1,1,1,1]
+  Tensor[id=11]: offset=11796480,  bytes=512,  dtype=FP32,  shape=[1,1,1,1]
+-----------------------------------------------
+===============================================
+Region [M_BN_BIAS]  ID=34  offset=11796992  bytes=8704
+-----------------------------------------------
+  Tensor[id=54]: offset=11796992,  bytes=4608,  dtype=FP32,  shape=[1,1,1,1024]
+  Tensor[id=83]: offset=11801600,  bytes=2560,  dtype=FP32,  shape=[1,1,1,512]
+  Tensor[id=112]: offset=11804160,  bytes=1536,  dtype=FP32,  shape=[1,1,1,256]
+-----------------------------------------------
+===============================================
+Region [M_BN_WEIGHT]  ID=35  offset=11805696  bytes=8704
+-----------------------------------------------
+  Tensor[id=53]: offset=11805696,  bytes=4608,  dtype=FP32,  shape=[1,1,1,1024]
+  Tensor[id=82]: offset=11810304,  bytes=2560,  dtype=FP32,  shape=[1,1,1,512]
+  Tensor[id=111]: offset=11812864,  bytes=1536,  dtype=FP32,  shape=[1,1,1,256]
+-----------------------------------------------
+===============================================
+Region [M_FC_BIAS]  ID=36  offset=11814400  bytes=9216
+-----------------------------------------------
+  Tensor[id=37]: offset=11814400,  bytes=4608,  dtype=FP32,  shape=[1,1,1,1024]
+  Tensor[id=66]: offset=11819008,  bytes=2560,  dtype=FP32,  shape=[1,1,1,512]
+  Tensor[id=95]: offset=11821568,  bytes=1536,  dtype=FP32,  shape=[1,1,1,256]
+  Tensor[id=124]: offset=11823104,  bytes=512,  dtype=FP32,  shape=[1,1,1,10]
+-----------------------------------------------
+===============================================
+Region [M_FC_WEIGHT]  ID=37  offset=11823616  bytes=5844992
+-----------------------------------------------
+  Tensor[id=36]: offset=11823616,  bytes=3211776,  dtype=FP32,  shape=[1024,1,1,784]
+  Tensor[id=65]: offset=15035392,  bytes=2097664,  dtype=FP32,  shape=[512,1,1,1024]
+  Tensor[id=94]: offset=17133056,  bytes=524800,  dtype=FP32,  shape=[256,1,1,512]
+  Tensor[id=123]: offset=17657856,  bytes=10752,  dtype=FP32,  shape=[10,1,1,256]
+-----------------------------------------------
+===============================================
+Region [V_BN_BIAS]  ID=40  offset=17668608  bytes=8704
+-----------------------------------------------
+  Tensor[id=56]: offset=17668608,  bytes=4608,  dtype=FP32,  shape=[1,1,1,1024]
+  Tensor[id=85]: offset=17673216,  bytes=2560,  dtype=FP32,  shape=[1,1,1,512]
+  Tensor[id=114]: offset=17675776,  bytes=1536,  dtype=FP32,  shape=[1,1,1,256]
+-----------------------------------------------
+===============================================
+Region [V_BN_WEIGHT]  ID=41  offset=17677312  bytes=8704
+-----------------------------------------------
+  Tensor[id=55]: offset=17677312,  bytes=4608,  dtype=FP32,  shape=[1,1,1,1024]
+  Tensor[id=84]: offset=17681920,  bytes=2560,  dtype=FP32,  shape=[1,1,1,512]
+  Tensor[id=113]: offset=17684480,  bytes=1536,  dtype=FP32,  shape=[1,1,1,256]
+-----------------------------------------------
+===============================================
+Region [V_FC_BIAS]  ID=42  offset=17686016  bytes=9216
+-----------------------------------------------
+  Tensor[id=39]: offset=17686016,  bytes=4608,  dtype=FP32,  shape=[1,1,1,1024]
+  Tensor[id=68]: offset=17690624,  bytes=2560,  dtype=FP32,  shape=[1,1,1,512]
+  Tensor[id=97]: offset=17693184,  bytes=1536,  dtype=FP32,  shape=[1,1,1,256]
+  Tensor[id=126]: offset=17694720,  bytes=512,  dtype=FP32,  shape=[1,1,1,10]
+-----------------------------------------------
+===============================================
+Region [V_FC_WEIGHT]  ID=43  offset=17695232  bytes=5844992
+-----------------------------------------------
+  Tensor[id=38]: offset=17695232,  bytes=3211776,  dtype=FP32,  shape=[1024,1,1,784]
+  Tensor[id=67]: offset=20907008,  bytes=2097664,  dtype=FP32,  shape=[512,1,1,1024]
+  Tensor[id=96]: offset=23004672,  bytes=524800,  dtype=FP32,  shape=[256,1,1,512]
+  Tensor[id=125]: offset=23529472,  bytes=10752,  dtype=FP32,  shape=[10,1,1,256]
+-----------------------------------------------
+===============================================
+Region [I_A_LABEL]  ID=49  offset=23540224  bytes=1024
+-----------------------------------------------
+  Tensor[id=0]: offset=23540224,  bytes=1024,  dtype=INT32,  shape=[128,1,1,1]
+-----------------------------------------------
+===============================================
+Region [I_A_DATA]  ID=50  offset=23541248  bytes=401920
+-----------------------------------------------
+  Tensor[id=1]: offset=23541248,  bytes=401920,  dtype=FP32,  shape=[128,28,28,1]
+-----------------------------------------------
+===============================================
+Region [I_B_LABEL]  ID=51  offset=23943168  bytes=1024
+-----------------------------------------------
+  Tensor[id=2]: offset=23943168,  bytes=1024,  dtype=INT32,  shape=[128,1,1,1]
+-----------------------------------------------
+===============================================
+Region [I_B_DATA]  ID=52  offset=23944192  bytes=401920
+-----------------------------------------------
+  Tensor[id=3]: offset=23944192,  bytes=401920,  dtype=FP32,  shape=[128,28,28,1]
+-----------------------------------------------
+===============================================
+Region [F_FEATURE_FP32]  ID=53  offset=24346112  bytes=3170304
+-----------------------------------------------
+  Tensor[id=28]: offset=24346112,  bytes=401920,  dtype=FP32,  shape=[128,1,1,784]
+  Tensor[id=31]: offset=24748032,  bytes=524800,  dtype=FP32,  shape=[128,1,1,1024]
+  Tensor[id=42]: offset=25272832,  bytes=524800,  dtype=FP32,  shape=[128,1,1,1024]
+  Tensor[id=57]: offset=25797632,  bytes=524800,  dtype=FP32,  shape=[128,1,1,1024]
+  Tensor[id=60]: offset=26322432,  bytes=262656,  dtype=FP32,  shape=[128,1,1,512]
+  Tensor[id=71]: offset=26585088,  bytes=262656,  dtype=FP32,  shape=[128,1,1,512]
+  Tensor[id=86]: offset=26847744,  bytes=262656,  dtype=FP32,  shape=[128,1,1,512]
+  Tensor[id=89]: offset=27110400,  bytes=131584,  dtype=FP32,  shape=[128,1,1,256]
+  Tensor[id=100]: offset=27241984,  bytes=131584,  dtype=FP32,  shape=[128,1,1,256]
+  Tensor[id=115]: offset=27373568,  bytes=131584,  dtype=FP32,  shape=[128,1,1,256]
+  Tensor[id=118]: offset=27505152,  bytes=5632,  dtype=FP32,  shape=[128,1,1,10]
+  Tensor[id=127]: offset=27510784,  bytes=5632,  dtype=FP32,  shape=[128,1,1,10]
+-----------------------------------------------
+===============================================
+Region [S_SCALAR_FP32]  ID=57  offset=27516416  bytes=6144
+-----------------------------------------------
+  Tensor[id=6]: offset=27516416,  bytes=512,  dtype=FP32,  shape=[1,1,1,1]
+  Tensor[id=7]: offset=27516928,  bytes=512,  dtype=FP32,  shape=[1,1,1,1]
+  Tensor[id=8]: offset=27517440,  bytes=512,  dtype=FP32,  shape=[1,1,1,1]
+  Tensor[id=18]: offset=27517952,  bytes=512,  dtype=FP32,  shape=[1,1,1,1]
+  Tensor[id=19]: offset=27518464,  bytes=512,  dtype=FP32,  shape=[1,1,1,1]
+  Tensor[id=20]: offset=27518976,  bytes=512,  dtype=FP32,  shape=[1,1,1,1]
+  Tensor[id=21]: offset=27519488,  bytes=512,  dtype=FP32,  shape=[1,1,1,1]
+  Tensor[id=23]: offset=27520000,  bytes=512,  dtype=FP32,  shape=[1,1,1,1]
+  Tensor[id=24]: offset=27520512,  bytes=512,  dtype=FP32,  shape=[1,1,1,1]
+  Tensor[id=26]: offset=27521024,  bytes=512,  dtype=FP32,  shape=[1,1,1,1]
+  Tensor[id=27]: offset=27521536,  bytes=512,  dtype=FP32,  shape=[1,1,1,1]
+  Tensor[id=130]: offset=27522048,  bytes=512,  dtype=FP32,  shape=[1,1,1,1]
+-----------------------------------------------
+===============================================
+Region [S_SCALAR_INT32]  ID=59  offset=27522560  bytes=3072
+-----------------------------------------------
+  Tensor[id=5]: offset=27522560,  bytes=512,  dtype=INT32,  shape=[1,1,1,1]
+  Tensor[id=12]: offset=27523072,  bytes=512,  dtype=INT32,  shape=[1,1,1,1]
+  Tensor[id=13]: offset=27523584,  bytes=512,  dtype=INT32,  shape=[1,1,1,1]
+  Tensor[id=14]: offset=27524096,  bytes=512,  dtype=INT32,  shape=[1,1,1,1]
+  Tensor[id=22]: offset=27524608,  bytes=512,  dtype=INT32,  shape=[1,1,1,1]
+  Tensor[id=25]: offset=27525120,  bytes=512,  dtype=INT32,  shape=[1,1,1,2]
+-----------------------------------------------
+===============================================
+Region [T_TEMP_FP32]  ID=62  offset=27525632  bytes=23040
+-----------------------------------------------
+  Tensor[id=51]: offset=27525632,  bytes=4608,  dtype=FP32,  shape=[1,1,1,1024]
+  Tensor[id=52]: offset=27530240,  bytes=4608,  dtype=FP32,  shape=[1,1,1,1024]
+  Tensor[id=80]: offset=27534848,  bytes=2560,  dtype=FP32,  shape=[1,1,1,512]
+  Tensor[id=81]: offset=27537408,  bytes=2560,  dtype=FP32,  shape=[1,1,1,512]
+  Tensor[id=109]: offset=27539968,  bytes=1536,  dtype=FP32,  shape=[1,1,1,256]
+  Tensor[id=110]: offset=27541504,  bytes=1536,  dtype=FP32,  shape=[1,1,1,256]
+  Tensor[id=128]: offset=27543040,  bytes=5632,  dtype=FP32,  shape=[128,1,1,10]
+-----------------------------------------------
+===============================================
+Region [T_TEMP_INT32]  ID=64  offset=27548672  bytes=1024
+-----------------------------------------------
+  Tensor[id=4]: offset=27548672,  bytes=1024,  dtype=INT32,  shape=[128,1,1,1]
+-----------------------------------------------
+===============================================
+Region [R_PREDICTED_LABEL]  ID=66  offset=27549696  bytes=1024
+-----------------------------------------------
+  Tensor[id=129]: offset=27549696,  bytes=1024,  dtype=INT32,  shape=[128,1,1,1]
+-----------------------------------------------
+===============================================
+Region [R_RESULT_ACCUMULATED]  ID=67  offset=27550720  bytes=1536
+-----------------------------------------------
+  Tensor[id=15]: offset=27550720,  bytes=512,  dtype=FP32,  shape=[1,1,1,1]
+  Tensor[id=16]: offset=27551232,  bytes=512,  dtype=FP32,  shape=[1,1,1,1]
+  Tensor[id=17]: offset=27551744,  bytes=512,  dtype=FP32,  shape=[1,1,1,1]
+-----------------------------------------------
+===============================================
+
+--- Train ComputationGraph ---
+=== ComputationGraph Debug Dump ===
+[GraphId 0 / TRANSFER_A] 1 nodes:
+  RANGE_H2D_COPY_A outputs=[R49], [R50]
+[GraphId 1 / TRANSFER_B] 1 nodes:
+  RANGE_H2D_COPY_B outputs=[R51], [R52]
+[GraphId 2 / FIRST_LAYER_FWD_A] 2 nodes:
+  UNKNOWN inputs=[0] outputs=[4]
+  FLATTEN_FP32_FWD inputs=[1] outputs=[28]
+[GraphId 3 / FIRST_LAYER_FWD_B] 2 nodes:
+  UNKNOWN inputs=[2] outputs=[4]
+  FLATTEN_FP32_FWD inputs=[3] outputs=[28]
+[GraphId 4 / DEEP_FWD_BWD] 22 nodes:
+  FC_FP32_FWD inputs=[28, 29, 30] outputs=[31]
+  BN1D_FP32_FWD inputs=[31, 40, 41, 45, 46, 26, 27] outputs=[42, 51, 52]
+  LEAKY_RELU_FP32_FWD inputs=[42] outputs=[57]
+  FC_FP32_FWD inputs=[57, 58, 59] outputs=[60]
+  BN1D_FP32_FWD inputs=[60, 69, 70, 74, 75, 26, 27] outputs=[71, 80, 81]
+  LEAKY_RELU_FP32_FWD inputs=[71] outputs=[86]
+  FC_FP32_FWD inputs=[86, 87, 88] outputs=[89]
+  BN1D_FP32_FWD inputs=[89, 98, 99, 103, 104, 26, 27] outputs=[100, 109, 110]
+  LEAKY_RELU_FP32_FWD inputs=[100] outputs=[115]
+  FC_FP32_FWD inputs=[115, 116, 117] outputs=[118]
+  SOFTMAX_CE_FP32_FWD inputs=[118, 7, 12, 4, 8] outputs=[9, 130, 129, 128, 10, 11]
+  SOFTMAX_CE_FP32_BWD inputs=[127, 128, 130, 7, 4, 8] outputs=[127]
+  FC_FP32_BWD inputs=[127, 116, 118, 115] outputs=[115, 119, 120]
+  LEAKY_RELU_FP32_BWD inputs=[115, 115] outputs=[100]
+  BN1D_FP32_BWD inputs=[100, 98, 109, 110, 89] outputs=[89, 105, 106]
+  FC_FP32_BWD inputs=[89, 87, 89, 86] outputs=[86, 90, 91]
+  LEAKY_RELU_FP32_BWD inputs=[86, 86] outputs=[71]
+  BN1D_FP32_BWD inputs=[71, 69, 80, 81, 60] outputs=[60, 76, 77]
+  FC_FP32_BWD inputs=[60, 58, 60, 57] outputs=[57, 61, 62]
+  LEAKY_RELU_FP32_BWD inputs=[57, 57] outputs=[42]
+  BN1D_FP32_BWD inputs=[42, 40, 51, 52, 31] outputs=[31, 47, 48]
+  FC_FP32_BWD inputs=[31, 29, 31, 28] outputs=[28, 32, 33]
+[GraphId 5 / ZERO_GRAD] 1 nodes:
+  RANGE_CLEAR outputs=[R24 - R33]
+[GraphId 6 / FIRST_LAYER_BWD_A] 1 nodes:
+  FLATTEN_FP32_BWD inputs=[28] outputs=[1]
+[GraphId 7 / FIRST_LAYER_BWD_B] 1 nodes:
+  FLATTEN_FP32_BWD inputs=[28] outputs=[3]
+[GraphId 8 / FIRST_COMM] 1 nodes:
+  RANGE_MEAN_ALLREDUCE inputs=[R24 - R28] outputs=[R24 - R28]
+[GraphId 9 / DEEP_COMM] 1 nodes:
+  RANGE_MEAN_ALLREDUCE inputs=[R29 - R30] outputs=[R29 - R30]
+[GraphId 12 / NAN_CHECK_AND_GRAD_SCALING] 1 nodes:
+  RANGE_CHECK_NAN inputs=[R24 - R29] outputs=[5]
+[GraphId 13 / STATS_COMM] 2 nodes:
+  RANGE_BN_STATS_ALLREDUCE inputs=[R0 - R1], [R2 - R3] outputs=[R0 - R1], [R2 - R3]
+  RANGE_D2D_COPY inputs=[R2], [R3] outputs=[R0], [R1]
+[GraphId 14 / OPTIMIZER] 4 nodes:
+  SCALAR_INCREMENT inputs=[22] outputs=[22]
+  ADAM_BIAS_CORRECTION inputs=[22, 18, 20] outputs=[23, 24]
+  RANGE_UPDATE_WEIGHT_ADAMW inputs=[R9 - R11], [R27 - R29], [R37 - R39], [R43 - R45] outputs=[R9 - R11], [R37 - R39], [R43 - R45]
+  RANGE_UPDATE_BIAS_ADAM inputs=[R6 - R8], [R24 - R26], [R34 - R36], [R40 - R42] outputs=[R6 - R8], [R34 - R36], [R40 - R42]
+[GraphId 22 / ACCUM_METRICS] 1 nodes:
+  RANGE_ACCUM_METRICS outputs=[15, 16, 17]
+[GraphId 23 / ACCUM_METRICS_TRAIN_LAST] 1 nodes:
+  RANGE_ACCUM_METRICS outputs=[15, 16, 17]
+[GraphId 24 / ACCUM_METRICS_VAL_LAST] 1 nodes:
+  RANGE_ACCUM_METRICS outputs=[15, 16, 17]
+[GraphId 26 / CLEAR_METRICS] 1 nodes:
+  RANGE_CLEAR outputs=[R67]
+
+--- Inference ComputationGraph ---
+=== ComputationGraph Debug Dump ===
+[GraphId 16 / INF_MAIN_A] 13 nodes:
+  UNKNOWN inputs=[0] outputs=[4]
+  FLATTEN_FP32_FWD inputs=[1] outputs=[28]
+  FC_FP32_FWD inputs=[28, 29, 30] outputs=[31]
+  BN1D_FP32_INF inputs=[31, 50, 49, 40, 41, 45, 46, 26] outputs=[42]
+  LEAKY_RELU_FP32_FWD inputs=[42] outputs=[57]
+  FC_FP32_FWD inputs=[57, 58, 59] outputs=[60]
+  BN1D_FP32_INF inputs=[60, 79, 78, 69, 70, 74, 75, 26] outputs=[71]
+  LEAKY_RELU_FP32_FWD inputs=[71] outputs=[86]
+  FC_FP32_FWD inputs=[86, 87, 88] outputs=[89]
+  BN1D_FP32_INF inputs=[89, 108, 107, 98, 99, 103, 104, 26] outputs=[100]
+  LEAKY_RELU_FP32_FWD inputs=[100] outputs=[115]
+  FC_FP32_FWD inputs=[115, 116, 117] outputs=[118]
+  SOFTMAX_CE_FP32_INF inputs=[118, 7, 12, 4, 8] outputs=[9, 130, 129, 128, 10, 11]
+[GraphId 17 / INF_MAIN_B] 13 nodes:
+  UNKNOWN inputs=[2] outputs=[4]
+  FLATTEN_FP32_FWD inputs=[3] outputs=[28]
+  FC_FP32_FWD inputs=[28, 29, 30] outputs=[31]
+  BN1D_FP32_INF inputs=[31, 50, 49, 40, 41, 45, 46, 26] outputs=[42]
+  LEAKY_RELU_FP32_FWD inputs=[42] outputs=[57]
+  FC_FP32_FWD inputs=[57, 58, 59] outputs=[60]
+  BN1D_FP32_INF inputs=[60, 79, 78, 69, 70, 74, 75, 26] outputs=[71]
+  LEAKY_RELU_FP32_FWD inputs=[71] outputs=[86]
+  FC_FP32_FWD inputs=[86, 87, 88] outputs=[89]
+  BN1D_FP32_INF inputs=[89, 108, 107, 98, 99, 103, 104, 26] outputs=[100]
+  LEAKY_RELU_FP32_FWD inputs=[100] outputs=[115]
+  FC_FP32_FWD inputs=[115, 116, 117] outputs=[118]
+  SOFTMAX_CE_FP32_INF inputs=[118, 7, 12, 4, 8] outputs=[9, 130, 129, 128, 10, 11]
+[GraphId 25 / VAL_RESULT_COMM] 1 nodes:
+  RANGE_MEAN_ALLREDUCE inputs=[R67] outputs=[R67]
+
+=========================================
+
+     1 |   2.845819 |   3.061344 |      8.97% |     0.000000 |     0.7s
+     2 |   1.118395 |   0.711712 |     94.37% |     0.000200 |     0.6s
+     3 |   0.886686 |   0.655899 |     96.27% |     0.000400 |     0.6s
+     4 |   0.835583 |   0.634775 |     96.93% |     0.000600 |     0.6s
+     5 |   0.807526 |   0.611397 |     97.43% |     0.000800 |     0.6s
+     6 |   0.789437 |   0.601112 |     97.76% |     0.001000 |     0.6s
+     7 |   0.769898 |   0.586738 |     98.11% |     0.001000 |     0.6s
+     8 |   0.755036 |   0.587926 |     98.02% |     0.000999 |     0.6s
+     9 |   0.742176 |   0.578390 |     98.20% |     0.000998 |     0.6s
+    10 |   0.731883 |   0.568280 |     98.49% |     0.000996 |     0.6s
+    11 |   0.728209 |   0.567393 |     98.55% |     0.000993 |     0.6s
+    12 |   0.719923 |   0.564269 |     98.51% |     0.000990 |     0.6s
+    13 |   0.713463 |   0.556049 |     98.92% |     0.000987 |     0.6s
+    14 |   0.705191 |   0.557169 |     98.66% |     0.000983 |     0.6s
+    15 |   0.703784 |   0.553068 |     98.86% |     0.000978 |     0.6s
+    16 |   0.698435 |   0.551667 |     98.82% |     0.000973 |     0.6s
+    17 |   0.689387 |   0.547917 |     98.87% |     0.000967 |     0.6s
+    18 |   0.685526 |   0.549809 |     98.83% |     0.000961 |     0.6s
+    19 |   0.680881 |   0.544798 |     98.88% |     0.000955 |     0.6s
+    20 |   0.678346 |   0.544803 |     98.97% |     0.000947 |     0.6s
+    21 |   0.675882 |   0.542191 |     99.04% |     0.000940 |     0.6s
+    22 |   0.671081 |   0.541417 |     99.09% |     0.000932 |     0.6s
+    23 |   0.665254 |   0.538548 |     99.17% |     0.000923 |     0.6s
+    24 |   0.663899 |   0.538500 |     99.12% |     0.000914 |     0.6s
+    25 |   0.664517 |   0.538373 |     99.09% |     0.000905 |     0.6s
+    26 |   0.661806 |   0.535154 |     99.12% |     0.000895 |     0.6s
+    27 |   0.655810 |   0.536381 |     99.17% |     0.000884 |     0.6s
+    28 |   0.653006 |   0.533224 |     99.20% |     0.000874 |     0.6s
+    29 |   0.652980 |   0.532623 |     99.13% |     0.000862 |     0.6s
+    30 |   0.650442 |   0.530707 |     99.23% |     0.000851 |     0.6s
+    31 |   0.648227 |   0.533512 |     99.20% |     0.000839 |     0.6s
+    32 |   0.644608 |   0.531384 |     99.17% |     0.000826 |     0.6s
+    33 |   0.645922 |   0.530402 |     99.25% |     0.000814 |     0.6s
+    34 |   0.639597 |   0.528629 |     99.22% |     0.000801 |     0.6s
+    35 |   0.639701 |   0.528443 |     99.28% |     0.000787 |     0.6s
+    36 |   0.639103 |   0.528196 |     99.26% |     0.000774 |     0.6s
+    37 |   0.637840 |   0.527297 |     99.24% |     0.000760 |     0.6s
+    38 |   0.636748 |   0.525910 |     99.26% |     0.000745 |     0.6s
+    39 |   0.632508 |   0.527308 |     99.29% |     0.000731 |     0.6s
+    40 |   0.631904 |   0.527514 |     99.31% |     0.000716 |     0.6s
+    41 |   0.630970 |   0.527558 |     99.31% |     0.000701 |     0.6s
+    42 |   0.630822 |   0.525676 |     99.39% |     0.000686 |     0.6s
+    43 |   0.627585 |   0.526141 |     99.27% |     0.000670 |     0.6s
+    44 |   0.628160 |   0.524750 |     99.35% |     0.000655 |     0.6s
+    45 |   0.627069 |   0.526088 |     99.33% |     0.000639 |     0.6s
+    46 |   0.625393 |   0.524079 |     99.36% |     0.000623 |     0.6s
+    47 |   0.623523 |   0.525598 |     99.29% |     0.000607 |     0.6s
+    48 |   0.623088 |   0.524841 |     99.44% |     0.000591 |     0.6s
+    49 |   0.621205 |   0.523826 |     99.32% |     0.000575 |     0.6s
+    50 |   0.618117 |   0.524237 |     99.36% |     0.000558 |     0.6s
+    51 |   0.619101 |   0.523397 |     99.33% |     0.000542 |     0.6s
+    52 |   0.615836 |   0.523909 |     99.33% |     0.000525 |     0.6s
+    53 |   0.618103 |   0.523122 |     99.34% |     0.000509 |     0.6s
+    54 |   0.616294 |   0.522138 |     99.39% |     0.000492 |     0.6s
+    55 |   0.615660 |   0.522323 |     99.39% |     0.000476 |     0.6s
+    56 |   0.614816 |   0.522859 |     99.41% |     0.000459 |     0.6s
+    57 |   0.614523 |   0.520865 |     99.49% |     0.000443 |     0.6s
+    58 |   0.612228 |   0.521089 |     99.41% |     0.000426 |     0.6s
+    59 |   0.612320 |   0.521629 |     99.45% |     0.000410 |     0.6s
+    60 |   0.613070 |   0.521314 |     99.42% |     0.000394 |     0.6s
+    61 |   0.607388 |   0.520136 |     99.44% |     0.000378 |     0.6s
+    62 |   0.607955 |   0.520827 |     99.43% |     0.000362 |     0.6s
+    63 |   0.608843 |   0.520500 |     99.46% |     0.000346 |     0.6s
+    64 |   0.606423 |   0.520715 |     99.42% |     0.000331 |     0.6s
+    65 |   0.606591 |   0.520519 |     99.47% |     0.000315 |     0.6s
+    66 |   0.606854 |   0.519951 |     99.42% |     0.000300 |     0.6s
+    67 |   0.604461 |   0.519565 |     99.42% |     0.000285 |     0.6s
+    68 |   0.606294 |   0.520529 |     99.42% |     0.000270 |     0.6s
+    69 |   0.603018 |   0.519292 |     99.44% |     0.000256 |     0.6s
+    70 |   0.603599 |   0.519473 |     99.45% |     0.000241 |     0.6s
+    71 |   0.602746 |   0.519362 |     99.46% |     0.000227 |     0.6s
+    72 |   0.600574 |   0.518772 |     99.47% |     0.000214 |     0.6s
+    73 |   0.601674 |   0.518793 |     99.46% |     0.000200 |     0.6s
+    74 |   0.601025 |   0.518416 |     99.46% |     0.000187 |     0.6s
+    75 |   0.600191 |   0.518289 |     99.49% |     0.000175 |     0.6s
+    76 |   0.598779 |   0.518681 |     99.48% |     0.000162 |     0.6s
+    77 |   0.598373 |   0.518372 |     99.47% |     0.000150 |     0.6s
+    78 |   0.597263 |   0.518207 |     99.47% |     0.000139 |     0.6s
+    79 |   0.597556 |   0.518348 |     99.47% |     0.000127 |     0.6s
+    80 |   0.597618 |   0.518467 |     99.47% |     0.000117 |     0.6s
+    81 |   0.595845 |   0.518613 |     99.40% |     0.000106 |     0.6s
+    82 |   0.596300 |   0.518117 |     99.48% |     0.000096 |     0.6s
+    83 |   0.596477 |   0.518951 |     99.45% |     0.000087 |     0.6s
+    84 |   0.596043 |   0.518274 |     99.45% |     0.000078 |     0.6s
+    85 |   0.597612 |   0.518010 |     99.45% |     0.000069 |     0.6s
+    86 |   0.594444 |   0.518089 |     99.47% |     0.000061 |     0.6s
+    87 |   0.594985 |   0.517956 |     99.47% |     0.000054 |     0.6s
+    88 |   0.594873 |   0.518149 |     99.47% |     0.000046 |     0.6s
+    89 |   0.593864 |   0.517973 |     99.48% |     0.000040 |     0.6s
+    90 |   0.596642 |   0.517770 |     99.50% |     0.000034 |     0.6s
+    91 |   0.592351 |   0.518103 |     99.45% |     0.000028 |     0.6s
+    92 |   0.593531 |   0.517883 |     99.49% |     0.000023 |     0.5s
+    93 |   0.595223 |   0.517783 |     99.48% |     0.000018 |     0.6s
+    94 |   0.594726 |   0.517893 |     99.47% |     0.000014 |     0.6s
+    95 |   0.592103 |   0.517793 |     99.45% |     0.000011 |     0.6s
+    96 |   0.593139 |   0.518217 |     99.51% |     0.000008 |     0.6s
+    97 |   0.593884 |   0.518183 |     99.46% |     0.000005 |     0.6s
+    98 |   0.594450 |   0.517506 |     99.48% |     0.000003 |     0.6s
+    99 |   0.594005 |   0.518321 |     99.44% |     0.000002 |     0.6s
+   100 |   0.595157 |   0.517963 |     99.48% |     0.000001 |     0.6s
+
+=====================================
+ Mode: GPU  [FP32]
+=====================================
+ Best Top-1: 99.51%
+ Best Epoch: 96
+ Total Time: 58.41 s
+ Time per Epoch: 0.58 s
+=====================================
+EXCELLENT! Accuracy >= 98.5%
+Target achieved: Goal met!
+=====================================

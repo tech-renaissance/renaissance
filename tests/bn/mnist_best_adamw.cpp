@@ -159,7 +159,6 @@ int main(int argc, char** argv) {
         fc(512, true),                     // 中间层递减
         make_activation(cfg.activation),   // 动态选择激活函数
         fc(256, true),                     // 瓶颈层
-bn(),
         make_activation(cfg.activation),   // 动态选择激活函数
         fc(10, true)                       // 输出层
     );

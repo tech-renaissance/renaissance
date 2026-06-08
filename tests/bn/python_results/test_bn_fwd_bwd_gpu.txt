@@ -1,0 +1,155 @@
+Device: GPU [0]
+Random Seed: 0x0000A84055D9A7A4
+Generating reference data: C:/Python314/python.exe R:/renaissance/tests/bn/test_bn_fwd_bwd.py --batch 256 --H 224 --W 224 --C 8 --eps 1e-05 --momentum 0.1 --seed 42 --workspace "R:/renaissance/workspace/bn_fwd_bwd_data" --dtype fp32 --device cuda
+C:\Python314\Lib\site-packages\torch\backends\__init__.py:42: UserWarning: Please use the new API settings to control TF32 behavior, such as torch.backends.cudnn.conv.fp32_precision = 'tf32' or torch.backends.cuda.matmul.fp32_precision = 'ieee'. Old settings, e.g, torch.backends.cuda.matmul.allow_tf32 = True, torch.backends.cudnn.allow_tf32 = True, allowTF32CuDNN() and allowTF32CuBLAS() will be deprecated after Pytorch 2.9. Please see https://pytorch.org/docs/main/notes/cuda.html#tensorfloat-32-tf32-on-ampere-and-later-devices (Triggered internally at C:\actions-runner\_work\pytorch\pytorch\pytorch\aten\src\ATen\Context.cpp:85.)
+  return self.getter()
+BN 2D FWD+BWD+INF FP32 reference generated in: R:/renaissance/workspace/bn_fwd_bwd_data
+  Input shape:  [256, 224, 224, 8] (NHWC)
+  Output shape: [256, 224, 224, 8] (NHWC)
+  eps=1e-05, momentum=0.1
+  NOTE: Using nn.BatchNorm2d / F.batch_norm (PyTorch built-in C++ kernels)
+Reference data loaded.
+  Input shape:  [256, 224, 224, 8] (NHWC)
+[2026-06-08 14:47:01.306] [INFO ] [backend] Registered BN1D/BN2D ops (FP32/AMP x FWD/BWD/INF)
+[2026-06-08 14:47:01.346] [INFO ] [task] [DBG] compile_capture_simple: enter
+[2026-06-08 14:47:01.346] [INFO ] [task] [DBG] compile_capture_simple: start warmup loop, num_gpus=1
+[2026-06-08 14:47:01.346] [INFO ] [task] [DBG] warmup rank 0 begin
+[2026-06-08 14:47:01.346] [INFO ] [task] [DBG] warmup rank 0 gpu_id=0
+[2026-06-08 14:47:01.346] [INFO ] [task] [DBG] warmup op: 64
+[2026-06-08 14:47:01.461] [INFO ] [backend] DeviceContext 0: workspace for stream 2 grown to 12544 bytes
+[2026-06-08 14:47:01.462] [INFO ] [task] [DBG] warmup op done
+[2026-06-08 14:47:01.462] [INFO ] [task] [DBG] warmup op: 65
+[2026-06-08 14:47:01.542] [INFO ] [task] [DBG] warmup op done
+[2026-06-08 14:47:01.542] [INFO ] [task] [DBG] warmup op: 66
+[2026-06-08 14:47:01.551] [INFO ] [task] [DBG] warmup op done
+[2026-06-08 14:47:01.554] [INFO ] [task] [DBG] warmup rank 0 end
+[2026-06-08 14:47:01.554] [INFO ] [task] [DBG] compile_capture_simple: warmup done
+[2026-06-08 14:47:01.554] [INFO ] [task] [DBG] compile_capture_simple: starting capture phase, num_graphs=3 num_gpus=1
+[2026-06-08 14:47:01.554] [INFO ] [task] [DBG] capture graph 'fwd' graph_index=0
+[2026-06-08 14:47:01.554] [INFO ] [task] [DBG] capture rank 0 begin
+[2026-06-08 14:47:01.554] [INFO ] [task] [DBG] calling CapturedGraph::capture...
+[2026-06-08 14:47:01.554] [INFO ] [task] [DBG] CapturedGraph::capture done, is_cuda=1
+[2026-06-08 14:47:01.554] [INFO ] [task] [DBG] set_metadata_from...
+[2026-06-08 14:47:01.554] [INFO ] [task] [DBG] move_cpu_ops_from...
+[2026-06-08 14:47:01.554] [INFO ] [task] [DBG] rank0 metadata done
+[2026-06-08 14:47:01.554] [INFO ] [task] [DBG] check is_cuda=1
+[2026-06-08 14:47:01.554] [INFO ] [task] [DBG] release_rank_exec...
+[2026-06-08 14:47:01.554] [INFO ] [task] [DBG] release_rank_exec done, exec=000001D35608C190
+[2026-06-08 14:47:01.554] [INFO ] [task] [DBG] set_rank_exec done
+[2026-06-08 14:47:01.554] [INFO ] [task] [DBG] capture rank 0 end
+[2026-06-08 14:47:01.554] [INFO ] [task] [DBG] emplace simple_captured_graphs_ ...
+[2026-06-08 14:47:01.554] [INFO ] [task] [DBG] emplace done
+[2026-06-08 14:47:01.554] [INFO ] [task] [DBG] capture graph 'bwd' graph_index=1
+[2026-06-08 14:47:01.554] [INFO ] [task] [DBG] capture rank 0 begin
+[2026-06-08 14:47:01.554] [INFO ] [task] [DBG] calling CapturedGraph::capture...
+[2026-06-08 14:47:01.554] [INFO ] [task] [DBG] CapturedGraph::capture done, is_cuda=1
+[2026-06-08 14:47:01.554] [INFO ] [task] [DBG] set_metadata_from...
+[2026-06-08 14:47:01.554] [INFO ] [task] [DBG] move_cpu_ops_from...
+[2026-06-08 14:47:01.554] [INFO ] [task] [DBG] rank0 metadata done
+[2026-06-08 14:47:01.554] [INFO ] [task] [DBG] check is_cuda=1
+[2026-06-08 14:47:01.554] [INFO ] [task] [DBG] release_rank_exec...
+[2026-06-08 14:47:01.554] [INFO ] [task] [DBG] release_rank_exec done, exec=000001D356088B90
+[2026-06-08 14:47:01.555] [INFO ] [task] [DBG] set_rank_exec done
+[2026-06-08 14:47:01.555] [INFO ] [task] [DBG] capture rank 0 end
+[2026-06-08 14:47:01.555] [INFO ] [task] [DBG] emplace simple_captured_graphs_ ...
+[2026-06-08 14:47:01.555] [INFO ] [task] [DBG] emplace done
+[2026-06-08 14:47:01.555] [INFO ] [task] [DBG] capture graph 'inf' graph_index=2
+[2026-06-08 14:47:01.555] [INFO ] [task] [DBG] capture rank 0 begin
+[2026-06-08 14:47:01.555] [INFO ] [task] [DBG] calling CapturedGraph::capture...
+[2026-06-08 14:47:01.555] [INFO ] [task] [DBG] CapturedGraph::capture done, is_cuda=1
+[2026-06-08 14:47:01.555] [INFO ] [task] [DBG] set_metadata_from...
+[2026-06-08 14:47:01.555] [INFO ] [task] [DBG] move_cpu_ops_from...
+[2026-06-08 14:47:01.555] [INFO ] [task] [DBG] rank0 metadata done
+[2026-06-08 14:47:01.555] [INFO ] [task] [DBG] check is_cuda=1
+[2026-06-08 14:47:01.555] [INFO ] [task] [DBG] release_rank_exec...
+[2026-06-08 14:47:01.555] [INFO ] [task] [DBG] release_rank_exec done, exec=000001D35608D390
+[2026-06-08 14:47:01.555] [INFO ] [task] [DBG] set_rank_exec done
+[2026-06-08 14:47:01.555] [INFO ] [task] [DBG] capture rank 0 end
+[2026-06-08 14:47:01.555] [INFO ] [task] [DBG] emplace simple_captured_graphs_ ...
+[2026-06-08 14:47:01.555] [INFO ] [task] [DBG] emplace done
+[2026-06-08 14:47:01.555] [INFO ] [task] [DBG] compile_capture_simple: all done
+=== SimpleTask MemoryPlan ===
+Total bytes: 1644175360
+MemoryPlan Layout (total_bytes=1644175360)
+===============================================
+Region [B_NEXT_MEAN]  ID=2  offset=0  bytes=512
+-----------------------------------------------
+  Tensor[id=6]: offset=0,  bytes=512,  dtype=FP32,  shape=[1,1,1,8]
+-----------------------------------------------
+===============================================
+Region [B_NEXT_VAR]  ID=3  offset=512  bytes=512
+-----------------------------------------------
+  Tensor[id=7]: offset=512,  bytes=512,  dtype=FP32,  shape=[1,1,1,8]
+-----------------------------------------------
+===============================================
+Region [W_EQ_BIAS]  ID=4  offset=1024  bytes=512
+-----------------------------------------------
+  Tensor[id=11]: offset=1024,  bytes=512,  dtype=FP32,  shape=[1,1,1,8]
+-----------------------------------------------
+===============================================
+Region [W_EQ_SCALE]  ID=5  offset=1536  bytes=512
+-----------------------------------------------
+  Tensor[id=10]: offset=1536,  bytes=512,  dtype=FP32,  shape=[1,1,1,8]
+-----------------------------------------------
+===============================================
+Region [W_BN_BIAS]  ID=6  offset=2048  bytes=512
+-----------------------------------------------
+  Tensor[id=5]: offset=2048,  bytes=512,  dtype=FP32,  shape=[1,1,1,8]
+-----------------------------------------------
+===============================================
+Region [W_BN_WEIGHT]  ID=7  offset=2560  bytes=512
+-----------------------------------------------
+  Tensor[id=4]: offset=2560,  bytes=512,  dtype=FP32,  shape=[1,1,1,8]
+-----------------------------------------------
+===============================================
+Region [G_BN_BIAS]  ID=24  offset=3072  bytes=512
+-----------------------------------------------
+  Tensor[id=9]: offset=3072,  bytes=512,  dtype=FP32,  shape=[1,1,1,8]
+-----------------------------------------------
+===============================================
+Region [G_BN_WEIGHT]  ID=25  offset=3584  bytes=512
+-----------------------------------------------
+  Tensor[id=8]: offset=3584,  bytes=512,  dtype=FP32,  shape=[1,1,1,8]
+-----------------------------------------------
+===============================================
+Region [F_FEATURE_FP32]  ID=53  offset=4096  bytes=1644169216
+-----------------------------------------------
+  Tensor[id=0]: offset=4096,  bytes=411042304,  dtype=FP32,  shape=[256,224,224,8]
+  Tensor[id=1]: offset=411046400,  bytes=411042304,  dtype=FP32,  shape=[256,224,224,8]
+  Tensor[id=2]: offset=822088704,  bytes=411042304,  dtype=FP32,  shape=[256,224,224,8]
+  Tensor[id=3]: offset=1233131008,  bytes=411042304,  dtype=FP32,  shape=[256,224,224,8]
+-----------------------------------------------
+===============================================
+Region [S_SCALAR_FP32]  ID=57  offset=1644173312  bytes=1024
+-----------------------------------------------
+  Tensor[id=14]: offset=1644173312,  bytes=512,  dtype=FP32,  shape=[1,1,1,1]
+  Tensor[id=15]: offset=1644173824,  bytes=512,  dtype=FP32,  shape=[1,1,1,1]
+-----------------------------------------------
+===============================================
+Region [T_TEMP_FP32]  ID=62  offset=1644174336  bytes=1024
+-----------------------------------------------
+  Tensor[id=12]: offset=1644174336,  bytes=512,  dtype=FP32,  shape=[1,1,1,8]
+  Tensor[id=13]: offset=1644174848,  bytes=512,  dtype=FP32,  shape=[1,1,1,8]
+-----------------------------------------------
+===============================================
+
+
+===== BN FWD [GPU  [FP32]] BN2D =====
+  Rank 0 FWD MSE(Y)        = 3.171820E-13
+  Rank 0 FWD MSE(saved_mean) = 2.252136E-19
+  Rank 0 FWD MSE(saved_iv)   = 1.293188E-12
+  Rank 0 FWD MSE(next_mean)  = 2.242404E-21
+  Rank 0 FWD MSE(next_var)   = 1.776357E-15
+
+===== BN BWD [GPU  [FP32]] BN2D =====
+  Rank 0 BWD MSE(dX)         = 3.172749E-13
+  Rank 0 BWD MSE(dgamma)     = 3.003393E-05
+  Rank 0 BWD MSE(dbeta)      = 4.665274E-05
+
+===== BN INF [GPU  [FP32]] BN2D =====
+  Rank 0 INF MSE(Y)          = 1.989642E-15
+
+===== BN FWD+BWD+INF GPU  [FP32] BN2D (1 rank(s)): PASS =====
+  Shape: [256,224,224,8]
+  eps=1.000000E-05, momentum=1.000000E-01
+  MaxMSE: 4.665274E-05
