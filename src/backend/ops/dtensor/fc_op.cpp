@@ -125,10 +125,15 @@ FcAmpFwdCache build_fc_amp_fwd_conv_graph(
                 dt.h_stride_cuda(), dt.w_stride_cuda()};
     };
 
+    int64_t effective_c = static_cast<int64_t>(dt_x.shape.h())
+                        * dt_x.shape.w()
+                        * dt_x.shape.c();
+    int64_t n_stride = static_cast<int64_t>(dt_x.n_stride_cuda());
+
     auto X = graph->tensor(Tensor_attributes()
         .set_name("X")
-        .set_dim(to_fe_dim(dt_x.shape))
-        .set_stride(make_nhwc_stride(dt_x))
+        .set_dim({static_cast<int64_t>(dt_x.shape.n()), effective_c, 1, 1})
+        .set_stride({n_stride, 1, 1, 1})
         .set_data_type(DataType_t::HALF));
 
     auto W = graph->tensor(Tensor_attributes()
@@ -273,10 +278,6 @@ static void launch_fc_amp_fwd_cuda(
     //          << " dt_w shape={" << dt_w.n() << "," << dt_w.c() << "," << dt_w.h() << "," << dt_w.w() << "}"
     //          << " dt_y shape={" << dt_y.n() << "," << dt_y.c() << "," << dt_y.h() << "," << dt_y.w() << "}";
 
-    TR_DEBUG_CHECK(dt_x.h() == 1 && dt_x.w() == 1, ShapeError,
-                   "FC_AMP_FWD input must have H=1, W=1. Got H=" << dt_x.h()
-                   << ", W=" << dt_x.w());
-
     StreamKind sk = get_op_default_stream(node.compute_op);
     cudaStream_t s = static_cast<cudaStream_t>(ctx.stream(sk));
     int si = state.get_or_register(s);
@@ -289,7 +290,9 @@ static void launch_fc_amp_fwd_cuda(
     // ── per-shape cache: build once, reuse for all iterations ──
     FcAmpFwdCacheKey key{
         reinterpret_cast<uint64_t>(cudnn_handle),
-        dt_x.n(), dt_x.c(), dt_w.n(), has_bias};
+        dt_x.n(),
+        static_cast<int32_t>(dt_x.shape.h() * dt_x.shape.w() * dt_x.shape.c()),
+        dt_w.n(), has_bias};
 
     auto it = s_fc_amp_fwd_caches.find(key);
     if (it == s_fc_amp_fwd_caches.end()) {
@@ -364,13 +367,6 @@ static void launch_fc_amp_bwd_cuda(
     const DTensor& dt_dx = mp.get_dtensor(node.output_ids[0]);
     const DTensor& dt_dw = mp.get_dtensor(node.output_ids[1]);
 
-    TR_DEBUG_CHECK(dt_dy.h() == 1 && dt_dy.w() == 1, ShapeError,
-                   "FC_AMP_BWD dy input must have H=1, W=1. Got H=" << dt_dy.h()
-                   << ", W=" << dt_dy.w());
-    TR_DEBUG_CHECK(dt_x.h() == 1 && dt_x.w() == 1, ShapeError,
-                   "FC_AMP_BWD x input must have H=1, W=1. Got H=" << dt_x.h()
-                   << ", W=" << dt_x.w());
-
     __half* dy = static_cast<__half*>(ctx.ptr_at(node.input_ids[0]));
     __half* w  = static_cast<__half*>(ctx.ptr_at(node.input_ids[1]));
     __half* x  = static_cast<__half*>(ctx.ptr_at(node.input_ids[x_idx]));
@@ -380,7 +376,9 @@ static void launch_fc_amp_bwd_cuda(
 
     int64_t batch        = dt_dy.n();
     int64_t out_features = dt_dy.c();
-    int64_t in_features  = dt_x.c();
+    int64_t in_features  = static_cast<int64_t>(dt_x.shape.h())
+                         * dt_x.shape.w()
+                         * dt_x.shape.c();
 
     int dy_ns = static_cast<int>(dt_dy.n_stride_cuda());
     int w_ns  = static_cast<int>(dt_w.n_stride_cuda());

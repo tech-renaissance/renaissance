@@ -137,7 +137,7 @@ void CapturedGraph::capture_cuda(const ComputationGraph& cg,
     {
         cudaError_t e = cudaGetLastError();
         if (e != cudaSuccess) {
-            TR_LOG_INFO("graph") << "[DBG] After finalize barrier: " << cudaGetErrorString(e);
+            // TR_LOG_INFO("graph") << "[DBG] After finalize barrier: " << cudaGetErrorString(e);
         }
     }
 

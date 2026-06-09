@@ -417,16 +417,16 @@ void TaskBase::compile_capture_simple() {
 
 #ifdef TR_USE_CUDA
     if (!backend_->contexts.empty() && backend_->contexts[0]->is_gpu()) {
-        TR_LOG_INFO("task") << "[DBG] compile_capture_simple: enter";
+        // TR_LOG_INFO("task") << "[DBG] compile_capture_simple: enter";
         cudaGetLastError();
         cudaDeviceSynchronize();
 
-        TR_LOG_INFO("task") << "[DBG] compile_capture_simple: start warmup loop, num_gpus=" << num_gpus_;
+        // TR_LOG_INFO("task") << "[DBG] compile_capture_simple: start warmup loop, num_gpus=" << num_gpus_;
         for (int rank = 0; rank < num_gpus_; ++rank) {
-            TR_LOG_INFO("task") << "[DBG] warmup rank " << rank << " begin";
+            // TR_LOG_INFO("task") << "[DBG] warmup rank " << rank << " begin";
             DeviceContext& warm_ctx = *backend_->contexts[rank];
             int gpu_id = warm_ctx.device_id();
-            TR_LOG_INFO("task") << "[DBG] warmup rank " << rank << " gpu_id=" << gpu_id;
+            // TR_LOG_INFO("task") << "[DBG] warmup rank " << rank << " gpu_id=" << gpu_id;
             cudaSetDevice(gpu_id);
             cudaGetLastError();
             cudaDeviceSynchronize();
@@ -438,28 +438,28 @@ void TaskBase::compile_capture_simple() {
                 for (const auto& node : entry.graph.linear_nodes()) {
                     if (node.kind != GraphNode::Kind::COMPUTE) continue;
                     if (!require_warmup(node.compute_op)) continue;
-                    TR_LOG_INFO("task") << "[DBG] warmup op: " << static_cast<int>(node.compute_op);
+                    // TR_LOG_INFO("task") << "[DBG] warmup op: " << static_cast<int>(node.compute_op);
                     warmup_single_cudnn_op(node, memory_plan_, warm_ctx);
-                    TR_LOG_INFO("task") << "[DBG] warmup op done";
+                    // TR_LOG_INFO("task") << "[DBG] warmup op done";
                 }
             }
             cudaDeviceSynchronize();
             cudaGetLastError();
-            TR_LOG_INFO("task") << "[DBG] warmup rank " << rank << " end";
+            // TR_LOG_INFO("task") << "[DBG] warmup rank " << rank << " end";
         }
-        TR_LOG_INFO("task") << "[DBG] compile_capture_simple: warmup done";
+        // TR_LOG_INFO("task") << "[DBG] compile_capture_simple: warmup done";
     }
 #endif
 
-    TR_LOG_INFO("task") << "[DBG] compile_capture_simple: starting capture phase, num_graphs="
-                        << named_graphs_.size() << " num_gpus=" << num_gpus_;
+    // TR_LOG_INFO("task") << "[DBG] compile_capture_simple: starting capture phase, num_graphs="
+    //                     << named_graphs_.size() << " num_gpus=" << num_gpus_;
     int graph_index = 0;
     for (auto& [name, entry] : named_graphs_) {
-        TR_LOG_INFO("task") << "[DBG] capture graph '" << name << "' graph_index=" << graph_index;
+        // TR_LOG_INFO("task") << "[DBG] capture graph '" << name << "' graph_index=" << graph_index;
         CapturedGraph cg;
 
         if (entry.graph.has_nccl_ops() && context(0).is_gpu()) {
-            TR_LOG_INFO("task") << "[DBG] NCCL graph detected, coordinated multi-rank capture";
+            // TR_LOG_INFO("task") << "[DBG] NCCL graph detected, coordinated multi-rank capture";
 
             GraphId gid = GraphId::SIMPLE_TASK_GRAPH;
             cg.reserve_ranks(num_gpus_);
@@ -620,7 +620,7 @@ void TaskBase::compile_capture_simple() {
             cg.reserve_ranks(num_gpus_);
 
             for (int rank = 0; rank < num_gpus_; ++rank) {
-                TR_LOG_INFO("task") << "[DBG] capture rank " << rank << " begin";
+                // TR_LOG_INFO("task") << "[DBG] capture rank " << rank << " begin";
                 DeviceContext& ctx = *backend_->contexts[rank];
 #ifdef TR_USE_CUDA
                 if (ctx.is_gpu()) {
@@ -636,33 +636,33 @@ void TaskBase::compile_capture_simple() {
 
                 GraphId gid = GraphId::SIMPLE_TASK_GRAPH;
 
-                TR_LOG_INFO("task") << "[DBG] calling CapturedGraph::capture...";
+                // TR_LOG_INFO("task") << "[DBG] calling CapturedGraph::capture...";
                 auto captured = CapturedGraph::capture(
                     entry.graph, memory_plan_, gid, entry.stream, ctx);
-                TR_LOG_INFO("task") << "[DBG] CapturedGraph::capture done, is_cuda=" << captured.is_cuda();
+                // TR_LOG_INFO("task") << "[DBG] CapturedGraph::capture done, is_cuda=" << captured.is_cuda();
 
                 if (rank == 0) {
-                    TR_LOG_INFO("task") << "[DBG] set_metadata_from...";
+                    // TR_LOG_INFO("task") << "[DBG] set_metadata_from...";
                     cg.set_metadata_from(captured);
-                    TR_LOG_INFO("task") << "[DBG] move_cpu_ops_from...";
+                    // TR_LOG_INFO("task") << "[DBG] move_cpu_ops_from...";
                     cg.move_cpu_ops_from(captured);
-                    TR_LOG_INFO("task") << "[DBG] rank0 metadata done";
+                    // TR_LOG_INFO("task") << "[DBG] rank0 metadata done";
                 }
-                TR_LOG_INFO("task") << "[DBG] check is_cuda=" << captured.is_cuda();
+                // TR_LOG_INFO("task") << "[DBG] check is_cuda=" << captured.is_cuda();
                 if (captured.is_cuda()) {
-                    TR_LOG_INFO("task") << "[DBG] release_rank_exec...";
+                    // TR_LOG_INFO("task") << "[DBG] release_rank_exec...";
                     auto exec = captured.release_rank_exec(0);
-                    TR_LOG_INFO("task") << "[DBG] release_rank_exec done, exec=" << exec;
+                    // TR_LOG_INFO("task") << "[DBG] release_rank_exec done, exec=" << exec;
                     cg.set_rank_exec(rank, exec);
-                    TR_LOG_INFO("task") << "[DBG] set_rank_exec done";
+                    // TR_LOG_INFO("task") << "[DBG] set_rank_exec done";
                 }
-                TR_LOG_INFO("task") << "[DBG] capture rank " << rank << " end";
+                // TR_LOG_INFO("task") << "[DBG] capture rank " << rank << " end";
             }
         }
 
-        TR_LOG_INFO("task") << "[DBG] emplace simple_captured_graphs_ ...";
+        // TR_LOG_INFO("task") << "[DBG] emplace simple_captured_graphs_ ...";
         simple_captured_graphs_.emplace(name, std::move(cg));
-        TR_LOG_INFO("task") << "[DBG] emplace done";
+        // TR_LOG_INFO("task") << "[DBG] emplace done";
         graph_index++;  // 递增图索引，为下一个图分配GraphId
     }
 
@@ -672,7 +672,7 @@ void TaskBase::compile_capture_simple() {
         cg.launch(0, nullptr);
     }
 
-    TR_LOG_INFO("task") << "[DBG] compile_capture_simple: all done";
+    // TR_LOG_INFO("task") << "[DBG] compile_capture_simple: all done";
 }
 
 void TaskBase::compile_freeze_global() {
