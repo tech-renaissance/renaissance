@@ -67,27 +67,6 @@ void ArchPlan::recompute_shapes_from(size_t start_idx) {
             cur = {1, (cur.h() - 1) / s + 1, (cur.w() - 1) / s + 1, p.out_ch};
             break;
         }
-        case LayerKind::ConvBNReLU: {
-            auto& p = std::get<CBRLayerParams>(layer.params);
-            int oh = (cur.h() + 2 * p.p - p.k) / p.s + 1;
-            int ow = (cur.w() + 2 * p.p - p.k) / p.s + 1;
-            cur = {1, oh, ow, p.out_ch};
-            break;
-        }
-        case LayerKind::ConvBN: {
-            auto& p = std::get<CBLayerParams>(layer.params);
-            int oh = (cur.h() + 2 * p.p - p.k) / p.s + 1;
-            int ow = (cur.w() + 2 * p.p - p.k) / p.s + 1;
-            cur = {1, oh, ow, p.out_ch};
-            break;
-        }
-        case LayerKind::ConvReLU: {
-            auto& p = std::get<CRLayerParams>(layer.params);
-            int oh = (cur.h() + 2 * p.p - p.k) / p.s + 1;
-            int ow = (cur.w() + 2 * p.p - p.k) / p.s + 1;
-            cur = {1, oh, ow, p.out_ch};
-            break;
-        }
         case LayerKind::GapFC: {
             cur = {1, 1, 1, std::get<GapFCLayerParams>(layer.params).out_features};
             break;

@@ -701,22 +701,6 @@ void DeepLearningTask::init_variant_scalars() {
                 break;
             }
         }
-        if (layer.kind == LayerKind::ConvBNReLU) {
-            if (std::holds_alternative<CBRLayerParams>(layer.params)) {
-                const auto& bp = std::get<CBRLayerParams>(layer.params).bn;
-                bn_eps = bp.eps;
-                bn_mom = bp.momentum;
-                break;
-            }
-        }
-        if (layer.kind == LayerKind::ConvBN) {
-            if (std::holds_alternative<CBLayerParams>(layer.params)) {
-                const auto& bp = std::get<CBLayerParams>(layer.params).bn;
-                bn_eps = bp.eps;
-                bn_mom = bp.momentum;
-                break;
-            }
-        }
 
     }
 

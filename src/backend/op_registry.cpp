@@ -97,8 +97,6 @@ bool require_warmup(ComputeOp op) noexcept {
         case ComputeOp::SOFTMAX_CE_AMP_BWD:
         case ComputeOp::SOFTMAX_CE_FP32_INF:
         case ComputeOp::SOFTMAX_CE_AMP_INF:
-        case ComputeOp::CONV_BN_RELU_AMP_FWD: case ComputeOp::CONV_BN_RELU_AMP_BWD: case ComputeOp::CONV_BN_RELU_AMP_INF:
-        case ComputeOp::CBR_AMP_FWD:    case ComputeOp::CBR_AMP_BWD:    case ComputeOp::CBR_AMP_INF:
         case ComputeOp::BOTTLENECK_AMP_FWD: case ComputeOp::BOTTLENECK_AMP_BWD: case ComputeOp::BOTTLENECK_AMP_INF:
         case ComputeOp::BASICBLOCK_AMP_FWD: case ComputeOp::BASICBLOCK_AMP_BWD: case ComputeOp::BASICBLOCK_AMP_INF:
         case ComputeOp::INVRESIDUAL_AMP_FWD: case ComputeOp::INVRESIDUAL_AMP_BWD: case ComputeOp::INVRESIDUAL_AMP_INF:

@@ -1,47 +1,18 @@
 /**
- * @file mini_lenet_bn.cpp
- * @brief MNIST mini-LeNet-BN 准确率测试（含 BatchNorm）
+ * @file mini_lenet.cpp
+ * @brief MNIST mini-LeNet 准确率测试
  * @version 1.0.0
  * @date 2026-05-30
  * @author Team Tech-Renaissance
  *
  * 核心策略：
- * - 网络结构：conv(8,3,1,1) → bn → 400 → bn → 120 → bn → 84 → bn → 10
+ * - 网络结构：conv(6,3,1,1) → 400 → 120 → 84 → 10
  * - 激活函数：ReLU
  * - Bias：true
  * - 优化器：AdamW with weight_decay=1e-4
  * - 学习率：CosineAnnealing+warmup(5)
  * - 数据增强：完整6种预处理链
  * - 训练轮数：100 epochs
- *
- * ------------------------------------------------------------------------------
- * AdamW weight_decay 行为说明（重要，避免反复排查）
- * ------------------------------------------------------------------------------
- * 虽然配置 weight_decay(1e-4)，但后端对不同参数类型的处理不同：
- *
- *   - Weight 参数（卷积/全连接核）：使用 RANGE_UPDATE_WEIGHT_ADAMW，
- *     weight_decay=1e-4 以 decoupled 方式生效（见
- *     src/backend/ops/range/optimizer_op.cu 约第 130 行，w *= (1 - lr*wd)）。
- *
- *   - Bias/BN 参数（beta、gamma、fc bias）：graph compiler 将 AdamW 的 bias
- *     映射到 RANGE_UPDATE_BIAS_ADAM（见 src/graph/compiler.cpp 约第 2012 行）。
- *     为什么 BN gamma 也会被当作 bias？因为 Region 枚举顺序中
- *     W_BN_BIAS(007) < W_BN_WEIGHT(008) < W_FC_BIAS(009)，所以
- *     region_range(W_BN_BIAS, W_FC_BIAS) 把 W_BN_WEIGHT 也包进去了
- *     （见 include/renaissance/core/types.h 约第 251-258 行）。
- *
- *     该 bias kernel 的 wd 参数：CUDA 版传 nullptr（见
- *     src/backend/ops/range/optimizer_op.cu 约第 245 行），CPU 版传 0.0f
- *     （见 src/backend/ops/range/optimizer_op.cpp 约第 488 行）。
- *     kernel 内部均将 nullptr/0.0f 解释为 wd=0.0（见 optimizer_op.cu
- *     约第 107 行 `float _wd = wd ? *wd : 0.0f;`）。
- *
- *     因此：bias/BN 参数（含 gamma 和 beta）的 weight_decay 被硬编码为 0.0。
- *
- * 这意味着：C++ 中 weight 参数有 1e-4 的 decay，而 bias/BN 参数不衰减。
- * 这与 PyTorch 参考脚本 mini_lenet_bn.py 的 timed run 行为一致（该脚本在
- * 正式计时阶段将 bias/BN 参数的 weight_decay 显式设为 0.0）。
- * ------------------------------------------------------------------------------
  */
 
 #include "renaissance.h"
@@ -174,19 +145,15 @@ int main(int argc, char** argv) {
 
     BluePrint ultimate_mlp = seq(
         conv(8, 3, 1, 1),                  // 首层：8通道 3x3 卷积，padding=1
-        bn(),                               // BatchNorm after conv
         make_activation(cfg.activation),
-        flatten(),
+        avgpool(2, 2, 0),
         fc(400, true),
-        bn(),                               // BatchNorm after fc (非最后一层)
         make_activation(cfg.activation),
         fc(120, true),
-        bn(),                               // BatchNorm after fc (非最后一层)
         make_activation(cfg.activation),
         fc(84, true),
-        bn(),                               // BatchNorm after fc (非最后一层)
         make_activation(cfg.activation),
-        fc(10, true)                        // 最后一层FC，不加BN
+        fc(10, true)
     );
 
     DeepLearningTask task;
@@ -196,7 +163,6 @@ int main(int argc, char** argv) {
         .initializer(Initializer()
             .fc(InitKind::KAIMING_UNIFORM)
             .conv(InitKind::KAIMING_UNIFORM)
-            .bn(InitKind::STANDARD)
             .fan(FanMode::FAN_IN))
 
         .total_epochs(kTotalEpochs)
@@ -218,11 +184,11 @@ int main(int argc, char** argv) {
         .metrics(Metric::TRAIN_LOSS | Metric::VAL_LOSS | Metric::VAL_TOP1);
 
     std::cout << "\n=====================================\n"
-              << "Renaissance MNIST Ultimate Test (BN)\n"
+              << "Renaissance MNIST Ultimate Test\n"
               << "=====================================\n"
               << " Mode: " << mode_name(cfg.mode) << "\n"
               << "=====================================\n"
-              << "Network: conv(6,3,1,1)→bn → 400→bn → 120→bn → 84→bn → 10\n"
+              << "Network: conv(6,3,1,1) → 400 → 120 → 84 → 10\n"
               << "Activation: " << cfg.activation << "\n"
               << "Optimizer: AdamW (beta1=0.9, beta2=0.999, eps=1e-8, wd=1e-4)\n"
               << "Scheduler: CosineAnnealing + Warmup(5)\n"

@@ -270,42 +270,18 @@ void ArchPlan::step8_merge_quadruple() {
 }
 
 void ArchPlan::step9_merge_triple() {
-    auto build_cbr = [](const ArchLayer& conv, const ArchLayer& bn, const ArchLayer&) -> LayerParam {
-        auto& cp = std::get<ConvLayerParams>(conv.params);
-        auto& bp = std::get<BNParams>(bn.params);
-        return CBRLayerParams{cp.out_ch, cp.k, cp.s, cp.p, bp};
-    };
-    merge_pattern_triple(LayerKind::Conv, LayerKind::Bn2d, LayerKind::ReLU,
-        LayerKind::ConvBNReLU, build_cbr);
-
-    // CBRP upgrade removed: ConvBNReLU + MaxPool no longer fused into ConvBNReLUMaxPool
+    // ConvBNReLU fusion removed.
 }
 
 void ArchPlan::step10_merge_binary_and_mark() {
     auto build_gapfc = [](const ArchLayer&, const ArchLayer& fc) -> LayerParam {
         return GapFCLayerParams{std::get<FCLayerParams>(fc.params).out_features, std::get<FCLayerParams>(fc.params).bias};
     };
-    auto build_cb = [](const ArchLayer& conv, const ArchLayer& bn) -> LayerParam {
-        auto& cp = std::get<ConvLayerParams>(conv.params);
-        auto& bp = std::get<BNParams>(bn.params);
-        return CBLayerParams{cp.out_ch, cp.k, cp.s, cp.p, bp};
-    };
-    auto build_cr = [](const ArchLayer& conv, const ArchLayer&) -> LayerParam {
-        auto& cp = std::get<ConvLayerParams>(conv.params);
-        return CRLayerParams{cp.out_ch, cp.k, cp.s, cp.p};
-    };
     merge_pattern_binary(LayerKind::GAP, LayerKind::FC,
         LayerKind::GapFC, build_gapfc);
-    merge_pattern_binary(LayerKind::Conv, LayerKind::Bn2d,
-        LayerKind::ConvBN, build_cb);
-    merge_pattern_binary(LayerKind::Conv, LayerKind::ReLU,
-        LayerKind::ConvReLU, build_cr);
+    // ConvBN and ConvReLU fusions removed.
     // FC+ReLU fusion permanently disabled — FCReLU only has AMP kernels (no FP32),
     // which causes training failure in FP32 mode. Keep FC and ReLU separate.
-    // // FCReLU 融合算子的 launch_cuda 未注册，暂时禁用
-    // merge_pattern_binary(LayerKind::FC, LayerKind::ReLU,
-    //     LayerKind::FCReLU, build_fr);
-
 
     mark_first_layer();
 }

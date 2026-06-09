@@ -982,40 +982,6 @@ std::vector<TensorDesc> infer_convbnrelu_tensors(
     return descs;
 }
 
-SubgraphPattern build_convbnrelu_forward(const OpParams&, const std::vector<TensorDesc>& descs) {
-    SubgraphPattern p;
-    if (descs.size() < 20) return p;
-    // Conv FWD + BN FWD + ReLU FWD 融合 → 单CBR_AMP_FWD节点
-    SubgraphPattern::Node n;
-    n.op = ComputeOp::CBR_AMP_FWD;
-    n.input_indices  = {0, 6, 7, 9, 10};   // conv_weight, bn_weight, bn_bias, bn_prev_mean, bn_prev_var (P0-3修复)
-    n.output_indices = {1, 8, 19};         // conv_out, bn_out, relu_mask
-    p.nodes.push_back(n);
-    return p;
-}
-
-SubgraphPattern build_convbnrelu_backward(const OpParams&, const std::vector<TensorDesc>& descs) {
-    SubgraphPattern p;
-    if (descs.size() < 20) return p;
-    SubgraphPattern::Node n;
-    n.op = ComputeOp::CBR_AMP_BWD;
-    n.input_indices  = {0, 1, 2, 6, 7, 8, 9, 10, 19};  // conv_w, conv_out, grad_slot, bn_w, bn_b, bn_out, bn_mean, bn_var, relu_mask (P0-4修复)
-    n.output_indices = {2, 3, 13, 14};      // conv_grad_slot(dX), conv_weight_grad, bn_weight_grad, bn_bias_grad
-    p.nodes.push_back(n);
-    return p;
-}
-
-SubgraphPattern build_convbnrelu_inference(const OpParams&, const std::vector<TensorDesc>& descs) {
-    SubgraphPattern p;
-    if (descs.size() < 20) return p;
-    SubgraphPattern::Node n;
-    n.op = ComputeOp::CBR_AMP_INF;
-    n.input_indices  = {0, 6, 7};
-    n.output_indices = {8};                // bn_out only (INF skips mask)
-    p.nodes.push_back(n);
-    return p;
-}
-
 // ============================================================================
 // ConvBN — Conv(6) + BN(13) = 19张量
 // ============================================================================
@@ -1040,39 +1006,6 @@ std::vector<TensorDesc> infer_convbn_tensors(
     descs.insert(descs.end(), bn_d.begin(), bn_d.end());
 
     return descs;
-}
-
-SubgraphPattern build_convbn_forward(const OpParams&, const std::vector<TensorDesc>& descs) {
-    SubgraphPattern p;
-    if (descs.size() < 19) return p;
-    SubgraphPattern::Node n;
-    n.op = ComputeOp::CBR_AMP_FWD;
-    n.input_indices  = {0, 6, 7, 9, 10};   // conv_weight, bn_weight, bn_bias, bn_prev_mean, bn_prev_var (P0-3修复)
-    n.output_indices = {1, 8};
-    p.nodes.push_back(n);
-    return p;
-}
-
-SubgraphPattern build_convbn_backward(const OpParams&, const std::vector<TensorDesc>& descs) {
-    SubgraphPattern p;
-    if (descs.size() < 19) return p;
-    SubgraphPattern::Node n;
-    n.op = ComputeOp::CBR_AMP_BWD;
-    n.input_indices  = {0, 1, 2, 6, 7, 8, 9, 10};  // conv_w, conv_out, grad_slot, bn_w, bn_b, bn_out, bn_mean, bn_var (P0-4修复)
-    n.output_indices = {2, 3, 13, 14};      // conv_grad_slot(dX), conv_weight_grad, bn_weight_grad, bn_bias_grad
-    p.nodes.push_back(n);
-    return p;
-}
-
-SubgraphPattern build_convbn_inference(const OpParams&, const std::vector<TensorDesc>& descs) {
-    SubgraphPattern p;
-    if (descs.size() < 19) return p;
-    SubgraphPattern::Node n;
-    n.op = ComputeOp::CBR_AMP_INF;
-    n.input_indices  = {0, 6, 7};
-    n.output_indices = {8};
-    p.nodes.push_back(n);
-    return p;
 }
 
 // ============================================================================
@@ -1122,65 +1055,6 @@ SubgraphPattern build_dropout_inference(const OpParams&, const std::vector<Tenso
     p.nodes.push_back(n);
     return p;
 }
-
-// ============================================================================
-// ConvReLU — Conv(6) + ReLU的mask(1) = 7张量 (output shared)
-// ============================================================================
-
-std::vector<TensorDesc> infer_convrelu_tensors(
-    const Shape& input, const OpParams& params, const InferContext& ctx)
-{
-    std::vector<TensorDesc> descs;
-    if (!std::holds_alternative<ConvParams>(params.data)) {
-        LOG_WARN << "infer_convrelu_tensors: params is not ConvParams";
-        return descs;
-    }
-    const auto& cp = std::get<ConvParams>(params.data);
-
-    OpParams conv_op{ConvParams{cp}};
-    auto conv_d = infer_conv_tensors(input, conv_op, ctx);
-    descs.insert(descs.end(), conv_d.begin(), conv_d.end());
-
-    DType feat_dt = ctx.enable_amp ? DType::FP16 : DType::FP32;
-    Shape out = compute_conv_output(input, cp);
-    descs.push_back(TensorDesc{"relu_mask", out, Region::S_MASK, DType::INT8});
-
-    return descs;
-}
-
-SubgraphPattern build_convrelu_forward(const OpParams&, const std::vector<TensorDesc>& descs) {
-    SubgraphPattern p;
-    if (descs.size() < 7) return p;
-    SubgraphPattern::Node n;
-    n.op = ComputeOp::CBR_AMP_FWD;
-    n.input_indices  = {0};            // conv_weight
-    n.output_indices = {1, 6};         // conv_output, relu_mask
-    p.nodes.push_back(n);
-    return p;
-}
-
-SubgraphPattern build_convrelu_backward(const OpParams&, const std::vector<TensorDesc>& descs) {
-    SubgraphPattern p;
-    if (descs.size() < 7) return p;
-    SubgraphPattern::Node n;
-    n.op = ComputeOp::CBR_AMP_BWD;
-    n.input_indices  = {0, 1, 6};      // conv_weight, conv_output, relu_mask
-    n.output_indices = {2, 3};         // dX(grad_slot), weight_grad
-    p.nodes.push_back(n);
-    return p;
-}
-
-SubgraphPattern build_convrelu_inference(const OpParams&, const std::vector<TensorDesc>& descs) {
-    SubgraphPattern p;
-    if (descs.size() < 7) return p;
-    SubgraphPattern::Node n;
-    n.op = ComputeOp::CBR_AMP_INF;
-    n.input_indices  = {0};
-    n.output_indices = {1};
-    p.nodes.push_back(n);
-    return p;
-}
-
 
 // ============================================================================
 // GapFC — GAP(1) + FC(7) = 8张量
@@ -1946,9 +1820,6 @@ Shape get_output_shape(LayerKind kind, const std::vector<TensorDesc>& descs)
         case LayerKind::ELU:
         case LayerKind::Sigmoid:       return find(0);
         case LayerKind::SoftmaxCE:     return find(0);   // ce_output at index 0
-        case LayerKind::ConvBNReLU:    return find(8);   // BN output (index 6+2=8)
-        case LayerKind::ConvBN:        return find(8);   // BN output (same)
-        case LayerKind::ConvReLU:      return find(1);   // conv output
         case LayerKind::Dropout:       return find(0);   // dropout output
         case LayerKind::GapFC:         return find(3);   // fc output (gap[0] + fc_weight[1] + fc_bias[2] + fc_output[3])
         // Block fusions: output is the last sub-layer's BN output
@@ -1986,10 +1857,7 @@ const LayerDescriptor& get_layer_descriptor(LayerKind kind) {
     static const LayerDescriptor elu_desc        = { infer_elu_tensors,        build_elu_forward,        build_elu_backward,        build_elu_inference };
     static const LayerDescriptor sigmoid_desc    = { infer_sigmoid_tensors,    build_sigmoid_forward,    build_sigmoid_backward,    build_sigmoid_inference };
     static const LayerDescriptor add2_desc   = { infer_add2_tensors,      build_add2_forward,      build_add2_backward,      build_add2_inference };
-    static const LayerDescriptor cbr_desc    = { infer_convbnrelu_tensors, build_convbnrelu_forward, build_convbnrelu_backward, build_convbnrelu_inference };
-    static const LayerDescriptor cb_desc     = { infer_convbn_tensors,     build_convbn_forward,    build_convbn_backward,     build_convbn_inference };
     static const LayerDescriptor dropout_desc = { infer_dropout_tensors,   build_dropout_forward,   build_dropout_backward,   build_dropout_inference };
-    static const LayerDescriptor cr_desc     = { infer_convrelu_tensors,   build_convrelu_forward,   build_convrelu_backward,   build_convrelu_inference };
     static const LayerDescriptor gapfc_desc  = { infer_gapfc_tensors,      build_gapfc_forward,      build_gapfc_backward,      build_gapfc_inference };
 
     // Block融合的描述符 — 子层张量并集 + 分支梯度槽
@@ -2025,10 +1893,7 @@ const LayerDescriptor& get_layer_descriptor(LayerKind kind) {
         case LayerKind::Hardswish:            return hardswish_desc;
         case LayerKind::ELU:                  return elu_desc;
         case LayerKind::Sigmoid:              return sigmoid_desc;
-        case LayerKind::ConvBNReLU:           return cbr_desc;
-        case LayerKind::ConvBN:               return cb_desc;
-        case LayerKind::Dropout:              return dropout_desc;
-        case LayerKind::ConvReLU:             return cr_desc;
+        case LayerKind::Dropout:               return dropout_desc;
         case LayerKind::GapFC:                return gapfc_desc;
         case LayerKind::BottleneckProjection: return bproj_desc;
         case LayerKind::BottleneckIdentity:   return bid_desc;

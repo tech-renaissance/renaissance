@@ -42,9 +42,6 @@ const char* kind_name(LayerKind k) {
     case LayerKind::BasicBlockIdentity: return "BasicBlockIdentity";
     case LayerKind::InvResidualNoShortcut: return "InvResidualNoShortcut";
     case LayerKind::InvResidualIdentity: return "InvResidualIdentity";
-    case LayerKind::ConvBNReLU: return "ConvBNReLU";
-    case LayerKind::ConvBN: return "ConvBN";
-    case LayerKind::ConvReLU: return "ConvReLU";
     case LayerKind::GapFC: return "GapFC";
     case LayerKind::Dropout: return "Dropout";
     default: return "Unknown";
@@ -110,21 +107,6 @@ static std::string params_str(const ArchLayer& l) {
     case LayerKind::Dropout: {
         auto& p = std::get<DropoutLayerParams>(l.params);
         snprintf(buf, sizeof(buf), "p=%.2f", p.p);
-        break;
-    }
-    case LayerKind::ConvBNReLU: {
-        auto& p = std::get<CBRLayerParams>(l.params);
-        snprintf(buf, sizeof(buf), "out=%d k=%d s=%d p=%d", p.out_ch, p.k, p.s, p.p);
-        break;
-    }
-    case LayerKind::ConvBN: {
-        auto& p = std::get<CBLayerParams>(l.params);
-        snprintf(buf, sizeof(buf), "out=%d k=%d s=%d p=%d", p.out_ch, p.k, p.s, p.p);
-        break;
-    }
-    case LayerKind::ConvReLU: {
-        auto& p = std::get<CRLayerParams>(l.params);
-        snprintf(buf, sizeof(buf), "out=%d k=%d s=%d p=%d", p.out_ch, p.k, p.s, p.p);
         break;
     }
     case LayerKind::GapFC: {

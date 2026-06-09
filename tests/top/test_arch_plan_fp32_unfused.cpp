@@ -22,9 +22,6 @@ static bool is_fusion_layer(tr::LayerKind kind) {
         case tr::LayerKind::BasicBlockProjection:
         case tr::LayerKind::InvResidualIdentity:
         case tr::LayerKind::InvResidualNoShortcut:
-        case tr::LayerKind::ConvBNReLU:
-        case tr::LayerKind::ConvBN:
-        case tr::LayerKind::ConvReLU:
         case tr::LayerKind::GapFC:
             return true;
         default:

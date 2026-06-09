@@ -97,12 +97,6 @@ int ArchPlan::get_effective_output_c_at(size_t idx, int default_c) const {
         case LayerKind::InvResidualNoShortcut:
         case LayerKind::InvResidualIdentity:
             return std::get<InvResidualLayerParams>(layers_[j].params).out_ch;
-        case LayerKind::ConvBNReLU:
-            return std::get<CBRLayerParams>(layers_[j].params).out_ch;
-        case LayerKind::ConvBN:
-            return std::get<CBLayerParams>(layers_[j].params).out_ch;
-        case LayerKind::ConvReLU:
-            return std::get<CRLayerParams>(layers_[j].params).out_ch;
         case LayerKind::GapFC:
             return std::get<GapFCLayerParams>(layers_[j].params).out_features;
         case LayerKind::ReLU:

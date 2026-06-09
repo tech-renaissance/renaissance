@@ -37,8 +37,6 @@ static bool is_bn_like(LayerKind k) {
     switch (k) {
         case LayerKind::Bn1d:
         case LayerKind::Bn2d:
-        case LayerKind::ConvBNReLU:
-        case LayerKind::ConvBN:
             return true;
         default:
             return false;
@@ -60,7 +58,6 @@ static bool is_weight_bearing(LayerKind k) {
         case LayerKind::Conv:
         case LayerKind::Bn1d: case LayerKind::Bn2d:
         case LayerKind::FC:
-        case LayerKind::ConvBNReLU: case LayerKind::ConvBN: case LayerKind::ConvReLU:
         case LayerKind::GapFC:
         case LayerKind::BottleneckProjection:
         case LayerKind::BottleneckIdentity:
@@ -245,14 +242,6 @@ private:
                 break;
             case LayerKind::FC:
                 compile_fc(layer);
-                break;
-            case LayerKind::ConvBNReLU:
-            case LayerKind::ConvBN:
-                compile_conv(layer);
-                compile_bn(layer, idx);
-                break;
-            case LayerKind::ConvReLU:
-                compile_conv(layer);
                 break;
             case LayerKind::GapFC:
                 compile_fc(layer);
@@ -447,9 +436,6 @@ private:
     ConvLayerParams extract_conv_params(const ArchLayer& layer) {
         auto& p = layer.params;
         if (std::holds_alternative<ConvLayerParams>(p))  return std::get<ConvLayerParams>(p);
-        if (std::holds_alternative<CBRLayerParams>(p))    { auto& cp=std::get<CBRLayerParams>(p); return {cp.out_ch, cp.k, cp.s, cp.p}; }
-        if (std::holds_alternative<CBLayerParams>(p))     { auto& cp=std::get<CBLayerParams>(p);  return {cp.out_ch, cp.k, cp.s, cp.p}; }
-        if (std::holds_alternative<CRLayerParams>(p))     { auto& cp=std::get<CRLayerParams>(p);  return {cp.out_ch, cp.k, cp.s, cp.p}; }
         Shape in  = layer.in_shape;
         Shape out = layer.out_shape;
         ConvLayerParams fp;
@@ -500,18 +486,6 @@ namespace {
     OpParams convert_to_op_params(const LayerParam& lp) {
         if (std::holds_alternative<ConvLayerParams>(lp)) {
             auto& p = std::get<ConvLayerParams>(lp);
-            return OpParams{ConvParams{p.out_ch, p.k, p.k, p.s, p.s, p.p, p.p, 1, 1, 1}};
-        }
-        if (std::holds_alternative<CBRLayerParams>(lp)) {
-            auto& p = std::get<CBRLayerParams>(lp);
-            return OpParams{CBRParams{ConvParams{p.out_ch, p.k, p.k, p.s, p.s, p.p, p.p, 1, 1, 1}, p.bn}};
-        }
-        if (std::holds_alternative<CBLayerParams>(lp)) {
-            auto& p = std::get<CBLayerParams>(lp);
-            return OpParams{CBRParams{ConvParams{p.out_ch, p.k, p.k, p.s, p.s, p.p, p.p, 1, 1, 1}, p.bn}};
-        }
-        if (std::holds_alternative<CRLayerParams>(lp)) {
-            auto& p = std::get<CRLayerParams>(lp);
             return OpParams{ConvParams{p.out_ch, p.k, p.k, p.s, p.s, p.p, p.p, 1, 1, 1}};
         }
         if (std::holds_alternative<PoolLayerParams>(lp)) {
@@ -1015,9 +989,6 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
             case LayerKind::ELU:               idx = 0; break;
             case LayerKind::Sigmoid:           idx = 0; break;
             case LayerKind::Add2Start: case LayerKind::Add2ShortcutEnd: case LayerKind::Add2End: idx = 0; break;
-            case LayerKind::ConvBNReLU:         idx = 8; break;
-            case LayerKind::ConvBN:             idx = 8; break;
-            case LayerKind::ConvReLU:           idx = 1; break;
             case LayerKind::GapFC:              idx = 3; break;
             case LayerKind::BottleneckProjection: idx = 61; break;
             case LayerKind::BottleneckIdentity:   idx = 44; break;
@@ -1054,9 +1025,6 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
             case LayerKind::ELU:               idx = -1; break;
             case LayerKind::Sigmoid:           idx = -1; break;
             case LayerKind::Add2Start: case LayerKind::Add2ShortcutEnd: case LayerKind::Add2End: idx = 0; break;  // inplace到第一个input
-            case LayerKind::ConvBNReLU:         idx = 2; break;  // 融合层的grad_slot
-            case LayerKind::ConvBN:             idx = 2; break;
-            case LayerKind::ConvReLU:           idx = 2; break;  // grad_slot
             case LayerKind::GapFC:              idx = -1; break; // dX in-place to X
             case LayerKind::BottleneckProjection: idx = 70; break;  // branch_grad_slot
             case LayerKind::BottleneckIdentity:   idx = 53; break;  // branch_grad_slot
@@ -1710,8 +1678,7 @@ void Compiler::build_auxiliary_graphs(ComputationGraph& train_cg, const MemoryPl
     bool has_bn = false;
     for (const auto& layer : arch.layers()) {
         auto k = layer.kind;
-        if (k == LayerKind::ConvBN || k == LayerKind::ConvBNReLU ||
-            k == LayerKind::Bn1d || k == LayerKind::Bn2d) {
+        if (k == LayerKind::Bn1d || k == LayerKind::Bn2d) {
             has_bn = true;
             break;
         }
