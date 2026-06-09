@@ -37,7 +37,8 @@ void ArchPlan::step2_rename_bn() {
         LayerKind prev = LayerKind::Conv;
         for (int j = static_cast<int>(i) - 1; j >= 0; --j) {
             auto k = layers_[j].kind;
-            if (k == LayerKind::ReLU || k == LayerKind::Tanh || k == LayerKind::Identity) continue;
+            if (k == LayerKind::ReLU || k == LayerKind::Tanh || k == LayerKind::Identity
+                || k == LayerKind::ChannelPadding) continue;
             if (k == LayerKind::Add2ShortcutEnd || k == LayerKind::Add2Start) {
                 prev = LayerKind::Conv; break;
             }
@@ -97,12 +98,6 @@ int ArchPlan::get_effective_output_c_at(size_t idx, int default_c) const {
         case LayerKind::InvResidualNoShortcut:
         case LayerKind::InvResidualIdentity:
             return std::get<InvResidualLayerParams>(layers_[j].params).out_ch;
-        case LayerKind::ConvBNReLU:
-            return std::get<CBRLayerParams>(layers_[j].params).out_ch;
-        case LayerKind::ConvBN:
-            return std::get<CBLayerParams>(layers_[j].params).out_ch;
-        case LayerKind::ConvReLU:
-            return std::get<CRLayerParams>(layers_[j].params).out_ch;
         case LayerKind::GapFC:
             return std::get<GapFCLayerParams>(layers_[j].params).out_features;
         case LayerKind::ReLU:
@@ -122,6 +117,8 @@ int ArchPlan::get_effective_output_c_at(size_t idx, int default_c) const {
         case LayerKind::Add2End:
         case LayerKind::SoftmaxCE:
             continue;
+        case LayerKind::ChannelPadding:
+            return layers_[j].out_shape.c();
         }
     }
     return default_c;

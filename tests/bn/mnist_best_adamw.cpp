@@ -118,7 +118,7 @@ int main(int argc, char** argv) {
     }
 
     GLOBAL_SETTING
-        .manual_seed(43)           // 固定随机种子，确保可复现
+        .manual_seed(123)           // 固定随机种子，确保可复现
         .global_batch_size(128)     // 全局batch size，自动按world_size缩放
         .train_resolution(28)      // MNIST标准分辨率
         .val_resolution(28)

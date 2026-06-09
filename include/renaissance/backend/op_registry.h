@@ -106,6 +106,7 @@ void register_op_elu();
 void register_op_sigmoid();
 void register_op_fc();
 void register_op_flatten();
+void register_op_channel_padding();
 void register_op_axpy();
 void register_op_conv();
 void register_op_gap();

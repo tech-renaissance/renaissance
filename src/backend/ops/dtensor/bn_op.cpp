@@ -700,7 +700,7 @@ void register_op_bn() {
     table[static_cast<size_t>(ComputeOp::BN2D_AMP_INF)].launch_cuda = launch_bn_inf_cuda;
 #endif
 
-    TR_LOG_INFO("backend") << "Registered BN1D/BN2D ops (FP32/AMP x FWD/BWD/INF)";
+    // TR_LOG_INFO("backend") << "Registered BN1D/BN2D ops (FP32/AMP x FWD/BWD/INF)";
 }
 
 } // namespace tr

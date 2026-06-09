@@ -26,6 +26,7 @@ static LayerKind kind_from_name(const std::string& name) {
     if (name == "GAP") return LayerKind::GAP;
     if (name == "FC") return LayerKind::FC;
     if (name == "Flatten") return LayerKind::Flatten;
+    if (name == "ChannelPadding") return LayerKind::ChannelPadding;
     if (name == "Identity") return LayerKind::Identity;
     if (name == "SoftmaxCE") return LayerKind::SoftmaxCE;
     if (name == "Add2Start") return LayerKind::Add2Start;
@@ -37,9 +38,6 @@ static LayerKind kind_from_name(const std::string& name) {
     if (name == "BasicBlockIdentity") return LayerKind::BasicBlockIdentity;
     if (name == "InvResidualNoShortcut") return LayerKind::InvResidualNoShortcut;
     if (name == "InvResidualIdentity") return LayerKind::InvResidualIdentity;
-    if (name == "ConvBNReLU") return LayerKind::ConvBNReLU;
-    if (name == "ConvBN") return LayerKind::ConvBN;
-    if (name == "ConvReLU") return LayerKind::ConvReLU;
     if (name == "GapFC") return LayerKind::GapFC;
     if (name == "Dropout") return LayerKind::Dropout;
     TR_VALUE_ERROR("kind_from_name: unknown kind: " + name);
@@ -128,24 +126,9 @@ std::string ArchPlan::to_yaml() const {
             pnode["stride"] = p.stride; pnode["has_shortcut"] = p.has_shortcut;
             break;
         }
-        case LayerKind::ConvBNReLU: {
-            auto& p = std::get<CBRLayerParams>(l.params);
-            pnode["out_ch"] = p.out_ch; pnode["k"] = p.k; pnode["s"] = p.s; pnode["p"] = p.p;
-            break;
-        }
         case LayerKind::Dropout: {
             auto& p = std::get<DropoutLayerParams>(l.params);
             pnode["p"] = p.p;
-            break;
-        }
-        case LayerKind::ConvBN: {
-            auto& p = std::get<CBLayerParams>(l.params);
-            pnode["out_ch"] = p.out_ch; pnode["k"] = p.k; pnode["s"] = p.s; pnode["p"] = p.p;
-            break;
-        }
-        case LayerKind::ConvReLU: {
-            auto& p = std::get<CRLayerParams>(l.params);
-            pnode["out_ch"] = p.out_ch; pnode["k"] = p.k; pnode["s"] = p.s; pnode["p"] = p.p;
             break;
         }
         case LayerKind::GapFC: {
@@ -252,23 +235,8 @@ ArchPlan ArchPlan::from_yaml(const std::string& yaml) {
                     pnode["expand_ch"].get_value<int>(), pnode["out_ch"].get_value<int>(),
                     pnode["stride"].get_value<int>(), pnode["has_shortcut"].get_value<bool>()};
                 break;
-            case LayerKind::ConvBNReLU:
-                layer.params = CBRLayerParams{
-                    pnode["out_ch"].get_value<int>(), pnode["k"].get_value<int>(),
-                    pnode["s"].get_value<int>(), pnode["p"].get_value<int>()};
-                break;
             case LayerKind::Dropout:
                 layer.params = DropoutLayerParams{pnode["p"].get_value<float>()};
-                break;
-            case LayerKind::ConvBN:
-                layer.params = CBLayerParams{
-                    pnode["out_ch"].get_value<int>(), pnode["k"].get_value<int>(),
-                    pnode["s"].get_value<int>(), pnode["p"].get_value<int>()};
-                break;
-            case LayerKind::ConvReLU:
-                layer.params = CRLayerParams{
-                    pnode["out_ch"].get_value<int>(), pnode["k"].get_value<int>(),
-                    pnode["s"].get_value<int>(), pnode["p"].get_value<int>()};
                 break;
             case LayerKind::GapFC:
                 layer.params = GapFCLayerParams{

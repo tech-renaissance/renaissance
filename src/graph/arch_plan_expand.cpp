@@ -62,6 +62,12 @@ static void expand_primitive_impl(const Layer::Node& node, std::vector<ArchLayer
         out.push_back({LayerKind::Flatten, EmptyParams{}, buf, {}, {}, false, false, src_id});
         break;
     }
+    case NodeKind::ChannelPadding: {
+        out.push_back({LayerKind::ChannelPadding, EmptyParams{}, "channel_padding",
+                       {}, {}, false, false, src_id});
+        current_c = (current_c + 7) / 8 * 8;
+        break;
+    }
     case NodeKind::Identity: {
         out.push_back({LayerKind::Identity, EmptyParams{}, "identity", {}, {}, false, false, src_id});
         break;
@@ -400,6 +406,7 @@ void ArchPlan::expand_tree(const Layer& root, std::vector<ArchLayer>& out,
     case NodeKind::GAP:
     case NodeKind::FC:
     case NodeKind::Flatten:
+    case NodeKind::ChannelPadding:
     case NodeKind::Identity:
     case NodeKind::TanhAct:
     case NodeKind::SiLU:

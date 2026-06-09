@@ -77,6 +77,7 @@ private:
     friend Layer sigmoid();
     friend Layer dropout(float);
     friend Layer flatten(int);
+    friend Layer channel_padding();
     friend Layer maxpool(int, int, int);
     friend Layer avgpool(int, int, int);
     friend Layer gap();
@@ -106,6 +107,7 @@ namespace detail {
 enum class NodeKind {
     Conv2d, DWConv2d, GroupConv2d,
     BN, ReLU, TanhAct, SiLU, ReLU6, LeakyReLU, Hardswish, ELU, Sigmoid, Dropout, Flatten,
+    ChannelPadding,
     MaxPool, AvgPool, GAP, FC, Identity,
     Sequential, Add2, Repeat,
     CBR, CBRP, GapFC,
@@ -126,6 +128,7 @@ struct ELUParam         {};
 struct SigmoidParam     {};
 struct DropoutParam     { float p; };
 struct FlattenParam     { int start_dim; };
+struct ChannelPaddingParam { };
 struct MaxPoolParam     { int k; int s; int p; };
 struct AvgPoolParam     { int k; int s; int p; };
 struct GAPParam         {};
@@ -143,7 +146,7 @@ struct BlockParam       { BlockStyle style; int mid_ch; int out_ch; int stride; 
 
 using Payload = std::variant<
     ConvParam, DWConvParam, GroupConvParam,
-    BNParam, ReLUParam, TanhActParam, SiLUParam, ReLU6Param, LeakyReLUParam, HardswishParam, ELUParam, SigmoidParam, DropoutParam, FlattenParam,
+    BNParam, ReLUParam, TanhActParam, SiLUParam, ReLU6Param, LeakyReLUParam, HardswishParam, ELUParam, SigmoidParam, DropoutParam, FlattenParam, ChannelPaddingParam,
     MaxPoolParam, AvgPoolParam, GAPParam, FCParam, IdentityParam,
     SequentialParam, Add2Param, RepeatParam,
     CBRParam, CBRPParam, GapFCParam, BlockParam
@@ -217,6 +220,10 @@ inline Layer dropout(float p) {
 inline Layer flatten(int start_dim = 1) {
     return Layer(std::make_shared<Layer::Node>(
         detail::NodeKind::Flatten, detail::FlattenParam{start_dim}));
+}
+inline Layer channel_padding() {
+    return Layer(std::make_shared<Layer::Node>(
+        detail::NodeKind::ChannelPadding, detail::ChannelPaddingParam{}));
 }
 inline Layer maxpool(int k, int s, int p) {
     return Layer(std::make_shared<Layer::Node>(

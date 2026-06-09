@@ -312,6 +312,30 @@ endif()
 message(STATUS "  - test_fc_fwd_bwd: FC FWD+BWD correctness test")
 
 # ============================================================================
+# FC AMP 4D 输入等价性测试
+# ============================================================================
+add_executable(test_fc_amp_4d test_fc_amp_4d.cpp)
+target_link_libraries(test_fc_amp_4d PRIVATE renaissance)
+target_compile_definitions(test_fc_amp_4d PRIVATE TR_LOG_LEVEL=1)
+
+if(TR_USE_CUDA)
+    setup_gpu_runtime_env(test_fc_amp_4d)
+endif()
+
+set_target_properties(test_fc_amp_4d PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/op
+    WIN32_EXECUTABLE FALSE
+)
+
+if(MSVC)
+    target_compile_options(test_fc_amp_4d PRIVATE /W4 /utf-8 /wd4244 /wd4505 /wd4458 /wd4127)
+else()
+    target_compile_options(test_fc_amp_4d PRIVATE -Wall -Wextra -Wpedantic -Wno-unused-function)
+endif()
+
+message(STATUS "  - test_fc_amp_4d: FC AMP 4D input equivalence test")
+
+# ============================================================================
 # Conv FWD+BWD 测试
 # ============================================================================
 add_executable(test_conv_fwd_bwd test_conv_fwd_bwd.cpp)
@@ -603,5 +627,29 @@ else()
 endif()
 
 message(STATUS "  - test_dropout: Dropout FWD+BWD+INF property test")
+
+# ============================================================================
+# ChannelPadding FWD+BWD 串接测试 — C 通道填充到 8 的倍数
+# ============================================================================
+add_executable(test_channel_padding test_channel_padding.cpp)
+target_link_libraries(test_channel_padding PRIVATE renaissance)
+target_compile_definitions(test_channel_padding PRIVATE TR_LOG_LEVEL=1)
+
+if(TR_USE_CUDA)
+    setup_gpu_runtime_env(test_channel_padding)
+endif()
+
+set_target_properties(test_channel_padding PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/op
+    WIN32_EXECUTABLE FALSE
+)
+
+if(MSVC)
+    target_compile_options(test_channel_padding PRIVATE /W4 /utf-8 /wd4244 /wd4505 /wd4458 /wd4127)
+else()
+    target_compile_options(test_channel_padding PRIVATE -Wall -Wextra -Wpedantic -Wno-unused-function)
+endif()
+
+message(STATUS "  - test_channel_padding: ChannelPadding FWD+BWD correctness test")
 
 

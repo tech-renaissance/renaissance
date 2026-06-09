@@ -121,14 +121,12 @@ std::string compute_op_to_string(ComputeOp op) {
         case ComputeOp::FLATTEN_FP32_BWD:         return "FLATTEN_FP32_BWD";
         case ComputeOp::FLATTEN_AMP_FWD:          return "FLATTEN_AMP_FWD";
         case ComputeOp::FLATTEN_AMP_BWD:          return "FLATTEN_AMP_BWD";
+        case ComputeOp::CHANNEL_PADDING_FP32_FWD: return "CHANNEL_PADDING_FP32_FWD";
+        case ComputeOp::CHANNEL_PADDING_FP32_BWD: return "CHANNEL_PADDING_FP32_BWD";
+        case ComputeOp::CHANNEL_PADDING_AMP_FWD:  return "CHANNEL_PADDING_AMP_FWD";
+        case ComputeOp::CHANNEL_PADDING_AMP_BWD:  return "CHANNEL_PADDING_AMP_BWD";
 
         // === 融合算子（AMP 训练 + INF 推理）===
-        case ComputeOp::CONV_BN_RELU_AMP_FWD:      return "CONV_BN_RELU_AMP_FWD";
-        case ComputeOp::CONV_BN_RELU_AMP_BWD:      return "CONV_BN_RELU_AMP_BWD";
-        case ComputeOp::CONV_BN_RELU_AMP_INF:      return "CONV_BN_RELU_AMP_INF";
-        case ComputeOp::CBR_AMP_FWD:                  return "CBR_AMP_FWD";
-        case ComputeOp::CBR_AMP_BWD:                  return "CBR_AMP_BWD";
-        case ComputeOp::CBR_AMP_INF:                  return "CBR_AMP_INF";
         case ComputeOp::BOTTLENECK_AMP_FWD:           return "BOTTLENECK_AMP_FWD";
         case ComputeOp::BOTTLENECK_AMP_BWD:    return "BOTTLENECK_AMP_BWD";
         case ComputeOp::BOTTLENECK_AMP_INF:    return "BOTTLENECK_AMP_INF";
@@ -248,18 +246,6 @@ std::string format_params(ComputeOp op, const OpParams& p) {
                     << ",kernel=" << cp->kernel_h << "x" << cp->kernel_w
                     << ",stride=" << cp->stride_h << "x" << cp->stride_w
                     << ",pad=" << cp->pad_h << "x" << cp->pad_w;
-            }
-            break;
-        }
-        case ComputeOp::CBR_AMP_FWD:
-        case ComputeOp::CBR_AMP_BWD:
-        case ComputeOp::CBR_AMP_INF: {
-            if (auto* cp = std::get_if<CBRParams>(&p.data)) {
-                oss << "conv:out_ch=" << cp->conv.out_channels
-                    << ",kernel=" << cp->conv.kernel_h << "x" << cp->conv.kernel_w
-                    << ",stride=" << cp->conv.stride_h << "x" << cp->conv.stride_w
-                    << ",pad=" << cp->conv.pad_h << "x" << cp->conv.pad_w
-                    << ",bn:eps=" << cp->bn.eps;
             }
             break;
         }

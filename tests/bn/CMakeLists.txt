@@ -73,3 +73,27 @@ else()
 endif()
 
 message(STATUS "  - mnist_best_adamw_bn: MNIST MLP with BN ultimate accuracy test (AdamW)")
+
+# ============================================================================
+# MNIST mini-LeNet accuracy test (AdamW) — 无BN的CNN训练验证
+# ============================================================================
+add_executable(mini_lenet mini_lenet.cpp)
+target_link_libraries(mini_lenet PRIVATE renaissance)
+target_compile_definitions(mini_lenet PRIVATE TR_LOG_LEVEL=1)
+
+if(TR_USE_CUDA)
+    setup_gpu_runtime_env(mini_lenet)
+endif()
+
+set_target_properties(mini_lenet PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/bn
+    WIN32_EXECUTABLE FALSE
+)
+
+if(MSVC)
+    target_compile_options(mini_lenet PRIVATE /W4 /utf-8 /wd4244 /wd4505 /wd4458 /wd4127)
+else()
+    target_compile_options(mini_lenet PRIVATE -Wall -Wextra -Wpedantic -Wno-unused-function)
+endif()
+
+message(STATUS "  - mini_lenet: MNIST mini-LeNet end-to-end accuracy test (AdamW)")

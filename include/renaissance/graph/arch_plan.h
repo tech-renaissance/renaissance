@@ -28,7 +28,7 @@ class Layer;
 enum class LayerKind : uint16_t {
     // 基础原语
     Conv, Bn1d, Bn2d, ReLU, Tanh, SiLU, ReLU6, LeakyReLU, Hardswish, ELU, Sigmoid, MaxPool, AvgPool, GAP, FC,
-    Flatten, Identity, SoftmaxCE, Dropout,
+    Flatten, ChannelPadding, Identity, SoftmaxCE, Dropout,
 
     // Add2 结构标记
     Add2Start, Add2ShortcutEnd, Add2End,
@@ -38,11 +38,8 @@ enum class LayerKind : uint16_t {
     BasicBlockProjection, BasicBlockIdentity,
     InvResidualNoShortcut, InvResidualIdentity,
 
-    // 三元融合
-    ConvBNReLU,
-
     // 二元融合
-    ConvBN, ConvReLU, GapFC,
+    GapFC,
 };
 
 // 参数结构体
@@ -93,20 +90,6 @@ struct InvResidualLayerParams {
         return expand_ch == o.expand_ch && out_ch == o.out_ch && stride == o.stride && has_shortcut == o.has_shortcut;
     }
 };
-struct CBRLayerParams {
-    int out_ch, k, s, p;
-    BNParams bn;
-    bool operator==(const CBRLayerParams& o) const { return out_ch == o.out_ch && k == o.k && s == o.s && p == o.p && bn == o.bn; }
-};
-struct CBLayerParams {
-    int out_ch, k, s, p;
-    BNParams bn;
-    bool operator==(const CBLayerParams& o) const { return out_ch == o.out_ch && k == o.k && s == o.s && p == o.p && bn == o.bn; }
-};
-struct CRLayerParams {
-    int out_ch, k, s, p;
-    bool operator==(const CRLayerParams& o) const { return out_ch == o.out_ch && k == o.k && s == o.s && p == o.p; }
-};
 struct GapFCLayerParams {
     int out_features;
     bool bias = true;
@@ -124,8 +107,7 @@ using LayerParam = std::variant<
     BottleneckIdentityLayerParams, BottleneckProjectionLayerParams,
     BasicBlockIdentityLayerParams, BasicBlockProjectionLayerParams,
     InvResidualLayerParams,
-    CBRLayerParams,
-    CBLayerParams, CRLayerParams, GapFCLayerParams,
+    GapFCLayerParams,
     EmptyParams
 >;
 

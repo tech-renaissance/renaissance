@@ -278,8 +278,6 @@ protected:
             switch (layer.kind) {
                 case LayerKind::ReLU:
                 case LayerKind::MaxPool:
-                case LayerKind::ConvBNReLU:
-                case LayerKind::ConvReLU:
                 case LayerKind::BottleneckProjection:
                 case LayerKind::BottleneckIdentity:
                 case LayerKind::BasicBlockProjection:
@@ -421,22 +419,6 @@ protected:
                         break;
                     }
                 }
-                if (layer.kind == LayerKind::ConvBNReLU) {
-                    if (std::holds_alternative<CBRLayerParams>(layer.params)) {
-                        const auto& bp = std::get<CBRLayerParams>(layer.params).bn;
-                        bn_eps = bp.eps;
-                        bn_mom = bp.momentum;
-                        break;
-                    }
-                }
-                if (layer.kind == LayerKind::ConvBN) {
-                    if (std::holds_alternative<CBLayerParams>(layer.params)) {
-                        const auto& bp = std::get<CBLayerParams>(layer.params).bn;
-                        bn_eps = bp.eps;
-                        bn_mom = bp.momentum;
-                        break;
-                    }
-                }
 
             }
             const auto& bl = active_memory_plan_->baseline();
@@ -462,8 +444,6 @@ protected:
     static bool has_relu_layers(const ArchPlan& plan) {
         for (const auto& l : plan.layers()) {
             if (l.kind == LayerKind::ReLU ||
-                l.kind == LayerKind::ConvBNReLU ||
-                l.kind == LayerKind::ConvReLU ||
                 l.kind == LayerKind::BasicBlockProjection ||
                 l.kind == LayerKind::BasicBlockIdentity) {
                 return true;

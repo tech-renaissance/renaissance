@@ -79,6 +79,8 @@ list(APPEND RENAISSANCE_SOURCES
     backend/ops/dtensor/fc_op.cu
     backend/ops/dtensor/flatten_op.cpp
     backend/ops/dtensor/flatten_op.cu
+    backend/ops/dtensor/channel_padding_op.cpp
+    backend/ops/dtensor/channel_padding_op.cu
     backend/ops/dtensor/gap_op.cpp
     backend/ops/dtensor/gap_op.cu
     backend/ops/dtensor/maxpool_op.cpp

@@ -37,8 +37,6 @@ static bool is_bn_like(LayerKind k) {
     switch (k) {
         case LayerKind::Bn1d:
         case LayerKind::Bn2d:
-        case LayerKind::ConvBNReLU:
-        case LayerKind::ConvBN:
             return true;
         default:
             return false;
@@ -60,7 +58,6 @@ static bool is_weight_bearing(LayerKind k) {
         case LayerKind::Conv:
         case LayerKind::Bn1d: case LayerKind::Bn2d:
         case LayerKind::FC:
-        case LayerKind::ConvBNReLU: case LayerKind::ConvBN: case LayerKind::ConvReLU:
         case LayerKind::GapFC:
         case LayerKind::BottleneckProjection:
         case LayerKind::BottleneckIdentity:
@@ -246,14 +243,6 @@ private:
             case LayerKind::FC:
                 compile_fc(layer);
                 break;
-            case LayerKind::ConvBNReLU:
-            case LayerKind::ConvBN:
-                compile_conv(layer);
-                compile_bn(layer, idx);
-                break;
-            case LayerKind::ConvReLU:
-                compile_conv(layer);
-                break;
             case LayerKind::GapFC:
                 compile_fc(layer);
                 break;
@@ -286,6 +275,7 @@ private:
             case LayerKind::Dropout:
             case LayerKind::GAP:
             case LayerKind::Flatten:
+            case LayerKind::ChannelPadding:
             case LayerKind::Identity:
             case LayerKind::SoftmaxCE:
             case LayerKind::Add2Start:
@@ -447,9 +437,6 @@ private:
     ConvLayerParams extract_conv_params(const ArchLayer& layer) {
         auto& p = layer.params;
         if (std::holds_alternative<ConvLayerParams>(p))  return std::get<ConvLayerParams>(p);
-        if (std::holds_alternative<CBRLayerParams>(p))    { auto& cp=std::get<CBRLayerParams>(p); return {cp.out_ch, cp.k, cp.s, cp.p}; }
-        if (std::holds_alternative<CBLayerParams>(p))     { auto& cp=std::get<CBLayerParams>(p);  return {cp.out_ch, cp.k, cp.s, cp.p}; }
-        if (std::holds_alternative<CRLayerParams>(p))     { auto& cp=std::get<CRLayerParams>(p);  return {cp.out_ch, cp.k, cp.s, cp.p}; }
         Shape in  = layer.in_shape;
         Shape out = layer.out_shape;
         ConvLayerParams fp;
@@ -500,18 +487,6 @@ namespace {
     OpParams convert_to_op_params(const LayerParam& lp) {
         if (std::holds_alternative<ConvLayerParams>(lp)) {
             auto& p = std::get<ConvLayerParams>(lp);
-            return OpParams{ConvParams{p.out_ch, p.k, p.k, p.s, p.s, p.p, p.p, 1, 1, 1}};
-        }
-        if (std::holds_alternative<CBRLayerParams>(lp)) {
-            auto& p = std::get<CBRLayerParams>(lp);
-            return OpParams{CBRParams{ConvParams{p.out_ch, p.k, p.k, p.s, p.s, p.p, p.p, 1, 1, 1}, p.bn}};
-        }
-        if (std::holds_alternative<CBLayerParams>(lp)) {
-            auto& p = std::get<CBLayerParams>(lp);
-            return OpParams{CBRParams{ConvParams{p.out_ch, p.k, p.k, p.s, p.s, p.p, p.p, 1, 1, 1}, p.bn}};
-        }
-        if (std::holds_alternative<CRLayerParams>(lp)) {
-            auto& p = std::get<CRLayerParams>(lp);
             return OpParams{ConvParams{p.out_ch, p.k, p.k, p.s, p.s, p.p, p.p, 1, 1, 1}};
         }
         if (std::holds_alternative<PoolLayerParams>(lp)) {
@@ -1005,6 +980,7 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
             case LayerKind::GAP:                idx = 0; break;
             case LayerKind::FC:                 idx = 2; break;
             case LayerKind::Flatten:            idx = 0; break;
+            case LayerKind::ChannelPadding:   idx = 0; break;
             case LayerKind::SoftmaxCE:          idx = 0; break;
             case LayerKind::Identity:           idx = 0; break;
             case LayerKind::Tanh:               idx = 0; break;
@@ -1015,9 +991,6 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
             case LayerKind::ELU:               idx = 0; break;
             case LayerKind::Sigmoid:           idx = 0; break;
             case LayerKind::Add2Start: case LayerKind::Add2ShortcutEnd: case LayerKind::Add2End: idx = 0; break;
-            case LayerKind::ConvBNReLU:         idx = 8; break;
-            case LayerKind::ConvBN:             idx = 8; break;
-            case LayerKind::ConvReLU:           idx = 1; break;
             case LayerKind::GapFC:              idx = 3; break;
             case LayerKind::BottleneckProjection: idx = 61; break;
             case LayerKind::BottleneckIdentity:   idx = 44; break;
@@ -1044,6 +1017,7 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
             case LayerKind::GAP:                idx = 1; break;  // gap_grad_slot
             case LayerKind::FC:                 idx = -1; break; // dX in-place to X
             case LayerKind::Flatten:            idx = -1; break; // dX reshape写回前层输出（layer_input_ids），由fallback追踪
+            case LayerKind::ChannelPadding:   idx = -1; break; // dX in-place to X
             case LayerKind::SoftmaxCE:          idx = 0; break;  // ce_output (gradient in-place覆写)
             case LayerKind::Identity:           idx = -1; break;  // in-place
             case LayerKind::Tanh:               idx = -1; break;  // dX in-place to x (handled by prev_grad_id tracking)
@@ -1054,9 +1028,6 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
             case LayerKind::ELU:               idx = -1; break;
             case LayerKind::Sigmoid:           idx = -1; break;
             case LayerKind::Add2Start: case LayerKind::Add2ShortcutEnd: case LayerKind::Add2End: idx = 0; break;  // inplace到第一个input
-            case LayerKind::ConvBNReLU:         idx = 2; break;  // 融合层的grad_slot
-            case LayerKind::ConvBN:             idx = 2; break;
-            case LayerKind::ConvReLU:           idx = 2; break;  // grad_slot
             case LayerKind::GapFC:              idx = -1; break; // dX in-place to X
             case LayerKind::BottleneckProjection: idx = 70; break;  // branch_grad_slot
             case LayerKind::BottleneckIdentity:   idx = 53; break;  // branch_grad_slot
@@ -1135,9 +1106,11 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
             gn.input_ids = map_indices(pattern_node.input_indices);
             gn.output_ids = map_indices(pattern_node.output_indices);
 
-            // Flatten: 显式输入来自数据缓冲区(首层)或前一层输出(非首层)
+            // Flatten / ChannelPadding: 显式输入来自数据缓冲区(首层)或前一层输出(非首层)
             if (pattern_node.op == ComputeOp::FLATTEN_FP32_FWD ||
-                pattern_node.op == ComputeOp::FLATTEN_AMP_FWD) {
+                pattern_node.op == ComputeOp::FLATTEN_AMP_FWD ||
+                pattern_node.op == ComputeOp::CHANNEL_PADDING_FP32_FWD ||
+                pattern_node.op == ComputeOp::CHANNEL_PADDING_AMP_FWD) {
                 if (layer.is_first_layer) {
                     GraphNode gn_a;
                     gn_a.kind = GraphNode::Kind::COMPUTE;
@@ -1304,10 +1277,12 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
             gn.input_ids = map_indices(pattern_node.input_indices);
             gn.output_ids = map_indices(pattern_node.output_indices);
 
-            // 跨层梯度链：注入下一层输出的梯度DTensor ID（Flatten已有显式输入，跳过）
+            // 跨层梯度链：注入下一层输出的梯度DTensor ID（Flatten/ChannelPadding已有显式输入，跳过）
             if (prev_grad_id >= 0 &&
                 gn.compute_op != ComputeOp::FLATTEN_FP32_BWD &&
-                gn.compute_op != ComputeOp::FLATTEN_AMP_BWD) {
+                gn.compute_op != ComputeOp::FLATTEN_AMP_BWD &&
+                gn.compute_op != ComputeOp::CHANNEL_PADDING_FP32_BWD &&
+                gn.compute_op != ComputeOp::CHANNEL_PADDING_AMP_BWD) {
                 gn.input_ids.insert(gn.input_ids.begin(), prev_grad_id);
             }
 
@@ -1406,9 +1381,11 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
                 gn.output_ids.push_back(prev_grad_id);
             }
 
-            // Flatten BWD: dX 写回正向原输入张量（梯度覆盖）
+            // Flatten / ChannelPadding BWD: dX 写回正向原输入张量（梯度覆盖）
             if (gn.compute_op == ComputeOp::FLATTEN_FP32_BWD ||
-                gn.compute_op == ComputeOp::FLATTEN_AMP_BWD) {
+                gn.compute_op == ComputeOp::FLATTEN_AMP_BWD ||
+                gn.compute_op == ComputeOp::CHANNEL_PADDING_FP32_BWD ||
+                gn.compute_op == ComputeOp::CHANNEL_PADDING_AMP_BWD) {
                 if (layer.is_first_layer) {
                     gn.output_ids = {1};  // 首层A：写回 I_A_DATA
                     train_cg.append(GraphId::FIRST_LAYER_BWD_A, gn);
@@ -1461,7 +1438,8 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
             layer.kind == LayerKind::SiLU || layer.kind == LayerKind::ReLU6 ||
             layer.kind == LayerKind::LeakyReLU || layer.kind == LayerKind::Hardswish ||
             layer.kind == LayerKind::ELU || layer.kind == LayerKind::Sigmoid ||
-            layer.kind == LayerKind::Flatten)) {
+            layer.kind == LayerKind::Flatten ||
+            layer.kind == LayerKind::ChannelPadding)) {
             auto it = layer_input_ids.find(l);
             if (it != layer_input_ids.end() && it->second >= 0) grad_id = it->second;
         }
@@ -1554,9 +1532,11 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
             gn.input_ids = map_indices_inf(pattern_node.input_indices);
             gn.output_ids = map_indices_inf(pattern_node.output_indices);
 
-            // Flatten: 显式输入来自数据缓冲区(首层)或前一层输出(非首层)
+            // Flatten / ChannelPadding: 显式输入来自数据缓冲区(首层)或前一层输出(非首层)
             if (pattern_node.op == ComputeOp::FLATTEN_FP32_FWD ||
-                pattern_node.op == ComputeOp::FLATTEN_AMP_FWD) {
+                pattern_node.op == ComputeOp::FLATTEN_AMP_FWD ||
+                pattern_node.op == ComputeOp::CHANNEL_PADDING_FP32_FWD ||
+                pattern_node.op == ComputeOp::CHANNEL_PADDING_AMP_FWD) {
                 if (layer.is_first_layer) {
                     GraphNode gn_a;
                     gn_a.kind = GraphNode::Kind::COMPUTE;
@@ -1710,8 +1690,7 @@ void Compiler::build_auxiliary_graphs(ComputationGraph& train_cg, const MemoryPl
     bool has_bn = false;
     for (const auto& layer : arch.layers()) {
         auto k = layer.kind;
-        if (k == LayerKind::ConvBN || k == LayerKind::ConvBNReLU ||
-            k == LayerKind::Bn1d || k == LayerKind::Bn2d) {
+        if (k == LayerKind::Bn1d || k == LayerKind::Bn2d) {
             has_bn = true;
             break;
         }
