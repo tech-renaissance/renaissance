@@ -105,8 +105,6 @@ int ArchPlan::get_effective_output_c_at(size_t idx, int default_c) const {
             return std::get<CRLayerParams>(layers_[j].params).out_ch;
         case LayerKind::GapFC:
             return std::get<GapFCLayerParams>(layers_[j].params).out_features;
-        case LayerKind::FCBNReLU:
-            return std::get<FBRLayerParams>(layers_[j].params).out_features;
         case LayerKind::ReLU:
         case LayerKind::Tanh:
         case LayerKind::Bn1d:
@@ -119,7 +117,6 @@ int ArchPlan::get_effective_output_c_at(size_t idx, int default_c) const {
         case LayerKind::Flatten:
         case LayerKind::BottleneckIdentity:
         case LayerKind::BasicBlockIdentity:
-        case LayerKind::BNReLU:
         case LayerKind::Add2Start:
         case LayerKind::Add2ShortcutEnd:
         case LayerKind::Add2End:

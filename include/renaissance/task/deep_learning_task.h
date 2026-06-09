@@ -279,9 +279,7 @@ protected:
                 case LayerKind::ReLU:
                 case LayerKind::MaxPool:
                 case LayerKind::ConvBNReLU:
-                case LayerKind::BNReLU:
                 case LayerKind::ConvReLU:
-                case LayerKind::FCBNReLU:
                 case LayerKind::BottleneckProjection:
                 case LayerKind::BottleneckIdentity:
                 case LayerKind::BasicBlockProjection:
@@ -439,22 +437,7 @@ protected:
                         break;
                     }
                 }
-                if (layer.kind == LayerKind::FCBNReLU) {
-                    if (std::holds_alternative<FBRLayerParams>(layer.params)) {
-                        const auto& bp = std::get<FBRLayerParams>(layer.params).bn;
-                        bn_eps = bp.eps;
-                        bn_mom = bp.momentum;
-                        break;
-                    }
-                }
-                if (layer.kind == LayerKind::BNReLU) {
-                    if (std::holds_alternative<BNReLUParams>(layer.params)) {
-                        const auto& bp = std::get<BNReLUParams>(layer.params).bn;
-                        bn_eps = bp.eps;
-                        bn_mom = bp.momentum;
-                        break;
-                    }
-                }
+
             }
             const auto& bl = active_memory_plan_->baseline();
             set_scalar_init(bl.bn_epsilon,  bn_eps);

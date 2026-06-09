@@ -37,10 +37,8 @@ static bool is_bn_like(LayerKind k) {
     switch (k) {
         case LayerKind::Bn1d:
         case LayerKind::Bn2d:
-        case LayerKind::BNReLU:
         case LayerKind::ConvBNReLU:
         case LayerKind::ConvBN:
-        case LayerKind::FCBNReLU:
             return true;
         default:
             return false;
@@ -63,8 +61,7 @@ static bool is_weight_bearing(LayerKind k) {
         case LayerKind::Bn1d: case LayerKind::Bn2d:
         case LayerKind::FC:
         case LayerKind::ConvBNReLU: case LayerKind::ConvBN: case LayerKind::ConvReLU:
-        case LayerKind::FCBNReLU: case LayerKind::GapFC:
-        case LayerKind::BNReLU:
+        case LayerKind::GapFC:
         case LayerKind::BottleneckProjection:
         case LayerKind::BottleneckIdentity:
         case LayerKind::BasicBlockProjection:
@@ -249,9 +246,6 @@ private:
             case LayerKind::FC:
                 compile_fc(layer);
                 break;
-            case LayerKind::BNReLU:
-                compile_bn(layer, idx);
-                break;
             case LayerKind::ConvBNReLU:
             case LayerKind::ConvBN:
                 compile_conv(layer);
@@ -259,10 +253,6 @@ private:
                 break;
             case LayerKind::ConvReLU:
                 compile_conv(layer);
-                break;
-            case LayerKind::FCBNReLU:
-                compile_fc(layer);
-                compile_bn(layer, idx);
                 break;
             case LayerKind::GapFC:
                 compile_fc(layer);
@@ -473,7 +463,6 @@ private:
     FCLayerParams extract_fc_params(const ArchLayer& layer) {
         auto& p = layer.params;
         if (std::holds_alternative<FCLayerParams>(p)) return std::get<FCLayerParams>(p);
-        if (std::holds_alternative<FBRLayerParams>(p)) { auto& fp=std::get<FBRLayerParams>(p); return {fp.out_features, fp.bias}; }
         if (std::holds_alternative<GapFCLayerParams>(p)){ auto& fp=std::get<GapFCLayerParams>(p); return {fp.out_features, fp.bias}; }
         FCLayerParams fp;
         fp.out_features = layer.out_shape.c();
@@ -537,10 +526,6 @@ namespace {
             auto& p = std::get<FCLayerParams>(lp);
             return OpParams{FCParams{p.out_features, p.bias}};
         }
-        if (std::holds_alternative<FBRLayerParams>(lp)) {
-            auto& p = std::get<FBRLayerParams>(lp);
-            return OpParams{FCParams{p.out_features, p.bias}};
-        }
         if (std::holds_alternative<GapFCLayerParams>(lp)) {
             auto& p = std::get<GapFCLayerParams>(lp);
             return OpParams{GapFCParams{p.out_features, p.bias}};
@@ -567,9 +552,6 @@ namespace {
         }
         if (std::holds_alternative<BNParams>(lp)) {
             return OpParams{std::get<BNParams>(lp)};
-        }
-        if (std::holds_alternative<BNReLUParams>(lp)) {
-            return OpParams{std::get<BNReLUParams>(lp).bn};
         }
         if (std::holds_alternative<SoftmaxCELayerParams>(lp)) {
             auto& p = std::get<SoftmaxCELayerParams>(lp);
@@ -1036,9 +1018,7 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
             case LayerKind::ConvBNReLU:         idx = 8; break;
             case LayerKind::ConvBN:             idx = 8; break;
             case LayerKind::ConvReLU:           idx = 1; break;
-            case LayerKind::FCBNReLU:           idx = 9; break;  // bn_output (FC7+2=9)
             case LayerKind::GapFC:              idx = 3; break;
-            case LayerKind::BNReLU:             idx = 2; break;
             case LayerKind::BottleneckProjection: idx = 61; break;
             case LayerKind::BottleneckIdentity:   idx = 44; break;
             case LayerKind::BasicBlockProjection: idx = 26; break;  // conv2_bn_out (Add inplace target)
@@ -1077,9 +1057,7 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
             case LayerKind::ConvBNReLU:         idx = 2; break;  // 融合层的grad_slot
             case LayerKind::ConvBN:             idx = 2; break;
             case LayerKind::ConvReLU:           idx = 2; break;  // grad_slot
-            case LayerKind::FCBNReLU:           idx = -1; break; // dX in-place to X
             case LayerKind::GapFC:              idx = -1; break; // dX in-place to X
-            case LayerKind::BNReLU:             idx = 2; break;  // dX inplace to bn_output
             case LayerKind::BottleneckProjection: idx = 70; break;  // branch_grad_slot
             case LayerKind::BottleneckIdentity:   idx = 53; break;  // branch_grad_slot
             case LayerKind::BasicBlockProjection: idx = 52; break;  // branch_grad_slot
@@ -1477,7 +1455,7 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
         if (grad_id < 0 && (layer.kind == LayerKind::FC ||
             layer.kind == LayerKind::Conv ||
             layer.kind == LayerKind::Bn1d || layer.kind == LayerKind::Bn2d ||  // [NEW]
-            layer.kind == LayerKind::FCBNReLU || layer.kind == LayerKind::GapFC ||
+            layer.kind == LayerKind::GapFC ||
             layer.kind == LayerKind::MaxPool || layer.kind == LayerKind::AvgPool || layer.kind == LayerKind::Dropout ||
             layer.kind == LayerKind::Tanh || layer.kind == LayerKind::ReLU ||
             layer.kind == LayerKind::SiLU || layer.kind == LayerKind::ReLU6 ||
@@ -1733,7 +1711,6 @@ void Compiler::build_auxiliary_graphs(ComputationGraph& train_cg, const MemoryPl
     for (const auto& layer : arch.layers()) {
         auto k = layer.kind;
         if (k == LayerKind::ConvBN || k == LayerKind::ConvBNReLU ||
-            k == LayerKind::BNReLU ||
             k == LayerKind::Bn1d || k == LayerKind::Bn2d) {
             has_bn = true;
             break;
@@ -1991,7 +1968,35 @@ void Compiler::build_auxiliary_graphs(ComputationGraph& train_cg, const MemoryPl
             }
         }
 
-        // --- Bias 更新（所有优化器均用 RangeOp，LARS 的 tc=0 退化为普通动量）---
+        // --- Bias-like 参数更新（BN Bias、BN Weight、FC Bias）---
+        // 框架设计约束：这三个参数在所有优化器中的更新行为必须完全一致：
+        //   1. 正常计算动量（M/V 缓冲区按条件分配）
+        //   2. Weight Decay 恒为 0（Bias launcher 不传 wd 指针，kernel 内 _wd = 0）
+        //   3. LARS 下不计算范数 / trust ratio（直接走 Momentum/Nesterov RangeOp）
+        // 实现上，它们在 Region 枚举中连续排列（W_BN_BIAS=007, W_BN_WEIGHT=008, W_FC_BIAS=009），
+        // 使得单个 region_range(start, end) 闭区间即可一次性覆盖三者。
+        // 对应的 G/M/V 系列（梯度、一阶矩、二阶矩）也保持相同的连续顺序。
+        static_assert(
+            static_cast<int>(Region::W_BN_BIAS) + 1 == static_cast<int>(Region::W_BN_WEIGHT) &&
+            static_cast<int>(Region::W_BN_WEIGHT) + 1 == static_cast<int>(Region::W_FC_BIAS),
+            "W_BN_BIAS, W_BN_WEIGHT, W_FC_BIAS must be consecutive in Region enum"
+        );
+        static_assert(
+            static_cast<int>(Region::G_BN_BIAS) + 1 == static_cast<int>(Region::G_BN_WEIGHT) &&
+            static_cast<int>(Region::G_BN_WEIGHT) + 1 == static_cast<int>(Region::G_FC_BIAS),
+            "G_BN_BIAS, G_BN_WEIGHT, G_FC_BIAS must be consecutive in Region enum"
+        );
+        static_assert(
+            static_cast<int>(Region::M_BN_BIAS) + 1 == static_cast<int>(Region::M_BN_WEIGHT) &&
+            static_cast<int>(Region::M_BN_WEIGHT) + 1 == static_cast<int>(Region::M_FC_BIAS),
+            "M_BN_BIAS, M_BN_WEIGHT, M_FC_BIAS must be consecutive in Region enum"
+        );
+        static_assert(
+            static_cast<int>(Region::V_BN_BIAS) + 1 == static_cast<int>(Region::V_BN_WEIGHT) &&
+            static_cast<int>(Region::V_BN_WEIGHT) + 1 == static_cast<int>(Region::V_FC_BIAS),
+            "V_BN_BIAS, V_BN_WEIGHT, V_FC_BIAS must be consecutive in Region enum"
+        );
+
         if (memory_plan.is_region_populated(Region::W_BN_BIAS) ||
             memory_plan.is_region_populated(Region::W_FC_BIAS)) {
             RangeOp bias_op;
@@ -2007,6 +2012,10 @@ void Compiler::build_auxiliary_graphs(ComputationGraph& train_cg, const MemoryPl
                 case OptimizerKind::LARS_NESTEROV:
                     bias_op = RangeOp::RANGE_UPDATE_BIAS_NESTEROV;
                     bias_needs_m = true; break;
+                // NOTE: RANGE_UPDATE_BIAS_ADAM 同时服务于 ADAM 和 ADAMW。
+                // Bias 路径的 Weight Decay 恒为 0（launcher 不传 wd 指针），
+                // 因此 update_adam_kernel(wd=nullptr) 与 update_adamw_kernel(wd=nullptr)
+                // 在数学上完全等价，无需单独定义 RANGE_UPDATE_BIAS_ADAMW。
                 case OptimizerKind::ADAM:
                 case OptimizerKind::ADAMW:
                     bias_op = RangeOp::RANGE_UPDATE_BIAS_ADAM;

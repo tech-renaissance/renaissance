@@ -38,9 +38,7 @@ static LayerKind kind_from_name(const std::string& name) {
     if (name == "InvResidualNoShortcut") return LayerKind::InvResidualNoShortcut;
     if (name == "InvResidualIdentity") return LayerKind::InvResidualIdentity;
     if (name == "ConvBNReLU") return LayerKind::ConvBNReLU;
-    if (name == "FCBNReLU") return LayerKind::FCBNReLU;
     if (name == "ConvBN") return LayerKind::ConvBN;
-    if (name == "BNReLU") return LayerKind::BNReLU;
     if (name == "ConvReLU") return LayerKind::ConvReLU;
     if (name == "GapFC") return LayerKind::GapFC;
     if (name == "Dropout") return LayerKind::Dropout;
@@ -138,11 +136,6 @@ std::string ArchPlan::to_yaml() const {
         case LayerKind::Dropout: {
             auto& p = std::get<DropoutLayerParams>(l.params);
             pnode["p"] = p.p;
-            break;
-        }
-        case LayerKind::FCBNReLU: {
-            auto& p = std::get<FBRLayerParams>(l.params);
-            pnode["out_features"] = p.out_features; pnode["bias"] = p.bias;
             break;
         }
         case LayerKind::ConvBN: {
@@ -266,11 +259,6 @@ ArchPlan ArchPlan::from_yaml(const std::string& yaml) {
                 break;
             case LayerKind::Dropout:
                 layer.params = DropoutLayerParams{pnode["p"].get_value<float>()};
-                break;
-            case LayerKind::FCBNReLU:
-                layer.params = FBRLayerParams{
-                    pnode["out_features"].get_value<int>(),
-                    pnode.contains("bias") ? pnode["bias"].get_value<bool>() : true};
                 break;
             case LayerKind::ConvBN:
                 layer.params = CBLayerParams{

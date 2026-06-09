@@ -123,9 +123,6 @@ std::string compute_op_to_string(ComputeOp op) {
         case ComputeOp::FLATTEN_AMP_BWD:          return "FLATTEN_AMP_BWD";
 
         // === 融合算子（AMP 训练 + INF 推理）===
-        case ComputeOp::FC_BN_RELU_AMP_FWD: return "FC_BN_RELU_AMP_FWD";
-        case ComputeOp::FC_BN_RELU_AMP_BWD: return "FC_BN_RELU_AMP_BWD";
-        case ComputeOp::FC_BN_RELU_AMP_INF: return "FC_BN_RELU_AMP_INF";
         case ComputeOp::CONV_BN_RELU_AMP_FWD:      return "CONV_BN_RELU_AMP_FWD";
         case ComputeOp::CONV_BN_RELU_AMP_BWD:      return "CONV_BN_RELU_AMP_BWD";
         case ComputeOp::CONV_BN_RELU_AMP_INF:      return "CONV_BN_RELU_AMP_INF";
@@ -311,9 +308,7 @@ std::string format_params(ComputeOp op, const OpParams& p) {
         case ComputeOp::FC_FP32_FWD:
         case ComputeOp::FC_FP32_BWD:
         case ComputeOp::FC_AMP_FWD:
-        case ComputeOp::FC_AMP_BWD:
-        case ComputeOp::FC_BN_RELU_AMP_FWD:
-        case ComputeOp::FC_BN_RELU_AMP_BWD: {
+        case ComputeOp::FC_AMP_BWD: {
             if (auto* fp = std::get_if<FCParams>(&p.data)) {
                 oss << "out_features=" << fp->out_features
                     << ",bias=" << (fp->bias ? "true" : "false");

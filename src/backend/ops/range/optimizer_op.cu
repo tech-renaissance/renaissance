@@ -235,6 +235,9 @@ void launch_nesterov_bias_cuda(
     update_nesterov_kernel<<<compute_grid(n), kBlock, 0, s>>>(w, g, m, n, lr, nullptr, beta, has_nan, scaling);
 }
 
+// NOTE: 此 launcher 同时服务于 ADAM 和 ADAMW 的 Bias 路径。
+// wd 固定传 nullptr，kernel 内 _wd = 0.0f，因此 update_adam_kernel 与
+// update_adamw_kernel 在此场景下数学等价，无需额外定义 bias_adamw 变体。
 void launch_adam_bias_cuda(
     float* w, const float* g, float* m, float* v, size_t n,
     const float* lr,

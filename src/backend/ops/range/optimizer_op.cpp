@@ -520,10 +520,14 @@ void register_op_range_optimizer() {
     reg(RangeOp::RANGE_UPDATE_WEIGHT_ADAM,      launch_opt_weight_adam_cpu,      launch_opt_weight_adam_cuda);
     reg(RangeOp::RANGE_UPDATE_WEIGHT_ADAMW,     launch_opt_weight_adamw_cpu,     launch_opt_weight_adamw_cuda);
 
-    // Bias
+    // Bias-like 参数更新（BN Bias、BN Weight、FC Bias）
+    // 注意：LARS/LARS_NESTEROV 的 Bias 路径不走 trust ratio，直接退化为标准 Momentum/Nesterov。
     reg(RangeOp::RANGE_UPDATE_BIAS_SGD,         launch_opt_bias_sgd_cpu,         launch_opt_bias_sgd_cuda);
     reg(RangeOp::RANGE_UPDATE_BIAS_MOMENTUM,    launch_opt_bias_momentum_cpu,    launch_opt_bias_momentum_cuda);
     reg(RangeOp::RANGE_UPDATE_BIAS_NESTEROV,    launch_opt_bias_nesterov_cpu,    launch_opt_bias_nesterov_cuda);
+    // NOTE: RANGE_UPDATE_BIAS_ADAM 同时服务于 ADAM 和 ADAMW。
+    // Bias 路径的 Weight Decay 恒为 0（launcher 不传 wd 指针），因此 update_adam_kernel
+    // 与 update_adamw_kernel 在 wd=nullptr 时数学等价，无需单独定义 RANGE_UPDATE_BIAS_ADAMW。
     reg(RangeOp::RANGE_UPDATE_BIAS_ADAM,        launch_opt_bias_adam_cpu,        launch_opt_bias_adam_cuda);
 
     TR_LOG_DEBUG("backend") << "9 optimizer RangeOps registered (CPU+CUDA)";
