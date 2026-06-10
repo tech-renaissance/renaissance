@@ -1,19 +1,16 @@
 /**
  * @file test_lenet.cpp
- * @brief MNIST LeNet-5 准确率测试（经典 CNN 结构）
+ * @brief LeNet-5 准确率测试
  * @version 1.0.0
  * @date 2026-05-30
  * @author Team Tech-Renaissance
  *
  * 核心策略：
- * - 网络结构：标准 LeNet-5（2 卷积 + 3 全连接）
- *   conv(6,5,1,2) → activation → avgpool(2,2,0)
- *   → conv(16,5,1,0) → activation → avgpool(2,2,0)
- *   → flatten → fc(120) → activation → fc(84) → activation → fc(10)
- * - 卷积层：无 bias（框架 conv 默认无 bias）
- * - 池化层：AvgPool 2x2
- * - 激活函数：可定制（默认 ReLU）
- * - 全连接层：有 bias
+ * - 网络结构：channel_padding → conv(8,5,1,2) → avgpool(2,2,0)
+ *             → conv(16,5,1,0) → avgpool(2,2,0)
+ *             → fc(120) → fc(88) → fc(10)
+ * - 激活函数：默认 Tanh（CLI 可切换）
+ * - Bias：true
  * - 优化器：AdamW with weight_decay=1e-4
  * - 学习率：CosineAnnealing+warmup(5)
  * - 数据增强：完整6种预处理链
@@ -44,7 +41,7 @@ const char* mode_name(TestMode m) {
 
 struct CliConfig {
     TestMode mode = TestMode::GPU;
-    std::string activation = "relu";
+    std::string activation = "tanh";  // LeNet-5 原版使用 Tanh
 };
 
 CliConfig parse_cli(int argc, char** argv) {
@@ -73,7 +70,7 @@ CliConfig parse_cli(int argc, char** argv) {
                       << "  --cpu          Run on CPU\n"
                       << "  --gpu          Run on GPU (FP32)\n"
                       << "  --amp          Run on GPU (AMP FP16)\n\n"
-                      << "Activation (default: relu):\n"
+                      << "Activation (default: tanh):\n"
                       << "  --activation NAME   Choose from: relu, tanh, silu, relu6,\n"
                       << "                      leaky_relu, hardswish, elu, sigmoid\n\n"
                       << "Other:\n"
@@ -148,23 +145,26 @@ int main(int argc, char** argv) {
         .val_transforms(DoNothing())
         .commit();
 
-    BluePrint lenet5 = seq(
-        conv(8, 5, 1, 2),                  // TODO: 为了测试AMP，临时把6改为8，测完恢复
+    BluePrint ultimate_mlp = seq(
+        channel_padding(),
+
+        conv(8, 5, 1, 2),  // 为兼容AMP模式，特意把输出通道数设为8
         make_activation(cfg.activation),
-        avgpool(2, 2, 0),                  // S2: 2x2 AvgPool, stride=2 → 14x14x6
-        conv(16, 5, 1, 0),                 // C3: 16通道 5x5 卷积, padding=0 → 10x10x16
+        avgpool(2, 2, 0),
+
+        conv(16, 5, 1, 0),
         make_activation(cfg.activation),
-        avgpool(2, 2, 0),                  // S4: 2x2 AvgPool, stride=2 → 5x5x16
-        flatten(),                         // flatten 5x5x16 = 400
-        fc(120, true),                     // C5/F5: 120单元全连接, 有bias
+        avgpool(2, 2, 0),   // flatten 视情况自动插入：C 为 8 的整数倍时免 flatten，FC 直接接收 4D 输入
+
+        fc(120, true),
         make_activation(cfg.activation),
-        fc(84, true),                      // F6: 84单元, 有bias
+        fc(88, true),  // 为兼容AMP模式，特意把输出通道数设为8的倍数
         make_activation(cfg.activation),
-        fc(10, true)                       // 输出: 10单元, 有bias
+        fc(10, true)
     );
 
     DeepLearningTask task;
-    task.model(lenet5)
+    task.model(ultimate_mlp)
         .loss(CrossEntropyLoss().label_smoothing(0.1f))
 
         .initializer(Initializer()
@@ -191,16 +191,12 @@ int main(int argc, char** argv) {
         .metrics(Metric::TRAIN_LOSS | Metric::VAL_LOSS | Metric::VAL_TOP1);
 
     std::cout << "\n=====================================\n"
-              << "Renaissance MNIST LeNet-5 Test\n"
+              << "Renaissance MNIST Ultimate Test\n"
               << "=====================================\n"
               << " Mode: " << mode_name(cfg.mode) << "\n"
               << "=====================================\n"
-              << "Network: LeNet-5 (2 conv + 3 fc)\n"
-              << "  conv(6,5,1,2) → activation → avgpool(2,2,0)\n"
-              << "  → conv(16,5,1,0) → activation → avgpool(2,2,0)\n"
-              << "  → flatten(400) → fc(120) → activation\n"
-              << "  → fc(84) → activation → fc(10)\n"
-              << "Conv bias: false (default) | FC bias: true\n"
+              << "Network: channel_padding → conv(8,5,1,2) → avgpool(2)"
+              << " → conv(16,5,1,0) → avgpool(2) → fc(120) → fc(88) → fc(10)\n"
               << "Activation: " << cfg.activation << "\n"
               << "Optimizer: AdamW (beta1=0.9, beta2=0.999, eps=1e-8, wd=1e-4)\n"
               << "Scheduler: CosineAnnealing + Warmup(5)\n"

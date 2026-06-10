@@ -177,6 +177,26 @@ std::vector<TensorDesc> infer_bn_tensors(
     std::vector<TensorDesc> descs;
     (void)params;
     int ch = input.c();
+
+    // [BN_AMP_ALIGN] cuDNN FP16 BatchNorm 在 TensorCore 路径上要求 C 为 8 的倍数。
+    // 这不是框架的设计限制，而是 cuDNN 硬件路径的硬性约束：
+    //   - FWD/BWD: cuDNN FE graph build 阶段校验，C % 8 != 0 则 finalize_cudnn_graph 崩溃
+    //   - INF:    自定义 CUDA kernel (bn_op.cu) 使用 y[nhw*C+c] 紧凑索引，
+    //             当 C != padded_c 时写错内存地址
+    // 因此必须在编译期拦截，禁止 C 非对齐的 BN 进入 AMP 模式。
+    // 解决方案：在 BN 前插入 channel_padding() 将 C pad 到 8 的倍数。
+    // 其他层（Conv、FC 等）不受此限制——Conv 的 C 由用户指定天然对齐，
+    // FC 的 AMP 实现通过 dim/stride 校正已正确处理非对齐 C。
+    if (ctx.enable_amp && (ch % 8 != 0)) {
+        int aligned_c = ((ch + 7) / 8) * 8;
+        TR_CHECK(false, ValueError,
+            "BN AMP requires input channels to be a multiple of 8 "
+            "(cuDNN TensorCore constraint). "
+            "Current C=" << ch << " is not aligned. "
+            "Insert channel_padding() before BN to pad C from "
+            << ch << " to " << aligned_c << ".");
+    }
+
     DType feat_dt = ctx.enable_amp ? DType::FP16 : DType::FP32;
     Shape pshape{1, 1, 1, ch};  // NHWC per-channel
 

@@ -17,66 +17,58 @@ try:
 except AttributeError:
     _HAS_AUTOCONTRAST = False
 
-parser = argparse.ArgumentParser(description="PyTorch MNIST LeNet-5 benchmark")
+parser = argparse.ArgumentParser(description="PyTorch MNIST LeNet-5 + BN benchmark")
 parser.add_argument("--cpu", action="store_true", help="Run on CPU (FP32)")
 parser.add_argument("--gpu", action="store_true", help="Run on GPU (FP32)")
 parser.add_argument("--amp", action="store_true", help="Run on GPU with AMP (FP16)")
-parser.add_argument("--activation", default="relu",
-                    help="Activation function (relu, tanh, silu, relu6, leaky_relu, hardswish, elu, sigmoid)")
+parser.add_argument("--activation", default="tanh",
+                    help="Activation function (relu, tanh)")
 
 
-class LeNet5(nn.Module):
-    def __init__(self, activation="relu"):
+class LeNet5BN(nn.Module):
+    def __init__(self, activation="tanh"):
         super().__init__()
 
-        # 选择激活函数
+        # 选择激活函数：仅支持 ReLU 和 Tanh
         if activation == "relu":
             act = nn.ReLU()
         elif activation == "tanh":
             act = nn.Tanh()
-        elif activation == "silu":
-            act = nn.SiLU()
-        elif activation == "relu6":
-            act = nn.ReLU6()
-        elif activation == "leaky_relu":
-            act = nn.LeakyReLU(0.1)
-        elif activation == "hardswish":
-            act = nn.Hardswish()
-        elif activation == "elu":
-            act = nn.ELU()
-        elif activation == "sigmoid":
-            act = nn.Sigmoid()
         else:
-            raise ValueError(f"Unknown activation: {activation}")
+            raise ValueError(f"Unknown activation: {activation}. Supported: relu, tanh")
 
-        # LeNet-5 架构
-        # C1: conv(6,5,1,2) -> activation -> avgpool(2,2,0)
-        # C3: conv(16,5,1,0) -> activation -> avgpool(2,2,0)
-        # Flatten -> fc(120) -> activation -> fc(84) -> activation -> fc(10)
+        # 网络结构（与 Renaissance test_lenet_bn.cpp 对齐）：
+        # channel_padding (implicit in NCHW) -> conv(8,5,1,2) -> bn -> act -> avgpool(2,2,0)
+        #   -> conv(16,5,1,0) -> bn -> act -> avgpool(2,2,0)
+        #   -> fc(120) -> bn -> act -> fc(88) -> bn -> act -> fc(10)
         self.features = nn.Sequential(
-            # C1: 6通道 5x5 卷积, padding=2 → 28x28x6
-            nn.Conv2d(1, 6, kernel_size=5, stride=1, padding=2, bias=False),
+            # C1: 8通道 5x5 卷积, padding=2 -> 28x28x8
+            nn.Conv2d(1, 8, kernel_size=5, stride=1, padding=2, bias=False),
+            nn.BatchNorm2d(8),
             act,
-            # S2: 2x2 AvgPool, stride=2 → 14x14x6
+            # S2: 2x2 AvgPool, stride=2 -> 14x14x8
             nn.AvgPool2d(kernel_size=2, stride=2, padding=0),
-            # C3: 16通道 5x5 卷积, padding=0 → 10x10x16
-            nn.Conv2d(6, 16, kernel_size=5, stride=1, padding=0, bias=False),
+            # C3: 16通道 5x5 卷积, padding=0 -> 10x10x16
+            nn.Conv2d(8, 16, kernel_size=5, stride=1, padding=0, bias=False),
+            nn.BatchNorm2d(16),
             act,
-            # S4: 2x2 AvgPool, stride=2 → 5x5x16
+            # S4: 2x2 AvgPool, stride=2 -> 5x5x16
             nn.AvgPool2d(kernel_size=2, stride=2, padding=0),
         )
 
         self.classifier = nn.Sequential(
             # Flatten 5x5x16 = 400
             nn.Flatten(),
-            # C5/F5: 120单元全连接, 有bias
+            # fc(120), 有bias
             nn.Linear(400, 120, bias=True),
+            nn.BatchNorm1d(120),
             act,
-            # F6: 84单元, 有bias
-            nn.Linear(120, 84, bias=True),
+            # fc(88), 有bias（8的倍数，兼容AMP模式）
+            nn.Linear(120, 88, bias=True),
+            nn.BatchNorm1d(88),
             act,
             # 输出: 10单元, 有bias
-            nn.Linear(84, 10, bias=True)
+            nn.Linear(88, 10, bias=True)
         )
 
         self._init_weights()
@@ -135,14 +127,14 @@ if __name__ == '__main__':
         use_amp = False
 
     print("===========================================", flush=True)
-    print(" PyTorch MNIST LeNet-5 Benchmark", flush=True)
+    print(" PyTorch MNIST LeNet-5 + BN Benchmark", flush=True)
     print("===========================================", flush=True)
     print(f" Mode:       {mode}", flush=True)
     print(f" Device:     {device}", flush=True)
-    print(f" Network:    LeNet-5 (2 conv + 3 fc)", flush=True)
-    print(f"   C1: conv(6,5,1,2) -> activation -> avgpool(2,2,0)", flush=True)
-    print(f"   C3: conv(16,5,1,0) -> activation -> avgpool(2,2,0)", flush=True)
-    print(f"   Flatten(400) -> fc(120) -> activation -> fc(84) -> activation -> fc(10)", flush=True)
+    print(f" Network:    LeNet-5-BN (2 conv + 3 fc)", flush=True)
+    print(f"   C1: conv(8,5,1,2) -> bn -> activation -> avgpool(2,2,0)", flush=True)
+    print(f"   C3: conv(16,5,1,0) -> bn -> activation -> avgpool(2,2,0)", flush=True)
+    print(f"   Flatten(400) -> fc(120) -> bn -> activation -> fc(88) -> bn -> activation -> fc(10)", flush=True)
     print(f" Conv bias:  false", flush=True)
     print(f" FC bias:    true", flush=True)
     print(f" Activation: {args.activation}", flush=True)
@@ -195,14 +187,12 @@ if __name__ == '__main__':
     val_loader   = DataLoader(val_set,   batch_size=batch_size, shuffle=False,
                               pin_memory=pin_mem, num_workers=8, persistent_workers=True)
 
-    model = LeNet5(activation=args.activation).to(device)
-
-    if hasattr(torch, "compile") and device.type == "cuda":
-        model = torch.compile(model, mode="max-autotune")
+    model = LeNet5BN(activation=args.activation).to(device)
 
     criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
 
-    # 参数分组：weight 用 AdamW (wd=1e-4)，bias 用 Adam (wd=0.0) 以匹配 CPP 行为
+    # 参数分组：weight 用 AdamW (wd=1e-4)，bias/1D 参数用 Adam (wd=0.0)
+    # 匹配 TR4 行为：BN Weight、BN Bias、FC Bias 固定 WD=0
     weight_params = []
     bias_params = []
     for name, param in model.named_parameters():
@@ -222,75 +212,6 @@ if __name__ == '__main__':
     scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=warmup_cosine_lambda)
 
     scaler = torch.amp.GradScaler("cuda") if use_amp else None
-
-    # ====================================================================
-    # WARMUP  (GPU / AMP only)
-    #
-    # Purpose: trigger torch.compile(max-autotune) so compilation finishes
-    #          BEFORE the timed 100-epoch loop starts.
-    # After warmup: re-seed + re-init.  torch.compile FX-graph cache makes
-    #               the second compilation near-instant.
-    # ====================================================================
-    if hasattr(torch, "compile") and device.type == "cuda":
-        print("\n--- Warmup: triggering max-autotune compilation ---", flush=True)
-        tw0 = time.perf_counter()
-
-        dummy_data  = torch.randn(batch_size, 1, 28, 28, device=device)
-        dummy_label = torch.randint(0, 10, (batch_size,), device=device)
-
-        model.train()
-        optimizer.zero_grad()
-        if use_amp:
-            with torch.amp.autocast("cuda"):
-                out = model(dummy_data)
-                l = criterion(out, dummy_label)
-            scaler.scale(l).backward()
-            scaler.step(optimizer)
-            scaler.update()
-        else:
-            out = model(dummy_data)
-            l = criterion(out, dummy_label)
-            l.backward()
-            optimizer.step()
-
-        model.eval()
-        with torch.no_grad():
-            if use_amp:
-                with torch.amp.autocast("cuda"):
-                    _ = model(dummy_data)
-            else:
-                _ = model(dummy_data)
-
-        torch.cuda.synchronize()
-        tw1 = time.perf_counter()
-        print(f"    warmup done in {tw1 - tw0:.3f}s", flush=True)
-
-        # Re-initialize everything so the timed run is pure training cost
-        torch.manual_seed(123)
-        model = LeNet5(activation=args.activation).to(device)
-        model = torch.compile(model, mode="max-autotune")
-
-        # 重新分组参数
-        weight_params = []
-        bias_params = []
-        for name, param in model.named_parameters():
-            if not param.requires_grad:
-                continue
-            if 'bias' in name or len(param.shape) == 1:
-                bias_params.append(param)
-            else:
-                weight_params.append(param)
-
-        param_groups = [
-            {'params': weight_params, 'weight_decay': 1e-4},
-            {'params': bias_params, 'weight_decay': 0.0}
-        ]
-        optimizer = optim.AdamW(param_groups, lr=BASE_LR,
-                                betas=(0.9, 0.999), eps=1e-8)
-        scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=warmup_cosine_lambda)
-        if use_amp:
-            scaler = torch.amp.GradScaler("cuda")
-        print("--- Re-initialized.  Timed 100-epoch run begins. ---\n", flush=True)
 
     best_acc = 0.0
     best_epoch = 0

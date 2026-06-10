@@ -121,3 +121,51 @@ else()
 endif()
 
 message(STATUS "  - mini_lenet_bn: MNIST mini-LeNet with BN end-to-end accuracy test (AdamW)")
+
+# ============================================================================
+# LeNet-5 accuracy test (AdamW) — 经典CNN训练验证
+# ============================================================================
+add_executable(test_lenet test_lenet.cpp)
+target_link_libraries(test_lenet PRIVATE renaissance)
+target_compile_definitions(test_lenet PRIVATE TR_LOG_LEVEL=1)
+
+if(TR_USE_CUDA)
+    setup_gpu_runtime_env(test_lenet)
+endif()
+
+set_target_properties(test_lenet PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/bn
+    WIN32_EXECUTABLE FALSE
+)
+
+if(MSVC)
+    target_compile_options(test_lenet PRIVATE /W4 /utf-8 /wd4244 /wd4505 /wd4458 /wd4127)
+else()
+    target_compile_options(test_lenet PRIVATE -Wall -Wextra -Wpedantic -Wno-unused-function)
+endif()
+
+message(STATUS "  - test_lenet: LeNet-5 end-to-end accuracy test (AdamW)")
+
+# ============================================================================
+# LeNet-5 with BatchNorm accuracy test (AdamW)
+# ============================================================================
+add_executable(test_lenet_bn test_lenet_bn.cpp)
+target_link_libraries(test_lenet_bn PRIVATE renaissance)
+target_compile_definitions(test_lenet_bn PRIVATE TR_LOG_LEVEL=1)
+
+if(TR_USE_CUDA)
+    setup_gpu_runtime_env(test_lenet_bn)
+endif()
+
+set_target_properties(test_lenet_bn PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/bn
+    WIN32_EXECUTABLE FALSE
+)
+
+if(MSVC)
+    target_compile_options(test_lenet_bn PRIVATE /W4 /utf-8 /wd4244 /wd4505 /wd4458 /wd4127)
+else()
+    target_compile_options(test_lenet_bn PRIVATE -Wall -Wextra -Wpedantic -Wno-unused-function)
+endif()
+
+message(STATUS "  - test_lenet_bn: LeNet-5 with BN end-to-end accuracy test (AdamW)")

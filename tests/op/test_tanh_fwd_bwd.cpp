@@ -1,8 +1,8 @@
 /**
  * @file test_tanh_fwd_bwd.cpp
- * @brief TANH FWD+BWD 串接测试 — 支持 CPU / GPU / AMP 三种模式
- * @version 1.0.0
- * @date 2026-05-17
+ * @brief TANH FWD+BWD 串接测试 — 支持 CPU / GPU / AMP 三种模式，含 PyTorch 参考 MSE
+ * @version 2.0.0
+ * @date 2026-06-10
  * @author 技术觉醒团队
  *
  * 用法：
@@ -16,8 +16,8 @@
  *
  * 关键特性：
  *   - 测试 TANH 算子的前向和反向
- *   - 数学公式：FWD: y = tanh(x), BWD: dx = dy * (1 - y²)
- *   - 不需要 Python 参考数据，直接使用正态分布随机数初始化
+ *   - 数学公式：FWD: y = tanh(x), BWD: dx = dy * (1 - y^2)
+ *   - 使用 PyTorch 生成参考数据，计算跨框架 MSE
  *   - 验证数值正确性（y 在 [-1, 1] 范围内）
  */
 
@@ -27,6 +27,7 @@
 #include <iostream>
 #include <cstdlib>
 #include <cmath>
+#include <cstring>
 
 #ifdef TR_USE_CUDA
 #include <cuda_fp16.h>
@@ -34,7 +35,67 @@
 
 using namespace tr;
 
+// ============================================================================
+// FP16 -> FP32 转换（bit-cast，避免硬件差异）
+// ============================================================================
+inline float fp16_to_f32(uint16_t h) {
+    uint32_t sign = (h >> 15) & 1;
+    uint32_t exponent = (h >> 10) & 0x1F;
+    uint32_t mantissa = h & 0x3FF;
+    if (exponent == 0) {
+        if (mantissa == 0) {
+            float zero = 0.0f;
+            uint32_t f = sign << 31;
+            std::memcpy(&zero, &f, sizeof(zero));
+            return zero;
+        }
+        float result = static_cast<float>(mantissa) * (1.0f / 16777216.0f);
+        return sign ? -result : result;
+    }
+    uint32_t f;
+    if (exponent == 0x1F) {
+        f = (sign << 31) | (0xFF << 23) | (mantissa << 13);
+    } else {
+        f = (sign << 31) | ((exponent + 112) << 23) | (mantissa << 13);
+    }
+    float result;
+    std::memcpy(&result, &f, sizeof(result));
+    return result;
+}
+
+// ============================================================================
+// MSE 计算
+// ============================================================================
+double compute_mse_fp16(const Tensor& a, const Tensor& b) {
+    TR_CHECK(a.shape() == b.shape(), ShapeError, "MSE shape mismatch");
+    int64_t n = a.numel();
+    double sum = 0.0;
+    const uint16_t* pa = a.data<uint16_t>();
+    const uint16_t* pb = b.data<uint16_t>();
+    for (int64_t i = 0; i < n; ++i) {
+        double d = static_cast<double>(fp16_to_f32(pa[i]))
+                 - static_cast<double>(fp16_to_f32(pb[i]));
+        sum += d * d;
+    }
+    return sum / n;
+}
+
+double compute_mse_fp32(const Tensor& a, const Tensor& b) {
+    TR_CHECK(a.shape() == b.shape(), ShapeError, "MSE shape mismatch");
+    int64_t n = a.numel();
+    double sum = 0.0;
+    const float* pa = a.data<float>();
+    const float* pb = b.data<float>();
+    for (int64_t i = 0; i < n; ++i) {
+        double d = static_cast<double>(pa[i]) - static_cast<double>(pb[i]);
+        sum += d * d;
+    }
+    return sum / n;
+}
+
+// ============================================================================
 // 验证 tanh 输出是否在有效范围内
+// ============================================================================
 bool validate_tanh_output(const Tensor& y) {
     int64_t n = y.numel();
     if (y.dtype() == DType::FP16) {
@@ -78,6 +139,7 @@ struct TestConfig {
     int seed = 42;
     int iterations = 100;
     int warmup = 5;
+    bool no_gen = false;
 };
 
 TestConfig parse_cli(int argc, char** argv) {
@@ -109,6 +171,8 @@ TestConfig parse_cli(int argc, char** argv) {
             c.shape_str = argv[++i];
         } else if (a == "--seed" && i + 1 < argc) {
             c.seed = std::stoi(argv[++i]);
+        } else if (a == "--no-gen") {
+            c.no_gen = true;
         } else if (a == "--help") {
             std::cout << "Usage: " << argv[0] << " --cpu|--gpu|--amp [options]\n\n"
                 << "Mode flags (required, exactly one):\n"
@@ -118,6 +182,7 @@ TestConfig parse_cli(int argc, char** argv) {
                 << "Options:\n"
                 << "  --shape N,H,W,C    Tensor shape (default: 8,1024,1024,8)\n"
                 << "  --seed N           Random seed (default: 42)\n"
+                << "  --no-gen           Skip Python reference data generation\n"
                 << "  --help             Show this message\n";
             std::exit(0);
         } else {
@@ -138,6 +203,8 @@ int main(int argc, char** argv) {
 
     const bool is_amp    = (cfg.mode == TestMode::AMP);
     const DType dtype    = is_amp ? DType::FP16 : DType::FP32;
+    const char* py_dtype = is_amp ? "fp16" : "fp32";
+    const char* tsr_sfx  = is_amp ? "_amp" : "_fp32";
 
     switch (cfg.mode) {
         case TestMode::CPU:
@@ -169,21 +236,44 @@ int main(int argc, char** argv) {
     std::cout << "Mode: " << mode_name(cfg.mode) << std::endl;
     std::cout << "Ranks: " << num_ranks << std::endl;
 
+    // ── 调用 PyTorch 生成参考数据 ──
+    std::string ws = std::string(TR_WORKSPACE) + "/tanh_fwd_bwd_data";
+    std::ostringstream py;
+#ifdef TR_PYTHON_EXECUTABLE
+    py << TR_PYTHON_EXECUTABLE << " ";
+#else
+    py << "python ";
+#endif
+    py << std::string(TR_PROJECT_ROOT) << "/tests/op/test_tanh_fwd_bwd.py"
+       << " --shape " << cfg.shape_str
+       << " --seed " << cfg.seed
+       << " --workspace \"" << ws << "\""
+       << " --dtype " << py_dtype;
+
+    if (!cfg.no_gen) {
+        std::cout << "Generating reference data: " << py.str() << std::endl;
+        TR_CHECK(std::system(py.str().c_str()) == 0, RuntimeError,
+                 "Python failed. Command: " << py.str());
+    } else {
+        std::cout << "Skipping reference generation (--no-gen)." << std::endl;
+    }
+
+    // ── 加载参考数据 ──
+    Tensor h_x  = Tensor::load_tensor(ws + "/x_fwd_bwd"      + tsr_sfx + ".tsr");
+    Tensor h_y  = Tensor::load_tensor(ws + "/y_ref_fwd_bwd"  + tsr_sfx + ".tsr");
+    Tensor h_dy = Tensor::load_tensor(ws + "/dy_fwd_bwd"     + tsr_sfx + ".tsr");
+    Tensor h_dx = Tensor::load_tensor(ws + "/dx_ref_fwd_bwd" + tsr_sfx + ".tsr");
+
+    std::cout << "Reference data loaded.\n";
+
     SimpleTask task;
 
     Region feat_region = is_amp ? Region::F_FEATURE_FP16 : Region::F_FEATURE_FP32;
     // 分配张量
-    DTensor d_x    = task.alloc(shape, dtype, feat_region);      // 输入
+    DTensor d_x    = task.alloc(shape, dtype, feat_region);      // 输入，BWD后变为dX
     DTensor d_y    = task.alloc(shape, dtype, feat_region);      // 前向输出
     DTensor d_dy   = task.alloc(shape, dtype, feat_region);      // 反向输入（梯度）
-    DTensor d_dx   = task.alloc(shape, dtype, feat_region);      // 反向输出（梯度），in-place to x
     task.finalize_memory();
-
-    // 使用正态分布随机数初始化输入
-    Tensor h_x = is_amp ? Tensor::normal_fp16(shape, dtype, 0.0f, 1.0f)
-                        : Tensor::normal(shape, dtype, 0.0f, 1.0f);
-    Tensor h_dy = is_amp ? Tensor::normal_fp16(shape, dtype, 0.0f, 1.0f)
-                         : Tensor::normal(shape, dtype, 0.0f, 1.0f);
 
     // 构建计算图：前向 + 反向
     ComputationGraph g;
@@ -192,14 +282,14 @@ int main(int argc, char** argv) {
 
     // 前向：y = tanh(x)
     g.append(fwd_op, {d_x.id}, {d_y.id});
-    // 反向：dx = dy * (1 - tanh(x)²)，重计算，1 输入 1 输出，dx 覆盖 x
+    // 反向：dx = dy * (1 - tanh(x)^2)，重计算，1 输入 1 输出，dx 覆盖 x
     g.append(bwd_op, {d_dy.id}, {d_x.id});
 
     task.add_graph("fwd_bwd", std::move(g), StreamKind::COMP_1);
 
     task.compile();
 
-    // 传输输入数据
+    // 传输参考数据
     {
         task.transfer_to_rank(h_x, d_x, 0);
         task.transfer_to_rank(h_dy, d_dy, 0);
@@ -209,29 +299,46 @@ int main(int argc, char** argv) {
         }
     }
 
-    // 运行测试
-    task.run_iter("fwd_bwd", cfg.warmup);
+    // 运行测试（只执行一次，避免 in-place BWD 覆盖输入）
     auto t0 = std::chrono::high_resolution_clock::now();
-    task.run_iter("fwd_bwd", cfg.iterations);
+    task.run("fwd_bwd");
     auto t1 = std::chrono::high_resolution_clock::now();
-    double avg_us = std::chrono::duration<double, std::micro>(t1 - t0).count()
-                   / cfg.iterations;
+    double avg_us = std::chrono::duration<double, std::micro>(t1 - t0).count();
 
     // 验证结果
     bool all_pass = true;
+    double max_mse = 0.0;
+    const double mse_thr = is_amp ? 1e-3 : 1e-5;
 
     for (int rank = 0; rank < num_ranks; ++rank) {
-        // 前向验证：y 应该在 [-1, 1] 范围内
-        Tensor h_y_out = task.fetch_from_rank(d_y, rank);
-        bool y_valid = validate_tanh_output(h_y_out);
+        std::cout << "\n===== TANH FWD+BWD [" << mode_name(cfg.mode)
+                  << "] Rank " << rank << " =====\n";
 
-        std::cout << "  Rank " << rank << " FWD: tanh output in [-1, 1]? "
-                  << (y_valid ? "YES" : "NO");
-        if (!y_valid) { std::cout << " FAIL"; all_pass = false; }
+        // 前向验证：MSE(Y)
+        Tensor h_y_out = task.fetch_from_rank(d_y, rank);
+        double mse = is_amp ? compute_mse_fp16(h_y_out, h_y)
+                            : compute_mse_fp32(h_y_out, h_y);
+        if (mse > max_mse) max_mse = mse;
+        std::cout << "  FWD MSE(Y)        = " << std::scientific << mse;
+        if (mse > mse_thr) { std::cout << "  FAIL"; all_pass = false; }
         std::cout << std::endl;
 
-        // 反向输出 dx 只需要保证没有 NaN/Inf
-        Tensor h_dx_out = task.fetch_from_rank(d_dx, rank);
+        // 前向范围检查
+        bool y_valid = validate_tanh_output(h_y_out);
+        std::cout << "  FWD Range Check   = " << (y_valid ? "PASS" : "FAIL");
+        if (!y_valid) all_pass = false;
+        std::cout << std::endl;
+
+        // 反向验证：MSE(dX) — BWD是in-place写入d_x
+        Tensor h_dx_out = task.fetch_from_rank(d_x, rank);
+        mse = is_amp ? compute_mse_fp16(h_dx_out, h_dx)
+                     : compute_mse_fp32(h_dx_out, h_dx);
+        if (mse > max_mse) max_mse = mse;
+        std::cout << "  BWD MSE(dX)       = " << std::scientific << mse;
+        if (mse > mse_thr) { std::cout << "  FAIL"; all_pass = false; }
+        std::cout << std::endl;
+
+        // 反向 NaN/Inf 检查
         int64_t n = h_dx_out.numel();
         bool dx_valid = true;
         if (h_dx_out.dtype() == DType::FP16) {
@@ -256,17 +363,16 @@ int main(int argc, char** argv) {
                 }
             }
         }
-
-        std::cout << "  Rank " << rank << " BWD: dx valid (no NaN/Inf)? "
-                  << (dx_valid ? "YES" : "NO");
-        if (!dx_valid) { std::cout << " FAIL"; all_pass = false; }
+        std::cout << "  BWD NaN/Inf Check = " << (dx_valid ? "PASS" : "FAIL");
+        if (!dx_valid) all_pass = false;
         std::cout << std::endl;
     }
 
     std::cout << "\n===== TANH FWD+BWD [" << mode_name(cfg.mode) << "] ("
               << num_ranks << " rank(s)): "
               << (all_pass ? "PASS" : "FAIL") << " =====\n"
-              << "  Avg:   " << std::fixed << avg_us << " us/iter\n" << std::endl;
+              << "  MaxMSE: " << std::scientific << max_mse << "\n"
+              << "  Avg:    " << std::fixed << avg_us << " us/iter\n" << std::endl;
 
     return all_pass ? 0 : 1;
 }
