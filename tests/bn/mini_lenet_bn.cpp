@@ -146,6 +146,7 @@ int main(int argc, char** argv) {
     BluePrint ultimate_mlp = seq(
         channel_padding(),
         conv(8, 3, 1, 1),
+        bn(),
         make_activation(cfg.activation),
         avgpool(2, 2, 0),
         fc(512, true),

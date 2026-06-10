@@ -97,3 +97,27 @@ else()
 endif()
 
 message(STATUS "  - mini_lenet: MNIST mini-LeNet end-to-end accuracy test (AdamW)")
+
+# ============================================================================
+# MNIST mini-LeNet with BatchNorm accuracy test (AdamW)
+# ============================================================================
+add_executable(mini_lenet_bn mini_lenet_bn.cpp)
+target_link_libraries(mini_lenet_bn PRIVATE renaissance)
+target_compile_definitions(mini_lenet_bn PRIVATE TR_LOG_LEVEL=1)
+
+if(TR_USE_CUDA)
+    setup_gpu_runtime_env(mini_lenet_bn)
+endif()
+
+set_target_properties(mini_lenet_bn PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/bn
+    WIN32_EXECUTABLE FALSE
+)
+
+if(MSVC)
+    target_compile_options(mini_lenet_bn PRIVATE /W4 /utf-8 /wd4244 /wd4505 /wd4458 /wd4127)
+else()
+    target_compile_options(mini_lenet_bn PRIVATE -Wall -Wextra -Wpedantic -Wno-unused-function)
+endif()
+
+message(STATUS "  - mini_lenet_bn: MNIST mini-LeNet with BN end-to-end accuracy test (AdamW)")

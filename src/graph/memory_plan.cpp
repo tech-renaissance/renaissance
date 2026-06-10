@@ -934,8 +934,8 @@ void MemoryPlan::validate_contiguity() const {
     //     单Region自动连续，仅确认为正确锚定
     (void)ri(R::G_DEEP_CONV);
 
-    // (4) FP32梯度连续: 025-030
-    check_span(R::G_BN_BIAS, R::G_DEEP_CONV, "FP32 gradient");
+    // (4) FP32梯度连续: 029-030 (G_FIRST_CONV 与 G_DEEP_CONV 衔接)
+    check_adjacent(R::G_FIRST_CONV, R::G_DEEP_CONV, "FP32 gradient");
 
     // (6) 输入A/B连续: 049-052
     check_adjacent(R::I_A_LABEL, R::I_A_DATA, "Input A");
