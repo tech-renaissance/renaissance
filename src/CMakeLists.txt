@@ -84,6 +84,7 @@ list(APPEND RENAISSANCE_SOURCES
     backend/ops/dtensor/gap_op.cpp
     backend/ops/dtensor/gap_op.cu
     backend/ops/dtensor/maxpool_op.cpp
+    backend/ops/dtensor/maxpool_op.cu
     backend/ops/dtensor/avgpool_op.cpp
     backend/ops/dtensor/avgpool_op.cu
     backend/ops/dtensor/dropout_op.cpp

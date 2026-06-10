@@ -150,11 +150,11 @@ int main(int argc, char** argv) {
 
         conv(8, 5, 1, 2),  // 为兼容AMP模式，特意把输出通道数设为8
         make_activation(cfg.activation),
-        avgpool(2, 2, 0),
+        maxpool(3, 2, 1),
 
         conv(16, 5, 1, 0),
         make_activation(cfg.activation),
-        avgpool(2, 2, 0),   // flatten 视情况自动插入：C 为 8 的整数倍时免 flatten，FC 直接接收 4D 输入
+        maxpool(3, 2, 1),   // flatten 视情况自动插入：C 为 8 的整数倍时免 flatten，FC 直接接收 4D 输入
 
         fc(120, true),
         make_activation(cfg.activation),

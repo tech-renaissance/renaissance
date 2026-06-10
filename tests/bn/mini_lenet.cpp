@@ -143,7 +143,7 @@ int main(int argc, char** argv) {
         channel_padding(),
         conv(8, 3, 1, 1),
         make_activation(cfg.activation),
-        avgpool(2, 2, 0),
+        maxpool(3, 2, 1),
         fc(512, true),
         make_activation(cfg.activation),
         fc(256, true),

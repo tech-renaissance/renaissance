@@ -93,10 +93,10 @@ const char* mode_name(TestMode m) {
 
 struct TestConfig {
     TestMode mode;
-    std::string shape_str = "8,224,224,64";
-    int kernel = 2;
+    std::string shape_str = "512,224,224,8";
+    int kernel = 3;
     int stride = 2;
-    int padding = 0;
+    int padding = 1;
     int seed = 42;
     bool no_gen = false;
 };
@@ -145,7 +145,7 @@ TestConfig parse_cli(int argc, char** argv) {
                 << "  --gpu     Run on GPU, FP32\n"
                 << "  --amp     Run on GPU, AMP FP16\n\n"
                 << "Options:\n"
-                << "  --shape N,H,W,C    Input tensor shape (default: 8,224,224,64)\n"
+                << "  --shape N,H,W,C    Input tensor shape (default: 512,224,224,8)\n"
                 << "  --kernel N         Kernel size (default: 3)\n"
                 << "  --stride N         Stride (default: 2)\n"
                 << "  --padding N        Padding (default: 1)\n"
@@ -279,11 +279,12 @@ int main(int argc, char** argv) {
 
     bool all_pass = true;
     double max_mse = 0.0;
-    // FWD 阈值：CPU/GPU 严格 1e-5，AMP 放宽到 1e-3
+    // FWD 阈值：CPU/GPU 严格 1e-12，AMP 放宽到 1e-3
     // BWD 阈值：CPU 严格 1e-5（mask 路由，与 PyTorch 一致）
-    //           GPU/AMP 放宽到 1e-2（cuDNN Legacy 独立重算索引，平局时可能与 PyTorch 不同）
-    const double mse_thr_fwd = is_amp ? 1e-3 : 1e-5;
-    const double mse_thr_bwd = (cfg.mode == TestMode::CPU) ? 1e-5 : 1e-2;
+    //           GPU 使用 cuDNN FE mask 路由，精度等同 CPU，阈值 1e-5
+    //           AMP 使用 mask 路由 + FP16 atomicAdd，累积精度限制，阈值 1e-2
+    const double mse_thr_fwd = is_amp ? 1e-3 : 1e-12;
+    const double mse_thr_bwd = is_amp ? 1e-2 : 1e-5;
 
     // ---------- FWD run ----------
     {

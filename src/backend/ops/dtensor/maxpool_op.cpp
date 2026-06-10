@@ -16,6 +16,7 @@
 #endif
 
 #ifdef TR_USE_CUDA
+#  include <cuda_fp16.h>
 #  include "renaissance/backend/cudnn_utils.h"
 #  include <cudnn_frontend.h>
 #  include <cuda_runtime.h>
@@ -184,6 +185,40 @@ static void launch_maxpool_fp32_inf_cpu(CpuOpContext* op_ctx) {
 // ============================================================================
 
 #ifdef TR_USE_CUDA
+
+// ---- CUDA kernel launches (defined in maxpool_op.cu) ----
+
+extern cudaError_t launch_maxpool_fp32_fwd_mask_kernel(
+    const float* x, const float* y, int8_t* mask,
+    int N, int C, int H, int W, int OH, int OW, int k, int s, int p,
+    int64_t x_n_stride, int64_t x_h_stride, int64_t x_w_stride, int64_t x_c_stride,
+    int64_t y_n_stride, int64_t y_h_stride, int64_t y_w_stride, int64_t y_c_stride,
+    int64_t m_n_stride, int64_t m_h_stride, int64_t m_w_stride, int64_t m_c_stride,
+    cudaStream_t stream);
+
+extern cudaError_t launch_maxpool_amp_fwd_mask_kernel(
+    const __half* x, const __half* y, int8_t* mask,
+    int N, int C, int H, int W, int OH, int OW, int k, int s, int p,
+    int64_t x_n_stride, int64_t x_h_stride, int64_t x_w_stride, int64_t x_c_stride,
+    int64_t y_n_stride, int64_t y_h_stride, int64_t y_w_stride, int64_t y_c_stride,
+    int64_t m_n_stride, int64_t m_h_stride, int64_t m_w_stride, int64_t m_c_stride,
+    cudaStream_t stream);
+
+extern cudaError_t launch_maxpool_bwd_fp32_kernel(
+    const float* dy, const int8_t* mask, float* dx,
+    int N, int C, int IH, int IW, int OH, int OW, int k, int s, int p,
+    int64_t dy_n_stride, int64_t dy_h_stride, int64_t dy_w_stride, int64_t dy_c_stride,
+    int64_t dx_n_stride, int64_t dx_h_stride, int64_t dx_w_stride, int64_t dx_c_stride,
+    int64_t m_n_stride, int64_t m_h_stride, int64_t m_w_stride, int64_t m_c_stride,
+    cudaStream_t stream);
+
+extern cudaError_t launch_maxpool_bwd_amp_kernel(
+    const __half* dy, const int8_t* mask, __half* dx,
+    int N, int C, int IH, int IW, int OH, int OW, int k, int s, int p,
+    int64_t dy_n_stride, int64_t dy_h_stride, int64_t dy_w_stride, int64_t dy_c_stride,
+    int64_t dx_n_stride, int64_t dx_h_stride, int64_t dx_w_stride, int64_t dx_c_stride,
+    int64_t m_n_stride, int64_t m_h_stride, int64_t m_w_stride, int64_t m_c_stride,
+    cudaStream_t stream);
 
 // ---- MaxPool FWD/INF (cuDNN Frontend Resample) ----
 
@@ -358,6 +393,27 @@ static void launch_maxpool_fwd_cuda_impl(
     } else {
         TR_CUDNN_FE_CHECK(fe_err, "MAXPOOL_FP32_FWD");
     }
+
+    // FP32 FWD 需要统一 mask 编码：cuDNN FE 生成的 mask（含 virtual tensor 情况）
+    // 编码格式可能与 BWD 解码不匹配。此处用独立 kernel 重新计算 mask（kh * k + kw），
+    // 保证 FWD/BWD 编码一致。AMP FWD 另有独立实现（launch_maxpool_amp_fwd_cuda_impl）。
+    if (!is_amp) {
+        int N = dt_x.n(), C = dt_x.c(), H = dt_x.h(), W = dt_x.w();
+        int OH = dt_y.h(), OW = dt_y.w();
+        launch_maxpool_fp32_fwd_mask_kernel(
+            static_cast<const float*>(ctx.ptr_at(node.input_ids[0])),
+            static_cast<const float*>(ctx.ptr_at(node.output_ids[0])),
+            static_cast<int8_t*>(ctx.ptr_at(node.output_ids[1])),
+            N, C, H, W, OH, OW, k, s_p, p,
+            dt_x.n_stride_cuda(), dt_x.h_stride_cuda(),
+            dt_x.w_stride_cuda(), dt_x.c_stride_cuda(),
+            dt_y.n_stride_cuda(), dt_y.h_stride_cuda(),
+            dt_y.w_stride_cuda(), dt_y.c_stride_cuda(),
+            dt_mask.n_stride_cuda(), dt_mask.h_stride_cuda(),
+            dt_mask.w_stride_cuda(), dt_mask.c_stride_cuda(),
+            s);
+    }
+
     cudaEventRecord(state.streams[si].last_done_event, s);
 }
 
@@ -449,6 +505,7 @@ static void launch_maxpool_amp_fwd_cuda_impl(
 {
     const DTensor& dt_x = mp.get_dtensor(node.input_ids[0]);
     const DTensor& dt_y = mp.get_dtensor(node.output_ids[0]);
+    const DTensor& dt_mask = mp.get_dtensor(node.output_ids[1]);
 
     StreamKind sk = get_op_default_stream(node.compute_op);
     cudaStream_t s  = static_cast<cudaStream_t>(ctx.stream(sk));
@@ -482,6 +539,25 @@ static void launch_maxpool_amp_fwd_cuda_impl(
         &beta,
         cache.y_desc, ctx.ptr_at(node.output_ids[0])));
 
+    // 在 cuDNN FWD 之后，计算 mask：在每个 pooling window 内
+    // 找到与 Y 值相等的 X 位置，编码为 kh * k + kw（与 CPU FWD / cuDNN FE 格式一致）。
+    // BWD 将使用此 mask 路由梯度，确保 FWD/BWD 索引一致性。
+    int N = dt_x.n(), C = dt_x.c(), H = dt_x.h(), W = dt_x.w();
+    int OH = dt_y.h(), OW = dt_y.w();
+
+    launch_maxpool_amp_fwd_mask_kernel(
+        static_cast<const __half*>(ctx.ptr_at(node.input_ids[0])),
+        static_cast<const __half*>(ctx.ptr_at(node.output_ids[0])),
+        static_cast<int8_t*>(ctx.ptr_at(node.output_ids[1])),
+        N, C, H, W, OH, OW, k, s_p, p,
+        dt_x.n_stride_cuda(), dt_x.h_stride_cuda(),
+        dt_x.w_stride_cuda(), dt_x.c_stride_cuda(),
+        dt_y.n_stride_cuda(), dt_y.h_stride_cuda(),
+        dt_y.w_stride_cuda(), dt_y.c_stride_cuda(),
+        dt_mask.n_stride_cuda(), dt_mask.h_stride_cuda(),
+        dt_mask.w_stride_cuda(), dt_mask.c_stride_cuda(),
+        s);
+
     cudaEventRecord(state.streams[si].last_done_event, s);
 }
 
@@ -499,126 +575,17 @@ static void launch_maxpool_amp_inf_cuda(
     launch_maxpool_amp_fwd_cuda_impl(node, mp, ctx, state);
 }
 
-// ---- MaxPool BWD (cuDNN Legacy API) ----
+// ---- MaxPool BWD (mask-based scatter-add) ----
 // input binding (after compiler processing):
 //   input_ids[0] = dY (prev_grad_id, compiler injected)
 //   input_ids[1] = Y  (pool_output, tensor_ids[0])
-//   input_ids[2] = mask (pool_mask, tensor_ids[1], Legacy API unused)
+//   input_ids[2] = mask (pool_mask, tensor_ids[1])
 //   input_ids[3] = X  (original input, compiler injected via layer_input_ids)
 //   output_ids[0] = dX (= X buffer, in-place)
-
-struct MaxPoolBwdCacheKey {
-    uint64_t handle_bits;
-    int32_t n, c, h, w, oh, ow, k, s, p;
-    bool is_amp;
-
-    bool operator==(const MaxPoolBwdCacheKey& o) const {
-        return handle_bits == o.handle_bits
-            && n == o.n && c == o.c && h == o.h && w == o.w
-            && oh == o.oh && ow == o.ow
-            && k == o.k && s == o.s && p == o.p
-            && is_amp == o.is_amp;
-    }
-};
-
-struct MaxPoolBwdCacheKeyHasher {
-    size_t operator()(const MaxPoolBwdCacheKey& key) const {
-        size_t hv = std::hash<uint64_t>{}(key.handle_bits);
-        auto mix = [&](int32_t v) { hv ^= std::hash<int32_t>{}(v) + 0x9e3779b9 + (hv << 6) + (hv >> 2); };
-        mix(key.n); mix(key.c); mix(key.h); mix(key.w);
-        mix(key.oh); mix(key.ow);
-        mix(key.k); mix(key.s); mix(key.p);
-        hv ^= std::hash<bool>{}(key.is_amp) + 0x9e3779b9 + (hv << 6) + (hv >> 2);
-        return hv;
-    }
-};
-
-struct MaxPoolBwdCache {
-    cudnnPoolingDescriptor_t pool_desc = nullptr;
-    cudnnTensorDescriptor_t x_desc = nullptr, y_desc = nullptr;
-    cudnnTensorDescriptor_t dx_desc = nullptr, dy_desc = nullptr;
-
-    ~MaxPoolBwdCache() {
-        if (pool_desc) cudnnDestroyPoolingDescriptor(pool_desc);
-        if (x_desc)    cudnnDestroyTensorDescriptor(x_desc);
-        if (y_desc)    cudnnDestroyTensorDescriptor(y_desc);
-        if (dx_desc)   cudnnDestroyTensorDescriptor(dx_desc);
-        if (dy_desc)   cudnnDestroyTensorDescriptor(dy_desc);
-    }
-    MaxPoolBwdCache(const MaxPoolBwdCache&) = delete;
-    MaxPoolBwdCache& operator=(const MaxPoolBwdCache&) = delete;
-    MaxPoolBwdCache() = default;
-    MaxPoolBwdCache(MaxPoolBwdCache&& o) noexcept
-        : pool_desc(o.pool_desc), x_desc(o.x_desc), y_desc(o.y_desc)
-        , dx_desc(o.dx_desc), dy_desc(o.dy_desc) {
-        o.pool_desc = nullptr;
-        o.x_desc = o.y_desc = o.dx_desc = o.dy_desc = nullptr;
-    }
-    MaxPoolBwdCache& operator=(MaxPoolBwdCache&& o) noexcept {
-        if (this != &o) {
-            this->~MaxPoolBwdCache();
-            pool_desc = o.pool_desc; o.pool_desc = nullptr;
-            x_desc = o.x_desc; o.x_desc = nullptr;
-            y_desc = o.y_desc; o.y_desc = nullptr;
-            dx_desc = o.dx_desc; o.dx_desc = nullptr;
-            dy_desc = o.dy_desc; o.dy_desc = nullptr;
-        }
-        return *this;
-    }
-};
-
-static std::unordered_map<MaxPoolBwdCacheKey, MaxPoolBwdCache, MaxPoolBwdCacheKeyHasher>
-    s_maxpool_bwd_caches;
-
-static MaxPoolBwdCache build_maxpool_bwd_cache(
-    cudnnHandle_t  handle,
-    const DTensor& dt_x,      // original input shape (N, C, H, W)
-    const DTensor& dt_y,      // pool output shape (N, C, OH, OW)
-    const DTensor& dt_dx,     // same as dt_x
-    const DTensor& dt_dy,     // same as dt_y
-    int            k, int s, int p)
-{
-    (void)handle;
-
-    MaxPoolBwdCache cache;
-
-    cudnnCreatePoolingDescriptor(&cache.pool_desc);
-    cudnnSetPooling2dDescriptor(cache.pool_desc,
-        CUDNN_POOLING_MAX_DETERMINISTIC,
-        CUDNN_NOT_PROPAGATE_NAN,
-        k, k, p, p, s, s);
-
-    cudnnDataType_t dt = to_cudnn_dtype(dt_x.dtype);
-
-    TR_CUDNN_CHECK(cudnnCreateTensorDescriptor(&cache.x_desc));
-    cudnnSetTensor4dDescriptorEx(cache.x_desc, dt,
-        dt_x.n(), dt_x.c(), dt_x.h(), dt_x.w(),
-        dt_x.n_stride_cuda(), dt_x.c_stride_cuda(),
-        dt_x.h_stride_cuda(), dt_x.w_stride_cuda());
-
-    TR_CUDNN_CHECK(cudnnCreateTensorDescriptor(&cache.y_desc));
-    cudnnSetTensor4dDescriptorEx(cache.y_desc, dt,
-        dt_y.n(), dt_y.c(), dt_y.h(), dt_y.w(),
-        dt_y.n_stride_cuda(), dt_y.c_stride_cuda(),
-        dt_y.h_stride_cuda(), dt_y.w_stride_cuda());
-
-    TR_CUDNN_CHECK(cudnnCreateTensorDescriptor(&cache.dx_desc));
-    cudnnSetTensor4dDescriptorEx(cache.dx_desc, dt,
-        dt_dx.n(), dt_dx.c(), dt_dx.h(), dt_dx.w(),
-        dt_dx.n_stride_cuda(), dt_dx.c_stride_cuda(),
-        dt_dx.h_stride_cuda(), dt_dx.w_stride_cuda());
-
-    // dY 描述符使用 dt_y 的形状（而非 dt_dy），因为 MaxPool 后接 FC 时
-    // FC 会将 pool_output flatten 为 2D，导致 BWD 中 dY 的形状与 pool output 不一致。
-    // 但底层数据布局一致（同一块内存，只是逻辑 reshape），直接复用 dt_y 的形状即可。
-    TR_CUDNN_CHECK(cudnnCreateTensorDescriptor(&cache.dy_desc));
-    cudnnSetTensor4dDescriptorEx(cache.dy_desc, dt,
-        dt_y.n(), dt_y.c(), dt_y.h(), dt_y.w(),
-        dt_y.n_stride_cuda(), dt_y.c_stride_cuda(),
-        dt_y.h_stride_cuda(), dt_y.w_stride_cuda());
-
-    return cache;
-}
+//
+// BWD 使用 FWD 生成的 INT8 mask 定位 max 位置，解码为输入坐标后
+// 将 dY 梯度 atomicAdd 到 dX 对应位置。取代 cuDNN Legacy BWD 独立
+// 重算索引，解决 FWD/BWD 索引不一致导致的梯度路由误差。
 
 static void launch_maxpool_bwd_cuda_impl(
     const GraphNode&          node,
@@ -627,11 +594,11 @@ static void launch_maxpool_bwd_cuda_impl(
     MultiStreamCaptureState&  state,
     bool                      is_amp)
 {
-    // input_ids[0]=dY, [1]=Y, [2]=mask(unused), [3]=X
-    const DTensor& dt_dy = mp.get_dtensor(node.input_ids[0]);  // dY (prev_grad_id)
-    const DTensor& dt_y  = mp.get_dtensor(node.input_ids[1]);  // Y (pool_output)
-    const DTensor& dt_x  = mp.get_dtensor(node.input_ids[3]);  // X (original input, same buffer as dX)
-    const DTensor& dt_dx = mp.get_dtensor(node.output_ids[0]); // dX (= X buffer)
+    const DTensor& dt_dy   = mp.get_dtensor(node.input_ids[0]);  // dY (prev_grad_id)
+    const DTensor& dt_y    = mp.get_dtensor(node.input_ids[1]);  // Y (pool_output)
+    const DTensor& dt_mask = mp.get_dtensor(node.input_ids[2]);  // mask
+    const DTensor& dt_x    = mp.get_dtensor(node.input_ids[3]);  // X (original input)
+    const DTensor& dt_dx   = mp.get_dtensor(node.output_ids[0]); // dX (= X buffer)
 
     StreamKind sk = get_op_default_stream(node.compute_op);
     cudaStream_t s  = static_cast<cudaStream_t>(ctx.stream(sk));
@@ -639,34 +606,41 @@ static void launch_maxpool_bwd_cuda_impl(
     state.output_stream_idx           = si;
     state.streams[si].has_pending_work = true;
 
-    cudnnHandle_t handle = static_cast<cudnnHandle_t>(ctx.cudnn_handle(sk));
-
     const auto& pp = node.params.pool();
     int k = pp.kernel_h, s_p = pp.stride_h, p = pp.pad_h;
+    int N = dt_x.n(), C = dt_x.c(), IH = dt_x.h(), IW = dt_x.w();
+    int OH = dt_y.h(), OW = dt_y.w();
 
-    MaxPoolBwdCacheKey key;
-    key.handle_bits = reinterpret_cast<uint64_t>(handle);
-    key.n = dt_x.n(); key.c = dt_x.c(); key.h = dt_x.h(); key.w = dt_x.w();
-    key.oh = dt_y.h(); key.ow = dt_y.w();
-    key.k = k; key.s = s_p; key.p = p;
-    key.is_amp = is_amp;
+    // 清零 dX（dX 覆盖 X，需要先归零再 scatter-add）
+    cudaMemsetAsync(ctx.ptr_at(node.output_ids[0]), 0, dt_dx.slot_bytes(), s);
 
-    auto it = s_maxpool_bwd_caches.find(key);
-    if (it == s_maxpool_bwd_caches.end()) {
-        auto cache = build_maxpool_bwd_cache(handle, dt_x, dt_y, dt_dx, dt_dy, k, s_p, p);
-        it = s_maxpool_bwd_caches.emplace(key, std::move(cache)).first;
+    if (is_amp) {
+        launch_maxpool_bwd_amp_kernel(
+            static_cast<const __half*>(ctx.ptr_at(node.input_ids[0])),
+            static_cast<const int8_t*>(ctx.ptr_at(node.input_ids[2])),
+            static_cast<__half*>(ctx.ptr_at(node.output_ids[0])),
+            N, C, IH, IW, OH, OW, k, s_p, p,
+            dt_dy.n_stride_cuda(), dt_dy.h_stride_cuda(),
+            dt_dy.w_stride_cuda(), dt_dy.c_stride_cuda(),
+            dt_dx.n_stride_cuda(), dt_dx.h_stride_cuda(),
+            dt_dx.w_stride_cuda(), dt_dx.c_stride_cuda(),
+            dt_mask.n_stride_cuda(), dt_mask.h_stride_cuda(),
+            dt_mask.w_stride_cuda(), dt_mask.c_stride_cuda(),
+            s);
+    } else {
+        launch_maxpool_bwd_fp32_kernel(
+            static_cast<const float*>(ctx.ptr_at(node.input_ids[0])),
+            static_cast<const int8_t*>(ctx.ptr_at(node.input_ids[2])),
+            static_cast<float*>(ctx.ptr_at(node.output_ids[0])),
+            N, C, IH, IW, OH, OW, k, s_p, p,
+            dt_dy.n_stride_cuda(), dt_dy.h_stride_cuda(),
+            dt_dy.w_stride_cuda(), dt_dy.c_stride_cuda(),
+            dt_dx.n_stride_cuda(), dt_dx.h_stride_cuda(),
+            dt_dx.w_stride_cuda(), dt_dx.c_stride_cuda(),
+            dt_mask.n_stride_cuda(), dt_mask.h_stride_cuda(),
+            dt_mask.w_stride_cuda(), dt_mask.c_stride_cuda(),
+            s);
     }
-    const auto& cache = it->second;
-
-    float alpha = 1.0f, beta = 0.0f;
-    TR_CUDNN_CHECK(cudnnPoolingBackward(
-        handle, cache.pool_desc,
-        &alpha,
-        cache.y_desc,  ctx.ptr_at(node.input_ids[1]),   // Y
-        cache.dy_desc, ctx.ptr_at(node.input_ids[0]),   // dY
-        cache.x_desc,  ctx.ptr_at(node.input_ids[3]),   // X (same buf as dX)
-        &beta,
-        cache.dx_desc, ctx.ptr_at(node.output_ids[0]))); // dX
 
     cudaEventRecord(state.streams[si].last_done_event, s);
 }
