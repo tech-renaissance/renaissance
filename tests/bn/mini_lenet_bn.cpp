@@ -12,7 +12,7 @@
  * - 优化器：AdamW with weight_decay=1e-4
  * - 学习率：CosineAnnealing+warmup(5)
  * - 数据增强：完整6种预处理链
- * - 训练轮数：100 epochs
+ * - 训练轮数：50 epochs
  */
 
 #include "renaissance.h"
@@ -24,7 +24,7 @@
 
 using namespace tr;
 
-constexpr int kTotalEpochs = 100;
+constexpr int kTotalEpochs = 50;
 
 enum class TestMode { CPU, GPU, AMP };
 
@@ -113,8 +113,8 @@ int main(int argc, char** argv) {
     }
 
     GLOBAL_SETTING
-        .manual_seed(123)
-        .global_batch_size(128)
+        .auto_seed()
+        .global_batch_size(200)
         .train_resolution(28)
         .val_resolution(28)
         .use_tf32(true);
@@ -133,11 +133,7 @@ int main(int argc, char** argv) {
 
         .train_transforms(
             Pad(2),
-            RandomRotation(15.0f, 0),
-            RandomScale(0.9f, 1.1f),
-            RandomCrop(28),
-            RandomAutocontrast(0.5f),
-            RandomErasing(0.5f)
+            RandomCrop(28)
         )
 
         .val_transforms(DoNothing())
