@@ -103,7 +103,7 @@ const char* mode_name(TestMode m) {
 }
 
 TestConfig parse_cli(int argc, char** argv) {
-    TestConfig c;
+    TestConfig c{TestMode::CPU};
     bool mode_set = false;
 
     for (int i = 1; i < argc; ++i) {
