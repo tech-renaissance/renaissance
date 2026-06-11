@@ -17,8 +17,8 @@ void ArchPlan::build(int num_classes) {
     step2_rename_bn();
     step3_normalize_softmax_ce(num_classes);
     step4_normalize_identity();
-    step5_normalize_flatten();
-    step6_deduce_shapes();
+    step6_deduce_shapes();      // derive actual H/W/C first
+    step5_normalize_flatten();  // then decide whether Flatten is truly needed
 
     if (fuse_) {
         step7_merge_blocks();
@@ -129,27 +129,50 @@ void ArchPlan::step5_normalize_flatten() {
         [](const ArchLayer& l) { return l.kind == LayerKind::Flatten; }),
         layers_.end());
 
-    size_t insert_at = layers_.size();
-    for (size_t i = 0; i < layers_.size(); ++i) {
-        if (layers_[i].kind == LayerKind::FC) { insert_at = i; break; }
+    // Detect whether the network contains any FC layer.
+    bool has_fc = false;
+    for (const auto& l : layers_) {
+        if (l.kind == LayerKind::FC) { has_fc = true; break; }
     }
-    if (insert_at == layers_.size()) {
+
+    size_t insert_at = layers_.size();
+    LayerKind target_kind = LayerKind::Identity;
+    for (size_t i = 0; i < layers_.size(); ++i) {
+        if (layers_[i].kind == LayerKind::FC) { insert_at = i; target_kind = LayerKind::FC; break; }
+    }
+    // Only consider inserting before SoftmaxCE when there is no FC layer at all.
+    if (!has_fc) {
         for (size_t i = 0; i < layers_.size(); ++i) {
-            if (layers_[i].kind == LayerKind::SoftmaxCE) { insert_at = i; break; }
+            if (layers_[i].kind == LayerKind::SoftmaxCE) {
+                insert_at = i;
+                target_kind = LayerKind::SoftmaxCE;
+                break;
+            }
         }
     }
 
-    bool needs_flatten = true;
-    if (insert_at == 0) {
-        needs_flatten = true;
-    } else {
-        int out_c = get_effective_output_c_at(insert_at - 1, input_.c());
-        needs_flatten = (out_c % 8 != 0);
+    bool needs_flatten = false;
+    if (insert_at < layers_.size()) {
+        const Shape& in_shape = (insert_at == 0)
+            ? layers_[0].in_shape
+            : layers_[insert_at - 1].out_shape;
+        bool spatial_not_one = (in_shape.h() > 1 || in_shape.w() > 1);
+        if (target_kind == LayerKind::FC) {
+            // Flatten before FC: spatial extent is non-trivial AND channels are not
+            // already aligned to 8 (the framework can directly view [H,W,C] as a
+            // vector when C % 8 == 0).
+            needs_flatten = spatial_not_one && (in_shape.c() % 8 != 0);
+        } else if (target_kind == LayerKind::SoftmaxCE) {
+            // Flatten before SoftmaxCE: spatial extent is non-trivial.
+            needs_flatten = spatial_not_one;
+        }
     }
 
     if (needs_flatten) {
         layers_.insert(layers_.begin() + static_cast<long long>(insert_at),
             {LayerKind::Flatten, EmptyParams{}, "flatten"});
+        // Recompute shapes from insertion point because Flatten changes downstream shapes.
+        recompute_shapes_from(insert_at);
     }
 }
 

@@ -1277,12 +1277,8 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
             gn.input_ids = map_indices(pattern_node.input_indices);
             gn.output_ids = map_indices(pattern_node.output_indices);
 
-            // 跨层梯度链：注入下一层输出的梯度DTensor ID（Flatten/ChannelPadding已有显式输入，跳过）
-            if (prev_grad_id >= 0 &&
-                gn.compute_op != ComputeOp::FLATTEN_FP32_BWD &&
-                gn.compute_op != ComputeOp::FLATTEN_AMP_BWD &&
-                gn.compute_op != ComputeOp::CHANNEL_PADDING_FP32_BWD &&
-                gn.compute_op != ComputeOp::CHANNEL_PADDING_AMP_BWD) {
+            // 跨层梯度链：注入下一层输出的梯度DTensor ID（统一处理，包括 Flatten/ChannelPadding）
+            if (prev_grad_id >= 0) {
                 gn.input_ids.insert(gn.input_ids.begin(), prev_grad_id);
             }
 
@@ -1449,22 +1445,24 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
     }
 
     // ===== DEBUG: 打印 DEEP_FWD_BWD 图节点 =====
-    // {
-    //     const auto& nodes = train_cg.nodes(GraphId::DEEP_FWD_BWD);
-    //     for (size_t i = 0; i < nodes.size(); ++i) {
-    //         const auto& n = nodes[i];
-    //         std::stringstream ss;
-    //         ss << "[COMPILER] DEEP[" << i << "] op=" << static_cast<int>(n.compute_op);
-    //         ss << " in=[";
-    //         for (size_t j = 0; j < n.input_ids.size(); ++j)
-    //             ss << (j?",":"") << n.input_ids[j];
-    //         ss << "] out=[";
-    //         for (size_t j = 0; j < n.output_ids.size(); ++j)
-    //             ss << (j?",":"") << n.output_ids[j];
-    //         ss << "]";
-    //         LOG_INFO << ss.str();
-    //     }
-    // }
+    /*
+    {
+        const auto& nodes = train_cg.nodes(GraphId::DEEP_FWD_BWD);
+        for (size_t i = 0; i < nodes.size(); ++i) {
+            const auto& n = nodes[i];
+            std::stringstream ss;
+            ss << "[COMPILER] DEEP[" << i << "] op=" << compute_op_to_string(n.compute_op);
+            ss << " in=[";
+            for (size_t j = 0; j < n.input_ids.size(); ++j)
+                ss << (j?",":"") << n.input_ids[j];
+            ss << "] out=[";
+            for (size_t j = 0; j < n.output_ids.size(); ++j)
+                ss << (j?",":"") << n.output_ids[j];
+            ss << "]";
+            LOG_INFO << ss.str();
+        }
+    }
+    */
 
     // 构建辅助图：通信、优化器、EMA等
     build_auxiliary_graphs(train_cg, memory_plan, arch, nan_flag_id, scalar_ids);

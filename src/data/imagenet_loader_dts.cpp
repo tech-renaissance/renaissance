@@ -572,8 +572,8 @@ void ImageNetLoaderDts::begin_epoch(int epoch_id, bool is_train) {
      * 3. 启动第一个buffer的加载
      */
 
-    LOG_INFO << "Beginning epoch " << epoch_id
-             << " (" << (is_train ? "train" : "val") << ")";
+    // LOG_INFO << "Beginning epoch " << epoch_id
+    //          << " (" << (is_train ? "train" : "val") << ")";
 
     // 1. 设置当前数据集
     current_set_ = is_train ? &train_set_ : &val_set_;
@@ -814,7 +814,7 @@ void ImageNetLoaderDts::end_epoch() {
      * 3. 重置buffer状态
      */
 
-    LOG_INFO << "Ending epoch";
+    // LOG_INFO << "Ending epoch";
 
     if (current_set_ == nullptr) {
         LOG_WARN << "No current dataset to end";
@@ -856,7 +856,7 @@ void ImageNetLoaderDts::end_epoch() {
 
     current_set_ = nullptr;
 
-    LOG_INFO << "Epoch ended successfully";
+    // LOG_INFO << "Epoch ended successfully";
 }
 
 void ImageNetLoaderDts::reset_after_warmup() {

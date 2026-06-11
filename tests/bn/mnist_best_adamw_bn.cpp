@@ -14,7 +14,7 @@
  * - 网络结构：1024→512→256（比AWY_FINAL_K更宽，配合Label Smoothing=0.1）
  * - 激活函数：ReLU（全票通过的最优选择）
  * - Bias：true（AWY_FINAL选择，补偿无BN）
- * - 优化器：LARS with weight_decay=5e-5（MLPerf Closed配置）
+ * - 优化器：AdamW with weight_decay=1e-4（MLPerf Closed配置）
  * - 学习率：CosineAnnealing+warmup(5)（AWY_FINAL选择，更稳定）
  * - 数据增强：完整6种预处理链（前辈验证的最强组合）
  * - 训练轮数：100 epochs（平衡点）

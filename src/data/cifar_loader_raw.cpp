@@ -186,8 +186,8 @@ bool CifarLoaderRaw::is_loaded() const {
 // =============================================================================
 
 void CifarLoaderRaw::begin_epoch(int epoch_id, bool is_train) {
-    LOG_INFO << "Beginning epoch " << epoch_id
-             << " (" << (is_train ? "train" : "val") << ")";
+    // LOG_INFO << "Beginning epoch " << epoch_id
+    //          << " (" << (is_train ? "train" : "val") << ")";
 
     // 1. 设置当前数据集
     current_set_ = is_train ? &train_set_ : &val_set_;
@@ -225,15 +225,15 @@ void CifarLoaderRaw::begin_epoch(int epoch_id, bool is_train) {
     current_set_->current_epoch_id = epoch_id;
     current_epoch_id_.store(epoch_id, std::memory_order_relaxed);
 
-    LOG_INFO << "Epoch " << epoch_id << " began (SampleInfo mode)";
+    // LOG_INFO << "Epoch " << epoch_id << " began (SampleInfo mode)";
 }
 
 void CifarLoaderRaw::end_epoch() {
-    LOG_INFO << "Ending epoch " << current_epoch_id_.load();
+    // LOG_INFO << "Ending epoch " << current_epoch_id_.load();
 
     // 不需要重置worker_states_,因为worker_local_idxs在begin_epoch()中已重置
 
-    LOG_INFO << "Epoch ended";
+    // LOG_INFO << "Epoch ended";
 }
 
 void CifarLoaderRaw::reset_after_warmup() {
@@ -531,7 +531,7 @@ void CifarLoaderRaw::register_sample_info(Dataset& ds, bool is_train) {
 void CifarLoaderRaw::perform_global_shuffle(std::vector<SampleInfo>& global_info, int epoch_id) {
     const uint64_t seed = static_cast<uint64_t>(epoch_id);
 
-    LOG_INFO << "Performing global shuffle with seed: " << seed;
+    // LOG_INFO << "Performing global shuffle with seed: " << seed;
 
     // 使用Philox PRNG进行可复现的洗牌（Fisher-Yates算法）
     for (size_t i = global_info.size() - 1; i > 0; --i) {
@@ -541,7 +541,7 @@ void CifarLoaderRaw::perform_global_shuffle(std::vector<SampleInfo>& global_info
         std::swap(global_info[i], global_info[j]);
     }
 
-    LOG_INFO << "Global shuffle completed";
+    // LOG_INFO << "Global shuffle completed";
 }
 
 void CifarLoaderRaw::distribute_to_threads(
@@ -551,7 +551,7 @@ void CifarLoaderRaw::distribute_to_threads(
     const size_t M = num_preproc_workers_;
     const size_t N = global_info.size();
 
-    LOG_INFO << "Distributing " << N << " samples to " << M << " workers";
+    // LOG_INFO << "Distributing " << N << " samples to " << M << " workers";
 
     // 计算均匀分配
     const size_t base_count = N / M;
@@ -585,7 +585,7 @@ void CifarLoaderRaw::distribute_to_threads(
     TR_CHECK(total == N, ValueError,
              "Total samples after distribution mismatch: expected " << N << ", got " << total);
 
-    LOG_INFO << "Distribution completed: total=" << total << ", expected=" << N;
+    // LOG_INFO << "Distribution completed: total=" << total << ", expected=" << N;
 }
 
 // =============================================================================

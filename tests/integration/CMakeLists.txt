@@ -233,3 +233,24 @@ else()
 endif()
 
 message(STATUS "  - test_vgg16: ImageNet VGG-16 end-to-end accuracy test (no BN, GPU FP32)")
+
+add_executable(test_nin test_nin.cpp)
+target_link_libraries(test_nin PRIVATE renaissance)
+target_compile_definitions(test_nin PRIVATE TR_LOG_LEVEL=1)
+
+if(TR_USE_CUDA)
+    setup_gpu_runtime_env(test_nin)
+endif()
+
+set_target_properties(test_nin PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/integration
+    WIN32_EXECUTABLE FALSE
+)
+
+if(MSVC)
+    target_compile_options(test_nin PRIVATE /W4 /utf-8 /wd4244 /wd4505 /wd4458 /wd4127)
+else()
+    target_compile_options(test_nin PRIVATE -Wall -Wextra -Wpedantic -Wno-unused-function)
+endif()
+
+message(STATUS "  - test_nin: CIFAR-10 NIN end-to-end accuracy test (AdamW, Dropout)")

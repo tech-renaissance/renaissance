@@ -594,7 +594,7 @@ SubgraphPattern build_flatten_backward(const OpParams&, const std::vector<Tensor
     SubgraphPattern::Node n;
     n.op = GlobalRegistry::instance().using_amp() ? ComputeOp::FLATTEN_AMP_BWD
                                                    : ComputeOp::FLATTEN_FP32_BWD;
-    n.input_indices = {0};
+    // BWD input is prev_grad_id (dY), injected by compiler; do not bind FWD output here.
     p.nodes.push_back(n);
     return p;
 }
@@ -636,7 +636,7 @@ SubgraphPattern build_channel_padding_backward(const OpParams&, const std::vecto
     SubgraphPattern::Node n;
     n.op = GlobalRegistry::instance().using_amp() ? ComputeOp::CHANNEL_PADDING_AMP_BWD
                                                    : ComputeOp::CHANNEL_PADDING_FP32_BWD;
-    n.input_indices = {0};
+    // BWD input is prev_grad_id (dY), injected by compiler; do not bind FWD output here.
     p.nodes.push_back(n);
     return p;
 }

@@ -9,7 +9,7 @@
  * - 网络结构：channel_padding → conv(8,5,1,2) → avgpool(2,2,0)
  *             → conv(16,5,1,0) → avgpool(2,2,0)
  *             → fc(120) → fc(88) → fc(10)
- * - 激活函数：默认 Tanh（CLI 可切换）
+ * - 激活函数：默认 ReLU（CLI 可切换）
  * - Bias：true
  * - 优化器：AdamW with weight_decay=1e-4
  * - 学习率：CosineAnnealing+warmup(5)
@@ -41,7 +41,7 @@ const char* mode_name(TestMode m) {
 
 struct CliConfig {
     TestMode mode = TestMode::GPU;
-    std::string activation = "tanh";  // LeNet-5 原版使用 Tanh
+    std::string activation = "relu";  // 默认使用 ReLU
 };
 
 CliConfig parse_cli(int argc, char** argv) {
@@ -150,11 +150,11 @@ int main(int argc, char** argv) {
 
         conv(8, 5, 1, 2),  // 为兼容AMP模式，特意把输出通道数设为8
         make_activation(cfg.activation),
-        maxpool(3, 2, 1),
+        avgpool(2, 2, 0),
 
         conv(16, 5, 1, 0),
         make_activation(cfg.activation),
-        maxpool(3, 2, 1),   // flatten 视情况自动插入：C 为 8 的整数倍时免 flatten，FC 直接接收 4D 输入
+        avgpool(2, 2, 0),
 
         fc(120, true),
         make_activation(cfg.activation),
