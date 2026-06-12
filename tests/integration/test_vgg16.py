@@ -14,10 +14,10 @@ from torchvision import datasets, transforms
 # ---------------------------------------------------------------------------
 TOTAL_EPOCHS   = 100
 LOCAL_BATCH_SIZE = 128        # per-GPU, global = 128*8 = 1024
-PEAK_LR         = 0.4
+PEAK_LR         = 0.2           # [FIX_2026_06_12]稳定性修复：峰值学习率从0.4降至0.2
 WARMUP_LR_START = 0.01
 ETA_MIN         = 1e-6
-WARMUP_EPOCHS   = 5
+WARMUP_EPOCHS   = 10          # [FIX_2026_06_12]稳定性修复：warmup从5 epoch延长至10 epoch
 WEIGHT_DECAY    = 1e-4
 MOMENTUM        = 0.9
 LABEL_SMOOTHING = 0.1
@@ -40,14 +40,15 @@ def reduce_tensor(tensor):
 # ---------------------------------------------------------------------------
 # Warmup + CosineAnnealing scheduler
 # Epoch 0: lr = WARMUP_LR_START (0.01)
-# Epoch 4 (end of warmup): lr = PEAK_LR (0.4)
-# Epoch 5+: cosine annealing down to ETA_MIN
+# Epoch 9 (end of warmup): lr = PEAK_LR (0.2)
+# Epoch 10+: cosine annealing down to ETA_MIN
+# [FIX_2026_06_12]稳定性修复：warmup延长至10 epoch，配合降低后的peak lr
 # ---------------------------------------------------------------------------
 def warmup_cosine_lambda(epoch):
     if epoch < WARMUP_EPOCHS:
         alpha = epoch / max(WARMUP_EPOCHS - 1, 1)
         return (WARMUP_LR_START + (PEAK_LR - WARMUP_LR_START) * alpha) / PEAK_LR
-    progress = (epoch - WARMUP_EPOCHS) / (TOTAL_EPOCHS - WARMUP_EPOCHS)
+    progress = (epoch - WARMUP_EPOCHS) / max(TOTAL_EPOCHS - WARMUP_EPOCHS - 1, 1)  # [FIX_2026_06_12]稳定性修复：最后一个epoch lr恰好到eta_min
     cos_val = 0.5 * (1.0 + math.cos(math.pi * progress))
     return (ETA_MIN + (PEAK_LR - ETA_MIN) * cos_val) / PEAK_LR
 
@@ -174,10 +175,10 @@ def main():
     train_transform = transforms.Compose([
         transforms.RandomResizedCrop(224, scale=(0.08, 1.0)),
         transforms.RandomHorizontalFlip(),
-        transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.1),
+        transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),  # [FIX_2026_06_12]稳定性修复：ColorJitter强度从0.4降至0.2
         transforms.ToTensor(),
         transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
-        transforms.RandomErasing(p=0.5, scale=(0.02, 0.33), ratio=(0.3, 3.3)),
+        transforms.RandomErasing(p=0.25, scale=(0.02, 0.33), ratio=(0.3, 3.3)),  # [FIX_2026_06_12]稳定性修复：RandomErasing概率从0.5降至0.25
     ])
     # Validation: Resize(256) + CenterCrop(224) + ToTensor + Normalize
     val_transform = transforms.Compose([
@@ -215,12 +216,13 @@ def main():
     model = DDP(model, device_ids=[local_rank], output_device=local_rank)
 
     # Parameter grouping: weight_decay for weights, no wd for bias & BN params
+    # [FIX_2026_06_12]稳定性修复：DDP下参数名带module.前缀，按维度(param.ndim==1)判断bias和BN参数更可靠
     weight_params = []
     no_wd_params = []
     for name, param in model.named_parameters():
         if not param.requires_grad:
             continue
-        if 'bias' in name or len(param.shape) == 1 or 'bn' in name.lower() or 'batch_norm' in name.lower():
+        if param.ndim == 1:
             no_wd_params.append(param)
         else:
             weight_params.append(param)
@@ -255,10 +257,10 @@ def main():
         log(f" Conv bias:  false | FC bias: true")
         log(f" Activation: ReLU (fixed)")
         log(f" Optimizer:  SGD (momentum=0.9, nesterov=False)")
-        log(f" Scheduler:  CosineAnnealing + Warmup(5)")
+        log(f" Scheduler:  CosineAnnealing + Warmup(10)")
         log(f" LR:         {WARMUP_LR_START} -> {PEAK_LR} (warmup) -> {ETA_MIN} (cosine)")
         log(f" Weight Decay: {WEIGHT_DECAY} (BN & bias excluded)")
-        log(f" Augmentation: RRC(0.08~1.0) + HFlip + ColorJitter(0.4) + RandomErasing(0.5)")
+        log(f" Augmentation: RRC(0.08~1.0) + HFlip + ColorJitter(0.2) + RandomErasing(0.25)")
         log(f" Training:   {TOTAL_EPOCHS} epochs, local_batch_size={LOCAL_BATCH_SIZE} per GPU")
         log(f" Global batch: {LOCAL_BATCH_SIZE * world_size}")
         log("=====================================")
@@ -269,6 +271,8 @@ def main():
     t0 = time.perf_counter()
 
     for epoch in range(TOTAL_EPOCHS):
+        scheduler.step(epoch)  # [FIX_2026_06_12]稳定性修复：在epoch开头更新lr，确保warmup对应当前epoch生效
+        current_lr = optimizer.param_groups[0]['lr']
         ep_t0 = time.perf_counter()
         train_sampler.set_epoch(epoch)
         model.train()
@@ -285,9 +289,10 @@ def main():
             output = model(data)
             loss = criterion(output, target)
             loss.backward()
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)  # [FIX_2026_06_12]稳定性修复：加入梯度裁剪防止异常梯度导致训练崩溃
             optimizer.step()
 
-            train_loss += loss.item() * data.size(0)
+            train_loss += loss * data.size(0)  # [FIX_2026_06_12]稳定性修复：train loss累加保留在GPU，避免每次迭代CPU-GPU同步
             train_total += data.size(0)
 
         # Aggregate train stats across all ranks
@@ -308,7 +313,7 @@ def main():
                 output = model(data)
                 loss = criterion(output, target)
 
-                val_loss += loss.item() * data.size(0)
+                val_loss += loss * data.size(0)  # [FIX_2026_06_12]稳定性修复：val loss累加保留在GPU
 
                 # Top-1
                 _, pred1 = output.topk(1, dim=1)
@@ -335,15 +340,12 @@ def main():
             best_top5 = top5_val
             best_epoch = epoch + 1
 
-        current_lr = optimizer.param_groups[0]['lr']
         ep_t1 = time.perf_counter()
 
         if is_main:
             log(f"Epoch {epoch+1:3d}: train_loss={train_loss.item():.6f}  "
                 f"val_loss={val_loss.item():.6f}  top1={top1_val:.2f}%  top5={top5_val:.2f}%  "
                 f"lr={current_lr:.6f}  time={ep_t1 - ep_t0:.1f}s")
-
-        scheduler.step()
 
     t1 = time.perf_counter()
 
