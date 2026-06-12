@@ -1192,7 +1192,9 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
                 }
             }
 
-            // SoftmaxCE FWD: 注入基线 ID（scaling + labels → loss + top1 + top5）
+            // SoftmaxCE FWD: 注入基线 ID + 显式重排 output_ids
+            // 最终布局: [loss, inv_sc, pred, probs, top1, top5, loss_p, top1_p, top5_p]
+            // orig = layer outputs: [inv_sc(3), pred(2), probs(1), loss_p(4), top1_p(5), top5_p(6)]
             if (gn.compute_op == ComputeOp::SOFTMAX_CE_FP32_FWD ||
                 gn.compute_op == ComputeOp::SOFTMAX_CE_AMP_FWD  ||
                 gn.compute_op == ComputeOp::SOFTMAX_CE_FP32_INF ||
@@ -1201,10 +1203,15 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
                 gn.input_ids.push_back(b.scaling);
                 gn.input_ids.push_back(b.local_batch_size);
                 gn.input_ids.push_back(b.label_smce);
-                gn.input_ids.push_back(b.label_smoothing);   // [NEW] → ids_in[4]
-                gn.output_ids.insert(gn.output_ids.begin(), b.loss);
-                gn.output_ids.push_back(b.top1);
-                gn.output_ids.push_back(b.top5);
+                gn.input_ids.push_back(b.label_smoothing);   // → ids_in[4]
+
+                auto orig = gn.output_ids;
+                gn.output_ids.clear();
+                gn.output_ids.push_back(b.loss);                                    // 0: loss
+                gn.output_ids.insert(gn.output_ids.end(), orig.begin(), orig.begin() + 3); // 1,2,3: inv_sc, pred, probs
+                gn.output_ids.push_back(b.top1);                                    // 4: top1
+                gn.output_ids.push_back(b.top5);                                    // 5: top5
+                gn.output_ids.insert(gn.output_ids.end(), orig.begin() + 3, orig.end());   // 6,7,8: loss_p, top1_p, top5_p
             }
 
             // BN FWD: 注入全局标量 bn_epsilon 和 bn_momentum
@@ -1594,7 +1601,7 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
                 gn.input_ids.insert(gn.input_ids.begin(), prev_inf_output_id);
             }
 
-            // SoftmaxCE inference: 注入基线 ID（scaling + labels → loss + inv_scaling + pred + probs + top1 + top5）
+            // SoftmaxCE inference: 注入基线 ID + 显式重排 output_ids（同训练路径）
             if (gn.compute_op == ComputeOp::SOFTMAX_CE_FP32_FWD ||
                 gn.compute_op == ComputeOp::SOFTMAX_CE_AMP_FWD  ||
                 gn.compute_op == ComputeOp::SOFTMAX_CE_FP32_INF ||
@@ -1603,10 +1610,15 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
                 gn.input_ids.push_back(b.scaling);
                 gn.input_ids.push_back(b.local_batch_size);
                 gn.input_ids.push_back(b.label_smce);
-                gn.input_ids.push_back(b.label_smoothing);   // [NEW] → ids_in[4]
-                gn.output_ids.insert(gn.output_ids.begin(), b.loss);
-                gn.output_ids.push_back(b.top1);
-                gn.output_ids.push_back(b.top5);
+                gn.input_ids.push_back(b.label_smoothing);   // → ids_in[4]
+
+                auto orig = gn.output_ids;
+                gn.output_ids.clear();
+                gn.output_ids.push_back(b.loss);                                    // 0: loss
+                gn.output_ids.insert(gn.output_ids.end(), orig.begin(), orig.begin() + 3); // 1,2,3: inv_sc, pred, probs
+                gn.output_ids.push_back(b.top1);                                    // 4: top1
+                gn.output_ids.push_back(b.top5);                                    // 5: top5
+                gn.output_ids.insert(gn.output_ids.end(), orig.begin() + 3, orig.end());   // 6,7,8: loss_p, top1_p, top5_p
             }
 
             // BN INF: 注入全局标量 bn_epsilon（用于 eq_scale/eq_bias 惰性生成）

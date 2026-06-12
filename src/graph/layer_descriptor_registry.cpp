@@ -646,36 +646,44 @@ SubgraphPattern build_channel_padding_inference(const OpParams&, const std::vect
 }
 
 // ============================================================================
-// SoftmaxCE — 4张量 (ce_output + probs + pred_labels + inv_scaling_factor)
+// SoftmaxCE — 7张量 (ce_output + probs + pred_labels + inv_scaling_factor
+//                    + loss_partial + top1_partial + top5_partial)
 // loss / scaling_factor / top1 / top5 由 MemoryPlan 基线分配器统一管理
+// partial 缓冲区用于确定性归约，消除 atomicAdd 的不可复现性
 // ============================================================================
 
 std::vector<TensorDesc> infer_softmaxce_tensors(
     const Shape& input, const OpParams&, const InferContext& ctx)
 {
     DType feat_dt = ctx.enable_amp ? DType::FP16 : DType::FP32;
+    Shape batch_shape{input.n(), 1, 1, 1};  // C=1, padded_c=1; kernel 用 partial[b] 直接索引
     return {
-        TensorDesc{"ce_output",          input,           select_feature_region(ctx), feat_dt},
-        TensorDesc{"softmax_probs",      input,           Region::T_TEMP_FP32,       DType::FP32},
-        TensorDesc{"pred_labels",        Shape{input.n(), 1, 1, 1}, Region::R_PREDICTED_LABEL, DType::INT32},
-        TensorDesc{"inv_scaling_factor", Shape{1,1,1,1},   Region::S_SCALAR_FP32,     DType::FP32}
+        // --- 原有 4 个 (索引 0..3) 不变 ---
+        TensorDesc{"ce_output",          input,           select_feature_region(ctx), feat_dt},     // 0
+        TensorDesc{"softmax_probs",      input,           Region::T_TEMP_FP32,       DType::FP32},  // 1
+        TensorDesc{"pred_labels",        batch_shape,     Region::R_PREDICTED_LABEL, DType::INT32}, // 2
+        TensorDesc{"inv_scaling_factor", Shape{1,1,1,1},   Region::S_SCALAR_FP32,     DType::FP32},  // 3
+        // --- 新增 3 个 TEMP (索引 4..6): 确定性归约所需的 partial sum 缓冲区 ---
+        TensorDesc{"loss_partial",       batch_shape,     Region::T_TEMP_FP32,       DType::FP32},  // 4
+        TensorDesc{"top1_partial",       batch_shape,     Region::T_TEMP_INT32,      DType::INT32}, // 5
+        TensorDesc{"top5_partial",       batch_shape,     Region::T_TEMP_INT32,      DType::INT32}, // 6
     };
 }
 
 SubgraphPattern build_softmaxce_forward(const OpParams&, const std::vector<TensorDesc>& descs) {
     SubgraphPattern p;
-    if (descs.size() < 4) return p;
+    if (descs.size() < 7) return p;
     SubgraphPattern::Node n;
     n.op = GlobalRegistry::instance().using_amp() ? ComputeOp::SOFTMAX_CE_AMP_FWD
                                                    : ComputeOp::SOFTMAX_CE_FP32_FWD;
-    n.output_indices = {3, 2, 1};
+    n.output_indices = {3, 2, 1, 4, 5, 6};  // inv_scaling + pred + probs + loss_p + top1_p + top5_p
     p.nodes.push_back(n);
     return p;
 }
 
 SubgraphPattern build_softmaxce_backward(const OpParams&, const std::vector<TensorDesc>& descs) {
     SubgraphPattern p;
-    if (descs.size() < 4) return p;
+    if (descs.size() < 7) return p;
     SubgraphPattern::Node n;
     n.op = GlobalRegistry::instance().using_amp() ? ComputeOp::SOFTMAX_CE_AMP_BWD
                                                    : ComputeOp::SOFTMAX_CE_FP32_BWD;
@@ -687,11 +695,11 @@ SubgraphPattern build_softmaxce_backward(const OpParams&, const std::vector<Tens
 
 SubgraphPattern build_softmaxce_inference(const OpParams&, const std::vector<TensorDesc>& descs) {
     SubgraphPattern p;
-    if (descs.size() < 4) return p;
+    if (descs.size() < 7) return p;
     SubgraphPattern::Node n;
     n.op = GlobalRegistry::instance().using_amp() ? ComputeOp::SOFTMAX_CE_AMP_INF
                                                    : ComputeOp::SOFTMAX_CE_FP32_INF;
-    n.output_indices = {3, 2, 1};
+    n.output_indices = {3, 2, 1, 4, 5, 6};  // inv_scaling + pred + probs + loss_p + top1_p + top5_p
     p.nodes.push_back(n);
     return p;
 }

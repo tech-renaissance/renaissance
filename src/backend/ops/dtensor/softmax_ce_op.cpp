@@ -55,6 +55,7 @@ extern cudaError_t launch_softmax_ce_fwd_fp32(
     float* inv_scaling, const float* scaling,
     const int32_t* batch_size,
     const float* label_smoothing,
+    float* loss_partial, int* top1_partial, int* top5_partial,   // [NEW]
     int batch, int logits_stride, int probs_stride, int num_classes);
 
 extern cudaError_t launch_softmax_ce_fwd_amp(
@@ -65,6 +66,7 @@ extern cudaError_t launch_softmax_ce_fwd_amp(
     float* inv_scaling, const float* scaling,
     const int32_t* batch_size,
     const float* label_smoothing,
+    float* loss_partial, int* top1_partial, int* top5_partial,   // [NEW]
     int batch, int logits_stride, int probs_stride, int num_classes);
 
 extern cudaError_t launch_softmax_ce_inf_fp32(
@@ -75,6 +77,7 @@ extern cudaError_t launch_softmax_ce_inf_fp32(
     float* inv_scaling, const float* scaling,
     const int32_t* batch_size,
     const float* label_smoothing,
+    float* loss_partial, int* top1_partial, int* top5_partial,   // [NEW]
     int batch, int logits_stride, int probs_stride, int num_classes);
 
 extern cudaError_t launch_softmax_ce_inf_amp(
@@ -85,8 +88,10 @@ extern cudaError_t launch_softmax_ce_inf_amp(
     float* inv_scaling, const float* scaling,
     const int32_t* batch_size,
     const float* label_smoothing,
+    float* loss_partial, int* top1_partial, int* top5_partial,   // [NEW]
     int batch, int logits_stride, int probs_stride, int num_classes);
 
+// BWD 声明不变
 extern cudaError_t launch_softmax_ce_bwd_fp32(
     cudaStream_t s,
     const float* probs, const int* labels,
@@ -380,6 +385,9 @@ static void launch_softmax_ce_fp32_fwd_cuda(
     float* probs  = static_cast<float*>(ctx.ptr_at(ids_out[3]));
     [[maybe_unused]] float* top1   = static_cast<float*>(ctx.ptr_at(ids_out[4]));
     [[maybe_unused]] float* top5   = static_cast<float*>(ctx.ptr_at(ids_out[5]));
+    float* loss_partial = static_cast<float*>(ctx.ptr_at(ids_out[6]));  // [NEW]
+    int*   top1_partial = static_cast<int*>(ctx.ptr_at(ids_out[7]));    // [NEW]
+    int*   top5_partial = static_cast<int*>(ctx.ptr_at(ids_out[8]));    // [NEW]
 
     const DTensor& logits_dt = mp.get_dtensor(ids_in[0]);
     int batch   = logits_dt.shape.n();
@@ -390,6 +398,7 @@ static void launch_softmax_ce_fp32_fwd_cuda(
     int probs_stride = probs_dt.n_stride_cuda();
     cudaError_t err_fwd = launch_softmax_ce_fwd_fp32(s, logits, labels, loss, top1, top5,
                                 pred, probs, inv_sc, scaling, batch_size, ls_ptr,
+                                loss_partial, top1_partial, top5_partial,
                                 batch, stride, probs_stride, num_cls);
     if (err_fwd != cudaSuccess)
         TR_DEVICE_ERROR("SOFTMAX_CE_FP32_FWD: " << cudaGetErrorString(err_fwd));
@@ -424,6 +433,9 @@ static void launch_softmax_ce_amp_fwd_cuda(
     float* probs  = static_cast<float*>(ctx.ptr_at(ids_out[3]));
     [[maybe_unused]] float* top1   = static_cast<float*>(ctx.ptr_at(ids_out[4]));
     [[maybe_unused]] float* top5   = static_cast<float*>(ctx.ptr_at(ids_out[5]));
+    float* loss_partial = static_cast<float*>(ctx.ptr_at(ids_out[6]));  // [NEW]
+    int*   top1_partial = static_cast<int*>(ctx.ptr_at(ids_out[7]));    // [NEW]
+    int*   top5_partial = static_cast<int*>(ctx.ptr_at(ids_out[8]));    // [NEW]
 
     const DTensor& logits_dt = mp.get_dtensor(ids_in[0]);
     int batch   = logits_dt.shape.n();
@@ -434,6 +446,7 @@ static void launch_softmax_ce_amp_fwd_cuda(
     int probs_stride = probs_dt.n_stride_cuda();
     cudaError_t err = launch_softmax_ce_fwd_amp(s, logits, labels, loss, top1, top5,
                                pred, probs, inv_sc, scaling, batch_size, ls_ptr,
+                               loss_partial, top1_partial, top5_partial,
                                batch, stride, probs_stride, num_cls);
     if (err != cudaSuccess)
         TR_DEVICE_ERROR("SOFTMAX_CE_AMP_FWD: " << cudaGetErrorString(err));
@@ -468,6 +481,9 @@ static void launch_softmax_ce_fp32_inf_cuda(
     float* probs  = static_cast<float*>(ctx.ptr_at(ids_out[3]));
     float* top1   = static_cast<float*>(ctx.ptr_at(ids_out[4]));
     float* top5   = static_cast<float*>(ctx.ptr_at(ids_out[5]));
+    float* loss_partial = static_cast<float*>(ctx.ptr_at(ids_out[6]));  // [NEW]
+    int*   top1_partial = static_cast<int*>(ctx.ptr_at(ids_out[7]));    // [NEW]
+    int*   top5_partial = static_cast<int*>(ctx.ptr_at(ids_out[8]));    // [NEW]
 
     const DTensor& logits_dt = mp.get_dtensor(ids_in[0]);
     int batch   = logits_dt.shape.n();
@@ -478,6 +494,7 @@ static void launch_softmax_ce_fp32_inf_cuda(
     int probs_stride = probs_dt.n_stride_cuda();
     cudaError_t err = launch_softmax_ce_inf_fp32(s, logits, labels, loss, top1, top5,
                                 pred, probs, inv_sc, scaling, batch_size, ls_ptr,
+                                loss_partial, top1_partial, top5_partial,
                                 batch, stride, probs_stride, num_cls);
     if (err != cudaSuccess)
         TR_DEVICE_ERROR("SOFTMAX_CE_FP32_INF: " << cudaGetErrorString(err));
@@ -512,6 +529,9 @@ static void launch_softmax_ce_amp_inf_cuda(
     float* probs  = static_cast<float*>(ctx.ptr_at(ids_out[3]));
     float* top1   = static_cast<float*>(ctx.ptr_at(ids_out[4]));
     float* top5   = static_cast<float*>(ctx.ptr_at(ids_out[5]));
+    float* loss_partial = static_cast<float*>(ctx.ptr_at(ids_out[6]));  // [NEW]
+    int*   top1_partial = static_cast<int*>(ctx.ptr_at(ids_out[7]));    // [NEW]
+    int*   top5_partial = static_cast<int*>(ctx.ptr_at(ids_out[8]));    // [NEW]
 
     const DTensor& logits_dt = mp.get_dtensor(ids_in[0]);
     int batch   = logits_dt.shape.n();
@@ -522,6 +542,7 @@ static void launch_softmax_ce_amp_inf_cuda(
     int probs_stride = probs_dt.n_stride_cuda();
     cudaError_t err = launch_softmax_ce_inf_amp(s, logits, labels, loss, top1, top5,
                                pred, probs, inv_sc, scaling, batch_size, ls_ptr,
+                               loss_partial, top1_partial, top5_partial,
                                batch, stride, probs_stride, num_cls);
     if (err != cudaSuccess)
         TR_DEVICE_ERROR("SOFTMAX_CE_AMP_INF: " << cudaGetErrorString(err));
