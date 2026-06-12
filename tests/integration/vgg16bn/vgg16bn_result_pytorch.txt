@@ -1,0 +1,190 @@
+(pytorch) root@tech-renaissance:~/epfs# torchrun --nproc_per_node=8 /root/epfs/R/renaissance/tests/integration/test_vgg16.py
+W0612 06:48:34.894000 1323428 torch/distributed/run.py:803] 
+W0612 06:48:34.894000 1323428 torch/distributed/run.py:803] *****************************************
+W0612 06:48:34.894000 1323428 torch/distributed/run.py:803] Setting OMP_NUM_THREADS environment variable for each process to be 1 in default, to avoid your system being overloaded, please further tune the variable for optimal performance in your application as needed. 
+W0612 06:48:34.894000 1323428 torch/distributed/run.py:803] *****************************************
+/opt/pytorch/lib/python3.12/site-packages/torch/backends/__init__.py:46: UserWarning: Please use the new API settings to control TF32 behavior, such as torch.backends.cudnn.conv.fp32_precision = 'tf32' or torch.backends.cuda.matmul.fp32_precision = 'ieee'. Old settings, e.g, torch.backends.cuda.matmul.allow_tf32 = True, torch.backends.cudnn.allow_tf32 = True, allowTF32CuDNN() and allowTF32CuBLAS() will be deprecated after Pytorch 2.9. Please see https://pytorch.org/docs/main/notes/cuda.html#tensorfloat-32-tf32-on-ampere-and-later-devices (Triggered internally at /pytorch/aten/src/ATen/Context.cpp:80.)
+  self.setter(val)
+/opt/pytorch/lib/python3.12/site-packages/torch/backends/__init__.py:46: UserWarning: Please use the new API settings to control TF32 behavior, such as torch.backends.cudnn.conv.fp32_precision = 'tf32' or torch.backends.cuda.matmul.fp32_precision = 'ieee'. Old settings, e.g, torch.backends.cuda.matmul.allow_tf32 = True, torch.backends.cudnn.allow_tf32 = True, allowTF32CuDNN() and allowTF32CuBLAS() will be deprecated after Pytorch 2.9. Please see https://pytorch.org/docs/main/notes/cuda.html#tensorfloat-32-tf32-on-ampere-and-later-devices (Triggered internally at /pytorch/aten/src/ATen/Context.cpp:80.)
+  self.setter(val)
+/opt/pytorch/lib/python3.12/site-packages/torch/backends/__init__.py:46: UserWarning: Please use the new API settings to control TF32 behavior, such as torch.backends.cudnn.conv.fp32_precision = 'tf32' or torch.backends.cuda.matmul.fp32_precision = 'ieee'. Old settings, e.g, torch.backends.cuda.matmul.allow_tf32 = True, torch.backends.cudnn.allow_tf32 = True, allowTF32CuDNN() and allowTF32CuBLAS() will be deprecated after Pytorch 2.9. Please see https://pytorch.org/docs/main/notes/cuda.html#tensorfloat-32-tf32-on-ampere-and-later-devices (Triggered internally at /pytorch/aten/src/ATen/Context.cpp:80.)
+  self.setter(val)
+/opt/pytorch/lib/python3.12/site-packages/torch/backends/__init__.py:46: UserWarning: Please use the new API settings to control TF32 behavior, such as torch.backends.cudnn.conv.fp32_precision = 'tf32' or torch.backends.cuda.matmul.fp32_precision = 'ieee'. Old settings, e.g, torch.backends.cuda.matmul.allow_tf32 = True, torch.backends.cudnn.allow_tf32 = True, allowTF32CuDNN() and allowTF32CuBLAS() will be deprecated after Pytorch 2.9. Please see https://pytorch.org/docs/main/notes/cuda.html#tensorfloat-32-tf32-on-ampere-and-later-devices (Triggered internally at /pytorch/aten/src/ATen/Context.cpp:80.)
+  self.setter(val)
+/opt/pytorch/lib/python3.12/site-packages/torch/backends/__init__.py:46: UserWarning: Please use the new API settings to control TF32 behavior, such as torch.backends.cudnn.conv.fp32_precision = 'tf32' or torch.backends.cuda.matmul.fp32_precision = 'ieee'. Old settings, e.g, torch.backends.cuda.matmul.allow_tf32 = True, torch.backends.cudnn.allow_tf32 = True, allowTF32CuDNN() and allowTF32CuBLAS() will be deprecated after Pytorch 2.9. Please see https://pytorch.org/docs/main/notes/cuda.html#tensorfloat-32-tf32-on-ampere-and-later-devices (Triggered internally at /pytorch/aten/src/ATen/Context.cpp:80.)
+  self.setter(val)
+/opt/pytorch/lib/python3.12/site-packages/torch/backends/__init__.py:46: UserWarning: Please use the new API settings to control TF32 behavior, such as torch.backends.cudnn.conv.fp32_precision = 'tf32' or torch.backends.cuda.matmul.fp32_precision = 'ieee'. Old settings, e.g, torch.backends.cuda.matmul.allow_tf32 = True, torch.backends.cudnn.allow_tf32 = True, allowTF32CuDNN() and allowTF32CuBLAS() will be deprecated after Pytorch 2.9. Please see https://pytorch.org/docs/main/notes/cuda.html#tensorfloat-32-tf32-on-ampere-and-later-devices (Triggered internally at /pytorch/aten/src/ATen/Context.cpp:80.)
+  self.setter(val)
+/opt/pytorch/lib/python3.12/site-packages/torch/backends/__init__.py:46: UserWarning: Please use the new API settings to control TF32 behavior, such as torch.backends.cudnn.conv.fp32_precision = 'tf32' or torch.backends.cuda.matmul.fp32_precision = 'ieee'. Old settings, e.g, torch.backends.cuda.matmul.allow_tf32 = True, torch.backends.cudnn.allow_tf32 = True, allowTF32CuDNN() and allowTF32CuBLAS() will be deprecated after Pytorch 2.9. Please see https://pytorch.org/docs/main/notes/cuda.html#tensorfloat-32-tf32-on-ampere-and-later-devices (Triggered internally at /pytorch/aten/src/ATen/Context.cpp:80.)
+  self.setter(val)
+/opt/pytorch/lib/python3.12/site-packages/torch/backends/__init__.py:46: UserWarning: Please use the new API settings to control TF32 behavior, such as torch.backends.cudnn.conv.fp32_precision = 'tf32' or torch.backends.cuda.matmul.fp32_precision = 'ieee'. Old settings, e.g, torch.backends.cuda.matmul.allow_tf32 = True, torch.backends.cudnn.allow_tf32 = True, allowTF32CuDNN() and allowTF32CuBLAS() will be deprecated after Pytorch 2.9. Please see https://pytorch.org/docs/main/notes/cuda.html#tensorfloat-32-tf32-on-ampere-and-later-devices (Triggered internally at /pytorch/aten/src/ATen/Context.cpp:80.)
+  self.setter(val)
+/opt/pytorch/lib/python3.12/site-packages/torch/optim/lr_scheduler.py:192: UserWarning: Detected call of `lr_scheduler.step()` before `optimizer.step()`. In PyTorch 1.1.0 and later, you should call them in the opposite order: `optimizer.step()` before `lr_scheduler.step()`.  Failure to do this will result in PyTorch skipping the first value of the learning rate schedule. See more details at https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate
+  warnings.warn(
+/opt/pytorch/lib/python3.12/site-packages/torch/optim/lr_scheduler.py:204: UserWarning: The epoch parameter in `scheduler.step()` was not necessary and is being deprecated where possible. Please use `scheduler.step()` to step the scheduler. During the deprecation, if epoch is different from None, the closed form is used instead of the new chainable form, where available. Please open an issue if you are unable to replicate your use case: https://github.com/pytorch/pytorch/issues/new/choose.
+  warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning)
+/opt/pytorch/lib/python3.12/site-packages/torch/optim/lr_scheduler.py:192: UserWarning: Detected call of `lr_scheduler.step()` before `optimizer.step()`. In PyTorch 1.1.0 and later, you should call them in the opposite order: `optimizer.step()` before `lr_scheduler.step()`.  Failure to do this will result in PyTorch skipping the first value of the learning rate schedule. See more details at https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate
+  warnings.warn(
+/opt/pytorch/lib/python3.12/site-packages/torch/optim/lr_scheduler.py:204: UserWarning: The epoch parameter in `scheduler.step()` was not necessary and is being deprecated where possible. Please use `scheduler.step()` to step the scheduler. During the deprecation, if epoch is different from None, the closed form is used instead of the new chainable form, where available. Please open an issue if you are unable to replicate your use case: https://github.com/pytorch/pytorch/issues/new/choose.
+  warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning)
+/opt/pytorch/lib/python3.12/site-packages/torch/optim/lr_scheduler.py:192: UserWarning: Detected call of `lr_scheduler.step()` before `optimizer.step()`. In PyTorch 1.1.0 and later, you should call them in the opposite order: `optimizer.step()` before `lr_scheduler.step()`.  Failure to do this will result in PyTorch skipping the first value of the learning rate schedule. See more details at https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate
+  warnings.warn(
+/opt/pytorch/lib/python3.12/site-packages/torch/optim/lr_scheduler.py:204: UserWarning: The epoch parameter in `scheduler.step()` was not necessary and is being deprecated where possible. Please use `scheduler.step()` to step the scheduler. During the deprecation, if epoch is different from None, the closed form is used instead of the new chainable form, where available. Please open an issue if you are unable to replicate your use case: https://github.com/pytorch/pytorch/issues/new/choose.
+  warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning)
+/opt/pytorch/lib/python3.12/site-packages/torch/optim/lr_scheduler.py:192: UserWarning: Detected call of `lr_scheduler.step()` before `optimizer.step()`. In PyTorch 1.1.0 and later, you should call them in the opposite order: `optimizer.step()` before `lr_scheduler.step()`.  Failure to do this will result in PyTorch skipping the first value of the learning rate schedule. See more details at https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate
+  warnings.warn(
+/opt/pytorch/lib/python3.12/site-packages/torch/optim/lr_scheduler.py:192: UserWarning: Detected call of `lr_scheduler.step()` before `optimizer.step()`. In PyTorch 1.1.0 and later, you should call them in the opposite order: `optimizer.step()` before `lr_scheduler.step()`.  Failure to do this will result in PyTorch skipping the first value of the learning rate schedule. See more details at https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate
+  warnings.warn(
+/opt/pytorch/lib/python3.12/site-packages/torch/optim/lr_scheduler.py:204: UserWarning: The epoch parameter in `scheduler.step()` was not necessary and is being deprecated where possible. Please use `scheduler.step()` to step the scheduler. During the deprecation, if epoch is different from None, the closed form is used instead of the new chainable form, where available. Please open an issue if you are unable to replicate your use case: https://github.com/pytorch/pytorch/issues/new/choose.
+  warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning)
+/opt/pytorch/lib/python3.12/site-packages/torch/optim/lr_scheduler.py:204: UserWarning: The epoch parameter in `scheduler.step()` was not necessary and is being deprecated where possible. Please use `scheduler.step()` to step the scheduler. During the deprecation, if epoch is different from None, the closed form is used instead of the new chainable form, where available. Please open an issue if you are unable to replicate your use case: https://github.com/pytorch/pytorch/issues/new/choose.
+  warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning)
+
+/opt/pytorch/lib/python3.12/site-packages/torch/optim/lr_scheduler.py:192: UserWarning: Detected call of `lr_scheduler.step()` before `optimizer.step()`. In PyTorch 1.1.0 and later, you should call them in the opposite order: `optimizer.step()` before `lr_scheduler.step()`.  Failure to do this will result in PyTorch skipping the first value of the learning rate schedule. See more details at https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate
+  warnings.warn(
+=====================================
+ PyTorch ImageNet VGG16BN Test (DDP)
+=====================================
+ Mode:       GPU [FP32] (Eager, SyncBN)
+ Device:     cuda:0 (world_size=8)
+/opt/pytorch/lib/python3.12/site-packages/torch/optim/lr_scheduler.py:204: UserWarning: The epoch parameter in `scheduler.step()` was not necessary and is being deprecated where possible. Please use `scheduler.step()` to step the scheduler. During the deprecation, if epoch is different from None, the closed form is used instead of the new chainable form, where available. Please open an issue if you are unable to replicate your use case: https://github.com/pytorch/pytorch/issues/new/choose.
+  warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning)
+ Network:    VGG-16-BN
+   conv(64)x2+BN  -> maxpool -> 112x112
+   conv(128)x2+BN -> maxpool -> 56x56
+   conv(256)x3+BN -> maxpool -> 28x28
+   conv(512)x3+BN -> maxpool -> 14x14
+   conv(512)x3+BN -> maxpool -> 7x7
+   flatten -> fc(4096) -> ReLU -> Dropout(0.5)
+           -> fc(4096) -> ReLU -> Dropout(0.5) -> fc(1000)
+ Conv bias:  false | FC bias: true
+ Activation: ReLU (fixed)
+ Optimizer:  SGD (momentum=0.9, nesterov=False)
+ Scheduler:  CosineAnnealing + Warmup(10)
+ LR:         0.01 -> 0.2 (warmup) -> 1e-06 (cosine)
+ Weight Decay: 0.0001 (BN & bias excluded)
+ Augmentation: RRC(0.08~1.0) + HFlip + ColorJitter(0.2) + RandomErasing(0.25)
+ Training:   100 epochs, local_batch_size=128 per GPU
+ Global batch: 1024
+=====================================
+/opt/pytorch/lib/python3.12/site-packages/torch/optim/lr_scheduler.py:192: UserWarning: Detected call of `lr_scheduler.step()` before `optimizer.step()`. In PyTorch 1.1.0 and later, you should call them in the opposite order: `optimizer.step()` before `lr_scheduler.step()`.  Failure to do this will result in PyTorch skipping the first value of the learning rate schedule. See more details at https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate
+  warnings.warn(
+/opt/pytorch/lib/python3.12/site-packages/torch/optim/lr_scheduler.py:204: UserWarning: The epoch parameter in `scheduler.step()` was not necessary and is being deprecated where possible. Please use `scheduler.step()` to step the scheduler. During the deprecation, if epoch is different from None, the closed form is used instead of the new chainable form, where available. Please open an issue if you are unable to replicate your use case: https://github.com/pytorch/pytorch/issues/new/choose.
+  warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning)
+/opt/pytorch/lib/python3.12/site-packages/torch/optim/lr_scheduler.py:192: UserWarning: Detected call of `lr_scheduler.step()` before `optimizer.step()`. In PyTorch 1.1.0 and later, you should call them in the opposite order: `optimizer.step()` before `lr_scheduler.step()`.  Failure to do this will result in PyTorch skipping the first value of the learning rate schedule. See more details at https://pytorch.org/docs/stable/optim.html#how-to-adjust-learning-rate
+  warnings.warn(
+/opt/pytorch/lib/python3.12/site-packages/torch/optim/lr_scheduler.py:204: UserWarning: The epoch parameter in `scheduler.step()` was not necessary and is being deprecated where possible. Please use `scheduler.step()` to step the scheduler. During the deprecation, if epoch is different from None, the closed form is used instead of the new chainable form, where available. Please open an issue if you are unable to replicate your use case: https://github.com/pytorch/pytorch/issues/new/choose.
+  warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning)
+Epoch   1: train_loss=6.896381  val_loss=6.791059  top1=0.42%  top5=1.81%  lr=0.010000  time=318.1s
+Epoch   2: train_loss=6.582478  val_loss=5.917741  top1=3.33%  top5=11.21%  lr=0.031111  time=303.7s
+Epoch   3: train_loss=5.692147  val_loss=5.235316  top1=9.27%  top5=25.47%  lr=0.052222  time=300.5s
+Epoch   4: train_loss=4.986593  val_loss=4.613023  top1=18.45%  top5=40.82%  lr=0.073333  time=299.9s
+Epoch   5: train_loss=4.483612  val_loss=4.014545  top1=27.14%  top5=53.88%  lr=0.094444  time=301.2s
+Epoch   6: train_loss=4.193756  val_loss=3.736200  top1=33.15%  top5=60.81%  lr=0.115556  time=300.1s
+Epoch   7: train_loss=3.957241  val_loss=3.697704  top1=33.82%  top5=61.08%  lr=0.136667  time=299.9s
+Epoch   8: train_loss=3.812532  val_loss=3.281752  top1=42.62%  top5=70.26%  lr=0.157778  time=299.2s
+Epoch   9: train_loss=3.655010  val_loss=3.157577  top1=44.95%  top5=72.46%  lr=0.178889  time=300.9s
+Epoch  10: train_loss=3.577856  val_loss=3.186504  top1=44.41%  top5=71.96%  lr=0.200000  time=300.2s
+Epoch  11: train_loss=3.482872  val_loss=3.115840  top1=45.77%  top5=73.01%  lr=0.200000  time=300.3s
+Epoch  12: train_loss=3.415385  val_loss=2.987073  top1=48.78%  top5=75.43%  lr=0.199938  time=300.5s
+Epoch  13: train_loss=3.361371  val_loss=2.922610  top1=50.66%  top5=77.00%  lr=0.199751  time=299.4s
+Epoch  14: train_loss=3.316664  val_loss=2.878162  top1=51.61%  top5=77.62%  lr=0.199440  time=299.4s
+Epoch  15: train_loss=3.284114  val_loss=2.893245  top1=50.99%  top5=77.22%  lr=0.199005  time=301.1s
+Epoch  16: train_loss=3.250842  val_loss=2.862132  top1=51.56%  top5=77.98%  lr=0.198447  time=299.5s
+Epoch  17: train_loss=3.227372  val_loss=2.866493  top1=51.78%  top5=77.82%  lr=0.197766  time=299.5s
+Epoch  18: train_loss=3.205673  val_loss=2.771086  top1=54.06%  top5=79.54%  lr=0.196963  time=300.7s
+Epoch  19: train_loss=3.185866  val_loss=2.785517  top1=53.31%  top5=79.06%  lr=0.196039  time=299.6s
+Epoch  20: train_loss=3.170302  val_loss=2.749961  top1=54.83%  top5=80.10%  lr=0.194996  time=299.7s
+Epoch  21: train_loss=3.152157  val_loss=2.741777  top1=54.56%  top5=80.06%  lr=0.193834  time=300.5s
+Epoch  22: train_loss=3.135228  val_loss=2.732218  top1=55.00%  top5=80.26%  lr=0.192556  time=300.6s
+Epoch  23: train_loss=3.126516  val_loss=2.706989  top1=55.49%  top5=80.42%  lr=0.191162  time=299.6s
+Epoch  24: train_loss=3.111421  val_loss=2.675840  top1=56.26%  top5=81.18%  lr=0.189655  time=300.0s
+Epoch  25: train_loss=3.101436  val_loss=2.746790  top1=54.38%  top5=80.02%  lr=0.188036  time=300.9s
+Epoch  26: train_loss=3.090617  val_loss=2.725159  top1=54.95%  top5=80.07%  lr=0.186307  time=299.3s
+Epoch  27: train_loss=3.077580  val_loss=2.665324  top1=56.34%  top5=81.39%  lr=0.184471  time=299.7s
+Epoch  28: train_loss=3.067090  val_loss=2.674570  top1=56.21%  top5=81.17%  lr=0.182529  time=300.8s
+Epoch  29: train_loss=3.052927  val_loss=2.645547  top1=57.05%  top5=81.84%  lr=0.180485  time=300.0s
+Epoch  30: train_loss=3.045929  val_loss=2.621693  top1=57.67%  top5=82.11%  lr=0.178340  time=299.3s
+Epoch  31: train_loss=3.033845  val_loss=2.649474  top1=56.90%  top5=81.58%  lr=0.176098  time=300.5s
+Epoch  32: train_loss=3.024230  val_loss=2.620498  top1=57.53%  top5=82.12%  lr=0.173761  time=298.6s
+Epoch  33: train_loss=3.011916  val_loss=2.653316  top1=56.92%  top5=81.54%  lr=0.171332  time=299.4s
+Epoch  34: train_loss=3.003191  val_loss=2.588732  top1=57.89%  top5=82.57%  lr=0.168814  time=300.3s
+Epoch  35: train_loss=2.991371  val_loss=2.587492  top1=58.34%  top5=82.72%  lr=0.166211  time=299.7s
+Epoch  36: train_loss=2.980361  val_loss=2.538751  top1=59.46%  top5=83.35%  lr=0.163525  time=299.0s
+Epoch  37: train_loss=2.970934  val_loss=2.623885  top1=57.45%  top5=82.06%  lr=0.160760  time=300.5s
+Epoch  38: train_loss=2.961079  val_loss=2.670633  top1=56.32%  top5=81.04%  lr=0.157919  time=299.9s
+Epoch  39: train_loss=2.948921  val_loss=2.565891  top1=59.03%  top5=83.00%  lr=0.155006  time=299.7s
+Epoch  40: train_loss=2.937693  val_loss=2.561038  top1=58.85%  top5=83.04%  lr=0.152024  time=300.1s
+Epoch  41: train_loss=2.925942  val_loss=2.551963  top1=59.18%  top5=83.19%  lr=0.148978  time=300.4s
+Epoch  42: train_loss=2.916122  val_loss=2.490068  top1=60.85%  top5=84.35%  lr=0.145870  time=298.7s
+Epoch  43: train_loss=2.905117  val_loss=2.492418  top1=60.48%  top5=84.09%  lr=0.142706  time=299.4s
+Epoch  44: train_loss=2.893496  val_loss=2.504325  top1=60.37%  top5=84.12%  lr=0.139488  time=300.7s
+Epoch  45: train_loss=2.880442  val_loss=2.506336  top1=60.15%  top5=83.85%  lr=0.136221  time=299.0s
+Epoch  46: train_loss=2.869875  val_loss=2.498771  top1=60.73%  top5=83.98%  lr=0.132909  time=299.1s
+Epoch  47: train_loss=2.856595  val_loss=2.463238  top1=61.27%  top5=84.80%  lr=0.129556  time=299.7s
+Epoch  48: train_loss=2.842962  val_loss=2.451593  top1=61.64%  top5=84.93%  lr=0.126166  time=299.5s
+Epoch  49: train_loss=2.833159  val_loss=2.484284  top1=60.77%  top5=84.17%  lr=0.122744  time=299.5s
+Epoch  50: train_loss=2.819108  val_loss=2.430349  top1=62.02%  top5=85.14%  lr=0.119293  time=300.3s
+Epoch  51: train_loss=2.807317  val_loss=2.421257  top1=62.54%  top5=85.37%  lr=0.115818  time=299.8s
+Epoch  52: train_loss=2.791744  val_loss=2.453807  top1=61.32%  top5=85.02%  lr=0.112324  time=299.5s
+Epoch  53: train_loss=2.781169  val_loss=2.405870  top1=62.65%  top5=85.43%  lr=0.108814  time=300.5s
+Epoch  54: train_loss=2.767205  val_loss=2.378438  top1=63.43%  top5=85.99%  lr=0.105293  time=299.4s
+Epoch  55: train_loss=2.752767  val_loss=2.375112  top1=63.49%  top5=85.89%  lr=0.101765  time=299.5s
+Epoch  56: train_loss=2.741381  val_loss=2.395113  top1=62.91%  top5=85.48%  lr=0.098236  time=300.0s
+Epoch  57: train_loss=2.728308  val_loss=2.320234  top1=64.78%  top5=86.96%  lr=0.094708  time=299.9s
+Epoch  58: train_loss=2.712473  val_loss=2.321032  top1=64.83%  top5=86.84%  lr=0.091187  time=299.5s
+Epoch  59: train_loss=2.696467  val_loss=2.330256  top1=64.47%  top5=86.71%  lr=0.087677  time=300.1s
+Epoch  60: train_loss=2.684852  val_loss=2.301597  top1=65.35%  top5=87.14%  lr=0.084183  time=299.8s
+Epoch  61: train_loss=2.669409  val_loss=2.302779  top1=65.19%  top5=87.04%  lr=0.080708  time=299.4s
+Epoch  62: train_loss=2.654049  val_loss=2.349845  top1=63.98%  top5=86.31%  lr=0.077257  time=299.5s
+Epoch  63: train_loss=2.638547  val_loss=2.259908  top1=66.22%  top5=87.65%  lr=0.073835  time=300.1s
+Epoch  64: train_loss=2.623165  val_loss=2.279526  top1=65.74%  top5=87.43%  lr=0.070445  time=299.5s
+Epoch  65: train_loss=2.607691  val_loss=2.246921  top1=66.67%  top5=87.99%  lr=0.067092  time=299.8s
+Epoch  66: train_loss=2.590927  val_loss=2.219558  top1=67.12%  top5=88.25%  lr=0.063780  time=300.1s
+Epoch  67: train_loss=2.577758  val_loss=2.206352  top1=67.69%  top5=88.57%  lr=0.060513  time=299.7s
+Epoch  68: train_loss=2.560849  val_loss=2.195281  top1=67.96%  top5=88.65%  lr=0.057295  time=299.1s
+Epoch  69: train_loss=2.544061  val_loss=2.178985  top1=68.08%  top5=88.92%  lr=0.054131  time=300.6s
+Epoch  70: train_loss=2.529529  val_loss=2.187243  top1=68.25%  top5=88.70%  lr=0.051023  time=299.5s
+Epoch  71: train_loss=2.509985  val_loss=2.152427  top1=68.84%  top5=89.23%  lr=0.047977  time=299.6s
+Epoch  72: train_loss=2.496286  val_loss=2.151416  top1=69.14%  top5=89.20%  lr=0.044995  time=300.2s
+Epoch  73: train_loss=2.476702  val_loss=2.128695  top1=69.65%  top5=89.57%  lr=0.042082  time=300.1s
+Epoch  74: train_loss=2.461921  val_loss=2.124330  top1=69.64%  top5=89.65%  lr=0.039241  time=299.3s
+Epoch  75: train_loss=2.445299  val_loss=2.103989  top1=70.22%  top5=90.00%  lr=0.036476  time=300.1s
+Epoch  76: train_loss=2.428775  val_loss=2.097958  top1=70.23%  top5=90.04%  lr=0.033790  time=300.4s
+Epoch  77: train_loss=2.410923  val_loss=2.099540  top1=70.30%  top5=90.02%  lr=0.031187  time=299.7s
+Epoch  78: train_loss=2.393027  val_loss=2.079845  top1=70.89%  top5=90.31%  lr=0.028669  time=300.0s
+Epoch  79: train_loss=2.376376  val_loss=2.057259  top1=71.37%  top5=90.62%  lr=0.026240  time=300.5s
+Epoch  80: train_loss=2.357933  val_loss=2.049301  top1=71.72%  top5=90.62%  lr=0.023903  time=299.7s
+Epoch  81: train_loss=2.341618  val_loss=2.043307  top1=71.79%  top5=90.62%  lr=0.021661  time=299.4s
+Epoch  82: train_loss=2.324122  val_loss=2.031556  top1=72.08%  top5=90.85%  lr=0.019516  time=300.6s
+Epoch  83: train_loss=2.307072  val_loss=2.023148  top1=72.29%  top5=91.05%  lr=0.017472  time=299.6s
+Epoch  84: train_loss=2.290054  val_loss=2.005949  top1=72.72%  top5=91.27%  lr=0.015530  time=299.9s
+Epoch  85: train_loss=2.274647  val_loss=1.999393  top1=73.02%  top5=91.36%  lr=0.013694  time=300.2s
+Epoch  86: train_loss=2.259149  val_loss=1.982721  top1=73.31%  top5=91.59%  lr=0.011965  time=299.8s
+Epoch  87: train_loss=2.243658  val_loss=1.981750  top1=73.38%  top5=91.59%  lr=0.010346  time=299.2s
+Epoch  88: train_loss=2.228792  val_loss=1.965878  top1=73.75%  top5=91.82%  lr=0.008839  time=300.3s
+Epoch  89: train_loss=2.214951  val_loss=1.956742  top1=74.06%  top5=91.91%  lr=0.007445  time=300.1s
+Epoch  90: train_loss=2.201719  val_loss=1.949934  top1=74.19%  top5=92.02%  lr=0.006167  time=298.9s
+Epoch  91: train_loss=2.190492  val_loss=1.944589  top1=74.36%  top5=91.99%  lr=0.005005  time=300.1s
+Epoch  92: train_loss=2.178445  val_loss=1.938141  top1=74.53%  top5=92.14%  lr=0.003962  time=299.7s
+Epoch  93: train_loss=2.170118  val_loss=1.933339  top1=74.50%  top5=92.23%  lr=0.003038  time=299.7s
+Epoch  94: train_loss=2.159355  val_loss=1.927234  top1=74.83%  top5=92.30%  lr=0.002235  time=299.7s
+Epoch  95: train_loss=2.153763  val_loss=1.926515  top1=74.81%  top5=92.34%  lr=0.001554  time=300.2s
+Epoch  96: train_loss=2.149682  val_loss=1.923976  top1=74.88%  top5=92.42%  lr=0.000996  time=299.6s
+Epoch  97: train_loss=2.145205  val_loss=1.921631  top1=74.92%  top5=92.41%  lr=0.000561  time=299.6s
+Epoch  98: train_loss=2.141849  val_loss=1.920918  top1=74.97%  top5=92.40%  lr=0.000250  time=300.3s
+Epoch  99: train_loss=2.140596  val_loss=1.920726  top1=74.94%  top5=92.39%  lr=0.000063  time=299.7s
+Epoch 100: train_loss=2.140204  val_loss=1.920321  top1=74.98%  top5=92.40%  lr=0.000001  time=299.4s
+
+=====================================
+ Mode:       GPU [FP32] (Eager, DDP, SyncBN)
+=====================================
+ Best Top-1: 74.98%
+ Best Top-5: 92.40%
+ Best Epoch: 100
+ Total Time: 30008.87 s
+ Time/Epoch: 300.09 s
+=====================================
+Target achieved: Top-1 >= 73.36%
+Goal met!
+=====================================
