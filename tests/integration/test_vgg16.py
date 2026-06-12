@@ -10,19 +10,21 @@ from torch.utils.data import DataLoader, DistributedSampler
 from torchvision import datasets, transforms
 
 # ---------------------------------------------------------------------------
-# Hyperparameters (aligned with test_vgg16.cpp)
+# Hyperparameters (aligned with VGG_RECIPE.md)
 # ---------------------------------------------------------------------------
-TOTAL_EPOCHS = 100
-LOCAL_BATCH_SIZE = 256       # per-GPU, aligned with test_vgg16.cpp local_batch_size(256)
-BASE_LR = 0.001
-ETA_MIN = 1e-6
-WARMUP_EPOCHS = 5
-WEIGHT_DECAY = 1e-4
+TOTAL_EPOCHS   = 100
+LOCAL_BATCH_SIZE = 128        # per-GPU, global = 128*8 = 1024
+PEAK_LR         = 0.4
+WARMUP_LR_START = 0.01
+ETA_MIN         = 1e-6
+WARMUP_EPOCHS   = 5
+WEIGHT_DECAY    = 1e-4
+MOMENTUM        = 0.9
 LABEL_SMOOTHING = 0.1
-NUM_WORKERS = 16
+NUM_WORKERS     = 16
 
 # ---------------------------------------------------------------------------
-# DDP setup (aligned with main.py)
+# DDP setup
 # ---------------------------------------------------------------------------
 def setup():
     dist.init_process_group('nccl')
@@ -36,65 +38,80 @@ def reduce_tensor(tensor):
 
 
 # ---------------------------------------------------------------------------
-# Warmup + CosineAnnealing scheduler (aligned with test_vgg16.cpp)
-# Epoch 1 (epoch=0): lr = 0
-# Epoch 6 (epoch=5): lr = base_lr
-# Epoch 7+         : cosine annealing down to eta_min
+# Warmup + CosineAnnealing scheduler
+# Epoch 0: lr = WARMUP_LR_START (0.01)
+# Epoch 4 (end of warmup): lr = PEAK_LR (0.4)
+# Epoch 5+: cosine annealing down to ETA_MIN
 # ---------------------------------------------------------------------------
 def warmup_cosine_lambda(epoch):
     if epoch < WARMUP_EPOCHS:
-        return epoch / WARMUP_EPOCHS
+        alpha = epoch / max(WARMUP_EPOCHS - 1, 1)
+        return (WARMUP_LR_START + (PEAK_LR - WARMUP_LR_START) * alpha) / PEAK_LR
     progress = (epoch - WARMUP_EPOCHS) / (TOTAL_EPOCHS - WARMUP_EPOCHS)
     cos_val = 0.5 * (1.0 + math.cos(math.pi * progress))
-    return (ETA_MIN + (BASE_LR - ETA_MIN) * cos_val) / BASE_LR
+    return (ETA_MIN + (PEAK_LR - ETA_MIN) * cos_val) / PEAK_LR
 
 
 # ---------------------------------------------------------------------------
-# VGG-16 without BN (aligned with test_vgg16.cpp)
+# VGG-16 with BatchNorm (VGG16BN)
 # Conv bias: false | FC bias: true | Activation: ReLU
+# Dropout(p=0.5) after FC-4096 layers
 # ---------------------------------------------------------------------------
-class VGG16(nn.Module):
+class VGG16BN(nn.Module):
     def __init__(self):
         super().__init__()
         self.features = nn.Sequential(
             # Block 1: 224 -> 112
             nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False),
+            nn.BatchNorm2d(64),
             nn.ReLU(inplace=True),
             nn.Conv2d(64, 64, kernel_size=3, stride=1, padding=1, bias=False),
+            nn.BatchNorm2d(64),
             nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
 
             # Block 2: 112 -> 56
             nn.Conv2d(64, 128, kernel_size=3, stride=1, padding=1, bias=False),
+            nn.BatchNorm2d(128),
             nn.ReLU(inplace=True),
             nn.Conv2d(128, 128, kernel_size=3, stride=1, padding=1, bias=False),
+            nn.BatchNorm2d(128),
             nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
 
             # Block 3: 56 -> 28
             nn.Conv2d(128, 256, kernel_size=3, stride=1, padding=1, bias=False),
+            nn.BatchNorm2d(256),
             nn.ReLU(inplace=True),
             nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1, bias=False),
+            nn.BatchNorm2d(256),
             nn.ReLU(inplace=True),
             nn.Conv2d(256, 256, kernel_size=3, stride=1, padding=1, bias=False),
+            nn.BatchNorm2d(256),
             nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
 
             # Block 4: 28 -> 14
             nn.Conv2d(256, 512, kernel_size=3, stride=1, padding=1, bias=False),
+            nn.BatchNorm2d(512),
             nn.ReLU(inplace=True),
             nn.Conv2d(512, 512, kernel_size=3, stride=1, padding=1, bias=False),
+            nn.BatchNorm2d(512),
             nn.ReLU(inplace=True),
             nn.Conv2d(512, 512, kernel_size=3, stride=1, padding=1, bias=False),
+            nn.BatchNorm2d(512),
             nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
 
             # Block 5: 14 -> 7
             nn.Conv2d(512, 512, kernel_size=3, stride=1, padding=1, bias=False),
+            nn.BatchNorm2d(512),
             nn.ReLU(inplace=True),
             nn.Conv2d(512, 512, kernel_size=3, stride=1, padding=1, bias=False),
+            nn.BatchNorm2d(512),
             nn.ReLU(inplace=True),
             nn.Conv2d(512, 512, kernel_size=3, stride=1, padding=1, bias=False),
+            nn.BatchNorm2d(512),
             nn.ReLU(inplace=True),
             nn.MaxPool2d(kernel_size=2, stride=2),
         )
@@ -102,19 +119,24 @@ class VGG16(nn.Module):
             nn.Flatten(),
             nn.Linear(512 * 7 * 7, 4096, bias=True),
             nn.ReLU(inplace=True),
+            nn.Dropout(p=0.5),
             nn.Linear(4096, 4096, bias=True),
             nn.ReLU(inplace=True),
+            nn.Dropout(p=0.5),
             nn.Linear(4096, 1000, bias=True),
         )
         self._init_weights()
 
     def _init_weights(self):
-        """Match TR4: Kaiming Uniform (FAN_IN) for conv and fc, bias = zeros"""
+        """Kaiming Uniform (FAN_IN) for conv and fc; bias = zeros; BN weight = 1, bias = 0"""
         for m in self.modules():
             if isinstance(m, (nn.Conv2d, nn.Linear)):
                 nn.init.kaiming_uniform_(m.weight, a=0, mode='fan_in')
                 if m.bias is not None:
                     nn.init.zeros_(m.bias)
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.ones_(m.weight)
+                nn.init.zeros_(m.bias)
 
     def forward(self, x):
         x = self.features(x)
@@ -138,7 +160,7 @@ def main():
         if is_main:
             print(msg, flush=True)
 
-    # TF32 (aligned with test_vgg16.cpp use_tf32)
+    # TF32
     torch.backends.cuda.matmul.allow_tf32 = True
     torch.backends.cudnn.allow_tf32 = True
     torch.set_float32_matmul_precision('high')
@@ -147,13 +169,17 @@ def main():
     # Seed
     torch.manual_seed(123 + rank)
 
-    # Data pipeline (aligned with test_vgg16.cpp)
+    # Data pipeline (aligned with VGG_RECIPE.md)
+    # Training: RRC(224, 0.08~1.0) + HFlip + ColorJitter + ToTensor + Normalize + RandomErasing
     train_transform = transforms.Compose([
-        transforms.RandomResizedCrop(224, scale=(0.25, 1.0), ratio=(0.75, 1.333)),
+        transforms.RandomResizedCrop(224, scale=(0.08, 1.0)),
         transforms.RandomHorizontalFlip(),
+        transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.1),
         transforms.ToTensor(),
         transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
+        transforms.RandomErasing(p=0.5, scale=(0.02, 0.33), ratio=(0.3, 3.3)),
     ])
+    # Validation: Resize(256) + CenterCrop(224) + ToTensor + Normalize
     val_transform = transforms.Compose([
         transforms.Resize(256),
         transforms.CenterCrop(224),
@@ -183,58 +209,62 @@ def main():
         persistent_workers=True, prefetch_factor=8
     )
 
-    # Model (eager mode, no torch.compile, no AMP)
-    model = VGG16().to(device).to(memory_format=torch.channels_last)
+    # Model (with SyncBN)
+    model = VGG16BN().to(device).to(memory_format=torch.channels_last)
+    model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
     model = DDP(model, device_ids=[local_rank], output_device=local_rank)
 
-    # Parameter grouping: weight_decay for weights, no wd for bias
-    # (aligned with test_vgg16.cpp AdamW behaviour)
+    # Parameter grouping: weight_decay for weights, no wd for bias & BN params
     weight_params = []
-    bias_params = []
+    no_wd_params = []
     for name, param in model.named_parameters():
         if not param.requires_grad:
             continue
-        if 'bias' in name or len(param.shape) == 1:
-            bias_params.append(param)
+        if 'bias' in name or len(param.shape) == 1 or 'bn' in name.lower() or 'batch_norm' in name.lower():
+            no_wd_params.append(param)
         else:
             weight_params.append(param)
 
     param_groups = [
         {'params': weight_params, 'weight_decay': WEIGHT_DECAY},
-        {'params': bias_params, 'weight_decay': 0.0}
+        {'params': no_wd_params, 'weight_decay': 0.0}
     ]
 
     criterion = nn.CrossEntropyLoss(label_smoothing=LABEL_SMOOTHING).to(device)
 
-    optimizer = optim.AdamW(param_groups, lr=BASE_LR,
-                            betas=(0.9, 0.999), eps=1e-8)
+    optimizer = optim.SGD(param_groups, lr=PEAK_LR,
+                          momentum=MOMENTUM, nesterov=False)
 
     scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=warmup_cosine_lambda)
 
     if is_main:
         log("")
         log("=====================================")
-        log(" PyTorch ImageNet VGG-16 Test (DDP)")
+        log(" PyTorch ImageNet VGG16BN Test (DDP)")
         log("=====================================")
-        log(f" Mode:       GPU [FP32] (Eager)")
+        log(f" Mode:       GPU [FP32] (Eager, SyncBN)")
         log(f" Device:     cuda:{local_rank} (world_size={world_size})")
-        log(f" Network:    VGG-16 (no BN)")
-        log(f"   conv(64)x2  -> maxpool -> 112x112")
-        log(f"   conv(128)x2 -> maxpool -> 56x56")
-        log(f"   conv(256)x3 -> maxpool -> 28x28")
-        log(f"   conv(512)x3 -> maxpool -> 14x14")
-        log(f"   conv(512)x3 -> maxpool -> 7x7")
-        log(f"   flatten -> fc(4096) -> ReLU -> fc(4096) -> ReLU -> fc(1000)")
+        log(f" Network:    VGG-16-BN")
+        log(f"   conv(64)x2+BN  -> maxpool -> 112x112")
+        log(f"   conv(128)x2+BN -> maxpool -> 56x56")
+        log(f"   conv(256)x3+BN -> maxpool -> 28x28")
+        log(f"   conv(512)x3+BN -> maxpool -> 14x14")
+        log(f"   conv(512)x3+BN -> maxpool -> 7x7")
+        log(f"   flatten -> fc(4096) -> ReLU -> Dropout(0.5)")
+        log(f"           -> fc(4096) -> ReLU -> Dropout(0.5) -> fc(1000)")
         log(f" Conv bias:  false | FC bias: true")
         log(f" Activation: ReLU (fixed)")
-        log(f" Optimizer:  AdamW (beta1=0.9, beta2=0.999, eps=1e-8, wd=1e-4)")
+        log(f" Optimizer:  SGD (momentum=0.9, nesterov=False)")
         log(f" Scheduler:  CosineAnnealing + Warmup(5)")
-        log(f" Augmentation: RandomResizedCrop + HFlip")
+        log(f" LR:         {WARMUP_LR_START} -> {PEAK_LR} (warmup) -> {ETA_MIN} (cosine)")
+        log(f" Weight Decay: {WEIGHT_DECAY} (BN & bias excluded)")
+        log(f" Augmentation: RRC(0.08~1.0) + HFlip + ColorJitter(0.4) + RandomErasing(0.5)")
         log(f" Training:   {TOTAL_EPOCHS} epochs, local_batch_size={LOCAL_BATCH_SIZE} per GPU")
         log(f" Global batch: {LOCAL_BATCH_SIZE * world_size}")
         log("=====================================")
 
-    best_acc = 0.0
+    best_top1 = 0.0
+    best_top5 = 0.0
     best_epoch = 0
     t0 = time.perf_counter()
 
@@ -266,7 +296,8 @@ def main():
         # Validation
         model.eval()
         val_loss = torch.tensor(0.0, device=device)
-        correct = torch.tensor(0.0, device=device)
+        correct1 = torch.tensor(0.0, device=device)
+        correct5 = torch.tensor(0.0, device=device)
         val_total = torch.tensor(0.0, device=device)
 
         with torch.no_grad():
@@ -278,19 +309,30 @@ def main():
                 loss = criterion(output, target)
 
                 val_loss += loss.item() * data.size(0)
-                pred = output.argmax(dim=1)
-                correct += pred.eq(target).sum().item()
+
+                # Top-1
+                _, pred1 = output.topk(1, dim=1)
+                correct1 += pred1.eq(target.view(-1, 1)).sum().item()
+
+                # Top-5
+                _, pred5 = output.topk(5, dim=1)
+                correct5 += pred5.eq(target.view(-1, 1)).sum().item()
+
                 val_total += data.size(0)
 
         # Aggregate val stats across all ranks
         val_loss = reduce_tensor(val_loss) / reduce_tensor(val_total)
-        correct = reduce_tensor(correct)
+        correct1 = reduce_tensor(correct1)
+        correct5 = reduce_tensor(correct5)
         val_total = reduce_tensor(val_total)
-        acc = 100.0 * correct / val_total
-        acc_val = acc.item()
+        top1 = 100.0 * correct1 / val_total
+        top5 = 100.0 * correct5 / val_total
+        top1_val = top1.item()
+        top5_val = top5.item()
 
-        if acc_val > best_acc:
-            best_acc = acc_val
+        if top1_val > best_top1:
+            best_top1 = top1_val
+            best_top5 = top5_val
             best_epoch = epoch + 1
 
         current_lr = optimizer.param_groups[0]['lr']
@@ -298,42 +340,37 @@ def main():
 
         if is_main:
             log(f"Epoch {epoch+1:3d}: train_loss={train_loss.item():.6f}  "
-                f"val_loss={val_loss.item():.6f}  val_top1={acc_val:.2f}%  "
+                f"val_loss={val_loss.item():.6f}  top1={top1_val:.2f}%  top5={top5_val:.2f}%  "
                 f"lr={current_lr:.6f}  time={ep_t1 - ep_t0:.1f}s")
 
         scheduler.step()
-
-        # Early stop (aligned with test_vgg16.cpp early_stop_by_top1(0.70f))
-        if acc_val >= 70.0:
-            if is_main:
-                log(f"Early stop triggered at epoch {epoch+1}: Top-1 >= 70.0%")
-            break
 
     t1 = time.perf_counter()
 
     if is_main:
         log("")
         log("=====================================")
-        log(" Mode:       GPU [FP32] (Eager, DDP)")
+        log(" Mode:       GPU [FP32] (Eager, DDP, SyncBN)")
         log("=====================================")
-        log(f" Best Top-1: {best_acc:.2f}%")
+        log(f" Best Top-1: {best_top1:.2f}%")
+        log(f" Best Top-5: {best_top5:.2f}%")
         log(f" Best Epoch: {best_epoch}")
         log(f" Total Time: {t1 - t0:.2f} s")
-        log(f" Time/Epoch: {(t1 - t0) / (epoch + 1):.2f} s")
+        log(f" Time/Epoch: {(t1 - t0) / TOTAL_EPOCHS:.2f} s")
         log("=====================================")
 
-        if best_acc >= 70.0:
-            log("Target achieved: Top-1 >= 70.0%")
+        if best_top1 >= 73.36:
+            log("Target achieved: Top-1 >= 73.36%")
             log("Goal met!")
-        elif best_acc >= 65.0:
+        elif best_top1 >= 65.0:
             log("Acceptable: Top-1 >= 65.0%")
             log("Performance: Above baseline")
         else:
             log("Needs improvement: Top-1 < 65.0%")
             log("Recommendations:")
             log("  1. Increase training epochs to 150+")
-            log("  2. Adjust weight_decay (try 5e-4)")
-            log("  3. Consider adding BatchNorm for stability")
+            log("  2. Adjust weight_decay")
+            log("  3. Check SyncBN / gradient flow")
         log("=====================================")
 
     dist.destroy_process_group()

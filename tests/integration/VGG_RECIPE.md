@@ -18,6 +18,7 @@ Normalize：ImageNet标准（[0.485, 0.456, 0.406], [0.229, 0.224, 0.225]）
 模型内Dropout：p=0.5
 早停：不开启
 模型EMA/SEMA：不开启
+TF32：开启
 输出：train loss、val loss、top-1、top-5、学习率
 BN层跨卡同步（SyncBN）：开启
 TR4框架已经确保BN参数的Weight Decay为0
