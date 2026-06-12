@@ -175,12 +175,12 @@ def main():
     train_loader = DataLoader(
         train_set, batch_size=LOCAL_BATCH_SIZE, sampler=train_sampler,
         num_workers=NUM_WORKERS, pin_memory=True,
-        persistent_workers=True, prefetch_factor=4
+        persistent_workers=True, prefetch_factor=8
     )
     val_loader = DataLoader(
         val_set, batch_size=LOCAL_BATCH_SIZE, sampler=val_sampler,
         num_workers=NUM_WORKERS, pin_memory=True,
-        persistent_workers=True, prefetch_factor=4
+        persistent_workers=True, prefetch_factor=8
     )
 
     # Model (eager mode, no torch.compile, no AMP)

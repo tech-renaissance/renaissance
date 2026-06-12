@@ -125,11 +125,11 @@ int main(int argc, char** argv) {
         .cpu_binding(true)
         .normalization(NormMode::CIFAR)
 
-        // NIN paper: Pad(4) + RandomCrop(32) + HorizontalFlip
         .train_transforms(
             Pad(4),
             RandomCrop(32),
-            RandomHorizontalFlip()
+            RandomHorizontalFlip(),
+            RandomErasing(0.2f)
         )
 
         .val_transforms(DoNothing())
@@ -138,32 +138,32 @@ int main(int argc, char** argv) {
     // NIN (Network in Network) for CIFAR-10
     // Input: [N, 32, 32, 3]
     BluePrint nin = seq(
-        channel_padding(),        // [N,32,32,3] -> [N,32,32,4]
+        channel_padding(),        // [N,32,32,3] -> [N,32,32,8]
 
         // mlpconv 1: 192 channels
-        conv(192, 5, 1, 2), relu(),  // [N,32,32,4] -> [N,32,32,192]
+        conv(192, 5, 1, 2), relu(),  // [N,32,32,8] -> [N,32,32,192]
         conv(192, 1, 1, 0), relu(),  // [N,32,32,192]
         conv(192, 1, 1, 0), relu(),  // [N,32,32,192]
-        maxpool(3, 2, 0),             // [N,15,15,192]
-        // dropout(0.5),  // framework dropout only supports [N,1,1,C]
+        maxpool(3, 2, 0),
+        dropout(0.5),                 // spatial dropout on feature map
 
         // mlpconv 2: 192 channels
-        conv(192, 5, 1, 2), relu(),  // [N,15,15,192]
+        conv(192, 5, 1, 2), relu(),  // [N,16,16,192]
         conv(192, 1, 1, 0), relu(),
         conv(192, 1, 1, 0), relu(),
-        maxpool(3, 2, 0),             // [N,7,7,192]
-        // dropout(0.5),  // framework dropout only supports [N,1,1,C]
+        maxpool(3, 2, 0),
+        dropout(0.5),                 // spatial dropout on feature map
 
-        // mlpconv 3: 10 channels (no ReLU after final conv, no dropout)
-        conv(192, 3, 1, 1), relu(),  // [N,7,7,192]
+        // mlpconv 3: 10 channels (no ReLU after final conv, no dropout per paper)
+        conv(192, 3, 1, 1), relu(),  // [N,8,8,192]
         conv(192, 1, 1, 0), relu(),
-        conv(10, 1, 1, 0),           // [N,7,7,10]
+        conv(10, 1, 1, 0),           // [N,8,8,10]
         gap()                        // [N,1,1,10]
     );
 
     DeepLearningTask task;
     task.model(nin)
-        .loss(CrossEntropyLoss())
+        .loss(CrossEntropyLoss().label_smoothing(0.05f))
 
         .initializer(Initializer()
             .conv(InitKind::KAIMING_UNIFORM)
@@ -194,9 +194,9 @@ int main(int argc, char** argv) {
               << "=====================================\n"
               << "Network: NIN (Network in Network)\n"
               << "  mlpconv1: channel_padding -> conv(192,5) -> ReLU -> conv(192,1) -> ReLU -> conv(192,1) -> ReLU\n"
-              << "            -> MaxPool(3,2)\n"
+              << "            -> MaxPool(3,2) -> Dropout(0.5)\n"
               << "  mlpconv2: conv(192,5) -> ReLU -> conv(192,1) -> ReLU -> conv(192,1) -> ReLU\n"
-              << "            -> MaxPool(3,2)\n"
+              << "            -> MaxPool(3,2) -> Dropout(0.5)\n"
               << "  mlpconv3: conv(192,3) -> ReLU -> conv(192,1) -> ReLU -> conv(10,1)\n"
               << "            -> GAP\n"
               << "Activation: ReLU\n"

@@ -1077,9 +1077,6 @@ std::vector<TensorDesc> infer_convbn_tensors(
 std::vector<TensorDesc> infer_dropout_tensors(
     const Shape& input, const OpParams&, const InferContext& ctx)
 {
-    TR_CHECK(input.h() == 1 && input.w() == 1, ShapeError,
-             "Dropout only supports [N,1,1,C] input, got [" << input.n() << ","
-             << input.c() << "," << input.h() << "," << input.w() << "]");
     DType feat_dt = ctx.enable_amp ? DType::FP16 : DType::FP32;
     return {
         TensorDesc{"dropout_output", input, select_feature_region(ctx), feat_dt},

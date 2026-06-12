@@ -156,38 +156,48 @@ static void launch_dropout_fp32_inf_cpu(CpuOpContext* op_ctx) {
 // CUDA kernel declarations (defined in .cu file)
 cudaError_t launch_dropout_fwd_kernel(
     const float* x, float* y, int8_t* mask,
-    int N, int C, int64_t feat_n_stride, int64_t mask_n_stride,
+    int N, int H, int W, int C,
+    int64_t feat_n_stride, int64_t feat_h_stride, int64_t feat_w_stride,
+    int64_t mask_n_stride, int64_t mask_h_stride, int64_t mask_w_stride,
     float p, float scale,
     const int32_t* seed_ptr,
     cudaStream_t stream);
 
 cudaError_t launch_dropout_bwd_kernel(
     const float* dy, const int8_t* mask, float* dx,
-    int N, int C, int64_t feat_n_stride, int64_t mask_n_stride,
+    int N, int H, int W, int C,
+    int64_t feat_n_stride, int64_t feat_h_stride, int64_t feat_w_stride,
+    int64_t mask_n_stride, int64_t mask_h_stride, int64_t mask_w_stride,
     float scale,
     cudaStream_t stream);
 
 cudaError_t launch_dropout_inf_kernel(
     const float* x, float* y,
-    int N, int C, int64_t feat_n_stride,
+    int N, int H, int W, int C,
+    int64_t feat_n_stride, int64_t feat_h_stride, int64_t feat_w_stride,
     cudaStream_t stream);
 
 cudaError_t launch_dropout_fwd_amp_kernel(
     const __half* x, __half* y, int8_t* mask,
-    int N, int C, int64_t feat_n_stride, int64_t mask_n_stride,
+    int N, int H, int W, int C,
+    int64_t feat_n_stride, int64_t feat_h_stride, int64_t feat_w_stride,
+    int64_t mask_n_stride, int64_t mask_h_stride, int64_t mask_w_stride,
     float p, float scale,
     const int32_t* seed_ptr,
     cudaStream_t stream);
 
 cudaError_t launch_dropout_bwd_amp_kernel(
     const __half* dy, const int8_t* mask, __half* dx,
-    int N, int C, int64_t feat_n_stride, int64_t mask_n_stride,
+    int N, int H, int W, int C,
+    int64_t feat_n_stride, int64_t feat_h_stride, int64_t feat_w_stride,
+    int64_t mask_n_stride, int64_t mask_h_stride, int64_t mask_w_stride,
     float scale,
     cudaStream_t stream);
 
 cudaError_t launch_dropout_inf_amp_kernel(
     const __half* x, __half* y,
-    int N, int C, int64_t feat_n_stride,
+    int N, int H, int W, int C,
+    int64_t feat_n_stride, int64_t feat_h_stride, int64_t feat_w_stride,
     cudaStream_t stream);
 
 static void launch_dropout_fp32_fwd_cuda(
@@ -217,10 +227,16 @@ static void launch_dropout_fp32_fwd_cuda(
 
     const DTensor& dt_mask = mp.get_dtensor(node.output_ids[1]);
     int64_t feat_n_stride = dt_x.n_stride_cuda();
+    int64_t feat_h_stride = dt_x.h_stride_cuda();
+    int64_t feat_w_stride = dt_x.w_stride_cuda();
     int64_t mask_n_stride = dt_mask.n_stride_cuda();
+    int64_t mask_h_stride = dt_mask.h_stride_cuda();
+    int64_t mask_w_stride = dt_mask.w_stride_cuda();
 
     cudaError_t err = launch_dropout_fwd_kernel(
-        x, y, mask, dt_x.n(), dt_x.c(), feat_n_stride, mask_n_stride,
+        x, y, mask, dt_x.n(), dt_x.h(), dt_x.w(), dt_x.c(),
+        feat_n_stride, feat_h_stride, feat_w_stride,
+        mask_n_stride, mask_h_stride, mask_w_stride,
         p, scale, seed_ptr, s);
     if (err != cudaSuccess) {
         TR_DEVICE_ERROR("DROPOUT_FP32_FWD kernel failed: " << cudaGetErrorString(err));
@@ -247,12 +263,18 @@ static void launch_dropout_fp32_bwd_cuda(
     const DTensor& dt_dx = mp.get_dtensor(node.output_ids[0]);
     const DTensor& dt_mask = mp.get_dtensor(node.input_ids[1]);
     int64_t feat_n_stride = dt_dx.n_stride_cuda();
+    int64_t feat_h_stride = dt_dx.h_stride_cuda();
+    int64_t feat_w_stride = dt_dx.w_stride_cuda();
     int64_t mask_n_stride = dt_mask.n_stride_cuda();
+    int64_t mask_h_stride = dt_mask.h_stride_cuda();
+    int64_t mask_w_stride = dt_mask.w_stride_cuda();
 
     float scale = 1.0f / (1.0f - node.params.dropout().p);
 
     cudaError_t err = launch_dropout_bwd_kernel(
-        dy, mask, dx, dt_dx.n(), dt_dx.c(), feat_n_stride, mask_n_stride,
+        dy, mask, dx, dt_dx.n(), dt_dx.h(), dt_dx.w(), dt_dx.c(),
+        feat_n_stride, feat_h_stride, feat_w_stride,
+        mask_n_stride, mask_h_stride, mask_w_stride,
         scale, s);
     if (err != cudaSuccess) {
         TR_DEVICE_ERROR("DROPOUT_FP32_BWD kernel failed: " << cudaGetErrorString(err));
@@ -277,9 +299,12 @@ static void launch_dropout_fp32_inf_cuda(
 
     const DTensor& dt_x = mp.get_dtensor(node.input_ids[0]);
     int64_t feat_n_stride = dt_x.n_stride_cuda();
+    int64_t feat_h_stride = dt_x.h_stride_cuda();
+    int64_t feat_w_stride = dt_x.w_stride_cuda();
 
     cudaError_t err = launch_dropout_inf_kernel(
-        x, y, dt_x.n(), dt_x.c(), feat_n_stride, s);
+        x, y, dt_x.n(), dt_x.h(), dt_x.w(), dt_x.c(),
+        feat_n_stride, feat_h_stride, feat_w_stride, s);
     if (err != cudaSuccess) {
         TR_DEVICE_ERROR("DROPOUT_FP32_INF kernel failed: " << cudaGetErrorString(err));
     }
@@ -305,7 +330,11 @@ static void launch_dropout_amp_fwd_cuda(
     const DTensor& dt_x = mp.get_dtensor(node.input_ids[0]);
     const DTensor& dt_mask = mp.get_dtensor(node.output_ids[1]);
     int64_t feat_n_stride = dt_x.n_stride_cuda();
+    int64_t feat_h_stride = dt_x.h_stride_cuda();
+    int64_t feat_w_stride = dt_x.w_stride_cuda();
     int64_t mask_n_stride = dt_mask.n_stride_cuda();
+    int64_t mask_h_stride = dt_mask.h_stride_cuda();
+    int64_t mask_w_stride = dt_mask.w_stride_cuda();
 
     float p = node.params.dropout().p;
     TR_CHECK(p >= 0.0f && p < 1.0f, ValueError, "Dropout p must be in [0.0, 1.0)");
@@ -315,7 +344,9 @@ static void launch_dropout_amp_fwd_cuda(
         ctx.ptr_at(mp.baseline().dropout_seed));
 
     cudaError_t err = launch_dropout_fwd_amp_kernel(
-        x, y, mask, dt_x.n(), dt_x.c(), feat_n_stride, mask_n_stride,
+        x, y, mask, dt_x.n(), dt_x.h(), dt_x.w(), dt_x.c(),
+        feat_n_stride, feat_h_stride, feat_w_stride,
+        mask_n_stride, mask_h_stride, mask_w_stride,
         p, scale, seed_ptr, s);
     if (err != cudaSuccess) {
         TR_DEVICE_ERROR("DROPOUT_AMP_FWD kernel failed: " << cudaGetErrorString(err));
@@ -342,12 +373,18 @@ static void launch_dropout_amp_bwd_cuda(
     const DTensor& dt_dx = mp.get_dtensor(node.output_ids[0]);
     const DTensor& dt_mask = mp.get_dtensor(node.input_ids[1]);
     int64_t feat_n_stride = dt_dx.n_stride_cuda();
+    int64_t feat_h_stride = dt_dx.h_stride_cuda();
+    int64_t feat_w_stride = dt_dx.w_stride_cuda();
     int64_t mask_n_stride = dt_mask.n_stride_cuda();
+    int64_t mask_h_stride = dt_mask.h_stride_cuda();
+    int64_t mask_w_stride = dt_mask.w_stride_cuda();
 
     float scale = 1.0f / (1.0f - node.params.dropout().p);
 
     cudaError_t err = launch_dropout_bwd_amp_kernel(
-        dy, mask, dx, dt_dx.n(), dt_dx.c(), feat_n_stride, mask_n_stride,
+        dy, mask, dx, dt_dx.n(), dt_dx.h(), dt_dx.w(), dt_dx.c(),
+        feat_n_stride, feat_h_stride, feat_w_stride,
+        mask_n_stride, mask_h_stride, mask_w_stride,
         scale, s);
     if (err != cudaSuccess) {
         TR_DEVICE_ERROR("DROPOUT_AMP_BWD kernel failed: " << cudaGetErrorString(err));
@@ -372,9 +409,12 @@ static void launch_dropout_amp_inf_cuda(
 
     const DTensor& dt_x = mp.get_dtensor(node.input_ids[0]);
     int64_t feat_n_stride = dt_x.n_stride_cuda();
+    int64_t feat_h_stride = dt_x.h_stride_cuda();
+    int64_t feat_w_stride = dt_x.w_stride_cuda();
 
     cudaError_t err = launch_dropout_inf_amp_kernel(
-        x, y, dt_x.n(), dt_x.c(), feat_n_stride, s);
+        x, y, dt_x.n(), dt_x.h(), dt_x.w(), dt_x.c(),
+        feat_n_stride, feat_h_stride, feat_w_stride, s);
     if (err != cudaSuccess) {
         TR_DEVICE_ERROR("DROPOUT_AMP_INF kernel failed: " << cudaGetErrorString(err));
     }
