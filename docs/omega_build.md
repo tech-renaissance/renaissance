@@ -149,3 +149,20 @@ powershell.exe -Command "& cmd /c 'call \"C:\Program Files\Microsoft Visual Stud
 ```
 
 详见后续章节（TODO: 编译、运行测试）
+
+
+
+## 运行并重定向到文件的示例
+
+如果你要运行C++程序并把结果重定向到某个txt文件：
+
+```shell
+$env:PATH = "C:\Program Files\NVIDIA\CUDNN\v9.17\bin\13.1;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\bin;" + $env:PATH; cmd /c 'cd /d R:\renaissance\build\windows-msvc-release && .\bin\tests\integration\test_nin.exe --gpu > R:\renaissance\test_nin_gpu_mp2.txt 2>&1'
+```
+
+如果你要运行python脚本并把结果重定向到某个txt文件：
+
+```shell
+powershell.exe -Command "$env:PATH = 'C:\Program Files\NVIDIA\CUDNN\v9.17\bin\13.1;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\bin;' + $env:PATH; Start-Process -FilePath 'B:\Softwares\miniconda3\envs\py313\python.exe' -ArgumentList 'r:\renaissance\tests\bn\mnist_best_adamw.py --gpu' -NoNewWindow -Wait -RedirectStandardOutput 'r:\renaissance\mnist_best_adamw_gpu_run1.txt' -RedirectStandardError 'r:\renaissance\mnist_best_adamw_gpu_run1_err.txt'; Write-Output 'GPU_RUN1_DONE'"
+```
+

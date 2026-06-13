@@ -127,7 +127,7 @@ if __name__ == '__main__':
     train_transform_list += [
         transforms.ToTensor(),
         transforms.Normalize((0.1307,), (0.3081,)),
-        transforms.RandomErasing(p=0.5),
+        transforms.RandomErasing(p=0.5, value=0),  # [对齐 CPP] C++ FusedNormalization 擦除区域填 0.0
     ]
     train_transform = transforms.Compose(train_transform_list)
 
@@ -140,12 +140,17 @@ if __name__ == '__main__':
     val_set   = datasets.MNIST("T:/dataset/mnist", train=False, download=False, transform=val_transform)
 
     pin_mem = (device.type == "cuda")
+    # [对齐 CPP] num_workers=8 对齐 C++ preprocess_workers(8)
     train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True,
-                              pin_memory=pin_mem, num_workers=4, persistent_workers=True)
+                              pin_memory=pin_mem, num_workers=8, persistent_workers=True)
     val_loader   = DataLoader(val_set,   batch_size=batch_size, shuffle=False,
-                              pin_memory=pin_mem, num_workers=4, persistent_workers=True)
+                              pin_memory=pin_mem, num_workers=8, persistent_workers=True)
 
     model = UltimateMLP().to(device)
+
+    # [对齐 CPP] torch.compile(max-autotune) 对齐 C++ 图级优化/算子融合
+    if hasattr(torch, "compile") and device.type == "cuda":
+        model = torch.compile(model, mode="max-autotune")
 
     criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
 
@@ -171,13 +176,13 @@ if __name__ == '__main__':
     scaler = torch.amp.GradScaler("cuda") if use_amp else None
 
     # ====================================================================
-    # WARMUP  (GPU / AMP only)
-    #
-    # Purpose: run a dummy forward/backward to warm up CUDA context,
-    #          then re-initialize for a clean timed run.
+    # WARMUP: 触发 torch.compile(max-autotune) 编译，隔离编译耗时
+    # [对齐 CPP] 参照 mnist_best_lars.py 模式：
+    #   compile → dummy batch(触发编译) → sync → 打印耗时 →
+    #   re-seed → re-init → re-compile → 正式开始计时
     # ====================================================================
-    if device.type == "cuda":
-        print("\n--- Warmup: eager mode warm-up ---", flush=True)
+    if hasattr(torch, "compile") and device.type == "cuda":
+        print("\n--- Warmup: triggering max-autotune compilation ---", flush=True)
         tw0 = time.perf_counter()
 
         dummy_data  = torch.randn(batch_size, 1, 28, 28, device=device)
@@ -211,8 +216,10 @@ if __name__ == '__main__':
         print(f"    warmup done in {tw1 - tw0:.3f}s", flush=True)
 
         # Re-initialize everything so the timed run is pure training cost
+        # [对齐 CPP] re-seed + re-init + re-compile，与 C++ task.compile() 后全新起点一致
         torch.manual_seed(123)
         model = UltimateMLP().to(device)
+        model = torch.compile(model, mode="max-autotune")  # 第二次 compile 走 FX cache，几乎瞬间完成
 
         # 重新分组参数
         weight_params = []
@@ -220,6 +227,7 @@ if __name__ == '__main__':
         for name, param in model.named_parameters():
             if not param.requires_grad:
                 continue
+            # [对齐 CPP] bias/BN 参数 wd=0，与 C++ compiler.cpp bias-like 参数分组一致
             if 'bias' in name or len(param.shape) == 1:
                 bias_params.append(param)
             else:
@@ -238,6 +246,9 @@ if __name__ == '__main__':
 
     best_acc = 0.0
     best_epoch = 0
+    # [对齐 CPP] 计时前显式同步 CUDA，确保无未完成 kernel 干扰计时
+    if device.type == "cuda":
+        torch.cuda.synchronize()
     t0 = time.perf_counter()
 
     for epoch in range(epochs):
@@ -247,7 +258,8 @@ if __name__ == '__main__':
         train_loss = 0.0
 
         for data, target in train_loader:
-            data, target = data.to(device), target.to(device)
+            data = data.to(device, non_blocking=True)
+            target = target.to(device, non_blocking=True)
             optimizer.zero_grad()
 
             if use_amp:
@@ -274,7 +286,8 @@ if __name__ == '__main__':
 
         with torch.no_grad():
             for data, target in val_loader:
-                data, target = data.to(device), target.to(device)
+                data = data.to(device, non_blocking=True)
+                target = target.to(device, non_blocking=True)
 
                 if use_amp:
                     with torch.amp.autocast("cuda"):
@@ -295,6 +308,11 @@ if __name__ == '__main__':
             best_acc = acc
             best_epoch = epoch + 1
 
+        # [对齐 CPP] 早停阈值 99.9%，与 C++ early_stop_by_top1(0.999f) 一致
+        if acc >= 99.9:
+            print(f"Early stop at epoch {epoch+1}: val_top1={acc:.2f}% >= 99.9%", flush=True)
+            break
+
         current_lr = optimizer.param_groups[0]['lr']
         ep_t1 = time.perf_counter()
 
@@ -303,6 +321,9 @@ if __name__ == '__main__':
 
         scheduler.step()
 
+    # [对齐 CPP] 计时后显式同步 CUDA，确保所有 kernel 已完成再取时间
+    if device.type == "cuda":
+        torch.cuda.synchronize()
     t1 = time.perf_counter()
     print("\n===========================================", flush=True)
     print(f" Mode:       {mode}", flush=True)

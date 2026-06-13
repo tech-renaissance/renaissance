@@ -211,7 +211,7 @@ private:
         bool shuffle_train = true;
         bool download = false;
         int sdmp_factor = 1;
-        bool using_cpvs = false;
+        bool using_cpvs = true;
         bool pw_test_mode = false;
         int max_intermediate_resolution = -1;
         bool drop_last = false;
@@ -407,7 +407,7 @@ private:
     // 步骤3：配置Preprocessor
     void config_preprocessor(int num_color_channels,
                              int sdmp_factor = 1,
-                             bool using_cpvs = false,
+                             bool using_cpvs = true,
                              bool pw_test_mode = false,
                              int max_intermediate_resolution = -1,
                              bool drop_last = false);
