@@ -145,13 +145,13 @@ int main(int argc, char** argv) {
         conv(192, 5, 1, 2), relu(),  // [N,32,32,8] -> [N,32,32,192]
         conv(192, 1, 1, 0), relu(),  // [N,32,32,192]
         conv(192, 1, 1, 0), relu(),  // [N,32,32,192]
-        avgpool(2, 2, 0),
+        maxpool(3, 2, 1),
 
         // mlpconv 2: 192 channels
         conv(192, 5, 1, 2), relu(),  // [N,16,16,192]
         conv(192, 1, 1, 0), relu(),
         conv(192, 1, 1, 0), relu(),
-        avgpool(2, 2, 0),
+        maxpool(3, 2, 1),
 
         // mlpconv 3: 10 channels (no ReLU after final conv, no dropout per paper)
         conv(192, 3, 1, 1), relu(),  // [N,8,8,192]

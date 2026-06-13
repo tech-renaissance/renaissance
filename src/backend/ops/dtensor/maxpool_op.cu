@@ -124,140 +124,84 @@ __global__ void maxpool_amp_fwd_mask_kernel(
 }
 
 // ============================================================================
-// FP32 BWD kernel (mask-based scatter-add)
+// FP32 & AMP BWD kernel (deterministic, inverted iteration)
 // ============================================================================
+// 反转遍历方向: 从"输出遍历 + atomicAdd 散列"改为"输入遍历 + 收集累加"。
+// 每个线程独占一个 dx 位置，无需原子操作，确保确定性。
+// 同时消除 cudaMemsetAsync 预清零（每个 dx 位置被完整覆写）。
 
-__global__ void maxpool_bwd_fp32_kernel(
-    const float*  __restrict__ dy,
-    const int8_t* __restrict__ mask,
-    float*        __restrict__ dx,
+// Helper: T -> float (device-side)
+template <typename T>
+__device__ __forceinline__ float pool_to_float(T val) { return static_cast<float>(val); }
+template <>
+__device__ __forceinline__ float pool_to_float(__half val) { return __half2float(val); }
+
+// Helper: float -> T (device-side)
+template <typename T>
+__device__ __forceinline__ T pool_from_float(float val) { return static_cast<T>(val); }
+template <>
+__device__ __forceinline__ __half pool_from_float(float val) { return __float2half(val); }
+
+template <typename T>
+__global__ void maxpool_bwd_deterministic_kernel(
+    const T*       __restrict__ dy,
+    const int8_t*  __restrict__ mask,
+    T*             __restrict__ dx,
     int N, int C, int IH, int IW, int OH, int OW, int k, int s, int p,
     int64_t dy_n_stride, int64_t dy_h_stride, int64_t dy_w_stride, int64_t dy_c_stride,
     int64_t dx_n_stride, int64_t dx_h_stride, int64_t dx_w_stride, int64_t dx_c_stride,
     int64_t m_n_stride,  int64_t m_h_stride,  int64_t m_w_stride,  int64_t m_c_stride)
 {
-    size_t total = static_cast<size_t>(N) * C * OH * OW;
+    size_t total = static_cast<size_t>(N) * C * IH * IW;
     for (size_t idx = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
          idx < total;
          idx += static_cast<size_t>(blockDim.x) * gridDim.x)
     {
+        // 解码输入坐标 (n, c, ih, iw)
         size_t tid = idx;
+        int iw = static_cast<int>(tid % IW);
+        tid /= IW;
+        int ih = static_cast<int>(tid % IH);
+        tid /= IH;
         int c  = static_cast<int>(tid % C);
-        size_t tmp = tid / C;
-        int ow = static_cast<int>(tmp % OW);
-        tmp /= OW;
-        int oh = static_cast<int>(tmp % OH);
-        int n  = static_cast<int>(tmp / OH);
+        int n  = static_cast<int>(tid / C);
 
-        size_t m_idx = static_cast<size_t>(n) * m_n_stride
-                     + static_cast<size_t>(oh) * m_h_stride
-                     + static_cast<size_t>(ow) * m_w_stride
-                     + static_cast<size_t>(c) * m_c_stride;
-        int8_t m = mask[m_idx];
-        if (m < 0) continue;
+        // 计算可能引用此输入位置的输出窗口范围
+        int oh_start = (ih + p - k + 1 + s - 1) / s;
+        if (oh_start < 0) oh_start = 0;
+        int oh_end = (ih + p) / s + 1;
+        if (oh_end > OH) oh_end = OH;
+        int ow_start = (iw + p - k + 1 + s - 1) / s;
+        if (ow_start < 0) ow_start = 0;
+        int ow_end = (iw + p) / s + 1;
+        if (ow_end > OW) ow_end = OW;
 
-        int max_kh = static_cast<int>(m) / k;
-        int max_kw = static_cast<int>(m) % k;
-        int ih = oh * s - p + max_kh;
-        int iw = ow * s - p + max_kw;
-
-        if (ih >= 0 && ih < IH && iw >= 0 && iw < IW) {
-            size_t dy_idx = static_cast<size_t>(n) * dy_n_stride
-                          + static_cast<size_t>(oh) * dy_h_stride
-                          + static_cast<size_t>(ow) * dy_w_stride
-                          + static_cast<size_t>(c) * dy_c_stride;
-            size_t dx_idx = static_cast<size_t>(n) * dx_n_stride
-                          + static_cast<size_t>(ih) * dx_h_stride
-                          + static_cast<size_t>(iw) * dx_w_stride
-                          + static_cast<size_t>(c) * dx_c_stride;
-            atomicAdd(&dx[dx_idx], dy[dy_idx]);
+        float acc = 0.0f;
+        for (int oh = oh_start; oh < oh_end; ++oh) {
+            int kh = ih - (oh * s - p);
+            for (int ow = ow_start; ow < ow_end; ++ow) {
+                int kw = iw - (ow * s - p);
+                // kh, kw 由 oh/ow 范围保证在 [0, k) 内，无需额外检查
+                size_t m_idx = static_cast<size_t>(n) * m_n_stride
+                             + static_cast<size_t>(oh) * m_h_stride
+                             + static_cast<size_t>(ow) * m_w_stride
+                             + static_cast<size_t>(c) * m_c_stride;
+                if (mask[m_idx] == static_cast<int8_t>(kh * k + kw)) {
+                    size_t dy_idx = static_cast<size_t>(n) * dy_n_stride
+                                  + static_cast<size_t>(oh) * dy_h_stride
+                                  + static_cast<size_t>(ow) * dy_w_stride
+                                  + static_cast<size_t>(c) * dy_c_stride;
+                    acc += pool_to_float(dy[dy_idx]);
+                }
+            }
         }
-    }
-}
 
-// ============================================================================
-// AMP BWD kernel (mask-based scatter-add)
-// ============================================================================
-
-__device__ __forceinline__ void atomicAddHalf(__half* addr, float val) {
-    unsigned int* base_addr = reinterpret_cast<unsigned int*>(
-        reinterpret_cast<size_t>(addr) & ~static_cast<size_t>(2));
-    unsigned int old = *base_addr;
-    unsigned int assumed;
-    do {
-        assumed = old;
-        unsigned short target_val;
-#if defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
-        target_val = (reinterpret_cast<size_t>(addr) & 2)
-            ? static_cast<unsigned short>(assumed)
-            : static_cast<unsigned short>(assumed >> 16);
-#else
-        target_val = (reinterpret_cast<size_t>(addr) & 2)
-            ? static_cast<unsigned short>(assumed >> 16)
-            : static_cast<unsigned short>(assumed);
-#endif
-        float fval = __half2float(*reinterpret_cast<__half*>(&target_val)) + val;
-        unsigned short new_val = *reinterpret_cast<unsigned short*>(&__float2half(fval));
-        unsigned int new_assumed;
-#if defined(__BYTE_ORDER__) && (__BYTE_ORDER__ == __ORDER_BIG_ENDIAN__)
-        new_assumed = (reinterpret_cast<size_t>(addr) & 2)
-            ? (assumed & 0xFFFF0000u) | new_val
-            : (assumed & 0xFFFFu) | (static_cast<unsigned int>(new_val) << 16);
-#else
-        new_assumed = (reinterpret_cast<size_t>(addr) & 2)
-            ? (assumed & 0xFFFFu) | (static_cast<unsigned int>(new_val) << 16)
-            : (assumed & 0xFFFF0000u) | new_val;
-#endif
-        old = atomicCAS(base_addr, assumed, new_assumed);
-    } while (assumed != old);
-}
-
-__global__ void maxpool_bwd_amp_kernel(
-    const __half* __restrict__ dy,
-    const int8_t* __restrict__ mask,
-    __half*       __restrict__ dx,
-    int N, int C, int IH, int IW, int OH, int OW, int k, int s, int p,
-    int64_t dy_n_stride, int64_t dy_h_stride, int64_t dy_w_stride, int64_t dy_c_stride,
-    int64_t dx_n_stride, int64_t dx_h_stride, int64_t dx_w_stride, int64_t dx_c_stride,
-    int64_t m_n_stride,  int64_t m_h_stride,  int64_t m_w_stride,  int64_t m_c_stride)
-{
-    size_t total = static_cast<size_t>(N) * C * OH * OW;
-    for (size_t idx = static_cast<size_t>(blockIdx.x) * blockDim.x + threadIdx.x;
-         idx < total;
-         idx += static_cast<size_t>(blockDim.x) * gridDim.x)
-    {
-        size_t tid = idx;
-        int c  = static_cast<int>(tid % C);
-        size_t tmp = tid / C;
-        int ow = static_cast<int>(tmp % OW);
-        tmp /= OW;
-        int oh = static_cast<int>(tmp % OH);
-        int n  = static_cast<int>(tmp / OH);
-
-        size_t m_idx = static_cast<size_t>(n) * m_n_stride
-                     + static_cast<size_t>(oh) * m_h_stride
-                     + static_cast<size_t>(ow) * m_w_stride
-                     + static_cast<size_t>(c) * m_c_stride;
-        int8_t m = mask[m_idx];
-        if (m < 0) continue;
-
-        int max_kh = static_cast<int>(m) / k;
-        int max_kw = static_cast<int>(m) % k;
-        int ih = oh * s - p + max_kh;
-        int iw = ow * s - p + max_kw;
-
-        if (ih >= 0 && ih < IH && iw >= 0 && iw < IW) {
-            size_t dy_idx = static_cast<size_t>(n) * dy_n_stride
-                          + static_cast<size_t>(oh) * dy_h_stride
-                          + static_cast<size_t>(ow) * dy_w_stride
-                          + static_cast<size_t>(c) * dy_c_stride;
-            size_t dx_idx = static_cast<size_t>(n) * dx_n_stride
-                          + static_cast<size_t>(ih) * dx_h_stride
-                          + static_cast<size_t>(iw) * dx_w_stride
-                          + static_cast<size_t>(c) * dx_c_stride;
-            float dy_val = __half2float(dy[dy_idx]);
-            atomicAddHalf(&dx[dx_idx], dy_val);
-        }
+        // 确定性写入: 每个线程独占一个 dx 位置
+        size_t dx_idx = static_cast<size_t>(n) * dx_n_stride
+                      + static_cast<size_t>(ih) * dx_h_stride
+                      + static_cast<size_t>(iw) * dx_w_stride
+                      + static_cast<size_t>(c) * dx_c_stride;
+        dx[dx_idx] = pool_from_float<T>(acc);
     }
 }
 
@@ -313,10 +257,11 @@ cudaError_t launch_maxpool_bwd_fp32_kernel(
     int64_t m_n_stride,  int64_t m_h_stride,  int64_t m_w_stride,  int64_t m_c_stride,
     cudaStream_t stream)
 {
-    size_t total = static_cast<size_t>(N) * C * OH * OW;
+    // 反转遍历: 遍历输入位置 (N*C*IH*IW)，每个线程独占一个 dx 位置
+    size_t total = static_cast<size_t>(N) * C * IH * IW;
     int block = 256;
     int grid = static_cast<int>(std::min<size_t>((total + block - 1) / block, INT_MAX));
-    maxpool_bwd_fp32_kernel<<<grid, block, 0, stream>>>(
+    maxpool_bwd_deterministic_kernel<float><<<grid, block, 0, stream>>>(
         dy, mask, dx, N, C, IH, IW, OH, OW, k, s, p,
         dy_n_stride, dy_h_stride, dy_w_stride, dy_c_stride,
         dx_n_stride, dx_h_stride, dx_w_stride, dx_c_stride,
@@ -332,10 +277,11 @@ cudaError_t launch_maxpool_bwd_amp_kernel(
     int64_t m_n_stride,  int64_t m_h_stride,  int64_t m_w_stride,  int64_t m_c_stride,
     cudaStream_t stream)
 {
-    size_t total = static_cast<size_t>(N) * C * OH * OW;
+    // 反转遍历: 遍历输入位置 (N*C*IH*IW)，每个线程独占一个 dx 位置
+    size_t total = static_cast<size_t>(N) * C * IH * IW;
     int block = 256;
     int grid = static_cast<int>(std::min<size_t>((total + block - 1) / block, INT_MAX));
-    maxpool_bwd_amp_kernel<<<grid, block, 0, stream>>>(
+    maxpool_bwd_deterministic_kernel<__half><<<grid, block, 0, stream>>>(
         dy, mask, dx, N, C, IH, IW, OH, OW, k, s, p,
         dy_n_stride, dy_h_stride, dy_w_stride, dy_c_stride,
         dx_n_stride, dx_h_stride, dx_w_stride, dx_c_stride,

@@ -611,9 +611,7 @@ static void launch_maxpool_bwd_cuda_impl(
     int N = dt_x.n(), C = dt_x.c(), IH = dt_x.h(), IW = dt_x.w();
     int OH = dt_y.h(), OW = dt_y.w();
 
-    // 清零 dX（dX 覆盖 X，需要先归零再 scatter-add）
-    cudaMemsetAsync(ctx.ptr_at(node.output_ids[0]), 0, dt_dx.slot_bytes(), s);
-
+    // 新确定性 kernel: 每个线程独占一个 dx 位置，完整覆写，无需预清零
     if (is_amp) {
         launch_maxpool_bwd_amp_kernel(
             static_cast<const __half*>(ctx.ptr_at(node.input_ids[0])),

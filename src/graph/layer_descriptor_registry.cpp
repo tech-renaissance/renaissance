@@ -427,8 +427,9 @@ std::vector<TensorDesc> infer_maxpool_tensors(
         out = Shape{input.n(), oh, ow, input.c()};
     }
     return {
-        TensorDesc{"pool_output", out,  select_feature_region(ctx), feat_dt},
-        TensorDesc{"pool_mask",   out,  Region::S_MASK,        DType::INT8}
+        TensorDesc{"pool_output", out,             select_feature_region(ctx), feat_dt},
+        TensorDesc{"pool_mask",   out,             Region::S_MASK,        DType::INT8},
+        TensorDesc{"bwd_temp",    Shape{1,1,1,1},  Region::T_TEMP_FP32,   DType::FP32},  // [NEW] 接口对齐占位，BWD 反转 kernel 不需要实际缓冲区
     };
 }
 

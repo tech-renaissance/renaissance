@@ -98,11 +98,22 @@ static void launch_dropout_fp32_fwd_cpu(CpuOpContext* op_ctx) {
     int total = op_ctx->input_shape.n * op_ctx->input_shape.h
               * op_ctx->input_shape.w * op_ctx->input_shape.c;
 
-    // 使用 Philox RNG（确定性，与 GPU 路径一致）
-    // CPU 单 rank，直接使用 global seed
-    uint64_t seed = get_default_generator().seed();
-    uint64_t seed_lo = seed;
-    uint64_t seed_hi = seed ^ 0x9e3779b97f4a7c15ULL;
+    // 从 dropout_seed tensor 读取 → Xorshift64* 旋转 → 写回（与 GPU 行为对齐）
+    // init_all() 每次都会重新初始化，保证跨 run 可复现
+    int32_t* seed_ptr = static_cast<int32_t*>(
+        op_ctx->ctx->ptr_at(op_ctx->ctx->memory_plan()->baseline().dropout_seed));
+    uint64_t s = (static_cast<uint64_t>(static_cast<uint32_t>(seed_ptr[1])) << 32)
+               | static_cast<uint32_t>(seed_ptr[0]);
+    if (s == 0) s = 0x9e3779b97f4a7c15ULL;
+    s ^= s >> 12;
+    s ^= s << 25;
+    s ^= s >> 27;
+    s *= 0x2545F4914F6CDD1DULL;
+    seed_ptr[0] = static_cast<int32_t>(s & 0xFFFFFFFFULL);
+    seed_ptr[1] = static_cast<int32_t>(s >> 32);
+
+    uint64_t seed_lo = s;
+    uint64_t seed_hi = s ^ 0x9e3779b97f4a7c15ULL;
 
     for (int i = 0; i < total; ++i) {
         float r = detail::philox_uniform_float(seed_lo, seed_hi, static_cast<uint64_t>(i));
@@ -154,6 +165,7 @@ static void launch_dropout_fp32_inf_cpu(CpuOpContext* op_ctx) {
 #ifdef TR_USE_CUDA
 
 // CUDA kernel declarations (defined in .cu file)
+cudaError_t launch_rotate_dropout_seed(int32_t* seed_ptr, cudaStream_t stream);
 cudaError_t launch_dropout_fwd_kernel(
     const float* x, float* y, int8_t* mask,
     int N, int H, int W, int C,
@@ -222,7 +234,7 @@ static void launch_dropout_fp32_fwd_cuda(
     TR_CHECK(p >= 0.0f && p < 1.0f, ValueError, "Dropout p must be in [0.0, 1.0)");
     float scale = 1.0f / (1.0f - p);
 
-    const int32_t* seed_ptr = static_cast<const int32_t*>(
+    int32_t* seed_ptr = static_cast<int32_t*>(
         ctx.ptr_at(mp.baseline().dropout_seed));
 
     const DTensor& dt_mask = mp.get_dtensor(node.output_ids[1]);
@@ -232,6 +244,9 @@ static void launch_dropout_fp32_fwd_cuda(
     int64_t mask_n_stride = dt_mask.n_stride_cuda();
     int64_t mask_h_stride = dt_mask.h_stride_cuda();
     int64_t mask_w_stride = dt_mask.w_stride_cuda();
+
+    // 确定性种子旋转：同一 stream 上先旋转 seed，再执行 dropout FWD
+    launch_rotate_dropout_seed(seed_ptr, s);
 
     cudaError_t err = launch_dropout_fwd_kernel(
         x, y, mask, dt_x.n(), dt_x.h(), dt_x.w(), dt_x.c(),
@@ -340,8 +355,11 @@ static void launch_dropout_amp_fwd_cuda(
     TR_CHECK(p >= 0.0f && p < 1.0f, ValueError, "Dropout p must be in [0.0, 1.0)");
     float scale = 1.0f / (1.0f - p);
 
-    const int32_t* seed_ptr = static_cast<const int32_t*>(
+    int32_t* seed_ptr = static_cast<int32_t*>(
         ctx.ptr_at(mp.baseline().dropout_seed));
+
+    // 确定性种子旋转：同一 stream 上先旋转 seed，再执行 dropout FWD
+    launch_rotate_dropout_seed(seed_ptr, s);
 
     cudaError_t err = launch_dropout_fwd_amp_kernel(
         x, y, mask, dt_x.n(), dt_x.h(), dt_x.w(), dt_x.c(),

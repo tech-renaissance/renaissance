@@ -259,10 +259,31 @@ extern "C" __global__ void dropout_inf_amp_kernel(
 }
 
 // ============================================================================
+// Dropout seed rotation kernel — 确定性 Xorshift64* 自旋转
+// ============================================================================
+
+__global__ void rotate_dropout_seed_kernel(int32_t* seed_ptr) {
+    uint64_t s = (static_cast<uint64_t>(static_cast<uint32_t>(seed_ptr[1])) << 32)
+               | static_cast<uint32_t>(seed_ptr[0]);
+    if (s == 0) s = 0x9e3779b97f4a7c15ULL;  // 防御 stuck
+    s ^= s >> 12;
+    s ^= s << 25;
+    s ^= s >> 27;
+    s *= 0x2545F4914F6CDD1DULL;
+    seed_ptr[0] = static_cast<int32_t>(s & 0xFFFFFFFFULL);
+    seed_ptr[1] = static_cast<int32_t>(s >> 32);
+}
+
+// ============================================================================
 // Host launcher wrappers
 // ============================================================================
 
 namespace tr {
+
+cudaError_t launch_rotate_dropout_seed(int32_t* seed_ptr, cudaStream_t stream) {
+    rotate_dropout_seed_kernel<<<1, 1, 0, stream>>>(seed_ptr);
+    return cudaGetLastError();
+}
 
 static int get_block_count(int64_t total, int threads_per_block = 256) {
     return static_cast<int>((total + threads_per_block - 1) / threads_per_block);
