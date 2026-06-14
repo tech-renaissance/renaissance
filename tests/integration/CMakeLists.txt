@@ -213,26 +213,26 @@ endif()
 
 message(STATUS "  - mlp_maxpool_conv: MNIST MLP MaxPool+Conv end-to-end accuracy test (AdamW)")
 
-add_executable(test_vgg16 test_vgg16.cpp)
-target_link_libraries(test_vgg16 PRIVATE renaissance)
-target_compile_definitions(test_vgg16 PRIVATE TR_LOG_LEVEL=1)
+add_executable(test_vgg16bn test_vgg16bn.cpp)
+target_link_libraries(test_vgg16bn PRIVATE renaissance)
+target_compile_definitions(test_vgg16bn PRIVATE TR_LOG_LEVEL=1)
 
 if(TR_USE_CUDA)
-    setup_gpu_runtime_env(test_vgg16)
+    setup_gpu_runtime_env(test_vgg16bn)
 endif()
 
-set_target_properties(test_vgg16 PROPERTIES
+set_target_properties(test_vgg16bn PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/integration
     WIN32_EXECUTABLE FALSE
 )
 
 if(MSVC)
-    target_compile_options(test_vgg16 PRIVATE /W4 /utf-8 /wd4244 /wd4505 /wd4458 /wd4127)
+    target_compile_options(test_vgg16bn PRIVATE /W4 /utf-8 /wd4244 /wd4505 /wd4458 /wd4127)
 else()
-    target_compile_options(test_vgg16 PRIVATE -Wall -Wextra -Wpedantic -Wno-unused-function)
+    target_compile_options(test_vgg16bn PRIVATE -Wall -Wextra -Wpedantic -Wno-unused-function)
 endif()
 
-message(STATUS "  - test_vgg16: ImageNet VGG-16 end-to-end accuracy test (no BN, GPU FP32)")
+message(STATUS "  - test_vgg16bn: ImageNet VGG-16-BN end-to-end accuracy test (SGD, Multi-RANK)")
 
 add_executable(test_nin test_nin.cpp)
 target_link_libraries(test_nin PRIVATE renaissance)
