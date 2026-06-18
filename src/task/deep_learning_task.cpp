@@ -1136,10 +1136,22 @@ float DeepLearningTask::run_train_epoch_gpu() {
                     auto g_xfer_n = from_a ? n_xfer_b : n_xfer_a;
                     auto g_first = from_a ? n_bwd_a : n_bwd_b;
 
-                    if (n_zg) cudaGraphLaunch(n_zg, s_up);
-                    if (g_fwd) cudaGraphLaunch(g_fwd, s_c1);
-                    ts->wait_buffer_readable(next_buf);
-                    if (g_xfer_n) cudaGraphLaunch(g_xfer_n, s_trans);
+                    // 先传递新的学习率，用时极短，但可以跟n_zg和g_fwd重叠
+                    bool need_lr = is_step_by_batch_mode() || batch == 0;
+                    if (need_lr) {
+                        lr = fetch_lr_for_batch(batch);
+                        *lr_pinned_[rank] = lr;
+                        cudaMemcpyAsync(lr_dev_ptr, lr_pinned_[rank], sizeof(float),
+                                        cudaMemcpyHostToDevice, s_trans);
+                    }
+
+                    if (n_zg) cudaGraphLaunch(n_zg, s_up);  // 清零梯度和loss
+                    if (g_fwd) cudaGraphLaunch(g_fwd, s_c1);  // 启动首层运算
+
+                    sync_tr();  // 同步确保学习率传输完成，此句放在n_zg和g_fwd之后，方便实现重叠。有必要同步，以免优化器使用旧学习率
+                    ts->wait_buffer_readable(next_buf);  // 可能需要等待HOST端，所以应该先启动首层运算再执行此语句
+                    if (g_xfer_n) cudaGraphLaunch(g_xfer_n, s_trans);  // 启动下一个batch的传输（非常耗时，计算通信重叠的关键）
+
                     sync_comp(); sync_up();
 
                     if (g_deep) cudaGraphLaunch(g_deep, s_c1);
@@ -1149,18 +1161,7 @@ float DeepLearningTask::run_train_epoch_gpu() {
                     if (using_amp && n_cdg) cudaGraphLaunch(n_cdg, s_up);
                     if (n_dar) cudaGraphLaunch(n_dar, s_up);
 
-                    bool need_lr = is_step_by_batch_mode() || batch == 0;
-                    if (need_lr) {
-                        lr = fetch_lr_for_batch(batch);
-                        *lr_pinned_[rank] = lr;
-                        cudaMemcpyAsync(lr_dev_ptr, lr_pinned_[rank], sizeof(float),
-                                        cudaMemcpyHostToDevice, s_trans);
-                    }
-
-                    sync_up(); sync_comp(); sync_tr();
-
-                    ts->set_buffer_readable(next_buf, false);
-                    ts->set_buffer_writeable(next_buf, true);
+                    sync_up(); sync_comp();
 
                     if (using_amp && n_cfg) cudaGraphLaunch(n_cfg, s_up);
                     if (n_far) cudaGraphLaunch(n_far, s_up);
@@ -1177,6 +1178,10 @@ float DeepLearningTask::run_train_epoch_gpu() {
                     sync_comp();
 
                     if (using_amp && n_cm) { cudaGraphLaunch(n_cm, s_up); sync_up(); }
+
+                    sync_tr();  // 最后才同步传输流，使得下一个batch的训练数据有充足的时间传输
+                    ts->set_buffer_readable(next_buf, false);
+                    ts->set_buffer_writeable(next_buf, true);
                 }
 
                 // ========== Last batch (batch = batches-1) — 使用 l_* handles ==========
@@ -1186,19 +1191,6 @@ float DeepLearningTask::run_train_epoch_gpu() {
                     auto g_deep_l = last_a ? l_deep_a : l_deep_b;
                     auto g_first_l = last_a ? l_bwd_a : l_bwd_b;
 
-                    if (n_zg) cudaGraphLaunch(n_zg, s_up);
-                    if (g_fwd_l) cudaGraphLaunch(g_fwd_l, s_c1);
-                    sync_comp(); sync_up();
-
-                    if (g_deep_l) cudaGraphLaunch(g_deep_l, s_c1);
-                    sync_comp();
-
-
-
-                    if (!frozen && g_first_l) cudaGraphLaunch(g_first_l, s_c1);
-                    if (using_amp && n_cdg) cudaGraphLaunch(n_cdg, s_up);
-                    if (n_dar) cudaGraphLaunch(n_dar, s_up);
-
                     bool need_lr = is_step_by_batch_mode() || batches == 1;
                     if (need_lr) {
                         float lr_last = fetch_lr_for_batch(batches - 1);
@@ -1207,7 +1199,18 @@ float DeepLearningTask::run_train_epoch_gpu() {
                                         cudaMemcpyHostToDevice, s_trans);
                     }
 
-                    sync_up(); sync_comp(); sync_tr();
+                    if (n_zg) cudaGraphLaunch(n_zg, s_up);
+                    if (g_fwd_l) cudaGraphLaunch(g_fwd_l, s_c1);
+                    sync_comp(); sync_up(); sync_tr();
+
+                    if (g_deep_l) cudaGraphLaunch(g_deep_l, s_c1);
+                    sync_comp();
+
+                    if (!frozen && g_first_l) cudaGraphLaunch(g_first_l, s_c1);
+                    if (using_amp && n_cdg) cudaGraphLaunch(n_cdg, s_up);
+                    if (n_dar) cudaGraphLaunch(n_dar, s_up);
+
+                    sync_up(); sync_comp();
 
                     if (using_amp && n_cfg) cudaGraphLaunch(n_cfg, s_up);
                     if (n_far) cudaGraphLaunch(n_far, s_up);
@@ -1491,6 +1494,9 @@ float DeepLearningTask::run_train_epoch_cpu() {
     if (idx_clear >= 0) launch(idx_clear);
 
     if (batches == 1) {
+        // --- lr（与 GPU 对齐：batch 最开始设置）---
+        *static_cast<float*>(lr_ptr) = fetch_lr_for_batch(0);
+
         // --- zg + fwd ---
         launch(idx_zg);
         launch(idx_fwd_a_nb);
@@ -1505,9 +1511,6 @@ float DeepLearningTask::run_train_epoch_cpu() {
         // --- first_bwd + dar ---
         if (!frozen) launch(idx_bwd_a_nb);
         launch(idx_dar);
-
-        // --- lr ---
-        *static_cast<float*>(lr_ptr) = fetch_lr_for_batch(0);
 
         // --- far + accum + ncg + sc（accum 移到 far 之后）---
         if (local_bs_ptr) *static_cast<int32_t*>(local_bs_ptr) = registry.get_local_batch_size();
@@ -1537,13 +1540,18 @@ float DeepLearningTask::run_train_epoch_cpu() {
         bool from_a  = (batch % 2 == 0);
         int next_buf = from_a ? 1 : 0;
 
-        // --- zg + fwd, 然后 wait + xfer（与 GPU 阶段1-2 对齐）---
+        // --- lr（与 GPU 对齐：batch 最开始设置）---
+        if (is_step_by_batch_mode() || batch == 0) {
+            *static_cast<float*>(lr_ptr) = fetch_lr_for_batch(batch);
+        }
+
+        // --- zg + fwd ---
         launch(idx_zg);
         launch(from_a ? idx_fwd_a_nb : idx_fwd_b_nb);
 
+        // --- wait + xfer + deep ---
         ts->wait_buffer_readable(next_buf);
 
-        // --- xfer + deep（与 GPU 阶段3-4 对齐：GPU 顺序为 wait → xfer → deep）---
         // 注意：CPU 必须保留 loss memset！CPU 的 softmax_ce_fwd_inner 使用 *loss += 逐样本
         // 累加，内核不负责清零。若删掉，上一 batch 的 loss 残留会导致数值错误。GPU 可删是因为
         // GPU 用 loss_partial 中间缓冲 + reduction 直接写入（=），CPU 没有这层间接。
@@ -1551,20 +1559,11 @@ float DeepLearningTask::run_train_epoch_cpu() {
         launch(from_a ? idx_xfer_b : idx_xfer_a);
         launch(idx_deep_nb);
 
-        // --- first_bwd + dar（与 GPU 阶段6 对齐）---
+        // --- first_bwd + dar ---
         if (!frozen) launch(from_a ? idx_bwd_a_nb : idx_bwd_b_nb);
         launch(idx_dar);
 
-        // --- lr（与 GPU 阶段7 对齐）---
-        if (is_step_by_batch_mode() || batch == 0) {
-            *static_cast<float*>(lr_ptr) = fetch_lr_for_batch(batch);
-        }
-
-        // --- set_buffer（与 GPU 阶段9 对齐，从 xfer 之后移至此）---
-        ts->set_buffer_readable(next_buf, false);
-        ts->set_buffer_writeable(next_buf, true);
-
-        // --- far + accum + ncg + sc（与 GPU 阶段10 对齐，accum 从 far 之前移到 far 之后）---
+        // --- far + accum + ncg + sc（accum 移到 far 之后）---
         if (local_bs_ptr) *static_cast<int32_t*>(local_bs_ptr) = registry.get_local_batch_size();
         launch(idx_far);
         int32_t idx_accum_nb = idx_for(GraphId::ACCUM_METRICS, v_base);
@@ -1572,17 +1571,26 @@ float DeepLearningTask::run_train_epoch_cpu() {
         if (idx_ncg >= 0) { launch(idx_ncg); }
         launch(idx_sc);
 
-        // --- opt + lars（与 GPU 阶段12 对齐）---
+        // --- opt + lars ---
         launch(idx_opt);
         launch(idx_lars_fc);
         launch(idx_lars_fc2);
         launch(idx_lars_dc);
+
+        // --- set_buffer（与 GPU 对齐：batch 最后释放 buffer）---
+        ts->set_buffer_readable(next_buf, false);
+        ts->set_buffer_writeable(next_buf, true);
     }
 
     {
         bool last_a = ((batches - 1) % 2 == 0);
 
         ctx.set_memory_plan(variant_memory_plans_[v_last].get());
+
+        // --- lr（与 GPU 对齐：batch 最开始设置）---
+        if (is_step_by_batch_mode() || batches == 1) {
+            *static_cast<float*>(lr_ptr) = fetch_lr_for_batch(batches - 1);
+        }
 
         // --- zg + fwd ---
         launch(idx_zg);
@@ -1596,11 +1604,6 @@ float DeepLearningTask::run_train_epoch_cpu() {
         // --- first_bwd + dar ---
         if (!frozen) launch(last_a ? idx_bwd_a_lb : idx_bwd_b_lb);
         launch(idx_dar);
-
-        // --- lr ---
-        if (is_step_by_batch_mode() || batches == 1) {
-            *static_cast<float*>(lr_ptr) = fetch_lr_for_batch(batches - 1);
-        }
 
         // --- far + accum + ncg + sc（accum 移到 far 之后）---
         if (last_bs_ptr) *static_cast<int32_t*>(last_bs_ptr) = registry.get_last_train_batch_size();
