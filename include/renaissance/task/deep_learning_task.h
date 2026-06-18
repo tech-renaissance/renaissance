@@ -563,12 +563,6 @@ private:
     /** @brief 验证配置完整性，在 compile() 前调用 */
     void validate_config() const;
 
-    /** @brief 执行单个 epoch 的训练阶段 */
-    void run_train_epoch();
-
-    /** @brief 执行单个 epoch 的验证阶段 */
-    void run_val_epoch(bool validate_ema);
-
     TrainingResult run_gpu();
     TrainingResult run_cpu();
 
