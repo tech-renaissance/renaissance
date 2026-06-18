@@ -1138,15 +1138,16 @@ float DeepLearningTask::run_train_epoch_gpu() {
 
                     if (n_zg) cudaGraphLaunch(n_zg, s_up);
                     if (g_fwd) cudaGraphLaunch(g_fwd, s_c1);
+                    ts->wait_buffer_readable(next_buf);
+                    if (g_xfer_n) cudaGraphLaunch(g_xfer_n, s_trans);
                     sync_comp(); sync_up();
 
-                    ts->wait_buffer_readable(next_buf);
-
-                    if (loss_id >= 0)
-                        cudaMemsetAsync(ctx.ptr_at(loss_id), 0, sizeof(float), s_c1);
                     if (g_deep) cudaGraphLaunch(g_deep, s_c1);
-                    if (g_xfer_n) cudaGraphLaunch(g_xfer_n, s_trans);
-                    sync_comp(); sync_tr();
+                    sync_comp();
+
+                    if (!frozen && g_first) cudaGraphLaunch(g_first, s_c1);
+                    if (using_amp && n_cdg) cudaGraphLaunch(n_cdg, s_up);
+                    if (n_dar) cudaGraphLaunch(n_dar, s_up);
 
                     bool need_lr = is_step_by_batch_mode() || batch == 0;
                     if (need_lr) {
@@ -1156,29 +1157,15 @@ float DeepLearningTask::run_train_epoch_gpu() {
                                         cudaMemcpyHostToDevice, s_trans);
                     }
 
-                    sync_tr();
+                    sync_up(); sync_comp(); sync_tr();
 
                     ts->set_buffer_readable(next_buf, false);
                     ts->set_buffer_writeable(next_buf, true);
 
-                    if (!frozen && g_first) cudaGraphLaunch(g_first, s_c1);
-                    sync_comp();
-
-                    if (using_amp && n_cdg) { cudaGraphLaunch(n_cdg, s_up); sync_up(); }
-
-                    if (n_dar) cudaGraphLaunch(n_dar, s_up);
-                    sync_up();
-
-                    if (using_amp && n_cfg) { cudaGraphLaunch(n_cfg, s_up); sync_up(); }
-
+                    if (using_amp && n_cfg) cudaGraphLaunch(n_cfg, s_up);
                     if (n_far) cudaGraphLaunch(n_far, s_up);
-                    sync_up();
-
                     if (n_accum) cudaGraphLaunch(n_accum, s_up);
-                    sync_up();
-
-                    if (n_ncg) { cudaGraphLaunch(n_ncg, s_up); sync_up(); }
-
+                    if (n_ncg) cudaGraphLaunch(n_ncg, s_up);
                     if (n_sc) cudaGraphLaunch(n_sc, s_up);
                     sync_up();
 
@@ -1188,6 +1175,7 @@ float DeepLearningTask::run_train_epoch_gpu() {
                     if (n_lars_dc)  cudaGraphLaunch(n_lars_dc,  s_c3);
                     sync_up();
                     sync_comp();
+
                     if (using_amp && n_cm) { cudaGraphLaunch(n_cm, s_up); sync_up(); }
                 }
 
@@ -1202,10 +1190,14 @@ float DeepLearningTask::run_train_epoch_gpu() {
                     if (g_fwd_l) cudaGraphLaunch(g_fwd_l, s_c1);
                     sync_comp(); sync_up();
 
-                    if (loss_id >= 0)
-                        cudaMemsetAsync(ctx.ptr_at(loss_id), 0, sizeof(float), s_c1);
                     if (g_deep_l) cudaGraphLaunch(g_deep_l, s_c1);
                     sync_comp();
+
+
+
+                    if (!frozen && g_first_l) cudaGraphLaunch(g_first_l, s_c1);
+                    if (using_amp && n_cdg) cudaGraphLaunch(n_cdg, s_up);
+                    if (n_dar) cudaGraphLaunch(n_dar, s_up);
 
                     bool need_lr = is_step_by_batch_mode() || batches == 1;
                     if (need_lr) {
@@ -1214,26 +1206,13 @@ float DeepLearningTask::run_train_epoch_gpu() {
                         cudaMemcpyAsync(lr_dev_ptr, lr_pinned_[rank], sizeof(float),
                                         cudaMemcpyHostToDevice, s_trans);
                     }
-                    sync_up(); sync_tr();
 
-                    if (!frozen && g_first_l) cudaGraphLaunch(g_first_l, s_c1);
-                    sync_comp();
+                    sync_up(); sync_comp(); sync_tr();
 
-                    if (using_amp && n_cdg) { cudaGraphLaunch(n_cdg, s_up); sync_up(); }
-
-                    if (n_dar) cudaGraphLaunch(n_dar, s_up);
-                    sync_up();
-
-                    if (using_amp && n_cfg) { cudaGraphLaunch(n_cfg, s_up); sync_up(); }
-
+                    if (using_amp && n_cfg) cudaGraphLaunch(n_cfg, s_up);
                     if (n_far) cudaGraphLaunch(n_far, s_up);
-                    sync_up();
-
                     if (l_accum_tl) cudaGraphLaunch(l_accum_tl, s_up);
-                    sync_up();
-
-                    if (n_ncg) { cudaGraphLaunch(n_ncg, s_up); sync_up(); }
-
+                    if (n_ncg) cudaGraphLaunch(n_ncg, s_up);
                     if (n_sc) cudaGraphLaunch(n_sc, s_up);
                     sync_up();
 
