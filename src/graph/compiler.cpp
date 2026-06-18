@@ -2110,6 +2110,13 @@ void Compiler::build_auxiliary_graphs(ComputationGraph& train_cg, const MemoryPl
         node.input_ranges.push_back(
             memory_plan.region_range(Region::G_BN_BIAS, Region::G_DEEP_CONV));
         node.output_ids.push_back(nan_flag_id);
+
+        // 若用户开启了梯度裁剪，将阈值作为 node 常数嵌入
+        float clip_max_abs = GlobalRegistry::instance().grad_clip_max_abs();
+        if (clip_max_abs > 0.0f) {
+            node.params = OpParams(GradClipParams{clip_max_abs});
+        }
+
         train_cg.append(GraphId::NAN_CHECK_AND_GRAD_SCALING, node);
     }
 

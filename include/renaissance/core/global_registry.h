@@ -970,6 +970,9 @@ public:
     void set_beta2(float value)       { optimizer_beta2_.store(value); }
     [[nodiscard]] float beta2() const { return optimizer_beta2_.load(); }
 
+    void set_grad_clip_max_abs(float value)       { grad_clip_max_abs_.store(value); }
+    [[nodiscard]] float grad_clip_max_abs() const { return grad_clip_max_abs_.load(); }
+
     // =========================================================================
     // 渐进式分辨率参数getter方法
     // =========================================================================
@@ -1205,6 +1208,7 @@ private:
     std::atomic<float> optimizer_trust_coefficient_{0.001f};
     std::atomic<float> optimizer_eps_{0.0f};
     std::atomic<float> optimizer_beta2_{0.999f};
+    std::atomic<float> grad_clip_max_abs_{-1.0f};
 
     // =========================================================================
     // 渐进式分辨率参数

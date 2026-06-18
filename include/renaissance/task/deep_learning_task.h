@@ -166,6 +166,13 @@ public:
     DeepLearningTask& sema_decay(float decay);
 
     /**
+     * @brief 设置梯度裁剪最大绝对值（按值裁剪 clamp(g, -max_abs, +max_abs)）
+     * @param max_abs 裁剪阈值；<= 0 表示不裁剪（默认 -1.0f）
+     * @note 仅可在 Phase::PLANNING 调用；阈值在 compile 时嵌入图，运行期零 H2D
+     */
+    DeepLearningTask& grad_clip(float max_abs);
+
+    /**
      * @brief 设置测试时增强（TTA）模式
      * @param mode TTA模式（DISABLED/LR/SHIFT_1PX）
      *
@@ -500,6 +507,7 @@ private:
     float early_stop_thr_ = 0.999f;
     bool use_sema_ = false;
     float sema_decay_ = 0.9f;
+    float grad_clip_max_abs_ = -1.0f;  // <=0 表示不裁剪
     TTA tta_mode_ = TTA::DISABLED;  // TTA模式
     int freeze_after_ = -1;  // -1 = 不冻结
     Metric metrics_ = Metric::TRAIN_LOSS | Metric::VAL_LOSS | Metric::VAL_TOP1;

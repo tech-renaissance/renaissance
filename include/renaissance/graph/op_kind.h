@@ -98,6 +98,18 @@ struct DropoutParams {
     float p = 0.5f;  // 丢弃率 [0.0, 1.0)
 };
 
+/** @brief 梯度裁剪参数（RANGE_CHECK_NAN 使用） */
+struct GradClipParams {
+    float max_abs = -1.0f;  // <=0 表示不裁剪（兼容默认 monostate 行为）
+
+    bool operator==(const GradClipParams& o) const noexcept {
+        return max_abs == o.max_abs;
+    }
+    bool operator!=(const GradClipParams& o) const noexcept {
+        return !(*this == o);
+    }
+};
+
 /** @brief Bottleneck 融合参数
  *
  * 对应ResNet Bottleneck结构（1x1 -> 3x3 -> 1x1）
@@ -371,7 +383,8 @@ struct OpParams {
         CBRParams,
         BottleneckParams,
         GapFCParams,
-        DropoutParams
+        DropoutParams,
+        GradClipParams
     > data = std::monostate{};
 
     OpParams() = default;
@@ -390,6 +403,7 @@ struct OpParams {
     explicit OpParams(GapFCParams p)      : data(std::move(p)) {}
     explicit OpParams(FlattenParams p)    : data(std::move(p)) {}
     explicit OpParams(DropoutParams p)    : data(std::move(p)) {}
+    explicit OpParams(GradClipParams p)   : data(std::move(p)) {}
 
     bool is_empty() const { return std::holds_alternative<std::monostate>(data); }
 
@@ -408,6 +422,13 @@ struct OpParams {
     const BottleneckParams& bottleneck() const { return std::get<BottleneckParams>(data); }
     const GapFCParams& gap_fc() const    { return std::get<GapFCParams>(data); }
     const DropoutParams& dropout() const  { return std::get<DropoutParams>(data); }
+
+    bool has_grad_clip() const {
+        return std::holds_alternative<GradClipParams>(data);
+    }
+    const GradClipParams& grad_clip() const {
+        return std::get<GradClipParams>(data);
+    }
 };
 
 // Utility functions

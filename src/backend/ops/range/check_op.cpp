@@ -21,6 +21,7 @@
 #ifdef TR_USE_CUDA
 namespace tr {
 void launch_check_nan_cuda_impl(int32_t* has_nan_ptr, const float* data, size_t n, cudaStream_t s);
+void launch_check_nan_and_clip_cuda_impl(int32_t* has_nan_ptr, float* data, size_t n, float clip_val, cudaStream_t s);
 }
 #endif
 
@@ -66,10 +67,22 @@ static void launch_range_check_nan_cuda(
         static_cast<Region>(node.input_ranges[0].start_region_id),
         static_cast<Region>(node.input_ranges[0].end_region_id));
     if (sz > 0) {
-        const float* data = static_cast<const float*>(
+        float clip_max_abs = -1.0f;
+        if (node.params.has_grad_clip()) {
+            clip_max_abs = node.params.grad_clip().max_abs;
+        }
+
+        float* data = static_cast<float*>(
             ArenaKeeper::instance().ptr_at(ctx.rank_for_context(), off));
         size_t elements = sz / sizeof(float);
-        launch_check_nan_cuda_impl(has_nan_ptr, data, elements, s);
+
+        if (clip_max_abs > 0.0f) {
+            launch_check_nan_and_clip_cuda_impl(
+                has_nan_ptr, data, elements, clip_max_abs, s);
+        } else {
+            launch_check_nan_cuda_impl(
+                has_nan_ptr, data, elements, s);
+        }
     }
 
     cudaEventRecord(state.streams[si].last_done_event, s);
@@ -104,14 +117,36 @@ static void launch_range_check_nan_cpu(CpuOpContext* op_ctx) {
     uint64_t off = op_ctx->input_ranges[0].offset;
     uint64_t sz  = op_ctx->input_ranges[0].size;
     if (sz > 0) {
-        const float* data = static_cast<const float*>(
+        // 从 CpuOpContext 读取裁剪参数（capture_cpu.cpp 已从 node.params 拷贝）
+        float clip_max_abs = -1.0f;
+        if (op_ctx->params.has_grad_clip()) {
+            clip_max_abs = op_ctx->params.grad_clip().max_abs;
+        }
+
+        float* data = static_cast<float*>(
             ArenaKeeper::instance().ptr_at(ctx.rank_for_context(), off));
         size_t elements = sz / sizeof(float);
 
-        for (size_t j = 0; j < elements; ++j) {
-            if (std::isnan(data[j]) || std::isinf(data[j])) {
-                *nan_ptr = 1;
-                break;
+        if (clip_max_abs > 0.0f) {
+            // 检查 + 裁剪：必须遍历全部元素以完成裁剪
+            for (size_t j = 0; j < elements; ++j) {
+                float val = data[j];
+                if (std::isnan(val)) {
+                    *nan_ptr = 1;
+                } else {
+                    float clipped = fminf(fmaxf(val, -clip_max_abs), clip_max_abs);
+                    if (clipped != val) {
+                        data[j] = clipped;
+                    }
+                }
+            }
+        } else {
+            // 纯检查模式（当前实现，完全不变）
+            for (size_t j = 0; j < elements; ++j) {
+                if (std::isnan(data[j]) || std::isinf(data[j])) {
+                    *nan_ptr = 1;
+                    break;
+                }
             }
         }
     }

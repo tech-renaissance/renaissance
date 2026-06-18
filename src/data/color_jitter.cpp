@@ -15,7 +15,376 @@
 #include <algorithm>
 #include <cstring>
 
+#if defined(__AVX2__)
+#include <immintrin.h>
+#endif
+
 namespace tr {
+
+// =============================================================================
+// AVX2 优化: 公共 helper 与 static 函数
+// =============================================================================
+
+#if defined(__AVX2__)
+
+// 小图走标量，避免 SIMD 启动开销
+static constexpr int kMinPixelsForSimd = 64;
+
+// ---------------------------------------------------------------------------
+// 量化：与当前 std::round(clamp(v, 0, 255)) 对正值等价
+// ---------------------------------------------------------------------------
+static inline __m256 quantize_round_ps(__m256 v) {
+    const __m256 zero = _mm256_setzero_ps();
+    const __m256 maxv = _mm256_set1_ps(255.0f);
+    const __m256 half = _mm256_set1_ps(0.5f);
+    v = _mm256_min_ps(_mm256_max_ps(v, zero), maxv);
+    return _mm256_floor_ps(_mm256_add_ps(v, half));
+}
+
+// ---------------------------------------------------------------------------
+// 水平求和：__m256 -> float
+// ---------------------------------------------------------------------------
+static inline float hsum256_ps(__m256 v) {
+    __m128 lo = _mm256_castps256_ps128(v);
+    __m128 hi = _mm256_extractf128_ps(v, 1);
+    __m128 s  = _mm_add_ps(lo, hi);
+    s = _mm_hadd_ps(s, s);
+    s = _mm_hadd_ps(s, s);
+    return _mm_cvtss_f32(s);
+}
+
+// ---------------------------------------------------------------------------
+// 安全加载 8 像素（24 字节），解交织为 3 个 __m256i（每个 8 x int32）
+// 调用方必须保证 [p, p+24) 在当前行内
+// ---------------------------------------------------------------------------
+static inline void load_rgb_8(const uint8_t* p, __m256i& r, __m256i& g, __m256i& b) {
+    __m128i v0 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(p));      // bytes 0..15
+    __m128i v1 = _mm_loadl_epi64(reinterpret_cast<const __m128i*>(p + 16)); // bytes 16..23
+    __m256i src = _mm256_inserti128_si256(_mm256_castsi128_si256(v0), v1, 1);
+
+    // R: lane0 0,3,6,9,12,15 ; lane1 2,5
+    const __m256i rmask = _mm256_setr_epi8(
+        0, 3, 6, 9, 12, 15, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+        2, 5, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
+    __m256i rs = _mm256_shuffle_epi8(src, rmask);
+    __m128i rs_lo = _mm256_castsi256_si128(rs);
+    __m128i rs_hi = _mm256_extracti128_si256(rs, 1);
+    __m256i r0_5 = _mm256_cvtepu8_epi32(rs_lo);        // [R0..R3 | R4,R5,0,0]
+    __m256i r6_7 = _mm256_cvtepu8_epi32(rs_hi);        // [R6,R7,0,0 | 0,0,0,0]
+    __m128i r_upper = _mm_unpacklo_epi64(
+        _mm256_extracti128_si256(r0_5, 1),
+        _mm256_castsi256_si128(r6_7));                 // [R4,R5,R6,R7]
+    r = _mm256_inserti128_si256(r0_5, r_upper, 1);     // [R0..R3 | R4..R7]
+
+    // G: lane0 1,4,7,10,13 ; lane1 0,3,6
+    const __m256i gmask = _mm256_setr_epi8(
+        1, 4, 7, 10, 13, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+        0, 3, 6, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
+    __m256i gs = _mm256_shuffle_epi8(src, gmask);
+    __m128i gs_lo = _mm256_castsi256_si128(gs);
+    __m128i gs_hi = _mm256_extracti128_si256(gs, 1);
+    __m256i g0_4 = _mm256_cvtepu8_epi32(gs_lo);        // [G0..G3 | G4,0,0,0]
+    __m256i g5_7 = _mm256_cvtepu8_epi32(gs_hi);        // [G5,G6,G7,0 | 0,0,0,0]
+    __m128i g4_only = _mm_shuffle_epi8(
+        _mm256_extracti128_si256(g0_4, 1),
+        _mm_setr_epi8(0, -1, -1, -1, -1, -1, -1, -1,
+                      -1, -1, -1, -1, -1, -1, -1, -1));
+    __m128i g_upper = _mm_or_si128(
+        g4_only,
+        _mm_slli_si128(_mm256_castsi256_si128(g5_7), 4)); // [G4,G5,G6,G7]
+    g = _mm256_inserti128_si256(g0_4, g_upper, 1);
+
+    // B: lane0 2,5,8,11,14 ; lane1 1,4,7
+    const __m256i bmask = _mm256_setr_epi8(
+        2, 5, 8, 11, 14, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
+        1, 4, 7, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
+    __m256i bs = _mm256_shuffle_epi8(src, bmask);
+    __m128i bs_lo = _mm256_castsi256_si128(bs);
+    __m128i bs_hi = _mm256_extracti128_si256(bs, 1);
+    __m256i b0_4 = _mm256_cvtepu8_epi32(bs_lo);        // [B0..B3 | B4,0,0,0]
+    __m256i b5_7 = _mm256_cvtepu8_epi32(bs_hi);        // [B5,B6,B7,0 | 0,0,0,0]
+    __m128i b4_only = _mm_shuffle_epi8(
+        _mm256_extracti128_si256(b0_4, 1),
+        _mm_setr_epi8(0, -1, -1, -1, -1, -1, -1, -1,
+                      -1, -1, -1, -1, -1, -1, -1, -1));
+    __m128i b_upper = _mm_or_si128(
+        b4_only,
+        _mm_slli_si128(_mm256_castsi256_si128(b5_7), 4)); // [B4,B5,B6,B7]
+    b = _mm256_inserti128_si256(b0_4, b_upper, 1);
+}
+
+// ---------------------------------------------------------------------------
+// 把 3 个 8 元素 int32 通道向量打包成交错 RGB，精确写入 24 字节
+// 调用方保证 [p, p+24) 可写
+// ---------------------------------------------------------------------------
+static inline void store_rgb_8(uint8_t* p, __m256i r, __m256i g, __m256i b) {
+    // int32 -> uint8
+    __m128i r_u8 = _mm_packus_epi16(
+        _mm_packus_epi32(_mm256_castsi256_si128(r), _mm256_extracti128_si256(r, 1)),
+        _mm_setzero_si128());
+    __m128i g_u8 = _mm_packus_epi16(
+        _mm_packus_epi32(_mm256_castsi256_si128(g), _mm256_extracti128_si256(g, 1)),
+        _mm_setzero_si128());
+    __m128i b_u8 = _mm_packus_epi16(
+        _mm_packus_epi32(_mm256_castsi256_si128(b), _mm256_extracti128_si256(b, 1)),
+        _mm_setzero_si128());
+
+    // pixels 0..3
+    __m128i rg_lo = _mm_unpacklo_epi8(r_u8, g_u8);
+    __m128i b0_z = _mm_unpacklo_epi8(b_u8, _mm_setzero_si128());
+    __m128i rgb0_16 = _mm_unpacklo_epi16(rg_lo, b0_z);
+    const __m128i shuf = _mm_setr_epi8(
+        0, 1, 2, 4, 5, 6, 8, 9, 10, 12, 13, 14, -1, -1, -1, -1);
+    __m128i out0 = _mm_shuffle_epi8(rgb0_16, shuf);
+
+    // pixels 4..7
+    __m128i r_hi = _mm_srli_si128(r_u8, 4);
+    __m128i g_hi = _mm_srli_si128(g_u8, 4);
+    __m128i b_hi = _mm_srli_si128(b_u8, 4);
+    __m128i rg_hi = _mm_unpacklo_epi8(r_hi, g_hi);
+    __m128i b1_z = _mm_unpacklo_epi8(b_hi, _mm_setzero_si128());
+    __m128i rgb1_16 = _mm_unpacklo_epi16(rg_hi, b1_z);
+    __m128i out1 = _mm_shuffle_epi8(rgb1_16, shuf);
+
+    // 精确写 24 字节，无重叠
+    _mm_storel_epi64(reinterpret_cast<__m128i*>(p), out0);
+    uint32_t mid4 = static_cast<uint32_t>(_mm_cvtsi128_si32(_mm_srli_si128(out0, 8)));
+    std::memcpy(p + 8, &mid4, 4);
+    _mm_storel_epi64(reinterpret_cast<__m128i*>(p + 12), out1);
+    uint32_t last4 = static_cast<uint32_t>(_mm_cvtsi128_si32(_mm_srli_si128(out1, 8)));
+    std::memcpy(p + 20, &last4, 4);
+}
+
+// =============================================================================
+// AVX2 版本的四个操作
+// =============================================================================
+
+// --- Brightness ---
+static void adjust_brightness_avx2(
+    const uint8_t* src, uint8_t* dst,
+    int width, int height,
+    size_t src_stride, size_t dst_stride,
+    float alpha)
+{
+    const __m256 v_alpha = _mm256_set1_ps(alpha);
+
+    for (int y = 0; y < height; ++y) {
+        const uint8_t* s_row = src + y * src_stride;
+        uint8_t* d_row = dst + y * dst_stride;
+
+        int x = 0;
+        for (; x + 11 <= width; x += 8) {
+            __m256i u8 = _mm256_loadu_si256(
+                reinterpret_cast<const __m256i*>(s_row + x * 3));
+
+            auto proc_chunk = [&](__m128i chunk) -> __m256i {
+                __m256 f = _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(chunk));
+                f = _mm256_mul_ps(f, v_alpha);
+                return _mm256_cvtps_epi32(quantize_round_ps(f));
+            };
+
+            __m256i out0 = proc_chunk(_mm256_castsi256_si128(u8));
+            __m256i out1 = proc_chunk(_mm_srli_si128(_mm256_castsi256_si128(u8), 8));
+            __m256i out2 = proc_chunk(_mm256_extracti128_si256(u8, 1));
+
+            auto pack8 = [](__m256i v) -> __m128i {
+                __m128i u16 = _mm_packus_epi32(
+                    _mm256_castsi256_si128(v),
+                    _mm256_extracti128_si256(v, 1));
+                return _mm_packus_epi16(u16, _mm_setzero_si128());
+            };
+            __m128i b0 = pack8(out0);
+            __m128i b1 = pack8(out1);
+            __m128i b2 = pack8(out2);
+
+            _mm_storel_epi64(reinterpret_cast<__m128i*>(d_row + x * 3), b0);
+            _mm_storel_epi64(reinterpret_cast<__m128i*>(d_row + x * 3 + 8), b1);
+            _mm_storel_epi64(reinterpret_cast<__m128i*>(d_row + x * 3 + 16), b2);
+        }
+
+        for (; x < width; ++x) {
+            const int idx = x * 3;
+            for (int c = 0; c < 3; ++c) {
+                float v = static_cast<float>(s_row[idx + c]) * alpha;
+                d_row[idx + c] = static_cast<uint8_t>(
+                    std::round(std::clamp(v, 0.0f, 255.0f)));
+            }
+        }
+    }
+}
+
+// --- Contrast ---
+static void adjust_contrast_blend_avx2(
+    const uint8_t* src, uint8_t* dst,
+    int width, int height,
+    size_t src_stride, size_t dst_stride,
+    float alpha, float gray_mean)
+{
+    const __m256 v_alpha = _mm256_set1_ps(alpha);
+    const __m256 v_beta  = _mm256_set1_ps((1.0f - alpha) * gray_mean);
+
+    for (int y = 0; y < height; ++y) {
+        const uint8_t* s_row = src + y * src_stride;
+        uint8_t* d_row = dst + y * dst_stride;
+
+        int x = 0;
+        for (; x + 11 <= width; x += 8) {
+            __m256i u8 = _mm256_loadu_si256(
+                reinterpret_cast<const __m256i*>(s_row + x * 3));
+
+            auto proc_chunk = [&](__m128i chunk) -> __m256i {
+                __m256 f = _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(chunk));
+                f = _mm256_fmadd_ps(f, v_alpha, v_beta);
+                return _mm256_cvtps_epi32(quantize_round_ps(f));
+            };
+
+            __m256i out0 = proc_chunk(_mm256_castsi256_si128(u8));
+            __m256i out1 = proc_chunk(_mm_srli_si128(_mm256_castsi256_si128(u8), 8));
+            __m256i out2 = proc_chunk(_mm256_extracti128_si256(u8, 1));
+
+            auto pack8 = [](__m256i v) -> __m128i {
+                __m128i u16 = _mm_packus_epi32(
+                    _mm256_castsi256_si128(v),
+                    _mm256_extracti128_si256(v, 1));
+                return _mm_packus_epi16(u16, _mm_setzero_si128());
+            };
+            __m128i b0 = pack8(out0);
+            __m128i b1 = pack8(out1);
+            __m128i b2 = pack8(out2);
+
+            _mm_storel_epi64(reinterpret_cast<__m128i*>(d_row + x * 3), b0);
+            _mm_storel_epi64(reinterpret_cast<__m128i*>(d_row + x * 3 + 8), b1);
+            _mm_storel_epi64(reinterpret_cast<__m128i*>(d_row + x * 3 + 16), b2);
+        }
+
+        for (; x < width; ++x) {
+            const int idx = x * 3;
+            for (int c = 0; c < 3; ++c) {
+                float v = (1.0f - alpha) * gray_mean +
+                          alpha * static_cast<float>(s_row[idx + c]);
+                d_row[idx + c] = static_cast<uint8_t>(
+                    std::round(std::clamp(v, 0.0f, 255.0f)));
+            }
+        }
+    }
+}
+
+// --- Saturation ---
+static void adjust_saturation_avx2(
+    const uint8_t* src, uint8_t* dst,
+    int width, int height,
+    size_t src_stride, size_t dst_stride,
+    float alpha)
+{
+    constexpr float R_COEF = 0.2989f;
+    constexpr float G_COEF = 0.5870f;
+    constexpr float B_COEF = 0.1140f;
+
+    const __m256 v_alpha     = _mm256_set1_ps(alpha);
+    const __m256 v_one_alpha = _mm256_set1_ps(1.0f - alpha);
+    const __m256 v_r_coef    = _mm256_set1_ps(R_COEF);
+    const __m256 v_g_coef    = _mm256_set1_ps(G_COEF);
+    const __m256 v_b_coef    = _mm256_set1_ps(B_COEF);
+
+    for (int y = 0; y < height; ++y) {
+        const uint8_t* s_row = src + y * src_stride;
+        uint8_t* d_row = dst + y * dst_stride;
+
+        int x = 0;
+        for (; x + 8 <= width; x += 8) {
+            __m256i r_i, g_i, b_i;
+            load_rgb_8(s_row + x * 3, r_i, g_i, b_i);
+
+            __m256 r = _mm256_cvtepi32_ps(r_i);
+            __m256 g = _mm256_cvtepi32_ps(g_i);
+            __m256 b = _mm256_cvtepi32_ps(b_i);
+
+            __m256 gray = _mm256_mul_ps(r, v_r_coef);
+            gray = _mm256_fmadd_ps(g, v_g_coef, gray);
+            gray = _mm256_fmadd_ps(b, v_b_coef, gray);
+
+            auto blend = [&](__m256 c) -> __m256i {
+                __m256 v = _mm256_fmadd_ps(c, v_alpha, _mm256_mul_ps(gray, v_one_alpha));
+                return _mm256_cvtps_epi32(quantize_round_ps(v));
+            };
+
+            store_rgb_8(d_row + x * 3,
+                        blend(r), blend(g), blend(b));
+        }
+
+        for (; x < width; ++x) {
+            const int idx = x * 3;
+            uint8_t r_u = s_row[idx];
+            uint8_t g_u = s_row[idx + 1];
+            uint8_t b_u = s_row[idx + 2];
+            float gray = R_COEF * r_u + G_COEF * g_u + B_COEF * b_u;
+
+            float out_r = (1.0f - alpha) * gray + alpha * r_u;
+            float out_g = (1.0f - alpha) * gray + alpha * g_u;
+            float out_b = (1.0f - alpha) * gray + alpha * b_u;
+
+            d_row[idx]     = static_cast<uint8_t>(std::round(std::clamp(out_r, 0.0f, 255.0f)));
+            d_row[idx + 1] = static_cast<uint8_t>(std::round(std::clamp(out_g, 0.0f, 255.0f)));
+            d_row[idx + 2] = static_cast<uint8_t>(std::round(std::clamp(out_b, 0.0f, 255.0f)));
+        }
+    }
+}
+
+// --- 灰度均值 ---
+static float compute_gray_mean_avx2(
+    const uint8_t* src,
+    int width, int height,
+    size_t src_stride)
+{
+    constexpr float R = 0.2989f;
+    constexpr float G = 0.5870f;
+    constexpr float B = 0.1140f;
+
+    const __m256 coef0 = _mm256_setr_ps(R, G, B, R, G, B, R, G);
+    const __m256 coef1 = _mm256_setr_ps(B, R, G, B, R, G, B, R);
+    const __m256 coef2 = _mm256_setr_ps(G, B, R, G, B, R, G, B);
+
+    __m256 sum_vec = _mm256_setzero_ps();
+    double sum_scalar = 0.0;
+    int64_t total_pixels = 0;
+
+    for (int y = 0; y < height; ++y) {
+        const uint8_t* s_row = src + y * src_stride;
+        int x = 0;
+
+        for (; x + 11 <= width; x += 8) {
+            __m256i u8 = _mm256_loadu_si256(
+                reinterpret_cast<const __m256i*>(s_row + x * 3));
+
+            __m256 f0 = _mm256_cvtepi32_ps(
+                _mm256_cvtepu8_epi32(_mm256_castsi256_si128(u8)));
+            sum_vec = _mm256_fmadd_ps(f0, coef0, sum_vec);
+
+            __m256 f1 = _mm256_cvtepi32_ps(
+                _mm256_cvtepu8_epi32(
+                    _mm_srli_si128(_mm256_castsi256_si128(u8), 8)));
+            sum_vec = _mm256_fmadd_ps(f1, coef1, sum_vec);
+
+            __m256 f2 = _mm256_cvtepi32_ps(
+                _mm256_cvtepu8_epi32(
+                    _mm256_extracti128_si256(u8, 1)));
+            sum_vec = _mm256_fmadd_ps(f2, coef2, sum_vec);
+
+            total_pixels += 8;
+        }
+
+        for (; x < width; ++x) {
+            const int idx = x * 3;
+            sum_scalar += R * s_row[idx] + G * s_row[idx + 1] + B * s_row[idx + 2];
+            ++total_pixels;
+        }
+    }
+
+    float sum = hsum256_ps(sum_vec) + static_cast<float>(sum_scalar);
+    return total_pixels > 0 ? sum / static_cast<float>(total_pixels) : 128.0f;
+}
+
+#endif // __AVX2__
 
 // =============================================================================
 // 构造函数
@@ -226,6 +595,13 @@ void ColorJitter::adjust_brightness(
     size_t dst_stride,
     float alpha
 ) const {
+#if defined(__AVX2__)
+    if (width * height >= kMinPixelsForSimd) {
+        adjust_brightness_avx2(src, dst, width, height,
+                               src_stride, dst_stride, alpha);
+        return;
+    }
+#endif
     // I_out = I_in * alpha
     for (int y = 0; y < height; ++y) {
         const uint8_t* src_row = src + y * src_stride;
@@ -249,11 +625,18 @@ void ColorJitter::adjust_contrast(
     size_t dst_stride,
     float alpha
 ) const {
-    // I_out = (1-alpha) * Mean + alpha * I_in
+    // I_out = (1-alpha) * Mean + alpha * I_in  [CEU1] 全分辨率精确灰度均值
 
-    // V2.0优化：使用降采样快速计算灰度均值
+    // 计算全图灰度均值
     float gray_mean = compute_gray_mean_fast(src, width, height, src_stride);
 
+#if defined(__AVX2__)
+    if (width * height >= kMinPixelsForSimd) {
+        adjust_contrast_blend_avx2(src, dst, width, height,
+                                   src_stride, dst_stride, alpha, gray_mean);
+        return;
+    }
+#endif
     // 应用对比度调整
     for (int y = 0; y < height; ++y) {
         const uint8_t* src_row = src + y * src_stride;
@@ -280,8 +663,15 @@ void ColorJitter::adjust_saturation(
     size_t dst_stride,
     float alpha
 ) const {
+#if defined(__AVX2__)
+    if (width * height >= kMinPixelsForSimd) {
+        adjust_saturation_avx2(src, dst, width, height,
+                               src_stride, dst_stride, alpha);
+        return;
+    }
+#endif
     // I_out = (1-alpha) * Gray + alpha * I_in
-    // Gray = 0.299*R + 0.587*G + 0.114*B
+    // Gray = 0.2989*R + 0.5870*G + 0.1140*B  [CEU1] 对齐 PyTorch rgb_to_grayscale
 
     for (int y = 0; y < height; ++y) {
         const uint8_t* src_row = src + y * src_stride;
@@ -293,7 +683,7 @@ void ColorJitter::adjust_saturation(
             uint8_t b = src_row[x * 3 + 2];
 
             // 计算灰度值
-            float gray = 0.299f * r + 0.587f * g + 0.114f * b;
+            float gray = 0.2989f * r + 0.5870f * g + 0.1140f * b;
 
             // 混合灰度和原色
             float out_r = (1.0f - alpha) * gray + alpha * r;
@@ -316,39 +706,39 @@ void ColorJitter::adjust_hue(
     size_t dst_stride,
     float hue_delta
 ) const {
-    // V2.0优化：使用RGB矩阵旋转代替HSV转换
-    adjust_hue_matrix(src, dst, width, height, src_stride, dst_stride, hue_delta);
+    // [CEU1] 真正的 HSV 色相旋转，与 PyTorch 语义一致
+    for (int y = 0; y < height; ++y) {
+        const uint8_t* src_row = src + y * src_stride;
+        uint8_t* dst_row = dst + y * dst_stride;
+
+        for (int x = 0; x < width; ++x) {
+            const int idx = x * 3;
+            const uint8_t r = src_row[idx];
+            const uint8_t g = src_row[idx + 1];
+            const uint8_t b = src_row[idx + 2];
+
+            // 灰度像素快速路径：hue旋转无效果，直接拷贝
+            if (r == g && g == b) {
+                dst_row[idx]     = r;
+                dst_row[idx + 1] = g;
+                dst_row[idx + 2] = b;
+                continue;
+            }
+
+            float h, s, v;
+            rgb_to_hsv(r, g, b, h, s, v);
+
+            h += hue_delta;
+            h -= std::floor(h);   // 等价于 PyTorch 的 (h + hue_factor) % 1.0
+
+            hsv_to_rgb(h, s, v, dst_row[idx], dst_row[idx + 1], dst_row[idx + 2]);
+        }
+    }
 }
 
 // =============================================================================
 // 辅助函数
 // =============================================================================
-
-void ColorJitter::compute_gray_mean(
-    const uint8_t* src,
-    int width,
-    int height,
-    size_t src_stride,
-    float& mean_r,
-    float& mean_g,
-    float& mean_b
-) const {
-    // 计算每个通道的均值
-    double sum_r = 0.0, sum_g = 0.0, sum_b = 0.0;
-
-    for (int y = 0; y < height; ++y) {
-        const uint8_t* src_row = src + y * src_stride;
-        for (int x = 0; x < width; ++x) {
-            sum_r += src_row[x * 3];
-            sum_g += src_row[x * 3 + 1];
-            sum_b += src_row[x * 3 + 2];
-        }
-    }
-
-    mean_r = static_cast<float>(sum_r / (width * height));
-    mean_g = static_cast<float>(sum_g / (width * height));
-    mean_b = static_cast<float>(sum_b / (width * height));
-}
 
 void ColorJitter::rgb_to_hsv(
     uint8_t r, uint8_t g, uint8_t b,
@@ -483,34 +873,30 @@ float ColorJitter::compute_gray_mean_fast(
     int height,
     size_t src_stride
 ) const {
-    // V2.0优化：降采样计算均值（大幅减少迭代次数）
-    // step_y = height/64, step_x = 4
-    // 对224×224图像：从50176次减少到约49次，减少约1000倍
+#if defined(__AVX2__)
+    if (width * height >= kMinPixelsForSimd) {
+        return compute_gray_mean_avx2(src, width, height, src_stride);
+    }
+#endif
+    // [CEU1] 全分辨率精确灰度均值，与 PyTorch rgb_to_grayscale 对齐
+    constexpr float R_COEF = 0.2989f;
+    constexpr float G_COEF = 0.5870f;
+    constexpr float B_COEF = 0.1140f;
 
-    // 灰度系数（Q8格式）
-    constexpr int R_COEF = 77;   // 0.299 * 256
-    constexpr int G_COEF = 150;  // 0.587 * 256
-    constexpr int B_COEF = 29;   // 0.114 * 256
+    double sum = 0.0;
+    const int64_t n = static_cast<int64_t>(width) * height;
 
-    uint64_t sum = 0;
-    int count = 0;
-
-    // 计算采样步长
-    const int step_y = std::max(1, height / 64);
-    const int step_x = 4;
-
-    for (int y = 0; y < height; y += step_y) {
+    for (int y = 0; y < height; ++y) {
         const uint8_t* row = src + y * src_stride;
-        for (int x = 0; x < width; x += step_x) {
+        for (int x = 0; x < width; ++x) {
             const int idx = x * 3;
-            sum += static_cast<uint64_t>(R_COEF) * row[idx] +
-                   static_cast<uint64_t>(G_COEF) * row[idx + 1] +
-                   static_cast<uint64_t>(B_COEF) * row[idx + 2];
-            ++count;
+            sum += R_COEF * row[idx] +
+                   G_COEF * row[idx + 1] +
+                   B_COEF * row[idx + 2];
         }
     }
 
-    return count > 0 ? static_cast<float>(sum) / (256.0f * count) : 128.0f;
+    return n > 0 ? static_cast<float>(sum / n) : 128.0f;
 }
 
 void ColorJitter::adjust_hue_matrix(
@@ -522,7 +908,8 @@ void ColorJitter::adjust_hue_matrix(
     size_t dst_stride,
     float hue_delta
 ) const {
-    // V2.0优化：使用RGB空间旋转矩阵调整色调（完全避免HSV转换）
+    // [CEU1] 保留供参考：RGB空间旋转矩阵调整色调（非默认路径）
+    // adjust_hue() 已改为真正的 HSV 色相旋转，与此函数不可混用
     // 参考：http://www.graficaobscura.com/matrix/index.html
     // 使用Rodrigues旋转公式绕灰度轴(1,1,1)/sqrt(3)旋转
 

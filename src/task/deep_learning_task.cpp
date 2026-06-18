@@ -255,6 +255,14 @@ DeepLearningTask& DeepLearningTask::sema_decay(float decay) {
     return *this;
 }
 
+DeepLearningTask& DeepLearningTask::grad_clip(float max_abs) {
+    TR_CHECK(phase_ == Phase::PLANNING, ValueError,
+             "Cannot set grad_clip after memory planning");
+    grad_clip_max_abs_ = max_abs;
+    GlobalRegistry::instance().set_grad_clip_max_abs(max_abs);
+    return *this;
+}
+
 DeepLearningTask& DeepLearningTask::freeze_first_layer_after(int epoch) {
     TR_CHECK(phase_ == Phase::PLANNING, ValueError,
              "Cannot set freeze_first_layer after memory planning");
@@ -1268,7 +1276,7 @@ float DeepLearningTask::run_train_epoch_gpu() {
                     if (n_accum) cudaGraphLaunch(n_accum, s_up);
                     sync_up();
 
-                    if (using_amp && n_ncg) { cudaGraphLaunch(n_ncg, s_up); sync_up(); }
+                    if (n_ncg) { cudaGraphLaunch(n_ncg, s_up); sync_up(); }
 
                     if (n_sc) cudaGraphLaunch(n_sc, s_up);
                     sync_up();
@@ -1323,7 +1331,7 @@ float DeepLearningTask::run_train_epoch_gpu() {
                     if (l_accum_tl) cudaGraphLaunch(l_accum_tl, s_up);
                     sync_up();
 
-                    if (using_amp && n_ncg) { cudaGraphLaunch(n_ncg, s_up); sync_up(); }
+                    if (n_ncg) { cudaGraphLaunch(n_ncg, s_up); sync_up(); }
 
                     if (n_sc) cudaGraphLaunch(n_sc, s_up);
                     sync_up();
@@ -1569,6 +1577,7 @@ float DeepLearningTask::run_train_epoch_cpu() {
     int32_t idx_opt    = idx_for(GraphId::OPTIMIZER, 0);
     int32_t idx_sc     = idx_for(GraphId::STATS_COMM, 0);
     int32_t idx_clear  = idx_for(GraphId::CLEAR_METRICS, 0);
+    int32_t idx_ncg    = idx_for(GraphId::NAN_CHECK_AND_GRAD_SCALING, 0);
 
     int32_t idx_lars_fc  = idx_for(GraphId::LARS_FC_OPT, 0);
     int32_t idx_lars_fc2 = idx_for(GraphId::LARS_FIRST_CONV_OPT, 0);
@@ -1615,6 +1624,7 @@ float DeepLearningTask::run_train_epoch_cpu() {
 
         *static_cast<float*>(lr_ptr) = fetch_lr_for_batch(0);
         launch(idx_far);
+        if (idx_ncg >= 0) { launch(idx_ncg); }
         launch(idx_sc);
         launch(idx_opt);
         launch(idx_lars_fc);
@@ -1658,6 +1668,7 @@ float DeepLearningTask::run_train_epoch_cpu() {
             *static_cast<float*>(lr_ptr) = fetch_lr_for_batch(batch);
         }
         launch(idx_far);
+        if (idx_ncg >= 0) { launch(idx_ncg); }
         launch(idx_sc);
         launch(idx_opt);
         launch(idx_lars_fc);
@@ -1687,6 +1698,7 @@ float DeepLearningTask::run_train_epoch_cpu() {
             *static_cast<float*>(lr_ptr) = fetch_lr_for_batch(batches - 1);
         }
         launch(idx_far);
+        if (idx_ncg >= 0) { launch(idx_ncg); }
         launch(idx_sc);
         launch(idx_opt);
         launch(idx_lars_fc);

@@ -247,35 +247,14 @@ private:
     ) const;
 
     /**
-     * @brief 计算图像的灰度均值（用于对比度调整）
+     * @brief 全分辨率精确计算灰度均值（用于对比度调整）
      * @param src 源图像数据
      * @param width 图像宽度
      * @param height 图像高度
      * @param src_stride 源stride（字节）
-     * @param mean_r [输出] 红色通道均值
-     * @param mean_g [输出] 绿色通道均值
-     * @param mean_b [输出] 蓝色通道均值
-     */
-    void compute_gray_mean(
-        const uint8_t* src,
-        int width,
-        int height,
-        size_t src_stride,
-        float& mean_r,
-        float& mean_g,
-        float& mean_b
-    ) const;
-
-    /**
-     * @brief 使用降采样快速计算灰度均值（用于对比度调整）
-     * @param src 源图像数据
-     * @param width 图像宽度
-     * @param height 图像高度
-     * @param src_stride 源stride（字节）
-     * @return 灰度均值（单值，使用标准灰度系数）
+     * @return 灰度均值（单值，使用标准灰度系数 0.2989/0.5870/0.1140）
      *
-     * V2.0优化：通过降采样大幅减少迭代次数（height/32 × width/32）
-     * 对224×224图像从50176次减少到约49次，减少约1000倍
+     * [CEU1] 已改为全分辨率精确计算，与 PyTorch rgb_to_grayscale 对齐
      */
     float compute_gray_mean_fast(
         const uint8_t* src,
@@ -294,8 +273,8 @@ private:
      * @param dst_stride 目标stride（字节）
      * @param hue_delta 色调偏移（范围[-0.5, 0.5]）
      *
-     * V2.0优化：使用3×3旋转矩阵在RGB空间直接旋转色调
-     * 完全避免RGB↔HSV转换，性能提升10-20倍
+     * [CEU1] 保留供参考，非默认路径。adjust_hue() 已改为真正的 HSV 色相旋转。
+     * 使用3×3旋转矩阵在RGB空间绕灰度轴(1,1,1)/√3旋转，保持R+G+B不变。
      */
     void adjust_hue_matrix(
         const uint8_t* src,

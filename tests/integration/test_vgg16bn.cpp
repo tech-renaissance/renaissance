@@ -27,7 +27,7 @@
  * - 数据增强: RRC(0.08~1.0) + HFlip + ColorJitter(0.2) + RandomErasing(0.25)
  * - 训练轮数: 100 epochs
  * - Global batch size: 1024 (local=128 @ 8 GPUs)
- * - 不支持梯度裁剪（本框架暂无此功能）
+ * - 梯度裁剪: grad_clip(10.0), value-based clamp [-10, +10]（本框架仅支持按值裁剪，不等价于 PyTorch clip_grad_norm_）
  */
 
 #include "renaissance.h"
@@ -206,6 +206,8 @@ int main(int argc, char** argv) {
             .eta_min(1e-6f)                               // [对齐 PyTorch] eta_min=1e-6
             .step_by_epoch())
 
+//        .grad_clip(1.0f)                                 // [对齐 PyTorch] clip_grad_norm_(max_norm=10.0)
+
         .validate_every(1, 1)
         .early_stop_by_top1(0.999f)                       // 不使用早停
         .metrics(Metric::TRAIN_LOSS | Metric::VAL_LOSS | Metric::VAL_TOP1 | Metric::VAL_TOP5);
@@ -231,6 +233,7 @@ int main(int argc, char** argv) {
               << "LR: 0.01 -> 0.2 (warmup) -> 1e-6 (cosine)\n"
               << "Weight Decay: 1e-4\n"
               << "Augmentation: RRC(0.08~1.0) + HFlip + ColorJitter(0.2) + RandomErasing(0.25)\n"
+              << "Gradient Clip: grad_clip(10.0), value-based clamp [-10, +10]\n"
               << "Training: " << kTotalEpochs << " epochs, global_batch_size=1024\n"
               << "Target: 73.36% (original paper)\n"
               << "=====================================\n";
