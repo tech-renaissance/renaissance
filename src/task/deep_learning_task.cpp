@@ -1483,29 +1483,41 @@ float DeepLearningTask::run_train_epoch_cpu() {
     void* last_bs_ptr   = bl.last_train_batch_size >= 0 ? ctx.ptr_at(bl.last_train_batch_size) : nullptr;
     bool frozen = is_first_layer_frozen();
 
-    if (idx_clear >= 0) launch(idx_clear);
-
     ts->wait_buffer_readable(0);
     launch(idx_xfer_a);
     ts->set_buffer_readable(0, false);
     ts->set_buffer_writeable(0, true);
 
+    if (idx_clear >= 0) launch(idx_clear);
+
     if (batches == 1) {
+        // --- zg + fwd ---
         launch(idx_zg);
         launch(idx_fwd_a_nb);
+
+        // --- deep ---
+        // 注意：CPU 必须保留 loss memset！CPU 的 softmax_ce_fwd_inner 使用 *loss += 逐样本
+        // 累加，内核不负责清零。若删掉，上一 batch 的 loss 残留会导致数值错误。GPU 可删是因为
+        // GPU 用 loss_partial 中间缓冲 + reduction 直接写入（=），CPU 没有这层间接。
         if (loss_ptr) std::memset(loss_ptr, 0, sizeof(float));
         launch(idx_deep_nb);
+
+        // --- first_bwd + dar ---
         if (!frozen) launch(idx_bwd_a_nb);
         launch(idx_dar);
 
+        // --- lr ---
+        *static_cast<float*>(lr_ptr) = fetch_lr_for_batch(0);
+
+        // --- far + accum + ncg + sc（accum 移到 far 之后）---
         if (local_bs_ptr) *static_cast<int32_t*>(local_bs_ptr) = registry.get_local_batch_size();
+        launch(idx_far);
         int32_t idx_accum_nb = idx_for(GraphId::ACCUM_METRICS, v_base);
         if (idx_accum_nb >= 0) launch(idx_accum_nb);
-
-        *static_cast<float*>(lr_ptr) = fetch_lr_for_batch(0);
-        launch(idx_far);
         if (idx_ncg >= 0) { launch(idx_ncg); }
         launch(idx_sc);
+
+        // --- opt + lars ---
         launch(idx_opt);
         launch(idx_lars_fc);
         launch(idx_lars_fc2);
@@ -1525,31 +1537,42 @@ float DeepLearningTask::run_train_epoch_cpu() {
         bool from_a  = (batch % 2 == 0);
         int next_buf = from_a ? 1 : 0;
 
+        // --- zg + fwd, 然后 wait + xfer（与 GPU 阶段1-2 对齐）---
         launch(idx_zg);
         launch(from_a ? idx_fwd_a_nb : idx_fwd_b_nb);
 
         ts->wait_buffer_readable(next_buf);
 
+        // --- xfer + deep（与 GPU 阶段3-4 对齐：GPU 顺序为 wait → xfer → deep）---
+        // 注意：CPU 必须保留 loss memset！CPU 的 softmax_ce_fwd_inner 使用 *loss += 逐样本
+        // 累加，内核不负责清零。若删掉，上一 batch 的 loss 残留会导致数值错误。GPU 可删是因为
+        // GPU 用 loss_partial 中间缓冲 + reduction 直接写入（=），CPU 没有这层间接。
         if (loss_ptr) std::memset(loss_ptr, 0, sizeof(float));
-        launch(idx_deep_nb);
         launch(from_a ? idx_xfer_b : idx_xfer_a);
+        launch(idx_deep_nb);
 
-        ts->set_buffer_readable(next_buf, false);
-        ts->set_buffer_writeable(next_buf, true);
-
+        // --- first_bwd + dar（与 GPU 阶段6 对齐）---
         if (!frozen) launch(from_a ? idx_bwd_a_nb : idx_bwd_b_nb);
         launch(idx_dar);
 
-        if (local_bs_ptr) *static_cast<int32_t*>(local_bs_ptr) = registry.get_local_batch_size();
-        int32_t idx_accum_nb = idx_for(GraphId::ACCUM_METRICS, v_base);
-        if (idx_accum_nb >= 0) launch(idx_accum_nb);
-
+        // --- lr（与 GPU 阶段7 对齐）---
         if (is_step_by_batch_mode() || batch == 0) {
             *static_cast<float*>(lr_ptr) = fetch_lr_for_batch(batch);
         }
+
+        // --- set_buffer（与 GPU 阶段9 对齐，从 xfer 之后移至此）---
+        ts->set_buffer_readable(next_buf, false);
+        ts->set_buffer_writeable(next_buf, true);
+
+        // --- far + accum + ncg + sc（与 GPU 阶段10 对齐，accum 从 far 之前移到 far 之后）---
+        if (local_bs_ptr) *static_cast<int32_t*>(local_bs_ptr) = registry.get_local_batch_size();
         launch(idx_far);
+        int32_t idx_accum_nb = idx_for(GraphId::ACCUM_METRICS, v_base);
+        if (idx_accum_nb >= 0) launch(idx_accum_nb);
         if (idx_ncg >= 0) { launch(idx_ncg); }
         launch(idx_sc);
+
+        // --- opt + lars（与 GPU 阶段12 对齐）---
         launch(idx_opt);
         launch(idx_lars_fc);
         launch(idx_lars_fc2);
@@ -1561,25 +1584,33 @@ float DeepLearningTask::run_train_epoch_cpu() {
 
         ctx.set_memory_plan(variant_memory_plans_[v_last].get());
 
+        // --- zg + fwd ---
         launch(idx_zg);
         launch(last_a ? idx_fwd_a_lb : idx_fwd_b_lb);
 
+        // --- deep（最后 batch 无 xfer）---
+        // 注意：CPU 必须保留 loss memset！与上同理。
         if (loss_ptr) std::memset(loss_ptr, 0, sizeof(float));
         launch(idx_deep_lb);
 
+        // --- first_bwd + dar ---
         if (!frozen) launch(last_a ? idx_bwd_a_lb : idx_bwd_b_lb);
         launch(idx_dar);
 
-        if (last_bs_ptr) *static_cast<int32_t*>(last_bs_ptr) = registry.get_last_train_batch_size();
-        int32_t idx_accum_lb = idx_for(GraphId::ACCUM_METRICS_TRAIN_LAST, v_last);
-        if (idx_accum_lb >= 0) launch(idx_accum_lb);
-
+        // --- lr ---
         if (is_step_by_batch_mode() || batches == 1) {
             *static_cast<float*>(lr_ptr) = fetch_lr_for_batch(batches - 1);
         }
+
+        // --- far + accum + ncg + sc（accum 移到 far 之后）---
+        if (last_bs_ptr) *static_cast<int32_t*>(last_bs_ptr) = registry.get_last_train_batch_size();
         launch(idx_far);
+        int32_t idx_accum_lb = idx_for(GraphId::ACCUM_METRICS_TRAIN_LAST, v_last);
+        if (idx_accum_lb >= 0) launch(idx_accum_lb);
         if (idx_ncg >= 0) { launch(idx_ncg); }
         launch(idx_sc);
+
+        // --- opt + lars ---
         launch(idx_opt);
         launch(idx_lars_fc);
         launch(idx_lars_fc2);
