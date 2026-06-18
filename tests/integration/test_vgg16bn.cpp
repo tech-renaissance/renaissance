@@ -124,6 +124,7 @@ int main(int argc, char** argv) {
         .load_workers(1)
         .preprocess_workers(128)  // PyTorch的num_workers是per-RANK，但本框架是总的预处理线程数，对于8-RANK情形要乘以8
         .cpu_binding(true)
+        .fully_mode(false)        // 显式禁用fully mode
         .normalization(NormMode::IMAGENET)
 
         .train_transforms(
@@ -144,7 +145,7 @@ int main(int argc, char** argv) {
     // VGG-16 with BatchNorm
     // Input: [N, 224, 224, 3]
     BluePrint vgg16bn = seq(
-        channel_padding(),        // [N,32,32,3] -> [N,32,32,8]，本框架暂时需要先对首层通道数进行padding
+        channel_padding(),        // [N,224,224,3] -> [N,224,224,8]，本框架暂时需要先对首层通道数进行padding
 
         // Block 1: 224x224 -> 112x112
         conv(64, 3, 1, 1), bn(), relu(),            // [对齐 PyTorch] Conv2d(64,3,pad=1) + BN
@@ -206,7 +207,7 @@ int main(int argc, char** argv) {
             .eta_min(1e-6f)                               // [对齐 PyTorch] eta_min=1e-6
             .step_by_epoch())
 
-//        .grad_clip(1.0f)                                 // [对齐 PyTorch] clip_grad_norm_(max_norm=10.0)
+//        .grad_clip(1.0f)                                 // 不应该使用梯度裁剪——GPU FP32无必要，而AMP的实现存在bug，未考虑scaling factor
 
         .validate_every(1, 1)
         .early_stop_by_top1(0.999f)                       // 不使用早停
@@ -256,21 +257,5 @@ int main(int argc, char** argv) {
               << " Time per Epoch: " << elapsed / kTotalEpochs << " s\n"
               << "=====================================\n";
 
-    if (result.best_top1 >= 0.7336f) {
-        std::cout << "Target achieved: Top-1 >= 73.36% (paper target)\n";
-        std::cout << "Goal met!\n";
-    } else if (result.best_top1 >= 0.65f) {
-        std::cout << "Acceptable: Top-1 >= 65.0%\n";
-        std::cout << "Performance: Above baseline\n";
-    } else {
-        std::cout << "Needs improvement: Top-1 < 65.0%\n";
-        std::cout << "Recommendations:\n";
-        std::cout << "  1. Increase training epochs to 150+\n";
-        std::cout << "  2. Adjust weight_decay (try 5e-4)\n";
-        std::cout << "  3. Check gradient flow through BN layers\n";
-    }
-
-    std::cout << "=====================================\n";
-
-    return result.best_top1 >= 0.65f ? 0 : 1;
+    return result.best_top1 >= 0.70f ? 0 : 1;
 }
