@@ -1489,6 +1489,15 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
             continue;
         }
 
+        // 省略 Dropout 的 INF 节点：Dropout 在推理阶段是 identity copy，
+        // 让下一层直接读取 Dropout 的输入，省去一次 memcpy。
+        // 不修改张量分配，不修改训练图，不修改 Dropout 算子实现。
+        if (layer.kind == LayerKind::Dropout) {
+            LOG_DEBUG << "  Skipped Dropout inference for layer[" << l
+                      << "](" << layer.name << ") — next layer reads input directly";
+            continue;
+        }
+
         const auto& lctx = base_contexts[l];
         const auto& descs = lctx.descs;
         const auto& tensor_ids = lctx.tensor_ids;
