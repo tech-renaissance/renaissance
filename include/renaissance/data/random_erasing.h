@@ -22,14 +22,14 @@ namespace tr {
  * Core functionality:
  * - Accepts probability parameter p (probability of erasing)
  * - Does NOT perform any CPU-side processing
- * - Stores p parameter for later use by DeepLearningEngine (GPU)
- * - Actual Random Erasing algorithm is implemented on GPU side
+ * - Stores p/scale/ratio parameters for later extraction into FusedNormalization
+ * - Actual Random Erasing algorithm is implemented inside FusedNormalization::execute()
  *
  * Design principle:
  * - This is a parameter-passing-only operation
  * - execute() throws NotImplementedError (not meant to be called on CPU)
  * - Introduce_randomness() returns true (to prevent CPVS optimization)
- * - Removed from PO chain during set_train_transforms(), p registered to GlobalRegistry
+ * - Removed from PO chain during set_train_transforms(), parameters forwarded to FusedNormalization
  * - NOT allowed in validation transforms (throws error if detected)
  *
  * PyTorch reference:
