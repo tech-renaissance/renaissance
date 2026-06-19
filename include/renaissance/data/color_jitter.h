@@ -108,6 +108,8 @@ public:
         cloned->output_stride_ = output_stride_;
         cloned->compact_output_stride_ = compact_output_stride_;
         cloned->rank_first_in_the_po_chain_ = rank_first_in_the_po_chain_;
+        // temp_buffer_ 是 per-instance 运行时临时空间，不拷贝
+        cloned->temp_buffer_.clear();
         return cloned;
     }
 
@@ -135,6 +137,9 @@ private:
     float contrast_;    ///< 对比度调整幅度
     float saturation_;  ///< 饱和度调整幅度
     float hue_;         ///< 色调调整幅度
+
+    // 对象级可复用临时缓冲（execute() 是非 const 虚函数，无需 mutable）
+    std::vector<uint8_t> temp_buffer_;
 
     // 变换类型枚举
     enum TransformType {
@@ -329,6 +334,16 @@ private:
      * @return 随机数
      */
     float uniform(float min_val, float max_val, Generator* rng) const;
+
+    /**
+     * @brief 应用单个变换（用于 execute() 中的链式调用）
+     */
+    void apply_transform(
+        TransformType transform,
+        const uint8_t* src, uint8_t* dst,
+        int width, int height,
+        size_t src_stride, size_t dst_stride,
+        Generator* rng) const;
 };
 
 } // namespace tr

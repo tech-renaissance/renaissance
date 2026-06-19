@@ -69,7 +69,9 @@ protected:
 
     /**
      * @brief 计算衰减阶段的学习率
-     * @param decay_step  衰减阶段内的步数索引（从 0 开始，已扣除 warmup_steps）
+     * @param decay_step  衰减阶段内的步数索引（从 1 开始，已扣除 warmup_steps）
+     *                    注意：warmup 在 step = warmup_steps 到达峰值，
+     *                    第一个 decay step 为 warmup_steps + 1，decay_step = 1
      * @param total_decay 衰减阶段总步数（= total_steps - warmup_steps）
      * @return 该 decay_step 对应的学习率
      */
@@ -130,6 +132,7 @@ public:
     }
 
     PolynomialLR& power(float p);
+    PolynomialLR& end_lr(float end_lr);
 
 protected:
     float compute_decay_lr(int decay_step, int total_decay) const override;
@@ -137,7 +140,8 @@ protected:
     const char* name() const override { return "PolynomialLR"; }
 
 private:
-    float power_ = 2.0f;
+    float power_  = 2.0f;
+    float end_lr_ = 0.0001f;
 };
 
 // ============================================================================

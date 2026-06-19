@@ -111,20 +111,11 @@ float LRScheduler::compute_lr_at_step(int effective_step) const {
     if (effective_step < 0) effective_step = 0;
     if (effective_step >= total_steps_) effective_step = total_steps_;
 
-    if (effective_step < warmup_steps_) {
-        if (warmup_steps_ == 0) return base_lr_;
-        // 模式感知的 warmup 线性插值分母：
-        // - step_by_batch: 从 step=0 到 step=warmup_steps_-1，共 warmup_steps_-1 步
-        // - step_by_epoch: 从 epoch=0 到 epoch=warmup_epochs_-1，共 warmup_epochs_-1 个 epoch
-        int last_warmup_step;
-        if (step_by_batch_) {
-            last_warmup_step = warmup_steps_ - 1;
-        } else {
-            last_warmup_step = warmup_steps_ - steps_per_epoch_;
-        }
-        if (last_warmup_step <= 0) return base_lr_;
+    // 统一 warmup：peak 在 effective_step == warmup_steps_
+    // 分母统一为 warmup_steps_，与 TF LARS 对齐
+    if (warmup_steps_ > 0 && effective_step <= warmup_steps_) {
         float progress = static_cast<float>(effective_step)
-                       / static_cast<float>(last_warmup_step);
+                       / static_cast<float>(warmup_steps_);
         if (progress > 1.0f) progress = 1.0f;
         float start_lr = resolve_warmup_start_lr();
         return start_lr + (base_lr_ - start_lr) * progress;
@@ -153,20 +144,33 @@ PolynomialLR& PolynomialLR::power(float p) {
 void PolynomialLR::validate_config() const {
     TR_CHECK(power_ > 0.0f, ValueError,
              "PolynomialLR power must be > 0, got " << power_);
+    TR_CHECK(end_lr_ >= 0.0f, ValueError,
+             "PolynomialLR end_lr must be >= 0, got " << end_lr_);
+    TR_CHECK(end_lr_ <= base_lr_, ValueError,
+             "PolynomialLR end_lr must be <= base_lr, got " << end_lr_
+             << " with base_lr " << base_lr_);
 }
 
 float PolynomialLR::compute_decay_lr(int decay_step, int total_decay) const {
     if (total_decay <= 0) return base_lr_;
 
-    // step_by_epoch 模式下，最后一个 epoch 应精确到达终点（eta_min / 0）
-    int effective_total = step_by_batch_ ? total_decay : (total_decay - steps_per_epoch_);
+    // 分母 +1：对齐 TF polynomial_decay 的 decay_steps = train_steps - w_steps + 1
+    int effective_total = total_decay + 1;
     if (effective_total <= 0) return base_lr_;
 
     float progress = static_cast<float>(decay_step)
                    / static_cast<float>(effective_total);
     if (progress > 1.0f) progress = 1.0f;
 
-    return base_lr_ * std::pow(1.0f - progress, power_);
+    return end_lr_ + (base_lr_ - end_lr_)
+                   * std::pow(1.0f - progress, power_);
+}
+
+PolynomialLR& PolynomialLR::end_lr(float end_lr) {
+    TR_CHECK(end_lr >= 0.0f, ValueError,
+             "PolynomialLR end_lr must be >= 0, got " << end_lr);
+    end_lr_ = end_lr;
+    return *this;
 }
 
 // ============================================================================

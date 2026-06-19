@@ -31,17 +31,6 @@ namespace tr {
 static constexpr int kMinPixelsForSimd = 64;
 
 // ---------------------------------------------------------------------------
-// 量化：与当前 std::round(clamp(v, 0, 255)) 对正值等价
-// ---------------------------------------------------------------------------
-static inline __m256 quantize_round_ps(__m256 v) {
-    const __m256 zero = _mm256_setzero_ps();
-    const __m256 maxv = _mm256_set1_ps(255.0f);
-    const __m256 half = _mm256_set1_ps(0.5f);
-    v = _mm256_min_ps(_mm256_max_ps(v, zero), maxv);
-    return _mm256_floor_ps(_mm256_add_ps(v, half));
-}
-
-// ---------------------------------------------------------------------------
 // 水平求和：__m256 -> float
 // ---------------------------------------------------------------------------
 static inline float hsum256_ps(__m256 v) {
@@ -167,47 +156,37 @@ static void adjust_brightness_avx2(
     float alpha)
 {
     const __m256 v_alpha = _mm256_set1_ps(alpha);
+    const __m256 v_zero  = _mm256_setzero_ps();
+    const __m256 v_max   = _mm256_set1_ps(255.0f);
 
     for (int y = 0; y < height; ++y) {
         const uint8_t* s_row = src + y * src_stride;
         uint8_t* d_row = dst + y * dst_stride;
 
         int x = 0;
-        for (; x + 11 <= width; x += 8) {
-            __m256i u8 = _mm256_loadu_si256(
-                reinterpret_cast<const __m256i*>(s_row + x * 3));
+        for (; x + 8 <= width; x += 8) {
+            __m256i r_i, g_i, b_i;
+            load_rgb_8(s_row + x * 3, r_i, g_i, b_i);
 
-            auto proc_chunk = [&](__m128i chunk) -> __m256i {
-                __m256 f = _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(chunk));
-                f = _mm256_mul_ps(f, v_alpha);
-                return _mm256_cvtps_epi32(quantize_round_ps(f));
-            };
+            __m256 r = _mm256_mul_ps(_mm256_cvtepi32_ps(r_i), v_alpha);
+            __m256 g = _mm256_mul_ps(_mm256_cvtepi32_ps(g_i), v_alpha);
+            __m256 b = _mm256_mul_ps(_mm256_cvtepi32_ps(b_i), v_alpha);
 
-            __m256i out0 = proc_chunk(_mm256_castsi256_si128(u8));
-            __m256i out1 = proc_chunk(_mm_srli_si128(_mm256_castsi256_si128(u8), 8));
-            __m256i out2 = proc_chunk(_mm256_extracti128_si256(u8, 1));
+            __m256i r_out = _mm256_cvttps_epi32(
+                _mm256_max_ps(_mm256_min_ps(r, v_max), v_zero));
+            __m256i g_out = _mm256_cvttps_epi32(
+                _mm256_max_ps(_mm256_min_ps(g, v_max), v_zero));
+            __m256i b_out = _mm256_cvttps_epi32(
+                _mm256_max_ps(_mm256_min_ps(b, v_max), v_zero));
 
-            auto pack8 = [](__m256i v) -> __m128i {
-                __m128i u16 = _mm_packus_epi32(
-                    _mm256_castsi256_si128(v),
-                    _mm256_extracti128_si256(v, 1));
-                return _mm_packus_epi16(u16, _mm_setzero_si128());
-            };
-            __m128i b0 = pack8(out0);
-            __m128i b1 = pack8(out1);
-            __m128i b2 = pack8(out2);
-
-            _mm_storel_epi64(reinterpret_cast<__m128i*>(d_row + x * 3), b0);
-            _mm_storel_epi64(reinterpret_cast<__m128i*>(d_row + x * 3 + 8), b1);
-            _mm_storel_epi64(reinterpret_cast<__m128i*>(d_row + x * 3 + 16), b2);
+            store_rgb_8(d_row + x * 3, r_out, g_out, b_out);
         }
 
         for (; x < width; ++x) {
             const int idx = x * 3;
             for (int c = 0; c < 3; ++c) {
                 float v = static_cast<float>(s_row[idx + c]) * alpha;
-                d_row[idx + c] = static_cast<uint8_t>(
-                    std::round(std::clamp(v, 0.0f, 255.0f)));
+                d_row[idx + c] = static_cast<uint8_t>(std::clamp(v, 0.0f, 255.0f));
             }
         }
     }
@@ -222,39 +201,30 @@ static void adjust_contrast_blend_avx2(
 {
     const __m256 v_alpha = _mm256_set1_ps(alpha);
     const __m256 v_beta  = _mm256_set1_ps((1.0f - alpha) * gray_mean);
+    const __m256 v_zero  = _mm256_setzero_ps();
+    const __m256 v_max   = _mm256_set1_ps(255.0f);
 
     for (int y = 0; y < height; ++y) {
         const uint8_t* s_row = src + y * src_stride;
         uint8_t* d_row = dst + y * dst_stride;
 
         int x = 0;
-        for (; x + 11 <= width; x += 8) {
-            __m256i u8 = _mm256_loadu_si256(
-                reinterpret_cast<const __m256i*>(s_row + x * 3));
+        for (; x + 8 <= width; x += 8) {
+            __m256i r_i, g_i, b_i;
+            load_rgb_8(s_row + x * 3, r_i, g_i, b_i);
 
-            auto proc_chunk = [&](__m128i chunk) -> __m256i {
-                __m256 f = _mm256_cvtepi32_ps(_mm256_cvtepu8_epi32(chunk));
-                f = _mm256_fmadd_ps(f, v_alpha, v_beta);
-                return _mm256_cvtps_epi32(quantize_round_ps(f));
-            };
+            __m256 r = _mm256_fmadd_ps(_mm256_cvtepi32_ps(r_i), v_alpha, v_beta);
+            __m256 g = _mm256_fmadd_ps(_mm256_cvtepi32_ps(g_i), v_alpha, v_beta);
+            __m256 b = _mm256_fmadd_ps(_mm256_cvtepi32_ps(b_i), v_alpha, v_beta);
 
-            __m256i out0 = proc_chunk(_mm256_castsi256_si128(u8));
-            __m256i out1 = proc_chunk(_mm_srli_si128(_mm256_castsi256_si128(u8), 8));
-            __m256i out2 = proc_chunk(_mm256_extracti128_si256(u8, 1));
+            __m256i r_out = _mm256_cvttps_epi32(
+                _mm256_max_ps(_mm256_min_ps(r, v_max), v_zero));
+            __m256i g_out = _mm256_cvttps_epi32(
+                _mm256_max_ps(_mm256_min_ps(g, v_max), v_zero));
+            __m256i b_out = _mm256_cvttps_epi32(
+                _mm256_max_ps(_mm256_min_ps(b, v_max), v_zero));
 
-            auto pack8 = [](__m256i v) -> __m128i {
-                __m128i u16 = _mm_packus_epi32(
-                    _mm256_castsi256_si128(v),
-                    _mm256_extracti128_si256(v, 1));
-                return _mm_packus_epi16(u16, _mm_setzero_si128());
-            };
-            __m128i b0 = pack8(out0);
-            __m128i b1 = pack8(out1);
-            __m128i b2 = pack8(out2);
-
-            _mm_storel_epi64(reinterpret_cast<__m128i*>(d_row + x * 3), b0);
-            _mm_storel_epi64(reinterpret_cast<__m128i*>(d_row + x * 3 + 8), b1);
-            _mm_storel_epi64(reinterpret_cast<__m128i*>(d_row + x * 3 + 16), b2);
+            store_rgb_8(d_row + x * 3, r_out, g_out, b_out);
         }
 
         for (; x < width; ++x) {
@@ -262,8 +232,7 @@ static void adjust_contrast_blend_avx2(
             for (int c = 0; c < 3; ++c) {
                 float v = (1.0f - alpha) * gray_mean +
                           alpha * static_cast<float>(s_row[idx + c]);
-                d_row[idx + c] = static_cast<uint8_t>(
-                    std::round(std::clamp(v, 0.0f, 255.0f)));
+                d_row[idx + c] = static_cast<uint8_t>(std::clamp(v, 0.0f, 255.0f));
             }
         }
     }
@@ -291,6 +260,13 @@ static void adjust_saturation_avx2(
         uint8_t* d_row = dst + y * dst_stride;
 
         int x = 0;
+        auto blend = [&](__m256 c, __m256 gray) -> __m256i {
+            __m256 v = _mm256_fmadd_ps(c, v_alpha, _mm256_mul_ps(gray, v_one_alpha));
+            return _mm256_cvttps_epi32(
+                _mm256_max_ps(
+                    _mm256_min_ps(v, _mm256_set1_ps(255.0f)),
+                    _mm256_setzero_ps()));
+        };
         for (; x + 8 <= width; x += 8) {
             __m256i r_i, g_i, b_i;
             load_rgb_8(s_row + x * 3, r_i, g_i, b_i);
@@ -303,13 +279,8 @@ static void adjust_saturation_avx2(
             gray = _mm256_fmadd_ps(g, v_g_coef, gray);
             gray = _mm256_fmadd_ps(b, v_b_coef, gray);
 
-            auto blend = [&](__m256 c) -> __m256i {
-                __m256 v = _mm256_fmadd_ps(c, v_alpha, _mm256_mul_ps(gray, v_one_alpha));
-                return _mm256_cvtps_epi32(quantize_round_ps(v));
-            };
-
             store_rgb_8(d_row + x * 3,
-                        blend(r), blend(g), blend(b));
+                        blend(r, gray), blend(g, gray), blend(b, gray));
         }
 
         for (; x < width; ++x) {
@@ -323,9 +294,9 @@ static void adjust_saturation_avx2(
             float out_g = (1.0f - alpha) * gray + alpha * g_u;
             float out_b = (1.0f - alpha) * gray + alpha * b_u;
 
-            d_row[idx]     = static_cast<uint8_t>(std::round(std::clamp(out_r, 0.0f, 255.0f)));
-            d_row[idx + 1] = static_cast<uint8_t>(std::round(std::clamp(out_g, 0.0f, 255.0f)));
-            d_row[idx + 2] = static_cast<uint8_t>(std::round(std::clamp(out_b, 0.0f, 255.0f)));
+            d_row[idx]     = static_cast<uint8_t>(std::clamp(out_r, 0.0f, 255.0f));
+            d_row[idx + 1] = static_cast<uint8_t>(std::clamp(out_g, 0.0f, 255.0f));
+            d_row[idx + 2] = static_cast<uint8_t>(std::clamp(out_b, 0.0f, 255.0f));
         }
     }
 }
@@ -340,9 +311,9 @@ static float compute_gray_mean_avx2(
     constexpr float G = 0.5870f;
     constexpr float B = 0.1140f;
 
-    const __m256 coef0 = _mm256_setr_ps(R, G, B, R, G, B, R, G);
-    const __m256 coef1 = _mm256_setr_ps(B, R, G, B, R, G, B, R);
-    const __m256 coef2 = _mm256_setr_ps(G, B, R, G, B, R, G, B);
+    const __m256 v_r = _mm256_set1_ps(R);
+    const __m256 v_g = _mm256_set1_ps(G);
+    const __m256 v_b = _mm256_set1_ps(B);
 
     __m256 sum_vec = _mm256_setzero_ps();
     double sum_scalar = 0.0;
@@ -352,24 +323,15 @@ static float compute_gray_mean_avx2(
         const uint8_t* s_row = src + y * src_stride;
         int x = 0;
 
-        for (; x + 11 <= width; x += 8) {
-            __m256i u8 = _mm256_loadu_si256(
-                reinterpret_cast<const __m256i*>(s_row + x * 3));
+        for (; x + 8 <= width; x += 8) {
+            __m256i r_i, g_i, b_i;
+            load_rgb_8(s_row + x * 3, r_i, g_i, b_i);
 
-            __m256 f0 = _mm256_cvtepi32_ps(
-                _mm256_cvtepu8_epi32(_mm256_castsi256_si128(u8)));
-            sum_vec = _mm256_fmadd_ps(f0, coef0, sum_vec);
+            __m256 gray = _mm256_mul_ps(_mm256_cvtepi32_ps(r_i), v_r);
+            gray = _mm256_fmadd_ps(_mm256_cvtepi32_ps(g_i), v_g, gray);
+            gray = _mm256_fmadd_ps(_mm256_cvtepi32_ps(b_i), v_b, gray);
 
-            __m256 f1 = _mm256_cvtepi32_ps(
-                _mm256_cvtepu8_epi32(
-                    _mm_srli_si128(_mm256_castsi256_si128(u8), 8)));
-            sum_vec = _mm256_fmadd_ps(f1, coef1, sum_vec);
-
-            __m256 f2 = _mm256_cvtepi32_ps(
-                _mm256_cvtepu8_epi32(
-                    _mm256_extracti128_si256(u8, 1)));
-            sum_vec = _mm256_fmadd_ps(f2, coef2, sum_vec);
-
+            sum_vec = _mm256_add_ps(sum_vec, gray);
             total_pixels += 8;
         }
 
@@ -431,134 +393,130 @@ void ColorJitter::execute(
     bool execute_from_full,
     bool forced_compact_output
 ) {
-    (void)execute_from_full;  // 颜色抖动与解码模式无关
+    (void)execute_from_full;
 
-    // 验证输入
     TR_CHECK(num_channels_ == 3, ValueError,
              "ColorJitter only supports RGB images (3 channels), got: " << num_channels_);
     TR_CHECK(rng != nullptr, ValueError,
              "ColorJitter requires a valid RNG pointer");
 
-    // 输出尺寸等于输入尺寸
-    output_width = input_width;
+    output_width  = input_width;
     output_height = input_height;
 
-    // 自动计算output_stride
     if (output_stride == 0) {
-        if (forced_compact_output) {
-            output_stride = compact_output_stride_;
-        } else {
-            output_stride = output_stride_;
-        }
+        output_stride = forced_compact_output ? compact_output_stride_ : output_stride_;
     }
 
-    // 生成随机变换顺序
-    std::vector<TransformType> order = generate_random_order(rng);
+    auto order = generate_random_order(rng);
 
-    // 准备临时缓冲区（用于链式变换）
-    std::vector<uint8_t> temp_buffer(output_stride * output_height);
+    // 零变换：直接复制
+    if (order.empty()) {
+        copy_with_stride(input_ptr, output_ptr,
+                         input_width, input_height,
+                         input_stride, output_stride);
+        return;
+    }
+
+    // 单变换：直接 input -> output，无需临时缓冲
+    if (order.size() == 1) {
+        apply_transform(order[0], input_ptr, output_ptr,
+                        input_width, input_height,
+                        input_stride, output_stride, rng);
+        return;
+    }
+
+    // 多变换：按需准备临时缓冲
+    const size_t needed = static_cast<size_t>(output_stride) * output_height;
+    if (temp_buffer_.size() < needed) {
+        temp_buffer_.resize(needed);
+    }
+    uint8_t* temp_ptr = temp_buffer_.data();
+
     uint8_t* current_src = const_cast<uint8_t*>(input_ptr);
-    uint8_t* current_dst = temp_buffer.data();
     size_t current_src_stride = input_stride;
-    size_t current_dst_stride = output_stride;
 
-    // 按随机顺序执行变换
-    bool need_copy = true;
     for (size_t i = 0; i < order.size(); ++i) {
-        TransformType transform = order[i];
+        const bool is_last = (i == order.size() - 1);
 
-        // 最后一个变换直接输出到output_ptr
-        if (i == order.size() - 1) {
+        uint8_t* current_dst;
+        size_t current_dst_stride;
+        if (is_last) {
             current_dst = output_ptr;
             current_dst_stride = output_stride;
-            need_copy = false;
-        }
-
-        switch (transform) {
-            case BRIGHTNESS: {
-                if (brightness_ > 0.0f) {
-                    float alpha = uniform(
-                        std::max(0.0f, 1.0f - brightness_),
-                        1.0f + brightness_,
-                        rng
-                    );
-                    adjust_brightness(current_src, current_dst,
-                                     input_width, input_height,
-                                     current_src_stride, current_dst_stride,
-                                     alpha);
-                } else {
-                    // 跳过亮度调整（直接复制）
-                    copy_with_stride(current_src, current_dst,
-                                    input_width, input_height,
-                                    current_src_stride, current_dst_stride);
-                }
-                break;
-            }
-            case CONTRAST: {
-                if (contrast_ > 0.0f) {
-                    float alpha = uniform(
-                        std::max(0.0f, 1.0f - contrast_),
-                        1.0f + contrast_,
-                        rng
-                    );
-                    adjust_contrast(current_src, current_dst,
-                                   input_width, input_height,
-                                   current_src_stride, current_dst_stride,
-                                   alpha);
-                } else {
-                    // 跳过对比度调整（直接复制）
-                    copy_with_stride(current_src, current_dst,
-                                    input_width, input_height,
-                                    current_src_stride, current_dst_stride);
-                }
-                break;
-            }
-            case SATURATION: {
-                if (saturation_ > 0.0f) {
-                    float alpha = uniform(
-                        std::max(0.0f, 1.0f - saturation_),
-                        1.0f + saturation_,
-                        rng
-                    );
-                    adjust_saturation(current_src, current_dst,
-                                     input_width, input_height,
-                                     current_src_stride, current_dst_stride,
-                                     alpha);
-                } else {
-                    // 跳过饱和度调整（直接复制）
-                    copy_with_stride(current_src, current_dst,
-                                    input_width, input_height,
-                                    current_src_stride, current_dst_stride);
-                }
-                break;
-            }
-            case HUE: {
-                if (hue_ > 0.0f) {
-                    float delta = uniform(-hue_, hue_, rng);
-                    adjust_hue(current_src, current_dst,
-                              input_width, input_height,
-                              current_src_stride, current_dst_stride,
-                              delta);
-                } else {
-                    // 跳过色调调整（直接复制）
-                    copy_with_stride(current_src, current_dst,
-                                    input_width, input_height,
-                                    current_src_stride, current_dst_stride);
-                }
-                break;
+        } else {
+            // 乒乓：当前 src 是 input 则写 temp；当前 src 是 temp 则写 input
+            if (current_src == input_ptr) {
+                current_dst = temp_ptr;
+                current_dst_stride = output_stride;
+            } else {
+                current_dst = const_cast<uint8_t*>(input_ptr);
+                current_dst_stride = input_stride;
             }
         }
 
-        // 交换src和dst（下一个变换的输入是当前变换的输出）
-        std::swap(current_src, current_dst);
-        std::swap(current_src_stride, current_dst_stride);
-    }
-
-    // 如果所有变换都跳过，或者需要最终复制
-    if (need_copy && current_src != output_ptr) {
-        copy_with_stride(current_src, output_ptr,
+        apply_transform(order[i], current_src, current_dst,
                         input_width, input_height,
-                        current_src_stride, output_stride);
+                        current_src_stride, current_dst_stride, rng);
+
+        current_src = current_dst;
+        current_src_stride = current_dst_stride;
+    }
+}
+
+// =============================================================================
+// apply_transform 辅助函数
+// =============================================================================
+
+void ColorJitter::apply_transform(
+    TransformType transform,
+    const uint8_t* src, uint8_t* dst,
+    int width, int height,
+    size_t src_stride, size_t dst_stride,
+    Generator* rng) const
+{
+    switch (transform) {
+        case BRIGHTNESS: {
+            if (brightness_ > 0.0f) {
+                float alpha = uniform(
+                    std::max(0.0f, 1.0f - brightness_),
+                    1.0f + brightness_, rng);
+                adjust_brightness(src, dst, width, height, src_stride, dst_stride, alpha);
+            } else {
+                copy_with_stride(src, dst, width, height, src_stride, dst_stride);
+            }
+            break;
+        }
+        case CONTRAST: {
+            if (contrast_ > 0.0f) {
+                float alpha = uniform(
+                    std::max(0.0f, 1.0f - contrast_),
+                    1.0f + contrast_, rng);
+                adjust_contrast(src, dst, width, height, src_stride, dst_stride, alpha);
+            } else {
+                copy_with_stride(src, dst, width, height, src_stride, dst_stride);
+            }
+            break;
+        }
+        case SATURATION: {
+            if (saturation_ > 0.0f) {
+                float alpha = uniform(
+                    std::max(0.0f, 1.0f - saturation_),
+                    1.0f + saturation_, rng);
+                adjust_saturation(src, dst, width, height, src_stride, dst_stride, alpha);
+            } else {
+                copy_with_stride(src, dst, width, height, src_stride, dst_stride);
+            }
+            break;
+        }
+        case HUE: {
+            if (hue_ > 0.0f) {
+                float delta = uniform(-hue_, hue_, rng);
+                adjust_hue(src, dst, width, height, src_stride, dst_stride, delta);
+            } else {
+                copy_with_stride(src, dst, width, height, src_stride, dst_stride);
+            }
+            break;
+        }
     }
 }
 
@@ -610,7 +568,7 @@ void ColorJitter::adjust_brightness(
         for (int x = 0; x < width; ++x) {
             for (int c = 0; c < 3; ++c) {
                 float val = static_cast<float>(src_row[x * 3 + c]) * alpha;
-                dst_row[x * 3 + c] = static_cast<uint8_t>(std::round(std::clamp(val, 0.0f, 255.0f)));
+                dst_row[x * 3 + c] = static_cast<uint8_t>(std::clamp(val, 0.0f, 255.0f));
             }
         }
     }
@@ -647,9 +605,9 @@ void ColorJitter::adjust_contrast(
             float g = (1.0f - alpha) * gray_mean + alpha * src_row[x * 3 + 1];
             float b = (1.0f - alpha) * gray_mean + alpha * src_row[x * 3 + 2];
 
-            dst_row[x * 3] = static_cast<uint8_t>(std::round(std::clamp(r, 0.0f, 255.0f)));
-            dst_row[x * 3 + 1] = static_cast<uint8_t>(std::round(std::clamp(g, 0.0f, 255.0f)));
-            dst_row[x * 3 + 2] = static_cast<uint8_t>(std::round(std::clamp(b, 0.0f, 255.0f)));
+            dst_row[x * 3] = static_cast<uint8_t>(std::clamp(r, 0.0f, 255.0f));
+            dst_row[x * 3 + 1] = static_cast<uint8_t>(std::clamp(g, 0.0f, 255.0f));
+            dst_row[x * 3 + 2] = static_cast<uint8_t>(std::clamp(b, 0.0f, 255.0f));
         }
     }
 }
@@ -690,9 +648,9 @@ void ColorJitter::adjust_saturation(
             float out_g = (1.0f - alpha) * gray + alpha * g;
             float out_b = (1.0f - alpha) * gray + alpha * b;
 
-            dst_row[x * 3] = static_cast<uint8_t>(std::round(std::clamp(out_r, 0.0f, 255.0f)));
-            dst_row[x * 3 + 1] = static_cast<uint8_t>(std::round(std::clamp(out_g, 0.0f, 255.0f)));
-            dst_row[x * 3 + 2] = static_cast<uint8_t>(std::round(std::clamp(out_b, 0.0f, 255.0f)));
+            dst_row[x * 3] = static_cast<uint8_t>(std::clamp(out_r, 0.0f, 255.0f));
+            dst_row[x * 3 + 1] = static_cast<uint8_t>(std::clamp(out_g, 0.0f, 255.0f));
+            dst_row[x * 3 + 2] = static_cast<uint8_t>(std::clamp(out_b, 0.0f, 255.0f));
         }
     }
 }
@@ -754,7 +712,7 @@ void ColorJitter::rgb_to_hsv(
     float delta = max_val - min_val;
 
     // 计算色调H
-    if (delta < 1e-6f) {
+    if (delta < 1e-8f) {
         h = 0.0f;  // 无色（灰度）
     } else if (max_val == r_norm) {
         h = (g_norm - b_norm) / delta;
@@ -769,7 +727,7 @@ void ColorJitter::rgb_to_hsv(
     h = h / 6.0f;  // 归一化到[0, 1)
 
     // 计算饱和度S
-    if (max_val < 1e-6f) {
+    if (max_val < 1e-8f) {
         s = 0.0f;
     } else {
         s = delta / max_val;
@@ -785,7 +743,7 @@ void ColorJitter::hsv_to_rgb(
 ) const {
     float r_norm, g_norm, b_norm;
 
-    if (s < 1e-6f) {
+    if (s < 1e-8f) {
         // 无色（灰度）
         r_norm = g_norm = b_norm = v;
     } else {
@@ -822,9 +780,9 @@ void ColorJitter::hsv_to_rgb(
     }
 
     // 转换回[0, 255]
-    r = static_cast<uint8_t>(std::round(std::clamp(r_norm * 255.0f, 0.0f, 255.0f)));
-    g = static_cast<uint8_t>(std::round(std::clamp(g_norm * 255.0f, 0.0f, 255.0f)));
-    b = static_cast<uint8_t>(std::round(std::clamp(b_norm * 255.0f, 0.0f, 255.0f)));
+    r = static_cast<uint8_t>(std::clamp(r_norm * 255.0f, 0.0f, 255.0f));
+    g = static_cast<uint8_t>(std::clamp(g_norm * 255.0f, 0.0f, 255.0f));
+    b = static_cast<uint8_t>(std::clamp(b_norm * 255.0f, 0.0f, 255.0f));
 }
 
 std::vector<ColorJitter::TransformType> ColorJitter::generate_random_order(Generator* rng) const {
