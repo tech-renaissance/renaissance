@@ -2159,6 +2159,28 @@ void Compiler::build_auxiliary_graphs(ComputationGraph& train_cg, const MemoryPl
         }
     }
 
+    // STATS_RECOVER 图：恢复 BN 统计量（B_PREV → B_NEXT，last batch 专用）
+    // 与 STATS_COMM 的子图 2 方向相反：将 prev 复制回 next，撤销 last batch 的污染
+    if (has_bn) {
+        std::pair<Region, Region> bn_recover_pairs[] = {
+            {Region::B_PREV_MEAN, Region::B_NEXT_MEAN},
+            {Region::B_PREV_VAR,  Region::B_NEXT_VAR},
+        };
+        bool has_recover = false;
+        GraphNode node;
+        node.kind = GraphNode::Kind::RANGE;
+        node.range_op = RangeOp::RANGE_D2D_COPY;
+        for (auto [src, dst] : bn_recover_pairs) {
+            if (!memory_plan.is_region_populated(src) || !memory_plan.is_region_populated(dst)) continue;
+            node.input_ranges.push_back(memory_plan.region_range(src));
+            node.output_ranges.push_back(memory_plan.region_range(dst));
+            has_recover = true;
+        }
+        if (has_recover) {
+            train_cg.append(GraphId::STATS_RECOVER, node);
+        }
+    }
+
     // 14. RANGE_SEMA_SWITCH - EMA 切换（Region 范围直接指定）
     if (has_ema) {
         MemRange r_e = memory_plan.region_range(

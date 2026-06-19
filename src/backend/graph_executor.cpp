@@ -29,6 +29,7 @@ StreamKind gid_to_stream_kind(GraphId gid) noexcept {
         case GraphId::FIRST_COMM:
         case GraphId::DEEP_COMM:
         case GraphId::STATS_COMM:
+        case GraphId::STATS_RECOVER:  // 新增
             return StreamKind::UPDATE;
         case GraphId::CAST_MAIN_FP32_TO_FP16:
         case GraphId::CAST_EMA_FP32_TO_FP16:
@@ -190,7 +191,13 @@ void GraphExecutor::run_train_step_last_batch() {
     launch(GraphId::NAN_CHECK_AND_GRAD_SCALING);
 
     // 10. 后续与标准 batch 相同
+#ifdef TR_STRICTLY_OBEY_MLPERF_RULES
+    // MLPerf 合规：last batch 照常更新 BN 统计量
     launch(GraphId::STATS_COMM);
+#else
+    // 默认行为：last batch 不更新 BN 统计量，避免小 batch 污染
+    launch(GraphId::STATS_RECOVER);
+#endif
 
     bool has_nan = check_nan_flag();
     if (!has_nan) {
