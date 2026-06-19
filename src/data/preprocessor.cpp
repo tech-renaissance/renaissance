@@ -224,6 +224,8 @@ void Preprocessor::set_train_transforms([[maybe_unused]] const std::vector<std::
     float erase_p = 0.0f;
     float erase_scale_min = 0.02f;
     float erase_scale_max = 0.33f;
+    float erase_ratio_min = 0.3f;
+    float erase_ratio_max = 3.3f;
     NormMode norm_mode = NormMode::NO_NORM;  // 默认值
 
     std::vector<std::unique_ptr<PreprocessOperation>> filtered_ops;
@@ -233,6 +235,8 @@ void Preprocessor::set_train_transforms([[maybe_unused]] const std::vector<std::
             erase_p = re->get_p();
             erase_scale_min = re->scale_min();
             erase_scale_max = re->scale_max();
+            erase_ratio_min = re->ratio_min();
+            erase_ratio_max = re->ratio_max();
         } else if (auto* rhf = dynamic_cast<RandomHorizontalFlip*>(op.get())) {
             flip_enabled = true;
         } else if (auto* norm = dynamic_cast<Normalize*>(op.get())) {
@@ -300,6 +304,8 @@ void Preprocessor::set_train_transforms([[maybe_unused]] const std::vector<std::
         erase_p,
         erase_scale_min,
         erase_scale_max,
+        erase_ratio_min,
+        erase_ratio_max,
         0
     );
     train_ops_template_.push_back(std::move(fused_norm));
@@ -491,6 +497,8 @@ void Preprocessor::set_val_transforms([[maybe_unused]] const std::vector<std::un
         0.0f,   // 擦除概率无效
         0.02f,  // 擦除比例无效
         0.33f,  // 擦除比例无效
+        0.3f,   // 擦除长宽比无效（验证集不启用擦除，使用默认值）
+        3.3f,   // 同上
         0
     );
     val_ops_template_.push_back(std::move(val_fused_norm));

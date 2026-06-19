@@ -199,6 +199,8 @@ FusedNormalization::FusedNormalization(
     float erase_p,
     float erase_scale_min,
     float erase_scale_max,
+    float erase_ratio_min,
+    float erase_ratio_max,
     size_t output_alignment
 )
     : PreprocessOperation(output_alignment)
@@ -209,6 +211,8 @@ FusedNormalization::FusedNormalization(
     , erase_p_(erase_p)
     , erase_scale_min_(erase_scale_min)
     , erase_scale_max_(erase_scale_max)
+    , erase_ratio_min_(erase_ratio_min)
+    , erase_ratio_max_(erase_ratio_max)
 {
     init_params();
 
@@ -218,6 +222,11 @@ FusedNormalization::FusedNormalization(
         TR_CHECK(erase_scale_min_ > 0.0f && erase_scale_max_ > erase_scale_min_, ValueError,
                  "erase_scale range is invalid: min=" << erase_scale_min_
                  << ", max=" << erase_scale_max_);
+        TR_CHECK(erase_ratio_min_ > 0.0f && erase_ratio_max_ >= erase_ratio_min_, ValueError,
+                 "erase_ratio range is invalid: min=" << erase_ratio_min_
+                 << ", max=" << erase_ratio_max_);
+        log_erase_ratio_min_ = std::log(erase_ratio_min_);
+        log_erase_ratio_max_ = std::log(erase_ratio_max_);
     }
 
 #if !defined(__AVX2__)
@@ -375,15 +384,16 @@ FusedNormalization::EraseRect FusedNormalization::generate_erase_rect(int H, int
         return {};
     }
 
-    constexpr float ratio_min = 0.3f;
-    constexpr float ratio_max = 3.3f;
     const float img_area = static_cast<float>(H) * static_cast<float>(W);
 
     for (int attempt = 0; attempt < 10; ++attempt) {
         float target_area_ratio = erase_scale_min_ + uniform(0.0f, 1.0f, rng) * (erase_scale_max_ - erase_scale_min_);
         float erase_area = target_area_ratio * img_area;
 
-        float aspect_ratio = ratio_min + uniform(0.0f, 1.0f, rng) * (ratio_max - ratio_min);
+        // 对数均匀分布采样长宽比：与 PyTorch torchvision RandomErasing 行为一致
+        float log_aspect_ratio = log_erase_ratio_min_
+                               + uniform(0.0f, 1.0f, rng) * (log_erase_ratio_max_ - log_erase_ratio_min_);
+        float aspect_ratio = std::exp(log_aspect_ratio);
 
         int eh = static_cast<int>(std::round(std::sqrt(erase_area * aspect_ratio)));
         int ew = static_cast<int>(std::round(std::sqrt(erase_area / aspect_ratio)));
@@ -634,6 +644,7 @@ std::unique_ptr<PreprocessOperation> FusedNormalization::clone() const {
     auto cloned = std::make_unique<FusedNormalization>(
         preset_, use_amp_, flip_enabled_, erase_enabled_,
         erase_p_, erase_scale_min_, erase_scale_max_,
+        erase_ratio_min_, erase_ratio_max_,
         output_alignment_
     );
     cloned->num_channels_ = num_channels_;

@@ -67,6 +67,8 @@ public:
         float erase_p = 0.5f,
         float erase_scale_min = 0.02f,
         float erase_scale_max = 0.33f,
+        float erase_ratio_min = 0.3f,
+        float erase_ratio_max = 3.3f,
         size_t output_alignment = 0
     );
 
@@ -133,6 +135,10 @@ private:
     float erase_p_;
     float erase_scale_min_;
     float erase_scale_max_;
+    float erase_ratio_min_ = 0.3f;        ///< Erasing region aspect ratio lower bound
+    float erase_ratio_max_ = 3.3f;        ///< Erasing region aspect ratio upper bound
+    float log_erase_ratio_min_ = 0.0f;    ///< Precomputed: log(erase_ratio_min_)（仅在 erase_enabled_ 时有效）
+    float log_erase_ratio_max_ = 0.0f;    ///< Precomputed: log(erase_ratio_max_)（仅在 erase_enabled_ 时有效）
 
     std::size_t channels_ = 0;
     float mean_[3] = {};

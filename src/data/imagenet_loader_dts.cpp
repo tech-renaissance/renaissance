@@ -628,7 +628,7 @@ void ImageNetLoaderDts::begin_epoch(int epoch_id, bool is_train) {
 
         // 第一次：分配内存并准备buffer_metas
         if (current_set_->full_arena == nullptr) {
-            LOG_INFO << "FULLY mode: first epoch, allocating memory and loading buffers";
+            // LOG_INFO << "FULLY mode: first epoch, allocating memory and loading buffers";
 
             // 1. 分配full_arena
             allocate_buffers(*current_set_);
@@ -665,14 +665,14 @@ void ImageNetLoaderDts::begin_epoch(int epoch_id, bool is_train) {
 
             // 4. 预先构建full_shuffled_locations（用于后续epoch的全局shuffle）
             // 注意：此时数据还未加载，只是根据full_slot_metas构建样本位置映射
-            LOG_INFO << "FULLY mode: building full_shuffled_locations for future epochs";
+            // LOG_INFO << "FULLY mode: building full_shuffled_locations for future epochs";
             build_full_shuffled_locations(*current_set_);
-            LOG_INFO << "FULLY mode: full_shuffled_locations built with " << current_set_->full_total_samples << " samples";
+            // LOG_INFO << "FULLY mode: full_shuffled_locations built with " << current_set_->full_total_samples << " samples";
 
             // 5. 同步加载第一个buffer（边加载边处理，避免GPU等待）
             current_set_->current_ready_buffer_seq = 0;
             load_one_buffer_batch_fully(*current_set_, 0);
-            LOG_INFO << "FULLY mode: first buffer loaded, ready for consumption";
+            // LOG_INFO << "FULLY mode: first buffer loaded, ready for consumption";
 
             // 6. 【关键修复】在epoch 0开始时预初始化thread_sample_info数组（避免多线程竞争）
             const int M = num_preproc_workers_;
@@ -683,7 +683,7 @@ void ImageNetLoaderDts::begin_epoch(int epoch_id, bool is_train) {
                     for (int i = 0; i < M; ++i) {
                         current_set_->thread_sample_info_fully_train[i].reserve(estimated_per_thread);
                     }
-                    LOG_INFO << "DTS FULLY mode: pre-initialized thread_sample_info_fully_train for epoch 0";
+                    // LOG_INFO << "DTS FULLY mode: pre-initialized thread_sample_info_fully_train for epoch 0";
                 }
             } else {
                 if (current_set_->thread_sample_info_fully_val.empty()) {
@@ -692,13 +692,13 @@ void ImageNetLoaderDts::begin_epoch(int epoch_id, bool is_train) {
                     for (int i = 0; i < M; ++i) {
                         current_set_->thread_sample_info_fully_val[i].reserve(estimated_per_thread);
                     }
-                    LOG_INFO << "DTS FULLY mode: pre-initialized thread_sample_info_fully_val for epoch 0";
+                    // LOG_INFO << "DTS FULLY mode: pre-initialized thread_sample_info_fully_val for epoch 0";
                 }
             }
 
         } else {
             // 后续epoch：不清空buffer，只需全局重洗牌
-            LOG_INFO << "FULLY mode: subsequent epoch " << epoch_id << ", shuffling existing data";
+            // LOG_INFO << "FULLY mode: subsequent epoch " << epoch_id << ", shuffling existing data";
 
             // 关键修复：重置worker状态（global_seq必须重置为0）
             for (int i = 0; i < num_preproc_workers_; ++i) {
@@ -706,11 +706,11 @@ void ImageNetLoaderDts::begin_epoch(int epoch_id, bool is_train) {
                 worker_states_[i].local_idx = 0;
                 worker_states_[i].global_seq = 0;  // 每个epoch开始时重置
             }
-            LOG_INFO << "FULLY mode: worker states reset for epoch " << epoch_id;
+            // LOG_INFO << "FULLY mode: worker states reset for epoch " << epoch_id;
 
             // 关键修复：重置cumulative_samples（否则has_more_buffers会返回false）
             current_set_->cumulative_samples = 0;
-            LOG_INFO << "FULLY mode: cumulative_samples reset to 0 for epoch " << epoch_id;
+            // LOG_INFO << "FULLY mode: cumulative_samples reset to 0 for epoch " << epoch_id;
 
             // 【FULLY方案】第二个epoch及以后：全局shuffle + 分段分配
             // 检查是否已收集
@@ -731,8 +731,8 @@ void ImageNetLoaderDts::begin_epoch(int epoch_id, bool is_train) {
                 uint64_t base_seed = tr::get_default_generator().seed();
                 uint64_t shuffle_seed = base_seed ^ (static_cast<uint64_t>(epoch_id) << 32);
 
-                LOG_INFO << "Shuffling global " << (current_set_->is_train ? "train" : "val")
-                         << " array: " << global_samples.size() << " samples, seed=" << shuffle_seed;
+                // LOG_INFO << "Shuffling global " << (current_set_->is_train ? "train" : "val")
+                //          << " array: " << global_samples.size() << " samples, seed=" << shuffle_seed;
 
                 shuffle_sample_info_array(global_samples, shuffle_seed);
             }
@@ -745,7 +745,7 @@ void ImageNetLoaderDts::begin_epoch(int epoch_id, bool is_train) {
                 worker_states_[i].fully_local_idx = 0;
             }
 
-            LOG_INFO << "FULLY mode: epoch " << epoch_id << " initialized, ready for consumption";
+            // LOG_INFO << "FULLY mode: epoch " << epoch_id << " initialized, ready for consumption";
 
             // 【关键修复】后续epoch不需要标记buffer为ready，因为我们不再使用buffer机制
             // 直接从thread_sample_info数组读取，避免竞争
@@ -801,7 +801,7 @@ void ImageNetLoaderDts::begin_epoch(int epoch_id, bool is_train) {
         current_set_->ready_buffer = actual_buffer_A;
     }
 
-    LOG_INFO << "Epoch " << epoch_id << " started successfully";
+    // LOG_INFO << "Epoch " << epoch_id << " started successfully";
 }
 
 void ImageNetLoaderDts::end_epoch() {
@@ -845,11 +845,11 @@ void ImageNetLoaderDts::end_epoch() {
             if (current_set_->is_train && !current_set_->fully_train_collected) {
                 merge_thread_samples_to_global(*current_set_, true);
                 current_set_->fully_train_collected = true;
-                LOG_INFO << "DTS FULLY mode: train set epoch 0 completed, global array merged";
+                // LOG_INFO << "DTS FULLY mode: train set epoch 0 completed, global array merged";
             } else if (!current_set_->is_train && !current_set_->fully_val_collected) {
                 merge_thread_samples_to_global(*current_set_, false);
                 current_set_->fully_val_collected = true;
-                LOG_INFO << "DTS FULLY mode: val set epoch 0 completed, global array merged";
+                // LOG_INFO << "DTS FULLY mode: val set epoch 0 completed, global array merged";
             }
         }
     }
@@ -1548,8 +1548,8 @@ void ImageNetLoaderDts::shuffle_full_dataset(Dataset& ds, int epoch_id) {
         TR_VALUE_ERROR("full_shuffled_locations is empty, call load_full_dataset() first");
     }
 
-    LOG_INFO << "Shuffling full dataset: " << ds.full_total_samples
-             << " samples, epoch_id=" << epoch_id;
+    // LOG_INFO << "Shuffling full dataset: " << ds.full_total_samples
+    //          << " samples, epoch_id=" << epoch_id;
 
     // 1. 生成洗牌种子（与PARTIAL的Level 3一致）
     uint64_t base_seed = tr::get_default_generator().seed();
@@ -1569,7 +1569,8 @@ void ImageNetLoaderDts::shuffle_full_dataset(Dataset& ds, int epoch_id) {
         std::swap(ds.full_shuffled_locations[i], ds.full_shuffled_locations[j]);
     }
 
-    LOG_INFO << "Full dataset shuffled: " << n << " samples, seed=" << shuffle_seed;
+    // LOG_INFO << "Full dataset shuffled: " << n << " samples, seed=" << shuffle_seed;
+    (void)shuffle_seed;
 }
 
 // =============================================================================
@@ -1853,8 +1854,8 @@ void ImageNetLoaderDts::load_one_buffer_batch_fully(Dataset& ds, uint32_t buffer
     // 9. 标记buffer为READY
     buffer_meta.ready->store(true, std::memory_order_release);
 
-    LOG_INFO << "FULLY buffer " << buffer_seq << " READY: "
-             << buffer_meta.total_samples << " samples (offset=" << buffer_meta.load_start_offset << ")";
+    // LOG_INFO << "FULLY buffer " << buffer_seq << " READY: "
+    //          << buffer_meta.total_samples << " samples (offset=" << buffer_meta.load_start_offset << ")";
 }
 
 void ImageNetLoaderDts::load_next_buffer() {
@@ -1886,22 +1887,22 @@ void ImageNetLoaderDts::load_next_buffer() {
             return;
         }
 
-        LOG_INFO << "FULLY mode: advancing to next buffer " << next_buffer_seq;
+        // LOG_INFO << "FULLY mode: advancing to next buffer " << next_buffer_seq;
 
         // 关键修复：检查下一个buffer是否已经是ready状态（第二个epoch情况）
         if (current_set_->buffer_metas[next_buffer_seq].ready->load(std::memory_order_acquire)) {
             // 下一个buffer已经是ready（数据已在内存中），只需切换指针
-            LOG_INFO << "FULLY mode: buffer " << next_buffer_seq << " already loaded (reusing existing data)";
+            // LOG_INFO << "FULLY mode: buffer " << next_buffer_seq << " already loaded (reusing existing data)";
         } else {
             // 下一个buffer未ready，需要加载
             load_one_buffer_batch_fully(*current_set_, next_buffer_seq);
-            LOG_INFO << "FULLY mode: buffer " << next_buffer_seq << " loaded from storage";
+            // LOG_INFO << "FULLY mode: buffer " << next_buffer_seq << " loaded from storage";
         }
 
         // 更新当前buffer序号
         current_set_->current_ready_buffer_seq = next_buffer_seq;
 
-        LOG_INFO << "FULLY mode: now reading from buffer " << next_buffer_seq;
+        // LOG_INFO << "FULLY mode: now reading from buffer " << next_buffer_seq;
         return;
     }
 
@@ -2034,7 +2035,7 @@ void ImageNetLoaderDts::load_full_dataset(Dataset& ds) {
 
     const int N = num_load_workers_;
 
-    LOG_INFO << "Loading full dataset: " << ds.num_blocks << " blocks with " << N << " workers";
+    // LOG_INFO << "Loading full dataset: " << ds.num_blocks << " blocks with " << N << " workers";
 
     // 1. 创建N个IO线程
     // 注意：FULLY模式不使用io_worker_func_batched，因为它的slot布局不适合一次性加载所有blocks
@@ -2092,7 +2093,7 @@ void ImageNetLoaderDts::load_full_dataset(Dataset& ds) {
         shuffle_samples(ds.full_shuffled_locations, seed);
     }
 
-    LOG_INFO << "Full dataset loaded: " << ds.full_total_samples << " samples";
+    // LOG_INFO << "Full dataset loaded: " << ds.full_total_samples << " samples";
 }
 
 void ImageNetLoaderDts::build_full_shuffled_locations(Dataset& ds) {
@@ -2364,8 +2365,9 @@ void ImageNetLoaderDts::merge_thread_samples_to_global(Dataset& ds, bool is_trai
                              thread_samples[worker_id].end());
     }
 
-    LOG_INFO << "Merged " << total_count << " samples to global "
-             << (is_train ? "train" : "val") << " array";
+    // LOG_INFO << "Merged " << total_count << " samples to global "
+    //          << (is_train ? "train" : "val") << " array";
+    (void)total_count;
 
     // 打印每个线程的样本数（前8个）
     std::string samples_str;
@@ -2378,7 +2380,8 @@ void ImageNetLoaderDts::merge_thread_samples_to_global(Dataset& ds, bool is_trai
     if (num_elements.size() > 8) {
         samples_str += "...";
     }
-    LOG_INFO << "  Samples per thread: " << samples_str;
+    // LOG_INFO << "  Samples per thread: " << samples_str;
+    (void)samples_str;
 }
 
 void ImageNetLoaderDts::distribute_global_to_threads(Dataset& ds, bool is_train) {

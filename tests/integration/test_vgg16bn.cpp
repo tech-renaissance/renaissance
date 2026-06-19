@@ -123,8 +123,8 @@ int main(int argc, char** argv) {
         .color_channels(3)
         .load_workers(1)
         .preprocess_workers(128)  // PyTorch的num_workers是per-RANK，但本框架是总的预处理线程数，对于8-RANK情形要乘以8
-        .cpu_binding(true)
-        .fully_mode(false)        // 显式禁用fully mode
+        .cpu_binding(false)
+        .fully_mode(true)
         .normalization(NormMode::IMAGENET)
 
         .train_transforms(
@@ -133,7 +133,7 @@ int main(int argc, char** argv) {
             ColorJitter(0.2f, 0.2f, 0.2f, 0.1f),   // [对齐 PyTorch] brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1
             RandomErasing(0.25f,                     // [对齐 PyTorch] p=0.25
                          {0.02f, 0.33f},             // [对齐 PyTorch] scale=(0.02, 0.33)
-                         {0.3f, 3.3f})               // ratio 被框架忽略（FusedNormalization 内部固定范围），保留仅为了接口匹配
+                         {0.3f, 3.3f})               // [对齐 PyTorch] ratio=(0.3, 3.3)
         )
 
         .val_transforms(

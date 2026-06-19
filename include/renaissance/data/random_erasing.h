@@ -73,7 +73,7 @@ public:
      * @brief Constructor（支持PyTorch风格的完整参数）
      * @param p Probability of applying Random Erasing
      * @param scale Scale range {min, max}（提取后传给 FusedNormalization）
-     * @param ratio Ratio range {min, max}（ignored, FusedNormalization 内部使用固定范围）
+     * @param ratio Ratio range {min, max}（提取后传给 FusedNormalization 使用）
      * @param output_alignment Output alignment (default 0=compact layout)
      *
      * 使用示例：RandomErasing(0.5f, {0.05f, 0.4f}, {0.3f, 3.3f})
@@ -111,6 +111,8 @@ public:
         auto cloned = std::make_unique<RandomErasing>(p_);
         cloned->scale_min_ = scale_min_;
         cloned->scale_max_ = scale_max_;
+        cloned->ratio_min_ = ratio_min_;
+        cloned->ratio_max_ = ratio_max_;
         // 复制基类成员变量
         cloned->num_channels_ = num_channels_;
         cloned->output_size_ = output_size_;
@@ -149,6 +151,16 @@ public:
     float scale_max() const { return scale_max_; }
 
     /**
+     * @brief Get ratio min (erasing region aspect ratio lower bound)
+     */
+    float ratio_min() const { return ratio_min_; }
+
+    /**
+     * @brief Get ratio max (erasing region aspect ratio upper bound)
+     */
+    float ratio_max() const { return ratio_max_; }
+
+    /**
      * @brief Infer output size (returns input size, no change)
      */
     int inference_output_size(int input_size) override {
@@ -161,6 +173,8 @@ private:
     float p_;               ///< Probability of applying Random Erasing [0.0, 1.0]
     float scale_min_ = 0.02f;  ///< Erasing region area ratio lower bound
     float scale_max_ = 0.33f;  ///< Erasing region area ratio upper bound
+    float ratio_min_ = 0.3f;   ///< Erasing region aspect ratio lower bound
+    float ratio_max_ = 3.3f;   ///< Erasing region aspect ratio upper bound
 };
 
 } // namespace tr

@@ -42,7 +42,11 @@ RandomErasing::RandomErasing(
 {
     scale_min_ = scale.first;
     scale_max_ = scale.second;
-    (void)ratio;
+    ratio_min_ = ratio.first;
+    ratio_max_ = ratio.second;
+    TR_CHECK(ratio_min_ > 0.0f && ratio_max_ >= ratio_min_, ValueError,
+             "RandomErasing ratio range is invalid: min=" << ratio_min_
+             << ", max=" << ratio_max_);
 }
 
 // =============================================================================
