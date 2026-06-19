@@ -126,6 +126,14 @@ std::string compute_op_to_string(ComputeOp op) {
         case ComputeOp::CHANNEL_PADDING_AMP_FWD:  return "CHANNEL_PADDING_AMP_FWD";
         case ComputeOp::CHANNEL_PADDING_AMP_BWD:  return "CHANNEL_PADDING_AMP_BWD";
 
+        // === 首层专用 BWD 特化算子 ===
+        case ComputeOp::CONV_FP32_BWD_FIRST_LAYER:              return "CONV_FP32_BWD_FIRST_LAYER";
+        case ComputeOp::CONV_AMP_BWD_FIRST_LAYER:               return "CONV_AMP_BWD_FIRST_LAYER";
+        case ComputeOp::FLATTEN_FP32_BWD_FIRST_LAYER:           return "FLATTEN_FP32_BWD_FIRST_LAYER";
+        case ComputeOp::FLATTEN_AMP_BWD_FIRST_LAYER:            return "FLATTEN_AMP_BWD_FIRST_LAYER";
+        case ComputeOp::CHANNEL_PADDING_FP32_BWD_FIRST_LAYER:   return "CHANNEL_PADDING_FP32_BWD_FIRST_LAYER";
+        case ComputeOp::CHANNEL_PADDING_AMP_BWD_FIRST_LAYER:    return "CHANNEL_PADDING_AMP_BWD_FIRST_LAYER";
+
         // === 融合算子（AMP 训练 + INF 推理）===
         case ComputeOp::BOTTLENECK_AMP_FWD:           return "BOTTLENECK_AMP_FWD";
         case ComputeOp::BOTTLENECK_AMP_BWD:    return "BOTTLENECK_AMP_BWD";
@@ -237,9 +245,11 @@ std::string format_params(ComputeOp op, const OpParams& p) {
     switch (op) {
         case ComputeOp::CONV_FP32_FWD:
         case ComputeOp::CONV_FP32_BWD:
+        case ComputeOp::CONV_FP32_BWD_FIRST_LAYER:
         case ComputeOp::CONV_FP32_INF:
         case ComputeOp::CONV_AMP_FWD:
         case ComputeOp::CONV_AMP_BWD:
+        case ComputeOp::CONV_AMP_BWD_FIRST_LAYER:
         case ComputeOp::CONV_AMP_INF: {
             if (auto* cp = std::get_if<ConvParams>(&p.data)) {
                 oss << "out_ch=" << cp->out_channels
@@ -303,8 +313,10 @@ std::string format_params(ComputeOp op, const OpParams& p) {
         }
         case ComputeOp::FLATTEN_FP32_FWD:
         case ComputeOp::FLATTEN_FP32_BWD:
+        case ComputeOp::FLATTEN_FP32_BWD_FIRST_LAYER:
         case ComputeOp::FLATTEN_AMP_FWD:
-        case ComputeOp::FLATTEN_AMP_BWD: {
+        case ComputeOp::FLATTEN_AMP_BWD:
+        case ComputeOp::FLATTEN_AMP_BWD_FIRST_LAYER: {
             if (auto* fp = std::get_if<FlattenParams>(&p.data)) {
                 oss << "start_dim=" << fp->start_dim;
             }

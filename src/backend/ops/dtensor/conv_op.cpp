@@ -449,6 +449,107 @@ static void launch_conv_amp_bwd_cuda(
     state.output_stream_idx = i_dx;
 }
 
+// ── CONV_FP32_BWD_FIRST_LAYER（仅 wgrad，无 dgrad） ──────────────────────────
+
+static void launch_conv_fp32_bwd_first_layer_cuda(
+    const GraphNode& node,
+    const MemoryPlan& mp,
+    const DeviceContext& ctx,
+    MultiStreamCaptureState& state)
+{
+    const auto& cp = node.params.conv();
+    const DTensor& dt_dy = mp.get_dtensor(node.input_ids[0]);
+    const DTensor& dt_w  = mp.get_dtensor(node.input_ids[1]);
+    const DTensor& dt_x  = mp.get_dtensor(node.input_ids[2]);
+    const DTensor& dt_dw = mp.get_dtensor(node.output_ids[1]);
+
+    cudaStream_t s_dw = static_cast<cudaStream_t>(ctx.stream(StreamKind::COMP_1));
+    cudnnHandle_t h_dw = static_cast<cudnnHandle_t>(ctx.cudnn_handle(StreamKind::COMP_1));
+    int i_dw = state.get_or_register(s_dw);
+
+    // 等待前序
+    int out_idx = state.output_stream_idx;
+    if (out_idx >= 0) {
+        cudaStreamWaitEvent(s_dw, state.streams[out_idx].last_done_event, 0);
+    }
+
+    // === 仅 WGrad ===
+    ConvGraphCacheKey key_w{
+        reinterpret_cast<uint64_t>(h_dw),
+        dt_x.n(), dt_x.h(), dt_x.w(), dt_x.c(),
+        dt_w.n(), dt_w.h(), dt_w.w(),
+        cp.pad_h, cp.pad_w, cp.stride_h, cp.stride_w,
+        false, ComputeOp::CONV_FP32_BWD_FIRST_LAYER
+    };
+    auto& cache_w = get_or_build_cache(s_conv_wgrad_cache, key_w, [&]() {
+        return build_conv_fp32_wgrad_graph(dt_dy, dt_x, dt_dw, cp, h_dw);
+    });
+    ctx.ensure_workspace_grow(StreamKind::COMP_1, cache_w.workspace_size);
+
+    update_conv_tensor_to_id(cache_w, dt_x.id, dt_w.id, -1, dt_dy.id, -1, dt_dw.id);
+    std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> vp_w;
+    for (const auto& [ta, tid] : cache_w.tensor_to_id) {
+        vp_w[ta] = ctx.ptr_at(static_cast<int>(tid));
+    }
+    TR_CUDNN_FE_CHECK(cache_w.graph->execute(h_dw, vp_w, ctx.workspace(StreamKind::COMP_1)),
+                      "CONV_FP32_BWD_FIRST_LAYER wgrad execute");
+
+    cudaEventRecord(state.streams[i_dw].last_done_event, s_dw);
+    state.streams[i_dw].has_pending_work = true;
+
+    state.output_stream_idx = i_dw;  // 无 dgrad，输出流即 wgrad 流
+}
+
+// ── CONV_AMP_BWD_FIRST_LAYER（仅 wgrad，无 dgrad） ───────────────────────────
+
+static void launch_conv_amp_bwd_first_layer_cuda(
+    const GraphNode& node,
+    const MemoryPlan& mp,
+    const DeviceContext& ctx,
+    MultiStreamCaptureState& state)
+{
+    const auto& cp = node.params.conv();
+    const DTensor& dt_dy = mp.get_dtensor(node.input_ids[0]);
+    const DTensor& dt_w  = mp.get_dtensor(node.input_ids[1]);
+    const DTensor& dt_x  = mp.get_dtensor(node.input_ids[2]);
+    const DTensor& dt_dw = mp.get_dtensor(node.output_ids[1]);
+
+    cudaStream_t s_dw = static_cast<cudaStream_t>(ctx.stream(StreamKind::COMP_1));
+    cudnnHandle_t h_dw = static_cast<cudnnHandle_t>(ctx.cudnn_handle(StreamKind::COMP_1));
+    int i_dw = state.get_or_register(s_dw);
+
+    int out_idx = state.output_stream_idx;
+    if (out_idx >= 0) {
+        cudaStreamWaitEvent(s_dw, state.streams[out_idx].last_done_event, 0);
+    }
+
+    // === 仅 WGrad (FP16) ===
+    ConvGraphCacheKey key_w{
+        reinterpret_cast<uint64_t>(h_dw),
+        dt_x.n(), dt_x.h(), dt_x.w(), dt_x.c(),
+        dt_w.n(), dt_w.h(), dt_w.w(),
+        cp.pad_h, cp.pad_w, cp.stride_h, cp.stride_w,
+        true, ComputeOp::CONV_AMP_BWD_FIRST_LAYER
+    };
+    auto& cache_w = get_or_build_cache(s_conv_wgrad_cache, key_w, [&]() {
+        return build_conv_amp_wgrad_graph(dt_dy, dt_x, dt_dw, cp, h_dw);
+    });
+    ctx.ensure_workspace_grow(StreamKind::COMP_1, cache_w.workspace_size);
+
+    update_conv_tensor_to_id(cache_w, dt_x.id, dt_w.id, -1, dt_dy.id, -1, dt_dw.id);
+    std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> vp_w;
+    for (const auto& [ta, tid] : cache_w.tensor_to_id) {
+        vp_w[ta] = ctx.ptr_at(static_cast<int>(tid));
+    }
+    TR_CUDNN_FE_CHECK(cache_w.graph->execute(h_dw, vp_w, ctx.workspace(StreamKind::COMP_1)),
+                      "CONV_AMP_BWD_FIRST_LAYER wgrad execute");
+
+    cudaEventRecord(state.streams[i_dw].last_done_event, s_dw);
+    state.streams[i_dw].has_pending_work = true;
+
+    state.output_stream_idx = i_dw;  // 无 dgrad，输出流即 wgrad 流
+}
+
 #endif // TR_USE_CUDA
 
 // ============================================================================
@@ -1000,6 +1101,252 @@ static void launch_conv_bwd_cpu(CpuOpContext* op_ctx) {
 #endif
 }
 
+// ── BWD CPU First Layer（仅 wgrad，无 dgrad）────────────────────────────────
+
+static void launch_conv_bwd_first_layer_cpu_naive(CpuOpContext* op_ctx) {
+    const auto* p = std::get_if<ConvParams>(&op_ctx->params.data);
+    TR_CHECK(p != nullptr, ValueError, "CONV_FP32_BWD_FIRST_LAYER CPU missing ConvParams");
+    TR_CHECK(op_ctx->num_inputs >= 3, ShapeError,
+             "CONV_FP32_BWD_FIRST_LAYER CPU requires 3 inputs (dY, X, W)");
+    TR_CHECK(op_ctx->num_outputs >= 2, ShapeError,
+             "CONV_FP32_BWD_FIRST_LAYER CPU requires 2 outputs (dX, dW)");
+
+    const float* dY = static_cast<const float*>(
+        const_cast<DeviceContext*>(op_ctx->ctx)->ptr_at(op_ctx->input_ids[0]));
+    const float* W_ptr = static_cast<const float*>(
+        const_cast<DeviceContext*>(op_ctx->ctx)->ptr_at(op_ctx->input_ids[1]));
+    const float* X = static_cast<const float*>(
+        const_cast<DeviceContext*>(op_ctx->ctx)->ptr_at(op_ctx->input_ids[2]));
+    float* dX = static_cast<float*>(
+        const_cast<DeviceContext*>(op_ctx->ctx)->ptr_at(op_ctx->output_ids[0]));
+    float* dW = static_cast<float*>(
+        const_cast<DeviceContext*>(op_ctx->ctx)->ptr_at(op_ctx->output_ids[1]));
+
+    int N = op_ctx->input_shape.n;
+    int OH = op_ctx->input_shape.h;
+    int OW = op_ctx->input_shape.w;
+
+    int H  = op_ctx->output_shape.h;
+    int IW = op_ctx->output_shape.w;
+    int C  = op_ctx->output_shape.c;
+    int K = p->out_channels;
+    int R = p->kernel_h, S = p->kernel_w;
+    int pad_h = p->pad_h, pad_w = p->pad_w;
+    int stride_h = p->stride_h, stride_w = p->stride_w;
+    int groups = p->groups;
+
+    int C_per_group = C / groups;
+    int K_per_group = K / groups;
+
+    (void)dX;      // 首层不计算 dgrad
+    (void)W_ptr;   // 首层不计算 dgrad
+
+    // wgrad：dW清零后累加
+    std::memset(dW, 0, static_cast<size_t>(K) * R * S * C * sizeof(float));
+
+    for (int n = 0; n < N; ++n) {
+        for (int oh = 0; oh < OH; ++oh) {
+            for (int ow = 0; ow < OW; ++ow) {
+                for (int g = 0; g < groups; ++g) {
+                    for (int k = 0; k < K_per_group; ++k) {
+                        int k_global = g * K_per_group + k;
+                        float dy_val = dY[((n * OH + oh) * OW + ow) * K + k_global];
+
+                        for (int r = 0; r < R; ++r) {
+                            int ih = oh * stride_h + r - pad_h;
+                            if (ih < 0 || ih >= H) continue;
+
+                            for (int s2 = 0; s2 < S; ++s2) {
+                                int iw = ow * stride_w + s2 - pad_w;
+                                if (iw < 0 || iw >= IW) continue;
+
+                                int x_row = (n * H + ih) * IW + iw;
+                                int dw_off = ((k_global * R + r) * S + s2) * C;
+
+                                for (int c = 0; c < C_per_group; ++c) {
+                                    int c_global = g * C_per_group + c;
+                                    dW[dw_off + c_global] +=
+                                        dy_val * X[x_row * C + c_global];
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#ifdef TR_USE_EIGEN
+
+static void launch_conv_bwd_first_layer_cpu_eigen(CpuOpContext* op_ctx) {
+    const auto* p = std::get_if<ConvParams>(&op_ctx->params.data);
+    TR_CHECK(p != nullptr, ValueError, "CONV_FP32_BWD_FIRST_LAYER CPU EIGEN missing ConvParams");
+
+    const float* dY = static_cast<const float*>(
+        const_cast<DeviceContext*>(op_ctx->ctx)->ptr_at(op_ctx->input_ids[0]));
+    const float* W_ptr = static_cast<const float*>(
+        const_cast<DeviceContext*>(op_ctx->ctx)->ptr_at(op_ctx->input_ids[1]));
+    const float* X = static_cast<const float*>(
+        const_cast<DeviceContext*>(op_ctx->ctx)->ptr_at(op_ctx->input_ids[2]));
+    float* dX = static_cast<float*>(
+        const_cast<DeviceContext*>(op_ctx->ctx)->ptr_at(op_ctx->output_ids[0]));
+    float* dW = static_cast<float*>(
+        const_cast<DeviceContext*>(op_ctx->ctx)->ptr_at(op_ctx->output_ids[1]));
+
+    int N = op_ctx->input_shape.n;
+    int OH = op_ctx->input_shape.h;
+    int OW = op_ctx->input_shape.w;
+    int H  = op_ctx->output_shape.h;
+    int IW = op_ctx->output_shape.w;
+    int C  = op_ctx->output_shape.c;
+    int K = p->out_channels;
+    int R = p->kernel_h, S = p->kernel_w;
+    int stride_h = p->stride_h, stride_w = p->stride_w;
+    int pad_h = p->pad_h, pad_w = p->pad_w;
+    int groups = p->groups;
+    int Cpg = C / groups;
+    int Kpg = K / groups;
+
+    int M = N * OH * OW;
+    int RSC = R * S * C;
+    int RSCg = R * S * Cpg;
+
+    const DeviceContext* ctx = op_ctx->ctx;
+
+    using MatrixXfRow = Eigen::Matrix<float, Eigen::Dynamic, Eigen::Dynamic, Eigen::RowMajor>;
+    using StrideDyn   = Eigen::Stride<Eigen::Dynamic, Eigen::Dynamic>;
+
+    (void)dX;      // 首层不计算 dgrad
+    (void)W_ptr;   // 首层不计算 dgrad
+
+    // ═══════════════════════════════════════════════════════════════
+    //  PATH A: groups == 1（最优路径，零拷贝 + tiled im2col）
+    // ═══════════════════════════════════════════════════════════════
+    if (groups == 1) {
+        constexpr size_t kMaxWsBytes = 16 * 1024 * 1024;
+        int tile_M = M;
+        if (RSC > 0) {
+            tile_M = static_cast<int>(kMaxWsBytes / (static_cast<size_t>(RSC) * sizeof(float)));
+            tile_M = std::max(tile_M, 64);
+            tile_M = std::min(tile_M, M);
+        }
+        size_t ws_needed = static_cast<size_t>(tile_M) * RSC * sizeof(float);
+        constexpr size_t kAlign = 64;
+        ws_needed = (ws_needed + kAlign - 1) & ~(kAlign - 1);
+        ctx->ensure_cpu_workspace_grow(ws_needed);
+        float* col = static_cast<float*>(ctx->cpu_workspace());
+
+        // ── wgrad: dW = dY^T · im2col(X) (tiled) ──
+        std::memset(dW, 0, static_cast<size_t>(K) * RSC * sizeof(float));
+        Eigen::Map<MatrixXfRow> dW_mat(dW, K, RSC);
+
+        for (int t = 0; t < M; t += tile_M) {
+            int tm = std::min(tile_M, M - t);
+
+            // 1. im2col: X[t : t+tm] → col
+            std::memset(col, 0, static_cast<size_t>(tm) * RSC * sizeof(float));
+            for (int m = 0; m < tm; ++m) {
+                int global_m = t + m;
+                int n  = global_m / (OH * OW);
+                int rem = global_m % (OH * OW);
+                int oh = rem / OW;
+                int ow = rem % OW;
+
+                float* col_row = col + m * RSC;
+                for (int r = 0; r < R; ++r) {
+                    int ih = oh * stride_h + r - pad_h;
+                    if (ih < 0 || ih >= H) continue;
+                    for (int s = 0; s < S; ++s) {
+                        int iw = ow * stride_w + s - pad_w;
+                        if (iw < 0 || iw >= IW) continue;
+                        const float* x_ptr = X + ((n * H + ih) * IW + iw) * C;
+                        float* col_ptr = col_row + (r * S + s) * C;
+                        std::memcpy(col_ptr, x_ptr, static_cast<size_t>(C) * sizeof(float));
+                    }
+                }
+            }
+
+            // 2. GEMM: dW += dY_tile^T · col_tile
+            Eigen::Map<const MatrixXfRow> dY_tile(dY + t * K, tm, K);
+            Eigen::Map<const MatrixXfRow> col_tile(col, tm, RSC);
+            dW_mat.noalias() += dY_tile.transpose() * col_tile;
+        }
+        return;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    //  PATH B: groups > 1（Strided dY + 双缓冲）
+    // ═══════════════════════════════════════════════════════════════
+    size_t col_elems = static_cast<size_t>(OH) * OW * RSCg;
+    size_t mat_elems = static_cast<size_t>(Kpg) * RSCg;
+    size_t ws_needed = (col_elems + mat_elems) * sizeof(float);
+    constexpr size_t kAlign = 64;
+    ws_needed = (ws_needed + kAlign - 1) & ~(kAlign - 1);
+    ctx->ensure_cpu_workspace_grow(ws_needed);
+    float* ws = static_cast<float*>(ctx->cpu_workspace());
+
+    float* acc  = ws;
+    float* colg = ws + mat_elems;
+
+    std::memset(dW, 0, static_cast<size_t>(K) * R * S * C * sizeof(float));
+
+    for (int g = 0; g < groups; ++g) {
+        int k0 = g * Kpg;
+        int c0 = g * Cpg;
+
+        // ── wgrad ──
+        std::memset(acc, 0, mat_elems * sizeof(float));
+        Eigen::Map<MatrixXfRow> dW_g(acc, Kpg, RSCg);
+
+        for (int n = 0; n < N; ++n) {
+            // 1. im2col
+            for (int oh = 0; oh < OH; ++oh) {
+                for (int ow = 0; ow < OW; ++ow) {
+                    int row = oh * OW + ow;
+                    for (int r = 0; r < R; ++r) {
+                        int ih = oh * stride_h + r - pad_h;
+                        if (ih < 0 || ih >= H) continue;
+                        for (int s = 0; s < S; ++s) {
+                            int iw = ow * stride_w + s - pad_w;
+                            if (iw < 0 || iw >= IW) continue;
+                            const float* src = X + ((n * H + ih) * IW + iw) * C + c0;
+                            float* dst = colg + row * RSCg + (r * S + s) * Cpg;
+                            std::memcpy(dst, src, static_cast<size_t>(Cpg) * sizeof(float));
+                        }
+                    }
+                }
+            }
+
+            // 2. GEMM: dW_g += dY_n_g^T · colg
+            Eigen::Map<const MatrixXfRow, Eigen::Unaligned, StrideDyn>
+                dY_n(dY + n * OH * OW * K + k0, OH * OW, Kpg, StrideDyn(K, 1));
+            Eigen::Map<const MatrixXfRow> col_mat(colg, OH * OW, RSCg);
+            dW_g.noalias() += dY_n.transpose() * col_mat;
+        }
+
+        // 3. 写回 dW
+        for (int k = 0; k < Kpg; ++k)
+            for (int r = 0; r < R; ++r)
+                for (int s = 0; s < S; ++s) {
+                    int dw_off = (((k0 + k) * R + r) * S + s) * C + c0;
+                    int acc_off = k * RSCg + (r * S + s) * Cpg;
+                    std::memcpy(&dW[dw_off], &acc[acc_off],
+                                static_cast<size_t>(Cpg) * sizeof(float));
+                }
+    }
+}
+
+#endif // TR_USE_EIGEN
+
+static void launch_conv_bwd_first_layer_cpu(CpuOpContext* op_ctx) {
+#ifdef TR_USE_EIGEN
+    launch_conv_bwd_first_layer_cpu_eigen(op_ctx);
+#else
+    launch_conv_bwd_first_layer_cpu_naive(op_ctx);
+#endif
+}
+
 // ── AMP CPU 不支持 ─────────────────────────────────────────────────────────
 
 static void launch_conv_amp_cpu_not_supported(CpuOpContext* op_ctx) {
@@ -1031,6 +1378,16 @@ void register_op_conv() {
 #endif
     }
 
+    // CONV_FP32_BWD_FIRST_LAYER（仅 wgrad）
+    {
+        auto& e = g_compute_op_table[static_cast<size_t>(ComputeOp::CONV_FP32_BWD_FIRST_LAYER)];
+        e.op = ComputeOp::CONV_FP32_BWD_FIRST_LAYER;
+        e.launch_cpu = launch_conv_bwd_first_layer_cpu;
+#ifdef TR_USE_CUDA
+        e.launch_cuda = launch_conv_fp32_bwd_first_layer_cuda;
+#endif
+    }
+
     // CONV_FP32_INF（复用 FWD 的 CPU + GPU launch）
     {
         auto& e = g_compute_op_table[static_cast<size_t>(ComputeOp::CONV_FP32_INF)];
@@ -1058,6 +1415,14 @@ void register_op_conv() {
         e.launch_cuda = launch_conv_amp_bwd_cuda;
     }
 
+    // CONV_AMP_BWD_FIRST_LAYER（仅 wgrad）
+    {
+        auto& e = g_compute_op_table[static_cast<size_t>(ComputeOp::CONV_AMP_BWD_FIRST_LAYER)];
+        e.op = ComputeOp::CONV_AMP_BWD_FIRST_LAYER;
+        e.launch_cpu = launch_conv_amp_cpu_not_supported;
+        e.launch_cuda = launch_conv_amp_bwd_first_layer_cuda;
+    }
+
     // CONV_AMP_INF
     {
         auto& e = g_compute_op_table[static_cast<size_t>(ComputeOp::CONV_AMP_INF)];
@@ -1067,7 +1432,7 @@ void register_op_conv() {
     }
 #endif
 
-    TR_LOG_DEBUG("backend") << "CONV operators registered (FP32_FWD/BWD/INF + AMP_FWD/BWD/INF)";
+    TR_LOG_DEBUG("backend") << "CONV operators registered (FP32_FWD/BWD/BWD_FIRST_LAYER/INF + AMP_FWD/BWD/BWD_FIRST_LAYER/INF)";
 }
 
 } // namespace tr

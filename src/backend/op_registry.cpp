@@ -76,9 +76,11 @@ bool require_warmup(ComputeOp op) noexcept {
     switch (op) {
         case ComputeOp::CONV_FP32_FWD:
         case ComputeOp::CONV_FP32_BWD:
+        case ComputeOp::CONV_FP32_BWD_FIRST_LAYER:
         case ComputeOp::CONV_FP32_INF:
         case ComputeOp::CONV_AMP_FWD:
         case ComputeOp::CONV_AMP_BWD:
+        case ComputeOp::CONV_AMP_BWD_FIRST_LAYER:
         case ComputeOp::CONV_AMP_INF:
         case ComputeOp::BN1D_AMP_FWD:   case ComputeOp::BN1D_AMP_BWD:   case ComputeOp::BN1D_AMP_INF:
         case ComputeOp::BN2D_AMP_FWD:   case ComputeOp::BN2D_AMP_BWD:   case ComputeOp::BN2D_AMP_INF:
@@ -135,9 +137,11 @@ void warmup_single_cudnn_op(const GraphNode& node,
     // BWD 涉及双流（COMP_1 + COMP_3），通用 launch_cuda 路径可正确处理
     if (node.compute_op == ComputeOp::CONV_FP32_FWD ||
         node.compute_op == ComputeOp::CONV_FP32_BWD ||
+        node.compute_op == ComputeOp::CONV_FP32_BWD_FIRST_LAYER ||
         node.compute_op == ComputeOp::CONV_FP32_INF ||
         node.compute_op == ComputeOp::CONV_AMP_FWD ||
         node.compute_op == ComputeOp::CONV_AMP_BWD ||
+        node.compute_op == ComputeOp::CONV_AMP_BWD_FIRST_LAYER ||
         node.compute_op == ComputeOp::CONV_AMP_INF) {
         auto& entry = g_compute_op_table[static_cast<size_t>(node.compute_op)];
         if (entry.launch_cuda) {

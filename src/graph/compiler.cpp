@@ -956,6 +956,35 @@ void Compiler::create_memory_plans(
 // Phase 4: build_computation_graph — 构建共享 ComputationGraph
 // ============================================================================
 
+// 将普通 BWD 算子映射为首层特化 BWD 算子。
+// 若传入的 op 不是需要特化的 BWD 算子，则原样返回。
+static ComputeOp to_first_layer_bwd_op(ComputeOp op) {
+    switch (op) {
+        case ComputeOp::CONV_FP32_BWD:              return ComputeOp::CONV_FP32_BWD_FIRST_LAYER;
+        case ComputeOp::CONV_AMP_BWD:               return ComputeOp::CONV_AMP_BWD_FIRST_LAYER;
+        case ComputeOp::FLATTEN_FP32_BWD:           return ComputeOp::FLATTEN_FP32_BWD_FIRST_LAYER;
+        case ComputeOp::FLATTEN_AMP_BWD:            return ComputeOp::FLATTEN_AMP_BWD_FIRST_LAYER;
+        case ComputeOp::CHANNEL_PADDING_FP32_BWD:   return ComputeOp::CHANNEL_PADDING_FP32_BWD_FIRST_LAYER;
+        case ComputeOp::CHANNEL_PADDING_AMP_BWD:    return ComputeOp::CHANNEL_PADDING_AMP_BWD_FIRST_LAYER;
+        default: return op;
+    }
+}
+
+inline bool is_conv_bwd_op(ComputeOp op) {
+    return op == ComputeOp::CONV_FP32_BWD || op == ComputeOp::CONV_AMP_BWD ||
+           op == ComputeOp::CONV_FP32_BWD_FIRST_LAYER || op == ComputeOp::CONV_AMP_BWD_FIRST_LAYER;
+}
+
+inline bool is_flatten_bwd_op(ComputeOp op) {
+    return op == ComputeOp::FLATTEN_FP32_BWD || op == ComputeOp::FLATTEN_AMP_BWD ||
+           op == ComputeOp::FLATTEN_FP32_BWD_FIRST_LAYER || op == ComputeOp::FLATTEN_AMP_BWD_FIRST_LAYER;
+}
+
+inline bool is_channel_padding_bwd_op(ComputeOp op) {
+    return op == ComputeOp::CHANNEL_PADDING_FP32_BWD || op == ComputeOp::CHANNEL_PADDING_AMP_BWD ||
+           op == ComputeOp::CHANNEL_PADDING_FP32_BWD_FIRST_LAYER || op == ComputeOp::CHANNEL_PADDING_AMP_BWD_FIRST_LAYER;
+}
+
 void Compiler::build_computation_graph(const ArchPlan& arch,
                                         const std::vector<LayerContext>& base_contexts,
                                         const MemoryPlan& memory_plan,
@@ -1280,6 +1309,12 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
             GraphNode gn;
             gn.kind = GraphNode::Kind::COMPUTE;
             gn.compute_op = pattern_node.op;
+
+            // 首层 BWD 特化：仅首层替换为 FIRST_LAYER 算子
+            if (layer.is_first_layer) {
+                gn.compute_op = to_first_layer_bwd_op(gn.compute_op);
+            }
+
             gn.params = op_params;
             gn.input_ids = map_indices(pattern_node.input_indices);
             gn.output_ids = map_indices(pattern_node.output_indices);
@@ -1298,7 +1333,7 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
                 }
             }
 
-            if (gn.compute_op == ComputeOp::CONV_FP32_BWD || gn.compute_op == ComputeOp::CONV_AMP_BWD) {
+            if (is_conv_bwd_op(gn.compute_op)) {
                 if (layer.is_first_layer) {
                     const auto& b = memory_plan.baseline();
 
@@ -1385,10 +1420,7 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
             }
 
             // Flatten / ChannelPadding BWD: dX 写回正向原输入张量（梯度覆盖）
-            if (gn.compute_op == ComputeOp::FLATTEN_FP32_BWD ||
-                gn.compute_op == ComputeOp::FLATTEN_AMP_BWD ||
-                gn.compute_op == ComputeOp::CHANNEL_PADDING_FP32_BWD ||
-                gn.compute_op == ComputeOp::CHANNEL_PADDING_AMP_BWD) {
+            if (is_flatten_bwd_op(gn.compute_op) || is_channel_padding_bwd_op(gn.compute_op)) {
                 if (layer.is_first_layer) {
                     gn.output_ids = {1};  // 首层A：写回 I_A_DATA
                     train_cg.append(GraphId::FIRST_LAYER_BWD_A, gn);

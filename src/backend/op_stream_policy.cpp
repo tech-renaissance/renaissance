@@ -30,6 +30,11 @@ StreamKind get_op_default_stream(ComputeOp op) noexcept {
         case ComputeOp::CONV_AMP_BWD:
             return StreamKind::COMP_3;
 
+        // ===== Conv 首层 BWD → COMP_1（仅 wgrad，无 dX 下游）=====
+        case ComputeOp::CONV_FP32_BWD_FIRST_LAYER:
+        case ComputeOp::CONV_AMP_BWD_FIRST_LAYER:
+            return StreamKind::COMP_1;
+
         // ===== 池化类（GAP / MaxPool / Dropout）→ COMP_2 =====
         case ComputeOp::GAP_FP32_FWD: case ComputeOp::GAP_AMP_FWD:
         case ComputeOp::GAP_FP32_BWD: case ComputeOp::GAP_AMP_BWD:

@@ -254,6 +254,47 @@ static void launch_flatten_amp_bwd_cuda(
 
 #endif // TR_USE_CUDA
 
+// ===== 首层 Flatten no-op（首层 Flatten 无前驱需回传梯度，不读输入、不写输出）=====
+
+static void launch_flatten_fp32_bwd_first_layer_cpu(CpuOpContext* op_ctx) {
+    (void)op_ctx;
+}
+
+#ifdef TR_USE_CUDA
+static void launch_flatten_fp32_bwd_first_layer_cuda(
+    const GraphNode& node,
+    const MemoryPlan& mp,
+    const DeviceContext& ctx,
+    MultiStreamCaptureState& state)
+{
+    (void)node;
+    (void)mp;
+
+    // 不读取输入张量，不写入输出张量；仅记录流事件以维持捕获状态机一致。
+    cudaStream_t s = static_cast<cudaStream_t>(ctx.stream(StreamKind::COMP_1));
+    int si = state.get_or_register(s);
+    state.output_stream_idx = si;
+    state.streams[si].has_pending_work = true;
+    cudaEventRecord(state.streams[si].last_done_event, s);
+}
+
+static void launch_flatten_amp_bwd_first_layer_cuda(
+    const GraphNode& node,
+    const MemoryPlan& mp,
+    const DeviceContext& ctx,
+    MultiStreamCaptureState& state)
+{
+    (void)node;
+    (void)mp;
+
+    cudaStream_t s = static_cast<cudaStream_t>(ctx.stream(StreamKind::COMP_1));
+    int si = state.get_or_register(s);
+    state.output_stream_idx = si;
+    state.streams[si].has_pending_work = true;
+    cudaEventRecord(state.streams[si].last_done_event, s);
+}
+#endif // TR_USE_CUDA
+
 // ===== 注册 FLATTEN 算子 =====
 void register_op_flatten() {
     auto& table = g_compute_op_table;
@@ -300,6 +341,27 @@ void register_op_flatten() {
         e.launch_cuda = launch_flatten_amp_bwd_cuda;
 #endif
         TR_LOG_DEBUG("graph") << "Registered FLATTEN_AMP_BWD (CUDA only)";
+    }
+
+    // 首层 Flatten no-op
+    {
+        auto& e = table[static_cast<size_t>(ComputeOp::FLATTEN_FP32_BWD_FIRST_LAYER)];
+        e.op = ComputeOp::FLATTEN_FP32_BWD_FIRST_LAYER;
+#ifdef TR_USE_EIGEN
+        e.launch_cpu = launch_flatten_fp32_bwd_first_layer_cpu;
+#endif
+#ifdef TR_USE_CUDA
+        e.launch_cuda = launch_flatten_fp32_bwd_first_layer_cuda;
+#endif
+    }
+
+    {
+        auto& e = table[static_cast<size_t>(ComputeOp::FLATTEN_AMP_BWD_FIRST_LAYER)];
+        e.op = ComputeOp::FLATTEN_AMP_BWD_FIRST_LAYER;
+        e.launch_cpu = launch_flatten_amp_cpu_not_supported;
+#ifdef TR_USE_CUDA
+        e.launch_cuda = launch_flatten_amp_bwd_first_layer_cuda;
+#endif
     }
 }
 

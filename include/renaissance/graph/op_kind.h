@@ -312,6 +312,14 @@ enum class ComputeOp : uint16_t {
     LARS_UPDATE_DEEP,
     LARS_NESTEROV_UPDATE_DEEP,
 
+    // === 首层专用 BWD 特化算子 ===
+    CONV_FP32_BWD_FIRST_LAYER,      // 首层 Conv：仅 wgrad
+    CONV_AMP_BWD_FIRST_LAYER,       // 首层 Conv AMP：仅 wgrad
+    FLATTEN_FP32_BWD_FIRST_LAYER,   // 首层 Flatten：no-op
+    FLATTEN_AMP_BWD_FIRST_LAYER,    // 首层 Flatten AMP：no-op
+    CHANNEL_PADDING_FP32_BWD_FIRST_LAYER,   // 首层 ChannelPadding：no-op
+    CHANNEL_PADDING_AMP_BWD_FIRST_LAYER,    // 首层 ChannelPadding AMP：no-op
+
     COUNT,              ///< 算子类型总数（哨兵值，用于数组大小计算）
     UNKNOWN = 0xFFFF
 };

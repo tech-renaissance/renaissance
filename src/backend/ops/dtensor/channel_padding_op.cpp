@@ -251,6 +251,46 @@ static void launch_channel_padding_amp_bwd_cuda(
 
 #endif // TR_USE_CUDA
 
+// ===== 首层 ChannelPadding no-op（首层无前驱需回传梯度，不读输入、不写输出）=====
+
+static void launch_channel_padding_fp32_bwd_first_layer_cpu(CpuOpContext* op_ctx) {
+    (void)op_ctx;
+}
+
+#ifdef TR_USE_CUDA
+static void launch_channel_padding_fp32_bwd_first_layer_cuda(
+    const GraphNode& node,
+    const MemoryPlan& mp,
+    const DeviceContext& ctx,
+    MultiStreamCaptureState& state)
+{
+    (void)node;
+    (void)mp;
+
+    cudaStream_t s = static_cast<cudaStream_t>(ctx.stream(StreamKind::COMP_1));
+    int si = state.get_or_register(s);
+    state.output_stream_idx = si;
+    state.streams[si].has_pending_work = true;
+    cudaEventRecord(state.streams[si].last_done_event, s);
+}
+
+static void launch_channel_padding_amp_bwd_first_layer_cuda(
+    const GraphNode& node,
+    const MemoryPlan& mp,
+    const DeviceContext& ctx,
+    MultiStreamCaptureState& state)
+{
+    (void)node;
+    (void)mp;
+
+    cudaStream_t s = static_cast<cudaStream_t>(ctx.stream(StreamKind::COMP_1));
+    int si = state.get_or_register(s);
+    state.output_stream_idx = si;
+    state.streams[si].has_pending_work = true;
+    cudaEventRecord(state.streams[si].last_done_event, s);
+}
+#endif // TR_USE_CUDA
+
 // ===== 注册 =====
 void register_op_channel_padding() {
     auto& table = g_compute_op_table;
@@ -285,6 +325,25 @@ void register_op_channel_padding() {
         e.launch_cpu = launch_channel_padding_amp_cpu_not_supported;
 #ifdef TR_USE_CUDA
         e.launch_cuda = launch_channel_padding_amp_bwd_cuda;
+#endif
+    }
+
+    // 首层 ChannelPadding no-op
+    {
+        auto& e = table[static_cast<size_t>(ComputeOp::CHANNEL_PADDING_FP32_BWD_FIRST_LAYER)];
+        e.op = ComputeOp::CHANNEL_PADDING_FP32_BWD_FIRST_LAYER;
+        e.launch_cpu = launch_channel_padding_fp32_bwd_first_layer_cpu;
+#ifdef TR_USE_CUDA
+        e.launch_cuda = launch_channel_padding_fp32_bwd_first_layer_cuda;
+#endif
+    }
+
+    {
+        auto& e = table[static_cast<size_t>(ComputeOp::CHANNEL_PADDING_AMP_BWD_FIRST_LAYER)];
+        e.op = ComputeOp::CHANNEL_PADDING_AMP_BWD_FIRST_LAYER;
+        e.launch_cpu = launch_channel_padding_amp_cpu_not_supported;
+#ifdef TR_USE_CUDA
+        e.launch_cuda = launch_channel_padding_amp_bwd_first_layer_cuda;
 #endif
     }
 }
