@@ -27,70 +27,70 @@ Gradient Clip: grad_clip(10.0), value-based clamp [-10, +10]
 Training: 100 epochs, global_batch_size=1024
 Target: 73.36% (original paper)
 =====================================
-[2026-06-18 18:45:34.355] [INFO ] [backend] DeviceContext 0: workspace for stream 1 grown to 12845568 bytes
-[2026-06-18 18:45:34.515] [INFO ] [backend] DeviceContext 0: workspace for stream 2 grown to 55808 bytes
-[2026-06-18 18:45:34.800] [INFO ] [backend] DeviceContext 0: workspace for stream 1 grown to 12846080 bytes
-[2026-06-18 18:45:34.963] [INFO ] [backend] DeviceContext 0: workspace for stream 2 grown to 111616 bytes
-[2026-06-18 18:45:35.386] [INFO ] [backend] DeviceContext 0: workspace for stream 2 grown to 222976 bytes
-[2026-06-18 18:45:35.815] [INFO ] [backend] DeviceContext 0: workspace for stream 2 grown to 443392 bytes
-[2026-06-18 18:45:37.324] [INFO ] [backend] DeviceContext 0: workspace for stream 1 grown to 28311808 bytes
-[2026-06-18 18:45:41.347] [INFO ] [backend] DeviceContext 0: workspace for stream 1 grown to 170414592 bytes
-[2026-06-18 18:45:41.918] [INFO ] [backend] DeviceContext 1: workspace for stream 1 grown to 12845568 bytes
-[2026-06-18 18:45:42.076] [INFO ] [backend] DeviceContext 1: workspace for stream 2 grown to 55808 bytes
-[2026-06-18 18:45:42.350] [INFO ] [backend] DeviceContext 1: workspace for stream 1 grown to 12846080 bytes
-[2026-06-18 18:45:42.509] [INFO ] [backend] DeviceContext 1: workspace for stream 2 grown to 111616 bytes
-[2026-06-18 18:45:42.930] [INFO ] [backend] DeviceContext 1: workspace for stream 2 grown to 222976 bytes
-[2026-06-18 18:45:43.347] [INFO ] [backend] DeviceContext 1: workspace for stream 2 grown to 443392 bytes
-[2026-06-18 18:45:44.643] [INFO ] [backend] DeviceContext 1: workspace for stream 1 grown to 28311808 bytes
-[2026-06-18 18:45:48.639] [INFO ] [backend] DeviceContext 1: workspace for stream 1 grown to 170414592 bytes
-[2026-06-18 18:45:49.203] [INFO ] [backend] DeviceContext 2: workspace for stream 1 grown to 12845568 bytes
-[2026-06-18 18:45:49.361] [INFO ] [backend] DeviceContext 2: workspace for stream 2 grown to 55808 bytes
-[2026-06-18 18:45:49.635] [INFO ] [backend] DeviceContext 2: workspace for stream 1 grown to 12846080 bytes
-[2026-06-18 18:45:49.792] [INFO ] [backend] DeviceContext 2: workspace for stream 2 grown to 111616 bytes
-[2026-06-18 18:45:50.206] [INFO ] [backend] DeviceContext 2: workspace for stream 2 grown to 222976 bytes
-[2026-06-18 18:45:50.623] [INFO ] [backend] DeviceContext 2: workspace for stream 2 grown to 443392 bytes
-[2026-06-18 18:45:51.919] [INFO ] [backend] DeviceContext 2: workspace for stream 1 grown to 28311808 bytes
-[2026-06-18 18:45:55.892] [INFO ] [backend] DeviceContext 2: workspace for stream 1 grown to 170414592 bytes
-[2026-06-18 18:45:56.456] [INFO ] [backend] DeviceContext 3: workspace for stream 1 grown to 12845568 bytes
-[2026-06-18 18:45:56.615] [INFO ] [backend] DeviceContext 3: workspace for stream 2 grown to 55808 bytes
-[2026-06-18 18:45:56.888] [INFO ] [backend] DeviceContext 3: workspace for stream 1 grown to 12846080 bytes
-[2026-06-18 18:45:57.046] [INFO ] [backend] DeviceContext 3: workspace for stream 2 grown to 111616 bytes
-[2026-06-18 18:45:57.463] [INFO ] [backend] DeviceContext 3: workspace for stream 2 grown to 222976 bytes
-[2026-06-18 18:45:57.881] [INFO ] [backend] DeviceContext 3: workspace for stream 2 grown to 443392 bytes
-[2026-06-18 18:45:59.183] [INFO ] [backend] DeviceContext 3: workspace for stream 1 grown to 28311808 bytes
-[2026-06-18 18:46:03.179] [INFO ] [backend] DeviceContext 3: workspace for stream 1 grown to 170414592 bytes
-[2026-06-18 18:46:03.748] [INFO ] [backend] DeviceContext 4: workspace for stream 1 grown to 12845568 bytes
-[2026-06-18 18:46:03.905] [INFO ] [backend] DeviceContext 4: workspace for stream 2 grown to 55808 bytes
-[2026-06-18 18:46:04.176] [INFO ] [backend] DeviceContext 4: workspace for stream 1 grown to 12846080 bytes
-[2026-06-18 18:46:04.333] [INFO ] [backend] DeviceContext 4: workspace for stream 2 grown to 111616 bytes
-[2026-06-18 18:46:04.750] [INFO ] [backend] DeviceContext 4: workspace for stream 2 grown to 222976 bytes
-[2026-06-18 18:46:05.170] [INFO ] [backend] DeviceContext 4: workspace for stream 2 grown to 443392 bytes
-[2026-06-18 18:46:06.463] [INFO ] [backend] DeviceContext 4: workspace for stream 1 grown to 28311808 bytes
-[2026-06-18 18:46:10.421] [INFO ] [backend] DeviceContext 4: workspace for stream 1 grown to 170414592 bytes
-[2026-06-18 18:46:10.981] [INFO ] [backend] DeviceContext 5: workspace for stream 1 grown to 12845568 bytes
-[2026-06-18 18:46:11.138] [INFO ] [backend] DeviceContext 5: workspace for stream 2 grown to 55808 bytes
-[2026-06-18 18:46:11.410] [INFO ] [backend] DeviceContext 5: workspace for stream 1 grown to 12846080 bytes
-[2026-06-18 18:46:11.567] [INFO ] [backend] DeviceContext 5: workspace for stream 2 grown to 111616 bytes
-[2026-06-18 18:46:11.985] [INFO ] [backend] DeviceContext 5: workspace for stream 2 grown to 222976 bytes
-[2026-06-18 18:46:12.404] [INFO ] [backend] DeviceContext 5: workspace for stream 2 grown to 443392 bytes
-[2026-06-18 18:46:13.694] [INFO ] [backend] DeviceContext 5: workspace for stream 1 grown to 28311808 bytes
-[2026-06-18 18:46:17.671] [INFO ] [backend] DeviceContext 5: workspace for stream 1 grown to 170414592 bytes
-[2026-06-18 18:46:18.235] [INFO ] [backend] DeviceContext 6: workspace for stream 1 grown to 12845568 bytes
-[2026-06-18 18:46:18.391] [INFO ] [backend] DeviceContext 6: workspace for stream 2 grown to 55808 bytes
-[2026-06-18 18:46:18.663] [INFO ] [backend] DeviceContext 6: workspace for stream 1 grown to 12846080 bytes
-[2026-06-18 18:46:18.820] [INFO ] [backend] DeviceContext 6: workspace for stream 2 grown to 111616 bytes
-[2026-06-18 18:46:19.239] [INFO ] [backend] DeviceContext 6: workspace for stream 2 grown to 222976 bytes
-[2026-06-18 18:46:19.658] [INFO ] [backend] DeviceContext 6: workspace for stream 2 grown to 443392 bytes
-[2026-06-18 18:46:20.957] [INFO ] [backend] DeviceContext 6: workspace for stream 1 grown to 28311808 bytes
-[2026-06-18 18:46:24.915] [INFO ] [backend] DeviceContext 6: workspace for stream 1 grown to 170414592 bytes
-[2026-06-18 18:46:25.478] [INFO ] [backend] DeviceContext 7: workspace for stream 1 grown to 12845568 bytes
-[2026-06-18 18:46:25.635] [INFO ] [backend] DeviceContext 7: workspace for stream 2 grown to 55808 bytes
-[2026-06-18 18:46:25.908] [INFO ] [backend] DeviceContext 7: workspace for stream 1 grown to 12846080 bytes
-[2026-06-18 18:46:26.064] [INFO ] [backend] DeviceContext 7: workspace for stream 2 grown to 111616 bytes
-[2026-06-18 18:46:26.479] [INFO ] [backend] DeviceContext 7: workspace for stream 2 grown to 222976 bytes
-[2026-06-18 18:46:26.897] [INFO ] [backend] DeviceContext 7: workspace for stream 2 grown to 443392 bytes
-[2026-06-18 18:46:28.193] [INFO ] [backend] DeviceContext 7: workspace for stream 1 grown to 28311808 bytes
-[2026-06-18 18:46:32.152] [INFO ] [backend] DeviceContext 7: workspace for stream 1 grown to 170414592 bytes
+[2026-06-19 10:18:21.800] [INFO ] [backend] DeviceContext 0: workspace for stream 1 grown to 12845568 bytes
+[2026-06-19 10:18:21.960] [INFO ] [backend] DeviceContext 0: workspace for stream 2 grown to 55808 bytes
+[2026-06-19 10:18:22.243] [INFO ] [backend] DeviceContext 0: workspace for stream 1 grown to 12846080 bytes
+[2026-06-19 10:18:22.406] [INFO ] [backend] DeviceContext 0: workspace for stream 2 grown to 111616 bytes
+[2026-06-19 10:18:22.832] [INFO ] [backend] DeviceContext 0: workspace for stream 2 grown to 222976 bytes
+[2026-06-19 10:18:23.264] [INFO ] [backend] DeviceContext 0: workspace for stream 2 grown to 443392 bytes
+[2026-06-19 10:18:24.773] [INFO ] [backend] DeviceContext 0: workspace for stream 1 grown to 28311808 bytes
+[2026-06-19 10:18:28.787] [INFO ] [backend] DeviceContext 0: workspace for stream 1 grown to 170414592 bytes
+[2026-06-19 10:18:29.348] [INFO ] [backend] DeviceContext 1: workspace for stream 1 grown to 12845568 bytes
+[2026-06-19 10:18:29.506] [INFO ] [backend] DeviceContext 1: workspace for stream 2 grown to 55808 bytes
+[2026-06-19 10:18:29.776] [INFO ] [backend] DeviceContext 1: workspace for stream 1 grown to 12846080 bytes
+[2026-06-19 10:18:29.934] [INFO ] [backend] DeviceContext 1: workspace for stream 2 grown to 111616 bytes
+[2026-06-19 10:18:30.353] [INFO ] [backend] DeviceContext 1: workspace for stream 2 grown to 222976 bytes
+[2026-06-19 10:18:30.774] [INFO ] [backend] DeviceContext 1: workspace for stream 2 grown to 443392 bytes
+[2026-06-19 10:18:32.074] [INFO ] [backend] DeviceContext 1: workspace for stream 1 grown to 28311808 bytes
+[2026-06-19 10:18:36.040] [INFO ] [backend] DeviceContext 1: workspace for stream 1 grown to 170414592 bytes
+[2026-06-19 10:18:36.606] [INFO ] [backend] DeviceContext 2: workspace for stream 1 grown to 12845568 bytes
+[2026-06-19 10:18:36.764] [INFO ] [backend] DeviceContext 2: workspace for stream 2 grown to 55808 bytes
+[2026-06-19 10:18:37.036] [INFO ] [backend] DeviceContext 2: workspace for stream 1 grown to 12846080 bytes
+[2026-06-19 10:18:37.193] [INFO ] [backend] DeviceContext 2: workspace for stream 2 grown to 111616 bytes
+[2026-06-19 10:18:37.608] [INFO ] [backend] DeviceContext 2: workspace for stream 2 grown to 222976 bytes
+[2026-06-19 10:18:38.022] [INFO ] [backend] DeviceContext 2: workspace for stream 2 grown to 443392 bytes
+[2026-06-19 10:18:39.317] [INFO ] [backend] DeviceContext 2: workspace for stream 1 grown to 28311808 bytes
+[2026-06-19 10:18:43.281] [INFO ] [backend] DeviceContext 2: workspace for stream 1 grown to 170414592 bytes
+[2026-06-19 10:18:43.845] [INFO ] [backend] DeviceContext 3: workspace for stream 1 grown to 12845568 bytes
+[2026-06-19 10:18:44.003] [INFO ] [backend] DeviceContext 3: workspace for stream 2 grown to 55808 bytes
+[2026-06-19 10:18:44.276] [INFO ] [backend] DeviceContext 3: workspace for stream 1 grown to 12846080 bytes
+[2026-06-19 10:18:44.434] [INFO ] [backend] DeviceContext 3: workspace for stream 2 grown to 111616 bytes
+[2026-06-19 10:18:44.848] [INFO ] [backend] DeviceContext 3: workspace for stream 2 grown to 222976 bytes
+[2026-06-19 10:18:45.265] [INFO ] [backend] DeviceContext 3: workspace for stream 2 grown to 443392 bytes
+[2026-06-19 10:18:46.561] [INFO ] [backend] DeviceContext 3: workspace for stream 1 grown to 28311808 bytes
+[2026-06-19 10:18:50.532] [INFO ] [backend] DeviceContext 3: workspace for stream 1 grown to 170414592 bytes
+[2026-06-19 10:18:51.092] [INFO ] [backend] DeviceContext 4: workspace for stream 1 grown to 12845568 bytes
+[2026-06-19 10:18:51.249] [INFO ] [backend] DeviceContext 4: workspace for stream 2 grown to 55808 bytes
+[2026-06-19 10:18:51.520] [INFO ] [backend] DeviceContext 4: workspace for stream 1 grown to 12846080 bytes
+[2026-06-19 10:18:51.678] [INFO ] [backend] DeviceContext 4: workspace for stream 2 grown to 111616 bytes
+[2026-06-19 10:18:52.092] [INFO ] [backend] DeviceContext 4: workspace for stream 2 grown to 222976 bytes
+[2026-06-19 10:18:52.508] [INFO ] [backend] DeviceContext 4: workspace for stream 2 grown to 443392 bytes
+[2026-06-19 10:18:53.798] [INFO ] [backend] DeviceContext 4: workspace for stream 1 grown to 28311808 bytes
+[2026-06-19 10:18:57.739] [INFO ] [backend] DeviceContext 4: workspace for stream 1 grown to 170414592 bytes
+[2026-06-19 10:18:58.296] [INFO ] [backend] DeviceContext 5: workspace for stream 1 grown to 12845568 bytes
+[2026-06-19 10:18:58.453] [INFO ] [backend] DeviceContext 5: workspace for stream 2 grown to 55808 bytes
+[2026-06-19 10:18:58.723] [INFO ] [backend] DeviceContext 5: workspace for stream 1 grown to 12846080 bytes
+[2026-06-19 10:18:58.880] [INFO ] [backend] DeviceContext 5: workspace for stream 2 grown to 111616 bytes
+[2026-06-19 10:18:59.295] [INFO ] [backend] DeviceContext 5: workspace for stream 2 grown to 222976 bytes
+[2026-06-19 10:18:59.712] [INFO ] [backend] DeviceContext 5: workspace for stream 2 grown to 443392 bytes
+[2026-06-19 10:19:01.001] [INFO ] [backend] DeviceContext 5: workspace for stream 1 grown to 28311808 bytes
+[2026-06-19 10:19:04.954] [INFO ] [backend] DeviceContext 5: workspace for stream 1 grown to 170414592 bytes
+[2026-06-19 10:19:05.511] [INFO ] [backend] DeviceContext 6: workspace for stream 1 grown to 12845568 bytes
+[2026-06-19 10:19:05.670] [INFO ] [backend] DeviceContext 6: workspace for stream 2 grown to 55808 bytes
+[2026-06-19 10:19:05.939] [INFO ] [backend] DeviceContext 6: workspace for stream 1 grown to 12846080 bytes
+[2026-06-19 10:19:06.097] [INFO ] [backend] DeviceContext 6: workspace for stream 2 grown to 111616 bytes
+[2026-06-19 10:19:06.510] [INFO ] [backend] DeviceContext 6: workspace for stream 2 grown to 222976 bytes
+[2026-06-19 10:19:06.924] [INFO ] [backend] DeviceContext 6: workspace for stream 2 grown to 443392 bytes
+[2026-06-19 10:19:08.213] [INFO ] [backend] DeviceContext 6: workspace for stream 1 grown to 28311808 bytes
+[2026-06-19 10:19:12.167] [INFO ] [backend] DeviceContext 6: workspace for stream 1 grown to 170414592 bytes
+[2026-06-19 10:19:12.727] [INFO ] [backend] DeviceContext 7: workspace for stream 1 grown to 12845568 bytes
+[2026-06-19 10:19:12.884] [INFO ] [backend] DeviceContext 7: workspace for stream 2 grown to 55808 bytes
+[2026-06-19 10:19:13.153] [INFO ] [backend] DeviceContext 7: workspace for stream 1 grown to 12846080 bytes
+[2026-06-19 10:19:13.311] [INFO ] [backend] DeviceContext 7: workspace for stream 2 grown to 111616 bytes
+[2026-06-19 10:19:13.726] [INFO ] [backend] DeviceContext 7: workspace for stream 2 grown to 222976 bytes
+[2026-06-19 10:19:14.143] [INFO ] [backend] DeviceContext 7: workspace for stream 2 grown to 443392 bytes
+[2026-06-19 10:19:15.437] [INFO ] [backend] DeviceContext 7: workspace for stream 1 grown to 28311808 bytes
+[2026-06-19 10:19:19.412] [INFO ] [backend] DeviceContext 7: workspace for stream 1 grown to 170414592 bytes
 
 ========== COMPILE DIAGNOSTICS ==========
 --- ArchPlan ---
@@ -983,116 +983,113 @@ Region [R_RESULT_ACCUMULATED]  ID=67  offset=17544456192  bytes=1536
 
 =========================================
 
-     1 |   6.903882 |   6.839576 |      0.25% |      1.28% |     0.010000 |   215.5s
-     2 |   6.809536 |   6.585563 |      0.81% |      3.29% |     0.031111 |   203.4s
-     3 |   6.187497 |   5.658801 |      5.14% |     15.74% |     0.052222 |   203.4s
-     4 |   5.364953 |   5.079828 |     11.10% |     28.81% |     0.073333 |   205.5s
-     5 |   4.740551 |   6.948561 |      0.40% |      1.57% |     0.094444 |   203.6s
-     6 |   4.354228 |   4.685878 |     18.36% |     39.66% |     0.115556 |   203.1s
-     7 |   4.061058 |   3.585246 |     35.80% |     63.30% |     0.136667 |   203.7s
-     8 |   3.829677 |   3.343831 |     41.18% |     68.55% |     0.157778 |   203.7s
-     9 |   3.672864 |   4.240250 |     26.69% |     49.47% |     0.178889 |   204.0s
-    10 |   3.589320 |   3.080737 |     46.93% |     73.60% |     0.200000 |   201.5s
-    11 |   3.444682 |   4.671328 |     21.42% |     41.11% |     0.200000 |   202.8s
-    12 |   3.372495 |   2.862278 |     51.85% |     77.87% |     0.199938 |   203.4s
-    13 |   3.277849 |   2.925174 |     51.02% |     76.36% |     0.199751 |   202.6s
-    14 |   3.222267 |   2.759426 |     54.44% |     79.52% |     0.199440 |   204.8s
-    15 |   3.164545 |   2.690361 |     55.92% |     80.83% |     0.199005 |   202.1s
-    16 |   3.118937 |   2.651318 |     56.80% |     81.54% |     0.198447 |   201.8s
-    17 |   3.075908 |   2.636188 |     57.12% |     81.71% |     0.197766 |   204.5s
-    18 |   3.036865 |   2.559633 |     59.44% |     83.29% |     0.196963 |   201.8s
-    19 |   3.006054 |   2.552417 |     59.44% |     83.17% |     0.196039 |   203.2s
-    20 |   2.976349 |   2.508402 |     60.40% |     84.03% |     0.194996 |   201.2s
-    21 |   2.950136 |   2.519907 |     60.08% |     83.77% |     0.193834 |   202.2s
-    22 |   2.924052 |   6.786345 |      1.84% |      4.40% |     0.192556 |   204.4s
-    23 |   3.003316 |   2.640125 |     57.63% |     81.66% |     0.191162 |   202.6s
-    24 |   2.915090 |   2.463319 |     61.39% |     84.37% |     0.189655 |   203.4s
-    25 |   2.880871 |   2.453183 |     61.86% |     85.03% |     0.188036 |   204.2s
-    26 |   2.855485 |   2.428736 |     62.27% |     85.21% |     0.186307 |   202.9s
-    27 |   2.832943 |   2.410976 |     62.86% |     85.47% |     0.184471 |   202.4s
-    28 |   2.814461 |   2.649494 |     57.51% |     80.95% |     0.182529 |   202.3s
-    29 |   2.813292 |   2.403178 |     63.23% |     85.92% |     0.180485 |   202.6s
-    30 |   2.786278 |   2.402456 |     63.11% |     85.62% |     0.178340 |   203.5s
-    31 |   2.768494 |   2.382290 |     63.50% |     86.04% |     0.176098 |   204.8s
-    32 |   2.751924 |   2.364855 |     64.20% |     86.28% |     0.173761 |   207.0s
-    33 |   2.739396 |   2.352752 |     64.36% |     86.45% |     0.171332 |   203.0s
-    34 |   2.723312 |   2.326581 |     64.71% |     87.08% |     0.168814 |   202.4s
-    35 |   2.709817 |   2.314858 |     65.36% |     87.17% |     0.166211 |   202.6s
-    36 |   2.694758 |   2.304947 |     65.53% |     87.32% |     0.163525 |   205.9s
-    37 |   2.693886 |   2.300663 |     65.37% |     87.34% |     0.160760 |   202.1s
-    38 |   2.675240 |   2.334723 |     64.74% |     86.69% |     0.157919 |   205.3s
-    39 |   2.664072 |   2.305112 |     65.45% |     87.19% |     0.155006 |   202.7s
-    40 |   2.651499 |   2.285296 |     66.02% |     87.54% |     0.152024 |   202.4s
-    41 |   2.636982 |   2.301711 |     65.65% |     87.17% |     0.148978 |   203.1s
-    42 |   2.626132 |   2.258823 |     66.52% |     87.98% |     0.145870 |   201.7s
-    43 |   2.622216 |   2.275118 |     66.42% |     87.61% |     0.142706 |   203.6s
-    44 |   2.602699 |   2.250082 |     66.91% |     88.08% |     0.139488 |   205.3s
-    45 |   2.594383 |   2.246288 |     66.96% |     88.10% |     0.136221 |   201.9s
-    46 |   2.579562 |   2.292272 |     65.86% |     87.28% |     0.132909 |   203.0s
-    47 |   2.582655 |   2.238485 |     67.12% |     88.21% |     0.129556 |   202.7s
-    48 |   2.562066 |   2.226663 |     67.59% |     88.38% |     0.126166 |   202.6s
-    49 |   2.549960 |   2.214285 |     67.87% |     88.66% |     0.122744 |   202.1s
-    50 |   2.538890 |   2.204336 |     68.21% |     88.74% |     0.119293 |   202.3s
-    51 |   2.536480 |   2.215543 |     67.75% |     88.46% |     0.115818 |   202.4s
-    52 |   2.532970 |   2.224459 |     67.59% |     88.45% |     0.112324 |   201.8s
-    53 |   2.519469 |   2.199795 |     68.31% |     88.86% |     0.108814 |   202.4s
-    54 |   2.504775 |   2.163467 |     69.10% |     89.37% |     0.105293 |   202.4s
-    55 |   2.489555 |   2.342626 |     64.59% |     86.61% |     0.101765 |   203.1s
-    56 |   2.505033 |   2.147969 |     69.26% |     89.48% |     0.098236 |   201.9s
-    57 |   2.475428 |   2.158204 |     69.19% |     89.35% |     0.094708 |   202.6s
-    58 |   2.461902 |   2.148345 |     69.55% |     89.57% |     0.091187 |   202.8s
-    59 |   2.450665 |   2.150451 |     69.41% |     89.40% |     0.087677 |   203.8s
-    60 |   2.438664 |   2.142801 |     69.77% |     89.61% |     0.084183 |   202.3s
-    61 |   2.429302 |   2.252529 |     67.15% |     87.86% |     0.080708 |   203.2s
-    62 |   2.448318 |   2.117781 |     70.30% |     89.96% |     0.077257 |   202.2s
-    63 |   2.416734 |   2.124160 |     70.23% |     90.02% |     0.073835 |   201.9s
-    64 |   2.404821 |   2.114780 |     70.41% |     89.98% |     0.070445 |   202.5s
-    65 |   2.393426 |   2.115514 |     70.50% |     90.21% |     0.067092 |   201.9s
-    66 |   2.383052 |   2.095633 |     70.80% |     90.31% |     0.063780 |   202.8s
-    67 |   2.375105 |   2.089036 |     71.00% |     90.36% |     0.060513 |   203.0s
-    68 |   2.364339 |   2.091560 |     71.05% |     90.41% |     0.057295 |   203.3s
-    69 |   2.355534 |   2.082042 |     71.16% |     90.55% |     0.054131 |   202.4s
-    70 |   2.347682 |   2.072550 |     71.31% |     90.49% |     0.051023 |   203.3s
-    71 |   2.337980 |   2.074584 |     71.18% |     90.50% |     0.047977 |   203.9s
-    72 |   2.329969 |   2.067203 |     71.70% |     90.62% |     0.044995 |   202.6s
-    73 |   2.320012 |   2.062785 |     71.63% |     90.67% |     0.042082 |   202.0s
-    74 |   2.311505 |   2.055897 |     71.79% |     90.80% |     0.039241 |   202.4s
-    75 |   2.302059 |   2.051049 |     71.99% |     90.93% |     0.036476 |   203.0s
-    76 |   2.296330 |   2.047133 |     72.09% |     90.89% |     0.033790 |   202.8s
-    77 |   2.289646 |   2.040244 |     72.31% |     91.07% |     0.031187 |   203.1s
-    78 |   2.280171 |   2.041209 |     72.15% |     91.02% |     0.028669 |   203.2s
-    79 |   2.274094 |   2.034093 |     72.31% |     91.15% |     0.026240 |   202.6s
-    80 |   2.267241 |   2.040061 |     72.22% |     91.09% |     0.023903 |   202.6s
-    81 |   2.269804 |   2.022291 |     72.63% |     91.26% |     0.021661 |   202.5s
-    82 |   2.255528 |   2.025138 |     72.63% |     91.17% |     0.019516 |   201.8s
-    83 |   2.248894 |   2.021469 |     72.75% |     91.25% |     0.017472 |   203.0s
-    84 |   2.242273 |   2.017938 |     72.77% |     91.33% |     0.015530 |   202.2s
-    85 |   2.239531 |   2.016388 |     73.03% |     91.27% |     0.013694 |   202.9s
-    86 |   2.234655 |   2.011067 |     73.04% |     91.39% |     0.011965 |   203.5s
-    87 |   2.229736 |   2.007151 |     73.08% |     91.40% |     0.010346 |   202.6s
-    88 |   2.224777 |   2.007479 |     73.07% |     91.49% |     0.008839 |   203.0s
-    89 |   2.220770 |   2.003569 |     73.18% |     91.57% |     0.007445 |   202.8s
-    90 |   2.218772 |   2.003599 |     73.14% |     91.53% |     0.006167 |   203.5s
-    91 |   2.213947 |   1.999510 |     73.26% |     91.51% |     0.005005 |   201.6s
-    92 |   2.211652 |   1.999710 |     73.36% |     91.56% |     0.003962 |   203.1s
-    93 |   2.209110 |   1.998152 |     73.39% |     91.57% |     0.003038 |   202.7s
-    94 |   2.208985 |   1.996467 |     73.46% |     91.54% |     0.002235 |   201.5s
-    95 |   2.207536 |   1.997220 |     73.48% |     91.57% |     0.001554 |   202.9s
-    96 |   2.204745 |   1.995738 |     73.55% |     91.58% |     0.000996 |   202.7s
-    97 |   2.205413 |   1.995506 |     73.50% |     91.58% |     0.000561 |   202.0s
-    98 |   2.204744 |   1.995486 |     73.51% |     91.58% |     0.000250 |   202.8s
-    99 |   2.204800 |   1.995976 |     73.52% |     91.57% |     0.000063 |   201.8s
-   100 |   2.203918 |   1.995399 |     73.53% |     91.60% |     0.000001 |   202.6s
+     1 |   6.903882 |   6.837833 |      0.27% |      1.27% |     0.010000 |   299.0s
+     2 |   6.798329 |   6.482615 |      0.90% |      3.58% |     0.031111 |   171.4s
+     3 |   6.178956 |   5.538017 |      5.85% |     18.11% |     0.052222 |   171.5s
+     4 |   5.351318 |   4.941616 |     12.97% |     31.86% |     0.073333 |   171.7s
+     5 |   4.740706 |   4.311690 |     22.64% |     47.17% |     0.094444 |   171.1s
+     6 |   4.330903 |   4.371850 |     22.47% |     46.40% |     0.115556 |   171.0s
+     7 |   4.036772 |   3.567342 |     36.16% |     63.93% |     0.136667 |   171.6s
+     8 |   3.825020 |   3.322665 |     41.51% |     68.92% |     0.157778 |   170.9s
+     9 |   3.681838 |   3.238817 |     42.98% |     70.52% |     0.178889 |   170.8s
+    10 |   3.557572 |   3.122322 |     45.89% |     72.84% |     0.200000 |   171.2s
+    11 |   3.444184 |   3.041981 |     47.67% |     74.37% |     0.200000 |   170.4s
+    12 |   3.340681 |   2.848322 |     51.93% |     78.04% |     0.199938 |   170.8s
+    13 |   3.279663 |   2.800892 |     53.30% |     78.84% |     0.199751 |   170.7s
+    14 |   3.212958 |   2.717091 |     55.61% |     80.05% |     0.199440 |   170.7s
+    15 |   3.163990 |   2.753241 |     54.62% |     79.80% |     0.199005 |   170.6s
+    16 |   3.133004 |   2.625864 |     57.36% |     81.85% |     0.198447 |   171.1s
+    17 |   3.073596 |   4.032344 |     36.35% |     55.34% |     0.197766 |   170.8s
+    18 |   3.069263 |   2.582583 |     58.56% |     82.59% |     0.196963 |   170.8s
+    19 |   3.021584 |   2.502409 |     60.75% |     84.13% |     0.196039 |   170.9s
+    20 |   2.991041 |   2.566265 |     59.15% |     82.96% |     0.194996 |   170.5s
+    21 |   2.953163 |   4.677398 |     23.16% |     42.64% |     0.193834 |   170.6s
+    22 |   3.040582 |   2.536973 |     59.79% |     83.51% |     0.192556 |   170.6s
+    23 |   2.927554 |   2.470179 |     61.58% |     84.52% |     0.191162 |   170.8s
+    24 |   2.898234 |   2.424254 |     62.87% |     85.43% |     0.189655 |   170.5s
+    25 |   2.871204 |   2.700699 |     56.31% |     80.27% |     0.188036 |   170.9s
+    26 |   2.867765 |   2.389108 |     63.40% |     85.91% |     0.186307 |   171.0s
+    27 |   2.833198 |   2.412978 |     62.80% |     85.49% |     0.184471 |   170.3s
+    28 |   2.814443 |   2.368572 |     64.05% |     86.24% |     0.182529 |   170.3s
+    29 |   2.793328 |   2.501437 |     60.74% |     83.92% |     0.180485 |   170.5s
+    30 |   2.789540 |   3.956126 |     32.02% |     56.16% |     0.178340 |   170.3s
+    31 |   2.842223 |   2.354324 |     64.42% |     86.40% |     0.176098 |   170.6s
+    32 |   2.772173 |   2.384651 |     63.59% |     85.84% |     0.173761 |   170.1s
+    33 |   2.752869 |   2.361168 |     64.47% |     86.21% |     0.171332 |   170.9s
+    34 |   2.731737 |   2.336975 |     64.86% |     86.78% |     0.168814 |   170.4s
+    35 |   2.717461 |   2.313429 |     65.38% |     86.97% |     0.166211 |   170.6s
+    36 |   2.705437 |   2.313884 |     65.53% |     87.10% |     0.163525 |   170.5s
+    37 |   2.692010 |   2.311481 |     65.43% |     87.00% |     0.160760 |   170.4s
+    38 |   2.675038 |   2.277085 |     66.42% |     87.56% |     0.157919 |   170.4s
+    39 |   2.662294 |   2.276675 |     66.43% |     87.66% |     0.155006 |   170.5s
+    40 |   2.651540 |   2.263337 |     66.98% |     87.79% |     0.152024 |   170.7s
+    41 |   2.637398 |   3.204879 |     46.04% |     70.72% |     0.148978 |   170.7s
+    42 |   2.692761 |   2.265916 |     66.86% |     87.91% |     0.145870 |   170.5s
+    43 |   2.632769 |   3.102767 |     48.21% |     72.73% |     0.142706 |   170.4s
+    44 |   2.667621 |   2.327345 |     65.25% |     86.86% |     0.139488 |   171.0s
+    45 |   2.623196 |   2.241155 |     67.36% |     88.29% |     0.136221 |   170.6s
+    46 |   2.596820 |   2.231203 |     67.57% |     88.18% |     0.132909 |   170.2s
+    47 |   2.581270 |   2.225210 |     67.85% |     88.51% |     0.129556 |   171.1s
+    48 |   2.569543 |   2.254927 |     66.92% |     87.88% |     0.126166 |   170.2s
+    49 |   2.566959 |   2.195686 |     68.31% |     88.89% |     0.122744 |   170.5s
+    50 |   2.545260 |   2.193001 |     68.56% |     88.88% |     0.119293 |   170.6s
+    51 |   2.534186 |   2.184378 |     68.59% |     88.86% |     0.115818 |   170.2s
+    52 |   2.525927 |   2.188233 |     68.42% |     89.06% |     0.112324 |   170.4s
+    53 |   2.512995 |   2.162292 |     69.27% |     89.39% |     0.108814 |   170.6s
+    54 |   2.500781 |   2.163037 |     69.27% |     89.35% |     0.105293 |   170.9s
+    55 |   2.488975 |   2.538069 |     60.56% |     83.23% |     0.101765 |   170.2s
+    56 |   2.495978 |   2.151685 |     69.56% |     89.49% |     0.098236 |   170.8s
+    57 |   2.472782 |   2.145555 |     69.63% |     89.58% |     0.094708 |   170.4s
+    58 |   2.460011 |   2.136971 |     70.20% |     89.74% |     0.091187 |   170.3s
+    59 |   2.452281 |   2.123385 |     70.10% |     89.79% |     0.087677 |   170.8s
+    60 |   2.439878 |   2.131152 |     69.94% |     89.84% |     0.084183 |   170.5s
+    61 |   2.436769 |   2.120892 |     70.41% |     89.92% |     0.080708 |   170.6s
+    62 |   2.422956 |   2.109027 |     70.53% |     90.09% |     0.077257 |   170.4s
+    63 |   2.412054 |   2.107952 |     70.60% |     90.12% |     0.073835 |   171.2s
+    64 |   2.402139 |   2.102355 |     70.79% |     90.08% |     0.070445 |   170.6s
+    65 |   2.392836 |   2.082609 |     71.30% |     90.34% |     0.067092 |   170.4s
+    66 |   2.381434 |   2.085472 |     71.16% |     90.39% |     0.063780 |   170.6s
+    67 |   2.372280 |   2.091715 |     70.86% |     90.24% |     0.060513 |   170.8s
+    68 |   2.369609 |   2.075557 |     71.50% |     90.47% |     0.057295 |   170.8s
+    69 |   2.358221 |   2.073942 |     71.50% |     90.51% |     0.054131 |   170.7s
+    70 |   2.347497 |   2.082019 |     71.21% |     90.47% |     0.051023 |   170.6s
+    71 |   2.341364 |   2.060183 |     71.69% |     90.76% |     0.047977 |   170.9s
+    72 |   2.329185 |   2.058826 |     71.71% |     90.79% |     0.044995 |   170.5s
+    73 |   2.321223 |   2.046124 |     72.20% |     90.89% |     0.042082 |   170.4s
+    74 |   2.310700 |   2.047695 |     72.10% |     90.99% |     0.039241 |   170.8s
+    75 |   2.303134 |   2.049540 |     72.19% |     91.02% |     0.036476 |   170.6s
+    76 |   2.297270 |   2.037064 |     72.33% |     91.08% |     0.033790 |   171.0s
+    77 |   2.289703 |   2.034701 |     72.39% |     91.05% |     0.031187 |   170.6s
+    78 |   2.281399 |   2.030434 |     72.44% |     91.14% |     0.028669 |   171.0s
+    79 |   2.274874 |   2.023061 |     72.58% |     91.26% |     0.026240 |   170.7s
+    80 |   2.266977 |   2.022491 |     72.69% |     91.26% |     0.023903 |   170.5s
+    81 |   2.260095 |   2.018713 |     72.96% |     91.24% |     0.021661 |   170.8s
+    82 |   2.258085 |   2.016193 |     72.99% |     91.42% |     0.019516 |   170.4s
+    83 |   2.248343 |   2.014299 |     73.01% |     91.35% |     0.017472 |   170.7s
+    84 |   2.242430 |   2.005643 |     73.15% |     91.51% |     0.015530 |   170.9s
+    85 |   2.237771 |   2.005508 |     73.19% |     91.46% |     0.013694 |   170.9s
+    86 |   2.232888 |   2.005936 |     73.17% |     91.46% |     0.011965 |   170.5s
+    87 |   2.229851 |   2.000580 |     73.36% |     91.48% |     0.010346 |   170.8s
+    88 |   2.225127 |   2.000111 |     73.36% |     91.59% |     0.008839 |   170.9s
+    89 |   2.220418 |   1.996623 |     73.49% |     91.62% |     0.007445 |   170.4s
+    90 |   2.218963 |   1.995499 |     73.50% |     91.56% |     0.006167 |   170.4s
+    91 |   2.214741 |   1.995329 |     73.44% |     91.60% |     0.005005 |   171.0s
+    92 |   2.212301 |   1.994335 |     73.57% |     91.63% |     0.003962 |   170.8s
+    93 |   2.209018 |   1.994642 |     73.56% |     91.62% |     0.003038 |   170.5s
+    94 |   2.208353 |   1.992041 |     73.57% |     91.63% |     0.002235 |   171.1s
+    95 |   2.206387 |   1.991968 |     73.57% |     91.67% |     0.001554 |   170.7s
+    96 |   2.204751 |   1.991385 |     73.64% |     91.67% |     0.000996 |   170.7s
+    97 |   2.203722 |   1.991111 |     73.59% |     91.68% |     0.000561 |   170.8s
+    98 |   2.204742 |   1.991134 |     73.60% |     91.67% |     0.000250 |   170.7s
+    99 |   2.202312 |   1.991318 |     73.62% |     91.64% |     0.000063 |   170.9s
+   100 |   2.202864 |   1.991074 |     73.63% |     91.67% |     0.000001 |   170.9s
 
 =====================================
  Mode: AMP  [FP16]
 =====================================
- Best Top-1: 73.55%
- Best Top-5: 91.58%
+ Best Top-1: 73.64%
+ Best Top-5: 91.67%
  Best Epoch: 96
- Total Time: 20304.10 s
- Time per Epoch: 203.04 s
-=====================================
-Target achieved: Top-1 >= 73.36% (paper target)
-Goal met!
+ Total Time: 17197.35 s
+ Time per Epoch: 171.97 s
 =====================================

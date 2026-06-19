@@ -51,6 +51,16 @@ void Resize::execute(
     output_width = output_size_;
     output_height = output_size_;
 
+    // 计算中心正方形区域：取短边，在长边方向居中
+    const int crop_side = (input_width < input_height) ? input_width : input_height;
+    const int crop_offset_x = (input_width - crop_side) / 2;
+    const int crop_offset_y = (input_height - crop_side) / 2;
+
+    // 源指针偏移到中心正方形左上角（不申请额外内存）
+    const uint8_t* crop_input_ptr = input_ptr
+        + static_cast<size_t>(crop_offset_y) * input_stride
+        + static_cast<size_t>(crop_offset_x) * num_channels_;
+
     // ==================== 自动计算output_stride（如果为0）====================
     if (output_stride == 0) {
         if (forced_compact_output) {
@@ -62,9 +72,10 @@ void Resize::execute(
     }
 
     // ==================== Simd Resizer缓存优化 ====================
+    // 缓存 key 改为 crop_side（正方形），而非原始全图尺寸
     if (!resizer_cache_ ||
-        cached_src_w_ != input_width ||
-        cached_src_h_ != input_height ||
+        cached_src_w_ != crop_side ||
+        cached_src_h_ != crop_side ||
         cached_dst_w_ != output_size_ ||
         cached_dst_h_ != output_size_) {
 
@@ -76,13 +87,13 @@ void Resize::execute(
         // 避开双线性插值在AVX2的小分辨率、单通道、非16倍数宽度情形下崩溃的bug
         auto resize_method = SimdResizeMethodBilinear;
 #if defined(__AVX2__)
-        if ((input_width <= 32 || input_height <= 32 || output_size_ <= 32) && num_channels_ == 1 && (output_size_ % 16 != 0)) {
+        if ((crop_side <= 32 || output_size_ <= 32) && num_channels_ == 1 && (output_size_ % 16 != 0)) {
             resize_method = SimdResizeMethodNearest;
         }
 #endif
 
         resizer_cache_ = SimdResizerInit(
-            input_width, input_height,
+            crop_side, crop_side,
             output_size_, output_size_,
             num_channels_,  // 动态通道数（支持灰度/RGB）
             SimdResizeChannelByte,
@@ -90,8 +101,8 @@ void Resize::execute(
         );
 
         // 更新缓存key
-        cached_src_w_ = input_width;
-        cached_src_h_ = input_height;
+        cached_src_w_ = crop_side;
+        cached_src_h_ = crop_side;
         cached_dst_w_ = output_size_;
         cached_dst_h_ = output_size_;
 
@@ -103,14 +114,14 @@ void Resize::execute(
 #ifdef _WIN32
     try {
         simd_resizer_run_seh(resizer_cache_,
-                            input_ptr, input_stride,
+                            crop_input_ptr, input_stride,
                             output_ptr, output_stride);
     } catch (const std::runtime_error& e) {
         TR_DEVICE_ERROR("Resize::execute: SimdResizerRun crashed with ACCESS_VIOLATION");
     }
 #else
     // Linux/Unix暂不实现signal处理
-    SimdResizerRun(resizer_cache_, input_ptr, input_stride, output_ptr, output_stride);
+    SimdResizerRun(resizer_cache_, crop_input_ptr, input_stride, output_ptr, output_stride);
 #endif
 }
 

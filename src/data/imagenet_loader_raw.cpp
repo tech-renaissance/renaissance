@@ -1258,7 +1258,7 @@ void ImageNetLoaderRaw::begin_epoch(int epoch_id, bool is_train) {
                     for (int i = 0; i < M; ++i) {
                         current_set_->thread_sample_info_fully_train[i].reserve(estimated_per_thread);
                     }
-                    LOG_INFO << "RAW FULLY mode: pre-initialized thread_sample_info_fully_train for epoch 0";
+                    // LOG_INFO << "RAW FULLY mode: pre-initialized thread_sample_info_fully_train for epoch 0";
                 }
             } else {
                 if (current_set_->thread_sample_info_fully_val.empty()) {
@@ -1267,7 +1267,7 @@ void ImageNetLoaderRaw::begin_epoch(int epoch_id, bool is_train) {
                     for (int i = 0; i < M; ++i) {
                         current_set_->thread_sample_info_fully_val[i].reserve(estimated_per_thread);
                     }
-                    LOG_INFO << "RAW FULLY mode: pre-initialized thread_sample_info_fully_val for epoch 0";
+                    // LOG_INFO << "RAW FULLY mode: pre-initialized thread_sample_info_fully_val for epoch 0";
                 }
             }
 
@@ -1306,8 +1306,8 @@ void ImageNetLoaderRaw::begin_epoch(int epoch_id, bool is_train) {
                 uint64_t base_seed = tr::get_default_generator().seed();
                 uint64_t shuffle_seed = base_seed ^ (static_cast<uint64_t>(epoch_id) << 32);
 
-                LOG_INFO << "Shuffling global " << (current_set_->is_train ? "train" : "val")
-                         << " array: " << global_samples.size() << " samples, seed=" << shuffle_seed;
+                // LOG_INFO << "Shuffling global " << (current_set_->is_train ? "train" : "val")
+                //          << " array: " << global_samples.size() << " samples, seed=" << shuffle_seed;
 
                 shuffle_sample_info_array(global_samples, shuffle_seed);
             }
@@ -1320,7 +1320,7 @@ void ImageNetLoaderRaw::begin_epoch(int epoch_id, bool is_train) {
                 worker_states_[i].fully_local_idx = 0;
             }
 
-            LOG_INFO << "FULLY mode: epoch " << epoch_id << " initialized, ready for consumption";
+            // LOG_INFO << "FULLY mode: epoch " << epoch_id << " initialized, ready for consumption";
 
             // 【关键修复】后续epoch不需要标记buffer为ready，因为我们不再使用buffer机制
             // 直接从thread_sample_info数组读取，避免竞争
@@ -1377,11 +1377,11 @@ void ImageNetLoaderRaw::end_epoch() {
             if (current_set_->is_train && !current_set_->fully_train_collected) {
                 merge_thread_samples_to_global(*current_set_, true);
                 current_set_->fully_train_collected = true;
-                LOG_INFO << "RAW FULLY mode: train set epoch 0 completed, global array merged";
+                // LOG_INFO << "RAW FULLY mode: train set epoch 0 completed, global array merged";
             } else if (!current_set_->is_train && !current_set_->fully_val_collected) {
                 merge_thread_samples_to_global(*current_set_, false);
                 current_set_->fully_val_collected = true;
-                LOG_INFO << "RAW FULLY mode: val set epoch 0 completed, global array merged";
+                // LOG_INFO << "RAW FULLY mode: val set epoch 0 completed, global array merged";
             }
         }
     }
@@ -3029,8 +3029,9 @@ void ImageNetLoaderRaw::merge_thread_samples_to_global(RawDataset& ds, bool is_t
                              thread_samples[worker_id].end());
     }
 
-    LOG_INFO << "Merged " << total_count << " samples to global "
-             << (is_train ? "train" : "val") << " array";
+    // LOG_INFO << "Merged " << total_count << " samples to global "
+    //          << (is_train ? "train" : "val") << " array";
+    (void)total_count;
 
     // 打印每个线程的样本数（前8个）
     std::string samples_str;
@@ -3043,7 +3044,8 @@ void ImageNetLoaderRaw::merge_thread_samples_to_global(RawDataset& ds, bool is_t
     if (num_elements.size() > 8) {
         samples_str += "...";
     }
-    LOG_INFO << "  Samples per thread: " << samples_str;
+    // LOG_INFO << "  Samples per thread: " << samples_str;
+    (void)samples_str;
 }
 
 void ImageNetLoaderRaw::distribute_global_to_threads(RawDataset& ds, bool is_train) {

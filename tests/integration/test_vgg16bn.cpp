@@ -123,8 +123,8 @@ int main(int argc, char** argv) {
         .color_channels(3)
         .load_workers(1)
         .preprocess_workers(128)  // PyTorch的num_workers是per-RANK，但本框架是总的预处理线程数，对于8-RANK情形要乘以8
-        .cpu_binding(true)
-        .fully_mode(false)        // 显式禁用fully mode
+        .cpu_binding(false)
+        .fully_mode(true)
         .normalization(NormMode::IMAGENET)
 
         .train_transforms(
