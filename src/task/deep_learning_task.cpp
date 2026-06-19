@@ -53,7 +53,6 @@ enum class GraphSlot : uint8_t {
     CAST_FIRST_GRAD,
     NAN_CHECK_GRAD_SCALE,
     STATS_COMM,
-    STATS_RECOVER,  // 新增
     FIRST_LAYER_FWD_A,
     FIRST_LAYER_FWD_B,
     INF_MAIN_A,
@@ -534,7 +533,6 @@ StreamKind DeepLearningTask::stream_for(GraphId gid) {
         case GraphId::CAST_FIRST_GRAD_FP16_TO_FP32:
         case GraphId::NAN_CHECK_AND_GRAD_SCALING:
         case GraphId::STATS_COMM:
-        case GraphId::STATS_RECOVER:  // 新增
         case GraphId::OPTIMIZER:
         case GraphId::EMA_UPDATE:
         case GraphId::CAST_MAIN_FP32_TO_FP16:
@@ -750,7 +748,6 @@ void DeepLearningTask::build_exec_table() {
                 g[S(GraphSlot::CAST_FIRST_GRAD)]    = resolve(GraphId::CAST_FIRST_GRAD_FP16_TO_FP32, rank, v);
                 g[S(GraphSlot::NAN_CHECK_GRAD_SCALE)] = resolve(GraphId::NAN_CHECK_AND_GRAD_SCALING, rank, v);
                 g[S(GraphSlot::STATS_COMM)]       = resolve(GraphId::STATS_COMM, rank, v);
-                g[S(GraphSlot::STATS_RECOVER)]    = resolve(GraphId::STATS_RECOVER, rank, v);  // 新增
                 g[S(GraphSlot::FIRST_LAYER_FWD_A)]      = resolve(GraphId::FIRST_LAYER_FWD_A, rank, v);
                 g[S(GraphSlot::FIRST_LAYER_FWD_B)]      = resolve(GraphId::FIRST_LAYER_FWD_B, rank, v);
                 g[S(GraphSlot::CAST_MAIN)]        = resolve(GraphId::CAST_MAIN_FP32_TO_FP16, rank, v);
@@ -1073,7 +1070,6 @@ float DeepLearningTask::run_train_epoch_gpu() {
                 auto n_cfg     = g_n[S(GraphSlot::CAST_FIRST_GRAD)];
                 auto n_ncg     = g_n[S(GraphSlot::NAN_CHECK_GRAD_SCALE)];
                 auto n_sc      = g_n[S(GraphSlot::STATS_COMM)];
-                [[maybe_unused]] auto n_sr = g_n[S(GraphSlot::STATS_RECOVER)];  // 新增
                 auto n_cm      = g_n[S(GraphSlot::CAST_MAIN)];
                 auto n_accum   = g_n[S(GraphSlot::ACCUM_METRICS)];
                 auto n_clear   = g_n[S(GraphSlot::CLEAR_METRICS)];
@@ -1220,13 +1216,7 @@ float DeepLearningTask::run_train_epoch_gpu() {
                     if (n_far) cudaGraphLaunch(n_far, s_up);
                     if (l_accum_tl) cudaGraphLaunch(l_accum_tl, s_up);
                     if (n_ncg) cudaGraphLaunch(n_ncg, s_up);
-#ifdef TR_STRICTLY_OBEY_MLPERF_RULES
-                    // MLPerf 合规：last batch 照常更新 BN 统计量
                     if (n_sc) cudaGraphLaunch(n_sc, s_up);
-#else
-                    // 默认行为：last batch 不更新 BN 统计量，避免小 batch 污染
-                    if (n_sr) cudaGraphLaunch(n_sr, s_up);
-#endif
                     sync_up();
 
                     if (n_wu) cudaGraphLaunch(n_wu, s_up);
@@ -1469,7 +1459,6 @@ float DeepLearningTask::run_train_epoch_cpu() {
     int32_t idx_far    = idx_for(GraphId::FIRST_COMM, 0);
     int32_t idx_opt    = idx_for(GraphId::OPTIMIZER, 0);
     int32_t idx_sc     = idx_for(GraphId::STATS_COMM, 0);
-    [[maybe_unused]] int32_t idx_sr = idx_for(GraphId::STATS_RECOVER, 0);  // 新增
     int32_t idx_clear  = idx_for(GraphId::CLEAR_METRICS, 0);
     int32_t idx_ncg    = idx_for(GraphId::NAN_CHECK_AND_GRAD_SCALING, 0);
 
@@ -1529,13 +1518,7 @@ float DeepLearningTask::run_train_epoch_cpu() {
         int32_t idx_accum_nb = idx_for(GraphId::ACCUM_METRICS, v_base);
         if (idx_accum_nb >= 0) launch(idx_accum_nb);
         if (idx_ncg >= 0) { launch(idx_ncg); }
-#ifdef TR_STRICTLY_OBEY_MLPERF_RULES
-        // MLPerf 合规：唯一 batch 照常更新 BN 统计量
         launch(idx_sc);
-#else
-        // 默认行为：唯一 batch 视为 last batch，不更新 BN 统计量
-        launch(idx_sr);
-#endif
 
         // --- opt + lars ---
         launch(idx_opt);
@@ -1628,13 +1611,7 @@ float DeepLearningTask::run_train_epoch_cpu() {
         int32_t idx_accum_lb = idx_for(GraphId::ACCUM_METRICS_TRAIN_LAST, v_last);
         if (idx_accum_lb >= 0) launch(idx_accum_lb);
         if (idx_ncg >= 0) { launch(idx_ncg); }
-#ifdef TR_STRICTLY_OBEY_MLPERF_RULES
-        // MLPerf 合规：last batch 照常更新 BN 统计量
         launch(idx_sc);
-#else
-        // 默认行为：last batch 不更新 BN 统计量，避免小 batch 污染
-        launch(idx_sr);
-#endif
 
         // --- opt + lars ---
         launch(idx_opt);

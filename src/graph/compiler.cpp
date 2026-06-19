@@ -2159,28 +2159,6 @@ void Compiler::build_auxiliary_graphs(ComputationGraph& train_cg, const MemoryPl
         }
     }
 
-    // STATS_RECOVER 图：恢复 BN 统计量（B_PREV → B_NEXT，last batch 专用）
-    // 与 STATS_COMM 的子图 2 方向相反：将 prev 复制回 next，撤销 last batch 的污染
-    if (has_bn) {
-        std::pair<Region, Region> bn_recover_pairs[] = {
-            {Region::B_PREV_MEAN, Region::B_NEXT_MEAN},
-            {Region::B_PREV_VAR,  Region::B_NEXT_VAR},
-        };
-        bool has_recover = false;
-        GraphNode node;
-        node.kind = GraphNode::Kind::RANGE;
-        node.range_op = RangeOp::RANGE_D2D_COPY;
-        for (auto [src, dst] : bn_recover_pairs) {
-            if (!memory_plan.is_region_populated(src) || !memory_plan.is_region_populated(dst)) continue;
-            node.input_ranges.push_back(memory_plan.region_range(src));
-            node.output_ranges.push_back(memory_plan.region_range(dst));
-            has_recover = true;
-        }
-        if (has_recover) {
-            train_cg.append(GraphId::STATS_RECOVER, node);
-        }
-    }
-
     // 14. RANGE_SEMA_SWITCH - EMA 切换（Region 范围直接指定）
     if (has_ema) {
         MemRange r_e = memory_plan.region_range(
@@ -2275,6 +2253,33 @@ void Compiler::share_or_clone(Result& result,
 }
 
 // ============================================================================
+// 首层合法性检查：只有 Flatten / Conv / ChannelPadding 可以作为首层。
+// 在 Compiler 入口处执行一次，失败时抛出 ValueError。
+// ============================================================================
+static void validate_first_layer(const ArchPlan& arch) {
+    int first_idx = arch.first_layer_index();
+    const auto& layers = arch.layers();
+
+    TR_CHECK(first_idx >= 0 && static_cast<size_t>(first_idx) < layers.size(),
+             ValueError,
+             "ArchPlan has no valid first layer (first_layer_index="
+             << first_idx << ", total_layers=" << layers.size() << ")");
+
+    const auto& first_layer = layers[static_cast<size_t>(first_idx)];
+    switch (first_layer.kind) {
+        case LayerKind::Flatten:
+        case LayerKind::Conv:
+        case LayerKind::ChannelPadding:
+            return;  // 合法首层，静默通过
+        default:
+            TR_CHECK(false, ValueError,
+                     "First layer must be Flatten, Conv, or ChannelPadding, but got "
+                     << kind_name(first_layer.kind)
+                     << " (layer name: \"" << first_layer.name << "\")");
+    }
+}
+
+// ============================================================================
 // Compiler::compile — 五阶段编译入口
 // ============================================================================
 
@@ -2293,6 +2298,9 @@ Compiler::Result Compiler::compile(const ArchPlan& arch,
                                     const std::vector<CompileSpec>& variant_specs) {
     // LOG_INFO << "Compiler::compile - starting five-phase compilation";
     // LOG_INFO << "  ArchPlan: " << arch.layers().size() << " layers";
+
+    // 一次性首层合法性检查
+    validate_first_layer(arch);
 
     // 准备6个CompileSpec（base + 5个变体）
     std::vector<CompileSpec> all_specs;
