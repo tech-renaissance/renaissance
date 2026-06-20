@@ -21,13 +21,13 @@
  * - Conv bias: false | FC bias: true
  * - BatchNorm: momentum=0.1, eps=1e-5 (default)
  * - 激活函数: ReLU
- * - 优化器: SGD with momentum=0.9, nesterov=false
- * - 学习率: CosineAnnealing + Warmup(10), peak_lr=0.2, warmup_start=0.01
+ * - 优化器: SGD with momentum=0.9, nesterov=true
+ * - 学习率: CosineAnnealing + Warmup(10), peak_lr=0.36, warmup_start=0.01
  * - Weight decay: 1e-4
  * - 数据增强: RRC(0.08~1.0) + HFlip + ColorJitter(0.2) + RandomErasing(0.25)
  * - 训练轮数: 100 epochs
- * - Global batch size: 1024 (local=128 @ 8 GPUs)
- * - 梯度裁剪: grad_clip(10.0), value-based clamp [-10, +10]（本框架仅支持按值裁剪，不等价于 PyTorch clip_grad_norm_）
+ * - Global batch size: 2048 (local=256 @ 8 GPUs)
+ * - 梯度裁剪: 已关闭
  */
 
 #include "renaissance.h"
@@ -109,7 +109,7 @@ int main(int argc, char** argv) {
 
     GLOBAL_SETTING
         .manual_seed(123)
-        .global_batch_size(1024)       // [对齐 PyTorch] global=128*8=1024
+        .global_batch_size(2048)       // local=256 @ 8 GPUs
         .train_resolution(224)
         .val_resolution(224)
         .use_tf32(true);
@@ -198,10 +198,10 @@ int main(int argc, char** argv) {
         .optimizer(SGD()                                  // [对齐 PyTorch] SGD with momentum
             .momentum(0.9f)                               // [对齐 PyTorch] momentum=0.9
             .weight_decay(1e-4f)                          // [对齐 PyTorch] weight_decay=1e-4
-            .nesterov(false))                             // [对齐 PyTorch] nesterov=False
+            .nesterov(true))                             // 开启 Nesterov 动量
 
         .scheduler(CosineAnnealingLR()
-            .base_lr(0.2f)                                // [对齐 PyTorch] peak_lr=0.2
+            .base_lr(0.36f)                                // 线性缩放×2 → Nesterov修正-10%
             .warmup_start_lr(0.01f)                       // [对齐 PyTorch] warmup_start=0.01
             .warmup(10)                                   // [对齐 PyTorch] warmup_epochs=10
             .eta_min(1e-6f)                               // [对齐 PyTorch] eta_min=1e-6
@@ -229,13 +229,13 @@ int main(int argc, char** argv) {
               << "Conv bias: false | FC bias: true\n"
               << "BatchNorm: affine=True, momentum=0.1, eps=1e-5\n"
               << "Activation: ReLU\n"
-              << "Optimizer: SGD (momentum=0.9, nesterov=False)\n"
+              << "Optimizer: SGD (momentum=0.9, nesterov=True)\n"
               << "Scheduler: CosineAnnealing + Warmup(10)\n"
-              << "LR: 0.01 -> 0.2 (warmup) -> 1e-6 (cosine)\n"
+              << "LR: 0.01 -> 0.36 (warmup) -> 1e-6 (cosine)\n"
               << "Weight Decay: 1e-4\n"
               << "Augmentation: RRC(0.08~1.0) + HFlip + ColorJitter(0.2) + RandomErasing(0.25)\n"
-              << "Gradient Clip: grad_clip(10.0), value-based clamp [-10, +10]\n"
-              << "Training: " << kTotalEpochs << " epochs, global_batch_size=1024\n"
+              << "Gradient Clip: disabled\n"
+              << "Training: " << kTotalEpochs << " epochs, global_batch_size=2048\n"
               << "Target: 73.36% (original paper)\n"
               << "=====================================\n";
 
