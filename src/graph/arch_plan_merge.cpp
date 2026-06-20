@@ -9,6 +9,7 @@
 
 #include "renaissance/graph/arch_plan.h"
 #include "renaissance/core/tr_exception.h"
+#include "renaissance/core/global_registry.h"
 #include <algorithm>
 #include <cstdio>
 
@@ -270,7 +271,19 @@ void ArchPlan::step8_merge_quadruple() {
 }
 
 void ArchPlan::step9_merge_triple() {
-    // ConvBNReLU fusion removed.
+    if (!GlobalRegistry::instance().using_amp()) return;
+
+    auto build_cbr = [](const ArchLayer& conv, const ArchLayer& bn, const ArchLayer& /*relu*/) -> LayerParam {
+        auto& cp = std::get<ConvLayerParams>(conv.params);
+        float eps = 1e-5f, momentum = 0.1f;
+        if (std::holds_alternative<BNParams>(bn.params)) {
+            auto& bp = std::get<BNParams>(bn.params);
+            eps = bp.eps; momentum = bp.momentum;
+        }
+        return CbrLayerParams{cp.out_ch, cp.k, cp.s, cp.p, eps, momentum};
+    };
+    merge_pattern_triple(LayerKind::Conv, LayerKind::Bn2d, LayerKind::ReLU,
+                         LayerKind::CBR, build_cbr);
 }
 
 void ArchPlan::step10_merge_binary_and_mark() {

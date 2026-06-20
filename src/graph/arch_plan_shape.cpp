@@ -74,6 +74,14 @@ void ArchPlan::recompute_shapes_from(size_t start_idx) {
             cur = {1, 1, 1, std::get<GapFCLayerParams>(layer.params).out_features};
             break;
         }
+        case LayerKind::CBR: {
+            auto& p = std::get<CbrLayerParams>(layer.params);
+            cur = {1,
+                   (cur.h() + 2 * p.p - p.k) / p.s + 1,
+                   (cur.w() + 2 * p.p - p.k) / p.s + 1,
+                   p.out_ch};
+            break;
+        }
         case LayerKind::SoftmaxCE: {
             int nc = std::get<SoftmaxCELayerParams>(layer.params).num_classes;
             TR_CHECK(cur.c() == nc, ShapeError,

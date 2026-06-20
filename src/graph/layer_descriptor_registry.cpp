@@ -423,6 +423,102 @@ SubgraphPattern build_relu_inference(const OpParams&, const std::vector<TensorDe
 }
 
 // ============================================================================
+// CBR — 23张量 (Conv 8 + BN 13 + ReLU 2)
+//   Conv part (0-7):   weight, output, grad_slot, weight_grad, amp_w_fp16, amp_g_fp16, sum, sq_sum
+//   BN part (8-20):    weight, bias, output, prev_mean, prev_var, next_mean, next_var,
+//                      weight_grad, bias_grad, eq_bias, eq_scale, saved_mean, saved_inv_var
+//   ReLU part (21-22): relu_output, relu_mask
+// ============================================================================
+
+std::vector<TensorDesc> infer_cbr_tensors(
+    const Shape& input, const OpParams& params, const InferContext& ctx)
+{
+    std::vector<TensorDesc> descs;
+    if (!std::holds_alternative<CBRParams>(params.data)) {
+        LOG_WARN << "infer_cbr_tensors: params is not CBRParams";
+        return descs;
+    }
+    const auto& cbr = std::get<CBRParams>(params.data);
+
+    // Conv 部分：8 张量（含 bn_sum/bn_sq_sum）
+    OpParams conv_op{ConvParams{cbr.conv}};
+    auto conv_d = infer_conv_tensors_with_bn_stats(input, conv_op, ctx);
+    descs.insert(descs.end(), conv_d.begin(), conv_d.end());
+
+    // BN 部分：13 张量
+    Shape conv_out = compute_conv_output(input, cbr.conv);
+
+    // BN 通道对齐检查
+    if (ctx.enable_amp && (conv_out.c() % 8 != 0)) {
+        int aligned_c = ((conv_out.c() + 7) / 8) * 8;
+        TR_CHECK(false, ValueError,
+            "CBR AMP requires conv output channels to be a multiple of 8 "
+            "(cuDNN TensorCore constraint for internal BN). "
+            "Current out_ch=" << conv_out.c() << " is not aligned. "
+            "Insert channel_padding() before CBR or set out_ch to "
+            << aligned_c << ".");
+    }
+
+    OpParams bn_op{BNParams{cbr.bn}};
+    auto bn_d = infer_bn_tensors(conv_out, bn_op, ctx);
+    descs.insert(descs.end(), bn_d.begin(), bn_d.end());
+
+    // ReLU 部分：2 张量（独立输出 + mask）
+    DType feat_dt = ctx.enable_amp ? DType::FP16 : DType::FP32;
+    descs.push_back(TensorDesc{"cbr_relu_output", conv_out, select_feature_region(ctx), feat_dt});
+    descs.push_back(TensorDesc{"cbr_relu_mask",   conv_out, Region::S_MASK,        DType::INT8});
+
+    return descs;  // 共 23 张量
+}
+
+SubgraphPattern build_cbr_forward(const OpParams&, const std::vector<TensorDesc>& descs) {
+    SubgraphPattern p;
+    if (descs.size() < 23) return p;
+    SubgraphPattern::Node n;
+    n.op = ComputeOp::CBR_AMP_FWD;
+    // input: amp_w(4), bn_weight(8), bn_bias(9), next_mean(13), next_var(14)
+    // X 由 Compiler 在 begin 注入；bn_epsilon / bn_momentum 由 Compiler 在末尾追加
+    n.input_indices  = {4, 8, 9, 13, 14};
+    // output: conv_output(1), bn_sum(6), bn_sq_sum(7), bn_output(10),
+    //         saved_mean(19), saved_inv_var(20), relu_output(21), relu_mask(22)
+    n.output_indices = {1, 6, 7, 10, 19, 20, 21, 22};
+    p.nodes.push_back(n);
+    return p;
+}
+
+SubgraphPattern build_cbr_backward(const OpParams&, const std::vector<TensorDesc>& descs) {
+    SubgraphPattern p;
+    if (descs.size() < 23) return p;
+    SubgraphPattern::Node n;
+    n.op = ComputeOp::CBR_AMP_BWD;
+    // input: amp_w(4), bn_weight(8), saved_mean(19), saved_inv_var(20), relu_mask(22)
+    // dY 由 Compiler 在 begin 注入；X 由 Compiler 在末尾追加
+    n.input_indices  = {4, 8, 19, 20, 22};
+    // output: conv_amp_g_fp16(5), bn_weight_grad(15), bn_bias_grad(16)
+    //         scratch: conv_output(1), bn_output(10)
+    // dX 由 Compiler 以 in-place 方式注入到 output_ids[0]
+    n.output_indices = {5, 15, 16, 1, 10};
+    p.nodes.push_back(n);
+    return p;
+}
+
+SubgraphPattern build_cbr_inference(const OpParams&, const std::vector<TensorDesc>& descs) {
+    SubgraphPattern p;
+    if (descs.size() < 23) return p;
+    SubgraphPattern::Node n;
+    n.op = ComputeOp::CBR_AMP_INF;
+    // input: amp_w(4), bn_weight(8), bn_bias(9), eq_scale(18), eq_bias(17),
+    //        next_mean(13), next_var(14)
+    // X 由 Compiler 在 begin 注入；bn_epsilon 由 Compiler 在末尾追加
+    n.input_indices  = {4, 8, 9, 18, 17, 13, 14};
+    // output: conv_output(1), bn_sum(6), bn_sq_sum(7), bn_output(10),
+    //         relu_output(21), relu_mask(22)
+    n.output_indices = {1, 6, 7, 10, 21, 22};
+    p.nodes.push_back(n);
+    return p;
+}
+
+// ============================================================================
 // MaxPool — 2张量
 // ============================================================================
 
@@ -1902,6 +1998,7 @@ Shape get_output_shape(LayerKind kind, const std::vector<TensorDesc>& descs)
         case LayerKind::SoftmaxCE:     return find(0);   // ce_output at index 0
         case LayerKind::Dropout:       return find(0);   // dropout output
         case LayerKind::GapFC:         return find(3);   // fc output (gap[0] + fc_weight[1] + fc_bias[2] + fc_output[3])
+        case LayerKind::CBR:           return find(21);  // relu_output
         // Block fusions: output is the last sub-layer's BN output
         case LayerKind::BottleneckProjection: return find(67); // conv3_bn_out (59+8)
         case LayerKind::BottleneckIdentity:   return find(48); // conv3_bn_out (40+8)
@@ -1940,6 +2037,7 @@ const LayerDescriptor& get_layer_descriptor(LayerKind kind) {
     static const LayerDescriptor add2_desc   = { infer_add2_tensors,      build_add2_forward,      build_add2_backward,      build_add2_inference };
     static const LayerDescriptor dropout_desc = { infer_dropout_tensors,   build_dropout_forward,   build_dropout_backward,   build_dropout_inference };
     static const LayerDescriptor gapfc_desc  = { infer_gapfc_tensors,      build_gapfc_forward,      build_gapfc_backward,      build_gapfc_inference };
+    static const LayerDescriptor cbr_desc   = { infer_cbr_tensors,       build_cbr_forward,        build_cbr_backward,        build_cbr_inference };
 
     // Block融合的描述符 — 子层张量并集 + 分支梯度槽
     static const LayerDescriptor bproj_desc  = { infer_bottleneck_proj_tensors, build_bottleneck_proj_forward, build_bottleneck_proj_backward, build_bottleneck_proj_inference };
@@ -1977,6 +2075,7 @@ const LayerDescriptor& get_layer_descriptor(LayerKind kind) {
         case LayerKind::Sigmoid:              return sigmoid_desc;
         case LayerKind::Dropout:               return dropout_desc;
         case LayerKind::GapFC:                return gapfc_desc;
+        case LayerKind::CBR:                 return cbr_desc;
         case LayerKind::BottleneckProjection: return bproj_desc;
         case LayerKind::BottleneckIdentity:   return bid_desc;
         case LayerKind::BasicBlockProjection: return bbproj_desc;

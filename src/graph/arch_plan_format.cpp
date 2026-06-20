@@ -44,6 +44,7 @@ const char* kind_name(LayerKind k) {
     case LayerKind::InvResidualNoShortcut: return "InvResidualNoShortcut";
     case LayerKind::InvResidualIdentity: return "InvResidualIdentity";
     case LayerKind::GapFC: return "GapFC";
+    case LayerKind::CBR: return "CBR";
     case LayerKind::Dropout: return "Dropout";
     default: return "Unknown";
     }
@@ -113,6 +114,12 @@ static std::string params_str(const ArchLayer& l) {
     case LayerKind::GapFC: {
         auto& p = std::get<GapFCLayerParams>(l.params);
         snprintf(buf, sizeof(buf), "out=%d bias=%d", p.out_features, p.bias);
+        break;
+    }
+    case LayerKind::CBR: {
+        auto& p = std::get<CbrLayerParams>(l.params);
+        snprintf(buf, sizeof(buf), "out=%d k=%d s=%d p=%d eps=%g mom=%g",
+                 p.out_ch, p.k, p.s, p.p, p.eps, p.momentum);
         break;
     }
     default:

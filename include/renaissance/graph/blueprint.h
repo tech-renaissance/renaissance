@@ -89,8 +89,8 @@ private:
     friend Layer add2(Layer, Layer);
     friend Layer repeat(Layer, int);
 
-    friend Layer cbr(int, int, int, int);
-    friend Layer conv_bn_relu(int, int, int, int);
+    friend Layer cbr(int, int, int, int, double, double);
+    friend Layer conv_bn_relu(int, int, int, int, double, double);
     friend Layer cbrp(int, int, int, int, int, int, int);
     friend Layer gap_fc(int, bool);
 
@@ -139,7 +139,7 @@ struct SequentialParam  { std::vector<Layer> children; };
 struct Add2Param        { Layer lhs; Layer rhs; };
 struct RepeatParam      { Layer body; int times; };
 
-struct CBRParam         { int out_ch; int k; int s; int p; };
+struct CBRParam         { int out_ch; int k; int s; int p; float momentum = 0.1f; float eps = 1e-5f; };
 struct CBRPParam        { int out_ch; int conv_k; int conv_s; int conv_p; int pool_k; int pool_s; int pool_p; };
 struct GapFCParam       { int out_features; bool bias; };
 struct BlockParam       { BlockStyle style; int mid_ch; int out_ch; int stride; int expand_ratio; };
@@ -284,13 +284,17 @@ inline Layer repeat(Layer body, int times) {
 // =============================================================================
 // 预融合模块（性能优化）
 // =============================================================================
-inline Layer cbr(int out_ch, int k, int s, int p) {
+inline Layer cbr(int out_ch, int k, int s, int p,
+                 double momentum = 0.1, double eps = 1e-5) {
     return Layer(std::make_shared<Layer::Node>(
-        detail::NodeKind::CBR, detail::CBRParam{out_ch, k, s, p}));
+        detail::NodeKind::CBR,
+        detail::CBRParam{out_ch, k, s, p,
+                         static_cast<float>(momentum),
+                         static_cast<float>(eps)}));
 }
-inline Layer conv_bn_relu(int out_ch, int k, int s, int p) {
-    // conv_bn_relu就是cbr的重装版本，提供更直观的API命名
-    return cbr(out_ch, k, s, p);
+inline Layer conv_bn_relu(int out_ch, int k, int s, int p,
+                          double momentum = 0.1, double eps = 1e-5) {
+    return cbr(out_ch, k, s, p, momentum, eps);
 }
 inline Layer cbrp(int out_ch, int conv_k, int conv_s, int conv_p, int pool_k, int pool_s, int pool_p) {
     return Layer(std::make_shared<Layer::Node>(

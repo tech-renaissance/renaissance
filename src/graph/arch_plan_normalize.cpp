@@ -100,6 +100,8 @@ int ArchPlan::get_effective_output_c_at(size_t idx, int default_c) const {
             return std::get<InvResidualLayerParams>(layers_[j].params).out_ch;
         case LayerKind::GapFC:
             return std::get<GapFCLayerParams>(layers_[j].params).out_features;
+        case LayerKind::CBR:
+            return std::get<CbrLayerParams>(layers_[j].params).out_ch;
         case LayerKind::ReLU:
         case LayerKind::Tanh:
         case LayerKind::Bn1d:

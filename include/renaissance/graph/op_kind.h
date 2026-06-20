@@ -320,6 +320,12 @@ enum class ComputeOp : uint16_t {
     CHANNEL_PADDING_FP32_BWD_FIRST_LAYER,   // 首层 ChannelPadding：no-op
     CHANNEL_PADDING_AMP_BWD_FIRST_LAYER,    // 首层 ChannelPadding AMP：no-op
 
+    // === CBR 融合算子（AMP 专用）===
+    CBR_AMP_FWD,
+    CBR_AMP_BWD,
+    CBR_AMP_BWD_FIRST_LAYER,
+    CBR_AMP_INF,
+
     COUNT,              ///< 算子类型总数（哨兵值，用于数组大小计算）
     UNKNOWN = 0xFFFF
 };

@@ -40,6 +40,9 @@ enum class LayerKind : uint16_t {
 
     // 二元融合
     GapFC,
+
+    // 三元融合
+    CBR,
 };
 
 // 参数结构体
@@ -95,6 +98,15 @@ struct GapFCLayerParams {
     bool bias = true;
     bool operator==(const GapFCLayerParams& o) const { return out_features == o.out_features && bias == o.bias; }
 };
+struct CbrLayerParams {
+    int out_ch, k, s, p;
+    float eps = 1e-5f;
+    float momentum = 0.1f;
+    bool operator==(const CbrLayerParams& o) const {
+        return out_ch == o.out_ch && k == o.k && s == o.s && p == o.p &&
+               eps == o.eps && momentum == o.momentum;
+    }
+};
 struct EmptyParams {
     bool operator==(const EmptyParams&) const { return true; }
 };
@@ -108,6 +120,7 @@ using LayerParam = std::variant<
     BasicBlockIdentityLayerParams, BasicBlockProjectionLayerParams,
     InvResidualLayerParams,
     GapFCLayerParams,
+    CbrLayerParams,
     EmptyParams
 >;
 

@@ -116,6 +116,13 @@ StreamKind get_op_default_stream(ComputeOp op) noexcept {
         case ComputeOp::LARS_NESTEROV_UPDATE_DEEP:
             return StreamKind::COMP_3;
 
+        // ===== CBR 融合算子 → COMP_1 =====
+        case ComputeOp::CBR_AMP_FWD:
+        case ComputeOp::CBR_AMP_BWD:
+        case ComputeOp::CBR_AMP_BWD_FIRST_LAYER:
+        case ComputeOp::CBR_AMP_INF:
+            return StreamKind::COMP_1;
+
         default:
             return StreamKind::COMP_1;
     }

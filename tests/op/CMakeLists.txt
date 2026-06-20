@@ -628,4 +628,33 @@ endif()
 
 message(STATUS "  - test_dropout: Dropout FWD+BWD+INF property test")
 
+# ============================================================================
+# CBR AMP 融合算子等价性测试 — 4 个算子分别独立测试
+# ============================================================================
+foreach(cbr_test IN ITEMS test_cbr_amp_fwd test_cbr_amp_bwd test_cbr_amp_bwd_first_layer test_cbr_amp_inf)
+    add_executable(${cbr_test} ${cbr_test}.cpp)
+    target_link_libraries(${cbr_test} PRIVATE renaissance)
+    target_compile_definitions(${cbr_test} PRIVATE TR_LOG_LEVEL=1)
+
+    if(TR_USE_CUDA)
+        setup_gpu_runtime_env(${cbr_test})
+    endif()
+
+    set_target_properties(${cbr_test} PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/op
+        WIN32_EXECUTABLE FALSE
+    )
+
+    if(MSVC)
+        target_compile_options(${cbr_test} PRIVATE /W4 /utf-8 /wd4244 /wd4505 /wd4458 /wd4127)
+    else()
+        target_compile_options(${cbr_test} PRIVATE -Wall -Wextra -Wpedantic -Wno-unused-function)
+    endif()
+endforeach()
+
+message(STATUS "  - test_cbr_amp_fwd: CBR AMP FWD equivalence test")
+message(STATUS "  - test_cbr_amp_bwd: CBR AMP BWD equivalence test")
+message(STATUS "  - test_cbr_amp_bwd_first_layer: CBR AMP BWD_FIRST_LAYER equivalence test")
+message(STATUS "  - test_cbr_amp_inf: CBR AMP INF equivalence test")
+
 

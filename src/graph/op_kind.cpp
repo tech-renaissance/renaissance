@@ -134,6 +134,12 @@ std::string compute_op_to_string(ComputeOp op) {
         case ComputeOp::CHANNEL_PADDING_FP32_BWD_FIRST_LAYER:   return "CHANNEL_PADDING_FP32_BWD_FIRST_LAYER";
         case ComputeOp::CHANNEL_PADDING_AMP_BWD_FIRST_LAYER:    return "CHANNEL_PADDING_AMP_BWD_FIRST_LAYER";
 
+        // === CBR 融合算子（AMP 专用）===
+        case ComputeOp::CBR_AMP_FWD:              return "CBR_AMP_FWD";
+        case ComputeOp::CBR_AMP_BWD:              return "CBR_AMP_BWD";
+        case ComputeOp::CBR_AMP_BWD_FIRST_LAYER:  return "CBR_AMP_BWD_FIRST_LAYER";
+        case ComputeOp::CBR_AMP_INF:              return "CBR_AMP_INF";
+
         // === 融合算子（AMP 训练 + INF 推理）===
         case ComputeOp::BOTTLENECK_AMP_FWD:           return "BOTTLENECK_AMP_FWD";
         case ComputeOp::BOTTLENECK_AMP_BWD:    return "BOTTLENECK_AMP_BWD";
@@ -374,6 +380,19 @@ std::string format_params(ComputeOp op, const OpParams& p) {
         case ComputeOp::EMA_UPDATE: {
             if (auto* ep = std::get_if<EMAParams>(&p.data)) {
                 oss << "decay=" << ep->decay;
+            }
+            break;
+        }
+        case ComputeOp::CBR_AMP_FWD:
+        case ComputeOp::CBR_AMP_BWD:
+        case ComputeOp::CBR_AMP_BWD_FIRST_LAYER:
+        case ComputeOp::CBR_AMP_INF: {
+            if (auto* cp = std::get_if<CBRParams>(&p.data)) {
+                oss << "out_ch=" << cp->conv.out_channels
+                    << ",kernel=" << cp->conv.kernel_h << "x" << cp->conv.kernel_w
+                    << ",stride=" << cp->conv.stride_h << "x" << cp->conv.stride_w
+                    << ",pad=" << cp->conv.pad_h << "x" << cp->conv.pad_w
+                    << ",eps=" << cp->bn.eps << ",momentum=" << cp->bn.momentum;
             }
             break;
         }

@@ -39,6 +39,7 @@ static LayerKind kind_from_name(const std::string& name) {
     if (name == "InvResidualNoShortcut") return LayerKind::InvResidualNoShortcut;
     if (name == "InvResidualIdentity") return LayerKind::InvResidualIdentity;
     if (name == "GapFC") return LayerKind::GapFC;
+    if (name == "CBR") return LayerKind::CBR;
     if (name == "Dropout") return LayerKind::Dropout;
     TR_VALUE_ERROR("kind_from_name: unknown kind: " + name);
     return LayerKind::Conv;
@@ -134,6 +135,12 @@ std::string ArchPlan::to_yaml() const {
         case LayerKind::GapFC: {
             auto& p = std::get<GapFCLayerParams>(l.params);
             pnode["out_features"] = p.out_features; pnode["bias"] = p.bias;
+            break;
+        }
+        case LayerKind::CBR: {
+            auto& p = std::get<CbrLayerParams>(l.params);
+            pnode["out_ch"] = p.out_ch; pnode["k"] = p.k; pnode["s"] = p.s; pnode["p"] = p.p;
+            pnode["eps"] = p.eps; pnode["momentum"] = p.momentum;
             break;
         }
         default:
@@ -242,6 +249,13 @@ ArchPlan ArchPlan::from_yaml(const std::string& yaml) {
                 layer.params = GapFCLayerParams{
                     pnode["out_features"].get_value<int>(),
                     pnode.contains("bias") ? pnode["bias"].get_value<bool>() : true};
+                break;
+            case LayerKind::CBR:
+                layer.params = CbrLayerParams{
+                    pnode["out_ch"].get_value<int>(), pnode["k"].get_value<int>(),
+                    pnode["s"].get_value<int>(), pnode["p"].get_value<int>(),
+                    pnode.contains("eps") ? pnode["eps"].get_value<float>() : 1e-5f,
+                    pnode.contains("momentum") ? pnode["momentum"].get_value<float>() : 0.1f};
                 break;
             default:
                 layer.params = EmptyParams{};

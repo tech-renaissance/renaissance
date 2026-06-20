@@ -37,6 +37,7 @@ static bool is_bn_like(LayerKind k) {
     switch (k) {
         case LayerKind::Bn1d:
         case LayerKind::Bn2d:
+        case LayerKind::CBR:
             return true;
         default:
             return false;
@@ -57,6 +58,7 @@ static bool is_weight_bearing(LayerKind k) {
     switch (k) {
         case LayerKind::Conv:
         case LayerKind::Bn1d: case LayerKind::Bn2d:
+        case LayerKind::CBR:
         case LayerKind::FC:
         case LayerKind::GapFC:
         case LayerKind::BottleneckProjection:
@@ -262,6 +264,9 @@ private:
             case LayerKind::InvResidualIdentity:
                 compile_invresidual(layer);
                 break;
+            case LayerKind::CBR:
+                compile_cbr(layer, idx);
+                break;
             case LayerKind::ReLU:
             case LayerKind::Tanh:
             case LayerKind::SiLU:
@@ -309,6 +314,20 @@ private:
         alloc_bn_bias_group(param_shape);
         memory_plan_.alloc_bn_stats(param_shape);
         LOG_DEBUG << layer.name << "(BN): ch=" << ch;
+    }
+
+    void compile_cbr(const ArchLayer& layer, size_t idx) {
+        auto& p = std::get<CbrLayerParams>(layer.params);
+        int in_c = layer.in_shape.c();
+        Shape w_shape{p.out_ch, p.k, p.k, in_c};
+        bool is_first = layer.is_first_layer;
+        alloc_conv_group(w_shape, is_first);
+
+        int ch = layer.out_shape.c();
+        Shape param_shape{ch};
+        alloc_bn_group(param_shape, idx, layer);
+        alloc_bn_bias_group(param_shape);
+        memory_plan_.alloc_bn_stats(param_shape);
     }
 
     void compile_fc(const ArchLayer& layer) {
@@ -527,6 +546,12 @@ namespace {
         }
         if (std::holds_alternative<BNParams>(lp)) {
             return OpParams{std::get<BNParams>(lp)};
+        }
+        if (std::holds_alternative<CbrLayerParams>(lp)) {
+            auto& p = std::get<CbrLayerParams>(lp);
+            ConvParams cp{p.out_ch, p.k, p.k, p.s, p.s, p.p, p.p, 1, 1, 1};
+            BNParams bp{p.eps, p.momentum};
+            return OpParams{CBRParams{cp, bp}};
         }
         if (std::holds_alternative<SoftmaxCELayerParams>(lp)) {
             auto& p = std::get<SoftmaxCELayerParams>(lp);
@@ -966,6 +991,7 @@ static ComputeOp to_first_layer_bwd_op(ComputeOp op) {
         case ComputeOp::FLATTEN_AMP_BWD:            return ComputeOp::FLATTEN_AMP_BWD_FIRST_LAYER;
         case ComputeOp::CHANNEL_PADDING_FP32_BWD:   return ComputeOp::CHANNEL_PADDING_FP32_BWD_FIRST_LAYER;
         case ComputeOp::CHANNEL_PADDING_AMP_BWD:    return ComputeOp::CHANNEL_PADDING_AMP_BWD_FIRST_LAYER;
+        case ComputeOp::CBR_AMP_BWD:               return ComputeOp::CBR_AMP_BWD_FIRST_LAYER;
         default: return op;
     }
 }
@@ -983,6 +1009,10 @@ inline bool is_flatten_bwd_op(ComputeOp op) {
 inline bool is_channel_padding_bwd_op(ComputeOp op) {
     return op == ComputeOp::CHANNEL_PADDING_FP32_BWD || op == ComputeOp::CHANNEL_PADDING_AMP_BWD ||
            op == ComputeOp::CHANNEL_PADDING_FP32_BWD_FIRST_LAYER || op == ComputeOp::CHANNEL_PADDING_AMP_BWD_FIRST_LAYER;
+}
+
+inline bool is_cbr_bwd_op(ComputeOp op) {
+    return op == ComputeOp::CBR_AMP_BWD || op == ComputeOp::CBR_AMP_BWD_FIRST_LAYER;
 }
 
 void Compiler::build_computation_graph(const ArchPlan& arch,
@@ -1021,6 +1051,7 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
             case LayerKind::Sigmoid:           idx = 0; break;
             case LayerKind::Add2Start: case LayerKind::Add2ShortcutEnd: case LayerKind::Add2End: idx = 0; break;
             case LayerKind::GapFC:              idx = 3; break;
+            case LayerKind::CBR:                idx = 21; break;  // relu_output
             case LayerKind::BottleneckProjection: idx = 61; break;
             case LayerKind::BottleneckIdentity:   idx = 44; break;
             case LayerKind::BasicBlockProjection: idx = 26; break;  // conv2_bn_out (Add inplace target)
@@ -1058,6 +1089,7 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
             case LayerKind::Sigmoid:           idx = -1; break;
             case LayerKind::Add2Start: case LayerKind::Add2ShortcutEnd: case LayerKind::Add2End: idx = 0; break;  // inplace到第一个input
             case LayerKind::GapFC:              idx = -1; break; // dX in-place to X
+            case LayerKind::CBR:                idx = -1; break;  // dX in-place to X
             case LayerKind::BottleneckProjection: idx = 70; break;  // branch_grad_slot
             case LayerKind::BottleneckIdentity:   idx = 53; break;  // branch_grad_slot
             case LayerKind::BasicBlockProjection: idx = 52; break;  // branch_grad_slot
@@ -1183,7 +1215,8 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
             // [FIX] 首层 Conv/FC 等有显式 input_indices（weight/bn_stats）的算子
             // 显式注入 I_A_DATA / I_B_DATA 作为输入数据 X
             if (layer.is_first_layer && !gn.input_ids.empty() &&
-                (layer.kind == LayerKind::Conv || layer.kind == LayerKind::FC)) {
+                (layer.kind == LayerKind::Conv || layer.kind == LayerKind::FC ||
+                 layer.kind == LayerKind::CBR)) {
                 const auto& b = memory_plan.baseline();
                 layer_input_ids[l] = b.data_a;
 
@@ -1245,6 +1278,13 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
 
             // BN FWD: 注入全局标量 bn_epsilon 和 bn_momentum
             if (is_bn_fwd_op(gn.compute_op)) {
+                const auto& b = memory_plan.baseline();
+                if (b.bn_epsilon >= 0)  gn.input_ids.push_back(b.bn_epsilon);
+                if (b.bn_momentum >= 0) gn.input_ids.push_back(b.bn_momentum);
+            }
+
+            // CBR FWD: 注入全局标量 bn_epsilon 和 bn_momentum
+            if (gn.compute_op == ComputeOp::CBR_AMP_FWD) {
                 const auto& b = memory_plan.baseline();
                 if (b.bn_epsilon >= 0)  gn.input_ids.push_back(b.bn_epsilon);
                 if (b.bn_momentum >= 0) gn.input_ids.push_back(b.bn_momentum);
@@ -1333,7 +1373,7 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
                 }
             }
 
-            if (is_conv_bwd_op(gn.compute_op)) {
+            if (is_conv_bwd_op(gn.compute_op) || is_cbr_bwd_op(gn.compute_op)) {
                 if (layer.is_first_layer) {
                     const auto& b = memory_plan.baseline();
 
@@ -1467,6 +1507,7 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
         if (grad_id < 0 && (layer.kind == LayerKind::FC ||
             layer.kind == LayerKind::Conv ||
             layer.kind == LayerKind::Bn1d || layer.kind == LayerKind::Bn2d ||  // [NEW]
+            layer.kind == LayerKind::CBR ||
             layer.kind == LayerKind::GapFC ||
             layer.kind == LayerKind::MaxPool || layer.kind == LayerKind::AvgPool || layer.kind == LayerKind::Dropout ||
             layer.kind == LayerKind::Tanh || layer.kind == LayerKind::ReLU ||
@@ -1624,7 +1665,8 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
 
             // [FIX] 首层 Conv/FC 推理图：显式 input_indices → 注入 I_A_DATA / I_B_DATA
             if (layer.is_first_layer && !gn.input_ids.empty() &&
-                (layer.kind == LayerKind::Conv || layer.kind == LayerKind::FC)) {
+                (layer.kind == LayerKind::Conv || layer.kind == LayerKind::FC ||
+                 layer.kind == LayerKind::CBR)) {
                 const auto& b = memory_plan.baseline();
 
                 GraphNode gn_a = gn;
@@ -1664,6 +1706,12 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
 
             // BN INF: 注入全局标量 bn_epsilon（用于 eq_scale/eq_bias 惰性生成）
             if (is_bn_inf_op(gn.compute_op)) {
+                const auto& b = memory_plan.baseline();
+                if (b.bn_epsilon >= 0) gn.input_ids.push_back(b.bn_epsilon);
+            }
+
+            // CBR INF: 注入全局标量 bn_epsilon
+            if (gn.compute_op == ComputeOp::CBR_AMP_INF) {
                 const auto& b = memory_plan.baseline();
                 if (b.bn_epsilon >= 0) gn.input_ids.push_back(b.bn_epsilon);
             }
@@ -1741,7 +1789,7 @@ void Compiler::build_auxiliary_graphs(ComputationGraph& train_cg, const MemoryPl
     bool has_bn = false;
     for (const auto& layer : arch.layers()) {
         auto k = layer.kind;
-        if (k == LayerKind::Bn1d || k == LayerKind::Bn2d) {
+        if (k == LayerKind::Bn1d || k == LayerKind::Bn2d || k == LayerKind::CBR) {
             has_bn = true;
             break;
         }
@@ -1751,13 +1799,20 @@ void Compiler::build_auxiliary_graphs(ComputationGraph& train_cg, const MemoryPl
     if (has_bn) {
         float first_eps = -1.0f, first_mom = -1.0f;
         for (const auto& layer : arch.layers()) {
-            if (layer.kind == LayerKind::Bn1d || layer.kind == LayerKind::Bn2d) {
+            if (layer.kind == LayerKind::Bn1d || layer.kind == LayerKind::Bn2d || layer.kind == LayerKind::CBR) {
+                float eps = -1.0f, mom = -1.0f;
                 if (std::holds_alternative<BNParams>(layer.params)) {
                     const auto& bp = std::get<BNParams>(layer.params);
-                    if (first_eps < 0) { first_eps = bp.eps; first_mom = bp.momentum; }
-                    else if (bp.eps != first_eps || bp.momentum != first_mom) {
+                    eps = bp.eps; mom = bp.momentum;
+                } else if (std::holds_alternative<CbrLayerParams>(layer.params)) {
+                    const auto& cp = std::get<CbrLayerParams>(layer.params);
+                    eps = cp.eps; mom = cp.momentum;
+                }
+                if (eps >= 0) {
+                    if (first_eps < 0) { first_eps = eps; first_mom = mom; }
+                    else if (eps != first_eps || mom != first_mom) {
                         TR_CHECK(false, ValueError,
-                                 "All BN layers must share the same epsilon and momentum "
+                                 "All BN/CBR layers must share the same epsilon and momentum "
                                  "for RANGE OP batch operations.");
                     }
                 }
@@ -2302,6 +2357,7 @@ static void validate_first_layer(const ArchPlan& arch) {
         case LayerKind::Flatten:
         case LayerKind::Conv:
         case LayerKind::ChannelPadding:
+        case LayerKind::CBR:
             return;  // 合法首层，静默通过
         default:
             TR_CHECK(false, ValueError,

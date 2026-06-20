@@ -107,9 +107,17 @@ static void expand_primitive_impl(const Layer::Node& node, std::vector<ArchLayer
     }
     case NodeKind::CBR: {
         auto& p = std::get<CBRParam>(node.payload);
-        out.push_back({LayerKind::Conv, ConvLayerParams{p.out_ch, p.k, p.s, p.p}, "conv_cbr", {}, {}, false, false, src_id});
-        out.push_back({LayerKind::Bn2d, EmptyParams{}, "bn_cbr", {}, {}, false, false, src_id});
-        out.push_back({LayerKind::ReLU, EmptyParams{}, "relu_cbr", {}, {}, false, false, src_id});
+        if (fuse) {
+            CbrLayerParams cbr{p.out_ch, p.k, p.s, p.p, p.eps, p.momentum};
+            out.push_back({LayerKind::CBR, cbr, "cbr", {}, {}, false, false, src_id});
+        } else {
+            out.push_back({LayerKind::Conv, ConvLayerParams{p.out_ch, p.k, p.s, p.p},
+                           "conv_cbr", {}, {}, false, false, src_id});
+            out.push_back({LayerKind::Bn2d, BNParams{p.eps, p.momentum},
+                           "bn_cbr", {}, {}, false, false, src_id});
+            out.push_back({LayerKind::ReLU, EmptyParams{},
+                           "relu_cbr", {}, {}, false, false, src_id});
+        }
         current_c = p.out_ch;
         break;
     }

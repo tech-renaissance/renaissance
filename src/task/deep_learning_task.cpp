@@ -602,11 +602,17 @@ void DeepLearningTask::init_variant_scalars() {
     float bn_eps = 1e-5f;
     float bn_mom = 0.1f;
     for (const auto& layer : arch_plan_.layers()) {
-        if (layer.kind == LayerKind::Bn1d || layer.kind == LayerKind::Bn2d) {
+        if (layer.kind == LayerKind::Bn1d || layer.kind == LayerKind::Bn2d ||
+            layer.kind == LayerKind::CBR) {
             if (std::holds_alternative<BNParams>(layer.params)) {
                 const auto& bp = std::get<BNParams>(layer.params);
                 bn_eps = bp.eps;
                 bn_mom = bp.momentum;
+                break;
+            } else if (std::holds_alternative<CbrLayerParams>(layer.params)) {
+                const auto& cp = std::get<CbrLayerParams>(layer.params);
+                bn_eps = cp.eps;
+                bn_mom = cp.momentum;
                 break;
             }
         }

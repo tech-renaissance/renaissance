@@ -68,6 +68,7 @@ void register_default_ops() {
     register_op_avgpool();
     register_op_dropout();
     register_op_bn();
+    register_op_cbr();
 }
 
 #ifdef TR_USE_CUDA
@@ -124,6 +125,10 @@ bool require_warmup(ComputeOp op) noexcept {
         case ComputeOp::SIGMOID_AMP_FWD:  case ComputeOp::SIGMOID_AMP_BWD:
         case ComputeOp::FC_AMP_FWD:
         case ComputeOp::FC_AMP_BWD:
+        case ComputeOp::CBR_AMP_FWD:
+        case ComputeOp::CBR_AMP_BWD:
+        case ComputeOp::CBR_AMP_BWD_FIRST_LAYER:
+        case ComputeOp::CBR_AMP_INF:
             return true;
         default:
             return false;
@@ -142,7 +147,11 @@ void warmup_single_cudnn_op(const GraphNode& node,
         node.compute_op == ComputeOp::CONV_AMP_FWD ||
         node.compute_op == ComputeOp::CONV_AMP_BWD ||
         node.compute_op == ComputeOp::CONV_AMP_BWD_FIRST_LAYER ||
-        node.compute_op == ComputeOp::CONV_AMP_INF) {
+        node.compute_op == ComputeOp::CONV_AMP_INF ||
+        node.compute_op == ComputeOp::CBR_AMP_FWD ||
+        node.compute_op == ComputeOp::CBR_AMP_BWD ||
+        node.compute_op == ComputeOp::CBR_AMP_BWD_FIRST_LAYER ||
+        node.compute_op == ComputeOp::CBR_AMP_INF) {
         auto& entry = g_compute_op_table[static_cast<size_t>(node.compute_op)];
         if (entry.launch_cuda) {
             MultiStreamCaptureState state;

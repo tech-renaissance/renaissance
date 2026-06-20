@@ -128,5 +128,6 @@ void register_op_maxpool();
 void register_op_avgpool();
 void register_op_dropout();
 void register_op_bn();
+void register_op_cbr();
 
 } // namespace tr

@@ -96,6 +96,7 @@ list(APPEND RENAISSANCE_SOURCES
     backend/ops/dtensor/conv_op.cpp
     backend/ops/dtensor/bn_op.cpp
     backend/ops/dtensor/bn_op.cu
+    backend/ops/dtensor/cbr_op.cpp
     # conv_op_impl.cpp is include-only, not compiled separately
     backend/ops/range/h2d_op.cpp
     backend/ops/range/clear_op.cpp
