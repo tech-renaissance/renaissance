@@ -11,8 +11,8 @@
  *
  * 注意：
  *   --cpu / --gpu / --amp 必须指定其一，且只能指定一个。
- *   卷积不支持 bias，输入为 {X, W}，输出为 {Y, bn_stats}。
- *   bn_stats 为保留接口（仅 AMP FWD 写入，其余模式输出但不消费）。
+ *   卷积不支持 bias，输入为 {X, W}，输出为 {Y, sum, sq_sum}。
+ *   sum/sq_sum 为保留接口（仅 AMP FWD 通过 genstats 写入，其余模式输出但不消费）。
  *
  * 关键特性：
  *   - 使用 torch.nn.functional.conv2d 生成 PyTorch 参考数据（.tsr 文件）
@@ -247,7 +247,8 @@ int main(int argc, char** argv) {
     Tensor h_dy  = Tensor::load_tensor(ws + "/dy_conv"         + tsr_sfx + ".tsr");
     Tensor h_dx  = Tensor::load_tensor(ws + "/dx_conv_ref"     + tsr_sfx + ".tsr");
     Tensor h_dw  = Tensor::load_tensor(ws + "/dw_conv_ref"     + tsr_sfx + ".tsr");
-    Tensor h_bn  = Tensor::load_tensor(ws + "/bn_stats_conv_ref" + tsr_sfx + ".tsr");
+    Tensor h_sum    = Tensor::load_tensor(ws + "/sum_conv_ref"    + tsr_sfx + ".tsr");
+    Tensor h_sq_sum = Tensor::load_tensor(ws + "/sq_sum_conv_ref" + tsr_sfx + ".tsr");
 
     std::cout << "Reference data loaded.\n";
     std::cout << "  Input  shape:  [" << h_x.shape().n() << ", " << h_x.shape().h()
@@ -273,7 +274,8 @@ int main(int argc, char** argv) {
     DTensor d_y   = task.alloc(Shape{cfg.batch, OH, OW, cfg.K}, dtype, feat_region);  // Y  [B, OH, OW, K]
     DTensor d_dy  = task.alloc(Shape{cfg.batch, OH, OW, cfg.K}, dtype, feat_region);  // dY [B, OH, OW, K]
     DTensor d_dx  = task.alloc(h_x.shape(), dtype, feat_region);     // dX [B, IH, IW, C]
-    DTensor d_bn  = task.alloc(Shape{1, 1, 1, cfg.K * 2}, DType::FP32, Region::T_TEMP_FP32);  // bn_stats
+    DTensor d_sum    = task.alloc(Shape{1, 1, 1, cfg.K}, DType::FP32, Region::T_TEMP_FP32);  // sum
+    DTensor d_sq_sum = task.alloc(Shape{1, 1, 1, cfg.K}, DType::FP32, Region::T_TEMP_FP32);  // sq_sum
 
     // 权重梯度 + 动量 + 方差
     DTensor d_gw, d_mw, d_vw;
@@ -308,8 +310,9 @@ int main(int argc, char** argv) {
     conv_params.pad_w    = cfg.pad;
     OpParams conv_op_params{conv_params};
 
-    // FWD: {X, W} -> {Y, bn_stats}
-    g_fwd.append(fwd_op, {d_x.id, d_w.id}, {d_y.id, d_bn.id}, conv_op_params);
+    // FWD: {X, W} -> {Y, sum, sq_sum}
+    g_fwd.append(fwd_op, {d_x.id, d_w.id},
+                 {d_y.id, d_sum.id, d_sq_sum.id}, conv_op_params);
 
     task.add_graph("fwd", std::move(g_fwd), StreamKind::COMP_1);
 
@@ -396,6 +399,24 @@ int main(int argc, char** argv) {
                   << mse_dw;
         if (mse_dw > mse_thr) { std::cout << "  FAIL"; all_pass = false; }
         std::cout << std::endl;
+
+        // AMP FWD: sum / sq_sum（仅 AMP 路径真实写入）
+        if (is_amp) {
+            Tensor h_sum_out    = task.fetch_from_rank(d_sum, rank);
+            Tensor h_sq_sum_out = task.fetch_from_rank(d_sq_sum, rank);
+            double mse_sum    = compute_mse_fp32(h_sum_out, h_sum);
+            double mse_sq_sum = compute_mse_fp32(h_sq_sum_out, h_sq_sum);
+            max_mse = (mse_sum    > max_mse) ? mse_sum    : max_mse;
+            max_mse = (mse_sq_sum > max_mse) ? mse_sq_sum : max_mse;
+            std::cout << "  Rank " << rank << " FWD MSE(sum)    = " << std::scientific
+                      << mse_sum;
+            if (mse_sum > mse_thr) { std::cout << "  FAIL"; all_pass = false; }
+            std::cout << std::endl;
+            std::cout << "  Rank " << rank << " FWD MSE(sq_sum) = " << std::scientific
+                      << mse_sq_sum;
+            if (mse_sq_sum > mse_thr) { std::cout << "  FAIL"; all_pass = false; }
+            std::cout << std::endl;
+        }
     }
 
     std::cout << "\n===== Conv FWD+BWD " << mode_name(cfg.mode)

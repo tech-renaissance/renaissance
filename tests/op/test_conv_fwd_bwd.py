@@ -83,11 +83,12 @@ def generate(batch: int, IH: int, IW: int, C: int, K: int,
     dW_conv = W_conv.grad.detach()                      # [K, C, R, S]
     dW_krsc = dW_conv.permute(0, 2, 3, 1).contiguous()  # KRSC [K, R, S, C]
 
-    # ── bn_stats: sum 和 sum of squares per channel ──
+    # ── sum / sq_sum: per-channel sum and sum of squares ──
     Y_fp32 = Y_nhwc.float()
     Y_sum    = Y_fp32.sum(dim=(0, 1, 2))        # [K]
     Y_sq_sum = (Y_fp32 ** 2).sum(dim=(0, 1, 2)) # [K]
-    bn_stats = torch.cat([Y_sum, Y_sq_sum], dim=0).view(1, 1, 1, 2 * K)
+    y_sum    = Y_sum.view(1, 1, 1, K)
+    y_sq_sum = Y_sq_sum.view(1, 1, 1, K)
 
     print(f"Conv FWD+BWD {dtype_label} reference:")
     print(f"  Input:  [{batch}, {IH}, {IW}, {C}] (NHWC)")
@@ -109,8 +110,10 @@ def generate(batch: int, IH: int, IW: int, C: int, K: int,
              [dX_nhwc.detach().numpy().astype(np_dtype)], compress=False)
     save_tsr(os.path.join(ws, f'dw_conv_ref{suffix}.tsr'),
              [dW_krsc.detach().numpy().astype(np_dtype)], compress=False)
-    save_tsr(os.path.join(ws, f'bn_stats_conv_ref{suffix}.tsr'),
-             [bn_stats.detach().numpy().astype(np.float32)], compress=False)
+    save_tsr(os.path.join(ws, f'sum_conv_ref{suffix}.tsr'),
+             [y_sum.detach().numpy().astype(np.float32)], compress=False)
+    save_tsr(os.path.join(ws, f'sq_sum_conv_ref{suffix}.tsr'),
+             [y_sq_sum.detach().numpy().astype(np.float32)], compress=False)
 
     file_desc = (
         f"  x:        x_conv{suffix}.tsr\n"
@@ -119,7 +122,8 @@ def generate(batch: int, IH: int, IW: int, C: int, K: int,
         f"  dy:       dy_conv{suffix}.tsr\n"
         f"  dx_ref:   dx_conv_ref{suffix}.tsr\n"
         f"  dw_ref:   dw_conv_ref{suffix}.tsr\n"
-        f"  bn_stats: bn_stats_conv_ref{suffix}.tsr\n"
+        f"  sum:      sum_conv_ref{suffix}.tsr\n"
+        f"  sq_sum:   sq_sum_conv_ref{suffix}.tsr\n"
     )
 
     yaml = (

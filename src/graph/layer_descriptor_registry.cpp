@@ -105,23 +105,33 @@ std::vector<TensorDesc> infer_conv_tensors_with_bn_stats(
 {
     auto descs = infer_conv_tensors(input, params, ctx);  // 0-5
     const auto& cp = std::get<ConvParams>(params.data);
-    // 6: bn_stats → T_TEMP_FP32, 形状 {1,1,1,2*K}
-    descs.push_back(TensorDesc{"conv_bn_stats",
-        Shape{1, 1, 1, cp.out_channels * 2},
+    const int K = cp.out_channels;
+
+    // 6: 通道和 sum
+    descs.push_back(TensorDesc{"conv_sum",
+        Shape{1, 1, 1, K},
         Region::T_TEMP_FP32, DType::FP32});
-    return descs;
+
+    // 7: 通道平方和 sq_sum
+    descs.push_back(TensorDesc{"conv_sq_sum",
+        Shape{1, 1, 1, K},
+        Region::T_TEMP_FP32, DType::FP32});
+
+    return descs;  // 共 8 个张量
 }
 
 SubgraphPattern build_conv_forward(const OpParams&, const std::vector<TensorDesc>& descs) {
     SubgraphPattern p;
-    if (descs.size() < 7) return p;
+    if (descs.size() < 8) return p;
     bool amp = GlobalRegistry::instance().using_amp();
     SubgraphPattern::Node n;
     n.op = amp ? ComputeOp::CONV_AMP_FWD : ComputeOp::CONV_FP32_FWD;
     n.input_indices  = amp ? std::vector<size_t>{4} : std::vector<size_t>{0};
     //   [weight(AMP:fp16/FP32:fp32)]
-    n.output_indices = {1, 6};
-    //   Y(1), bn_stats(6)
+    // AMP FWD: genstats 会真实写入 sum/sq_sum
+    // FP32 FWD: sum/sq_sum 是预留位，不访问
+    n.output_indices = {1, 6, 7};
+    //   Y(1), sum(6), sq_sum(7)
     p.nodes.push_back(n);
     return p;
 }
@@ -142,14 +152,15 @@ SubgraphPattern build_conv_backward(const OpParams&, const std::vector<TensorDes
 
 SubgraphPattern build_conv_inference(const OpParams&, const std::vector<TensorDesc>& descs) {
     SubgraphPattern p;
-    if (descs.size() < 7) return p;
+    if (descs.size() < 8) return p;
     bool amp = GlobalRegistry::instance().using_amp();
     SubgraphPattern::Node n;
     n.op = amp ? ComputeOp::CONV_AMP_INF : ComputeOp::CONV_FP32_INF;
     n.input_indices  = amp ? std::vector<size_t>{4} : std::vector<size_t>{0};
     //   [weight(AMP:fp16/FP32:fp32)]
-    n.output_indices = {1, 6};
-    //   Y(1), bn_stats(6)
+    // INF: sum/sq_sum 是预留位，不访问
+    n.output_indices = {1, 6, 7};
+    //   Y(1), sum(6, reserved), sq_sum(7, reserved)
     p.nodes.push_back(n);
     return p;
 }

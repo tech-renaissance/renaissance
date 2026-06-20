@@ -76,7 +76,7 @@ static void launch_conv_fp32_fwd_cuda(
     const DTensor& dt_x = mp.get_dtensor(node.input_ids[0]);
     const DTensor& dt_w = mp.get_dtensor(node.input_ids[1]);
     const DTensor& dt_y = mp.get_dtensor(node.output_ids[0]);
-    // output_ids[0] = Y, output_ids[1] = bn_stats (reserved, unused in FP32 FWD)
+    // output_ids[0] = Y, output_ids[1] = sum (reserved), output_ids[2] = sq_sum (reserved)
 
     StreamKind sk = StreamKind::COMP_1;
     cudaStream_t s = static_cast<cudaStream_t>(ctx.stream(sk));
@@ -133,7 +133,7 @@ static void launch_conv_fp32_inf_cuda(
     const DTensor& dt_x = mp.get_dtensor(node.input_ids[0]);
     const DTensor& dt_w = mp.get_dtensor(node.input_ids[1]);
     const DTensor& dt_y = mp.get_dtensor(node.output_ids[0]);
-    // output_ids[0] = Y, output_ids[1] = bn_stats (reserved, unused in FP32 INF)
+    // output_ids[0] = Y, output_ids[1] = sum (reserved), output_ids[2] = sq_sum (reserved)
 
     StreamKind sk = StreamKind::COMP_1;
     cudaStream_t s = static_cast<cudaStream_t>(ctx.stream(sk));
@@ -266,11 +266,12 @@ static void launch_conv_amp_fwd_cuda(
 {
     const auto& cp = node.params.conv();
     // input_ids: [0]=X, [1]=W_fp16
-    // output_ids: [0]=Y, [1]=bn_stats
-    const DTensor& dt_x  = mp.get_dtensor(node.input_ids[0]);
-    const DTensor& dt_w  = mp.get_dtensor(node.input_ids[1]);
-    const DTensor& dt_y  = mp.get_dtensor(node.output_ids[0]);
-    const DTensor& dt_bn = mp.get_dtensor(node.output_ids[1]);
+    // output_ids: [0]=Y, [1]=sum, [2]=sq_sum
+    const DTensor& dt_x      = mp.get_dtensor(node.input_ids[0]);
+    const DTensor& dt_w      = mp.get_dtensor(node.input_ids[1]);
+    const DTensor& dt_y      = mp.get_dtensor(node.output_ids[0]);
+    const DTensor& dt_sum    = mp.get_dtensor(node.output_ids[1]);
+    const DTensor& dt_sq_sum = mp.get_dtensor(node.output_ids[2]);
 
     StreamKind sk = StreamKind::COMP_1;
     cudaStream_t s = static_cast<cudaStream_t>(ctx.stream(sk));
@@ -289,23 +290,19 @@ static void launch_conv_amp_fwd_cuda(
         cp.pad_h, cp.pad_w, cp.stride_h, cp.stride_w,
         true, ComputeOp::CONV_AMP_FWD
     };
+    // 注意：必须是 build_conv_amp_fwd_graph（含 genstats），不能转发到 INF graph
     auto& cache = get_or_build_cache(s_conv_fwd_cache, key, [&]() {
-        return build_conv_amp_fwd_graph(dt_x, dt_w, dt_y, dt_bn, cp, h);
+        return build_conv_amp_fwd_graph(dt_x, dt_w, dt_y, dt_sum, dt_sq_sum, cp, h);
     });
 
     ctx.ensure_workspace_grow(sk, cache.workspace_size);
     void* ws = ctx.workspace(sk);
 
-    // Variant Pack：bn_stats 的 sq_sum 需要偏移
-    update_conv_tensor_to_id(cache, dt_x.id, dt_w.id, dt_y.id, -1, -1, -1, dt_bn.id);
+    update_conv_tensor_to_id(cache, dt_x.id, dt_w.id, dt_y.id,
+                             -1, -1, -1, dt_sum.id, dt_sq_sum.id);
     std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> vp;
     for (const auto& [ta, tid] : cache.tensor_to_id) {
-        void* ptr = ctx.ptr_at(static_cast<int>(tid));
-        if (tid == dt_bn.id && cache.bn_stats_offset > 0 &&
-            ta->get_name() == "sq_sum") {
-            ptr = static_cast<float*>(ptr) + cache.bn_stats_offset;
-        }
-        vp[ta] = ptr;
+        vp[ta] = ctx.ptr_at(static_cast<int>(tid));
     }
 
     TR_CUDNN_FE_CHECK(cache.graph->execute(h, vp, ws),
@@ -328,7 +325,7 @@ static void launch_conv_amp_inf_cuda(
     const DTensor& dt_x = mp.get_dtensor(node.input_ids[0]);
     const DTensor& dt_w = mp.get_dtensor(node.input_ids[1]);
     const DTensor& dt_y = mp.get_dtensor(node.output_ids[0]);
-    // output_ids[0] = Y, output_ids[1] = bn_stats (reserved, unused in AMP INF)
+    // output_ids[0] = Y, output_ids[1] = sum (reserved), output_ids[2] = sq_sum (reserved)
 
     StreamKind sk = StreamKind::COMP_1;
     cudaStream_t s = static_cast<cudaStream_t>(ctx.stream(sk));
@@ -565,8 +562,8 @@ static void launch_conv_fwd_cpu_xnnpack(CpuOpContext* op_ctx) {
     TR_CHECK(p != nullptr, ValueError, "CONV_FP32_FWD CPU missing ConvParams");
     TR_CHECK(op_ctx->num_inputs >= 2, ShapeError,
              "CONV_FP32_FWD CPU requires at least 2 inputs");
-    TR_CHECK(op_ctx->num_outputs >= 1, ShapeError,
-             "CONV_FP32_FWD CPU requires 1 output");
+    TR_CHECK(op_ctx->num_outputs >= 3, ShapeError,
+             "CONV_FP32_FWD CPU requires 3 outputs (Y, sum reserved, sq_sum reserved)");
 
     const float* X = static_cast<const float*>(
         const_cast<DeviceContext*>(op_ctx->ctx)->ptr_at(op_ctx->input_ids[0]));
@@ -670,8 +667,8 @@ static void launch_conv_fwd_cpu_naive(CpuOpContext* op_ctx) {
     TR_CHECK(p != nullptr, ValueError, "CONV_FP32_FWD CPU naive missing ConvParams");
     TR_CHECK(op_ctx->num_inputs >= 2, ShapeError,
              "CONV_FP32_FWD CPU naive requires at least 2 inputs");
-    TR_CHECK(op_ctx->num_outputs >= 1, ShapeError,
-             "CONV_FP32_FWD CPU naive requires 1 output");
+    TR_CHECK(op_ctx->num_outputs >= 3, ShapeError,
+             "CONV_FP32_FWD CPU naive requires 3 outputs (Y, sum reserved, sq_sum reserved)");
 
     const float* X = static_cast<const float*>(
         const_cast<DeviceContext*>(op_ctx->ctx)->ptr_at(op_ctx->input_ids[0]));

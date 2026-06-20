@@ -100,7 +100,6 @@ struct ConvGraphCache {
     std::shared_ptr<fe::graph::Graph> graph;
     std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, int64_t> tensor_to_id;
     size_t workspace_size = 0;
-    int64_t bn_stats_offset = 0;  // sq_sum 相对于 sum 的偏移（元素数），仅 AMP FWD 使用
 };
 
 // 静态缓存：按算子类型分独立 map
@@ -138,7 +137,7 @@ static void update_conv_tensor_to_id(
     ConvGraphCache& cache,
     int64_t x_id, int64_t w_id, int64_t y_id,
     int64_t dy_id = -1, int64_t dx_id = -1, int64_t dw_id = -1,
-    int64_t bn_id = -1)
+    int64_t sum_id = -1, int64_t sq_sum_id = -1)
 {
     for (auto& [ta, tid] : cache.tensor_to_id) {
         const std::string& name = ta->get_name();
@@ -148,8 +147,8 @@ static void update_conv_tensor_to_id(
         else if (name == "dY") tid = dy_id;
         else if (name == "dX") tid = dx_id;
         else if (name == "dW") tid = dw_id;
-        else if (name == "sum")     tid = bn_id;
-        else if (name == "sq_sum")  tid = bn_id;
+        else if (name == "sum")     tid = sum_id;
+        else if (name == "sq_sum")  tid = sq_sum_id;
     }
 }
 
@@ -312,11 +311,12 @@ ConvGraphCache build_conv_fp32_dgrad_graph(
  * AMP 精度：dim 使用 dt.padded_c()（对齐后的C），stride 使用 DTensor 真实值。
  * conv_out 直接 set_output(true)，然后 genstats 消费 conv_out。
  * GenStats 输出 sum 和 sq_sum，均为 FP32，形状 {1, K, 1, 1}。
- * bn_stats 张量：sum 写入前半段 [0, K)，sq_sum 写入后半段 [K, 2*K)。
+ * sum/sq_sum 分别绑定到独立的 DTensor（index 6 / 7）。
  */
 ConvGraphCache build_conv_amp_fwd_graph(
     const DTensor& dt_x, const DTensor& dt_w, const DTensor& dt_y,
-    const DTensor& dt_bn, const ConvParams& cp, cudnnHandle_t handle)
+    const DTensor& dt_sum, const DTensor& dt_sq_sum,
+    const ConvParams& cp, cudnnHandle_t handle)
 {
     using namespace fe::graph;
 
@@ -345,14 +345,14 @@ ConvGraphCache build_conv_amp_fwd_graph(
 
     auto conv_out = graph->conv_fprop(X, W, opts);
 
-    // 直接 set_output(true)，conv_out 设为 output 后仍可作为 genstats 的输入
+    // conv_out 设为 output 后仍可作为 genstats 的输入
     conv_out->set_output(true)
              .set_name("Y")
              .set_dim(to_fe_dim(dt_y.shape))
              .set_stride(make_nhwc_stride(dt_y))
              .set_data_type(fe::DataType_t::HALF);
 
-    // GenStats
+    // GenStats：保持原有行为，只改输出绑定方式
     auto genstats_opts = Genstats_attributes()
         .set_name("genstats")
         .set_compute_data_type(fe::DataType_t::FLOAT);
@@ -380,9 +380,8 @@ ConvGraphCache build_conv_amp_fwd_graph(
     cache.tensor_to_id[X]        = dt_x.id;
     cache.tensor_to_id[W]        = dt_w.id;
     cache.tensor_to_id[conv_out] = dt_y.id;
-    cache.tensor_to_id[sum]      = dt_bn.id;
-    cache.tensor_to_id[sq_sum]   = dt_bn.id;
-    cache.bn_stats_offset        = K;  // sq_sum 偏移 K 个 float 元素
+    cache.tensor_to_id[sum]      = dt_sum.id;
+    cache.tensor_to_id[sq_sum]   = dt_sq_sum.id;
     return cache;
 }
 
