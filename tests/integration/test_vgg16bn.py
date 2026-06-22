@@ -1,6 +1,7 @@
 import os
 import time
 import math
+import random
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -10,18 +11,18 @@ from torch.utils.data import DataLoader, DistributedSampler
 from torchvision import datasets, transforms
 
 # ---------------------------------------------------------------------------
-# Hyperparameters (aligned with VGG_RECIPE.md)
+# Hyperparameters (aligned with test_vgg16bn.cpp AMP version)
 # ---------------------------------------------------------------------------
-TOTAL_EPOCHS   = 100
-LOCAL_BATCH_SIZE = 128        # per-GPU, global = 128*8 = 1024
-PEAK_LR         = 0.2           # [FIX_2026_06_12]稳定性修复：峰值学习率从0.4降至0.2
-WARMUP_LR_START = 0.01
-ETA_MIN         = 1e-6
-WARMUP_EPOCHS   = 10          # [FIX_2026_06_12]稳定性修复：warmup从5 epoch延长至10 epoch
-WEIGHT_DECAY    = 1e-4
-MOMENTUM        = 0.9
-LABEL_SMOOTHING = 0.1
-NUM_WORKERS     = 16
+TOTAL_EPOCHS     = 100
+LOCAL_BATCH_SIZE = 256        # per-GPU, global = 256*8 = 2048
+PEAK_LR          = 0.36       # aligned with C++ AMP: peak lr 0.36 (Nesterov)
+WARMUP_LR_START  = 0.01
+ETA_MIN          = 1e-6
+WARMUP_EPOCHS    = 10
+WEIGHT_DECAY     = 1e-4
+MOMENTUM         = 0.9
+LABEL_SMOOTHING  = 0.1
+NUM_WORKERS      = 16
 
 # ---------------------------------------------------------------------------
 # DDP setup
@@ -39,24 +40,19 @@ def reduce_tensor(tensor):
 
 # ---------------------------------------------------------------------------
 # Warmup + CosineAnnealing scheduler
-# Epoch 0: lr = WARMUP_LR_START (0.01)
-# Epoch 9 (end of warmup): lr = PEAK_LR (0.2)
-# Epoch 10+: cosine annealing down to ETA_MIN
-# [FIX_2026_06_12]稳定性修复：warmup延长至10 epoch，配合降低后的peak lr
+# Aligned with C++ AMP: CosineAnnealing + Warmup(10), peak_lr=0.36
 # ---------------------------------------------------------------------------
 def warmup_cosine_lambda(epoch):
     if epoch < WARMUP_EPOCHS:
-        alpha = epoch / max(WARMUP_EPOCHS - 1, 1)
+        alpha = epoch / max(WARMUP_EPOCHS, 1)
         return (WARMUP_LR_START + (PEAK_LR - WARMUP_LR_START) * alpha) / PEAK_LR
-    progress = (epoch - WARMUP_EPOCHS) / max(TOTAL_EPOCHS - WARMUP_EPOCHS - 1, 1)  # [FIX_2026_06_12]稳定性修复：最后一个epoch lr恰好到eta_min
+    progress = (epoch - WARMUP_EPOCHS) / max(TOTAL_EPOCHS - WARMUP_EPOCHS - 1, 1)
     cos_val = 0.5 * (1.0 + math.cos(math.pi * progress))
     return (ETA_MIN + (PEAK_LR - ETA_MIN) * cos_val) / PEAK_LR
 
 
 # ---------------------------------------------------------------------------
 # VGG-16 with BatchNorm (VGG16BN)
-# Conv bias: false | FC bias: true | Activation: ReLU
-# Dropout(p=0.5) after FC-4096 layers
 # ---------------------------------------------------------------------------
 class VGG16BN(nn.Module):
     def __init__(self):
@@ -167,22 +163,21 @@ def main():
     torch.set_float32_matmul_precision('high')
     torch.backends.cudnn.benchmark = True
 
-    # Seed
+    # Seed (aligned with C++ deterministic seeding)
     torch.manual_seed(123 + rank)
+    random.seed(123 + rank)
 
-    # Data pipeline (aligned with VGG_RECIPE.md)
-    # Training: RRC(224, 0.08~1.0) + HFlip + ColorJitter + ToTensor + Normalize + RandomErasing
+    # Data pipeline
     train_transform = transforms.Compose([
-        transforms.RandomResizedCrop(224, scale=(0.08, 1.0)),
+        transforms.RandomResizedCrop(224, scale=(0.08, 1.0), antialias=False),
         transforms.RandomHorizontalFlip(),
-        transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),  # [FIX_2026_06_12]稳定性修复：ColorJitter强度从0.4降至0.2
+        transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.1),
         transforms.ToTensor(),
         transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
-        transforms.RandomErasing(p=0.25, scale=(0.02, 0.33), ratio=(0.3, 3.3)),  # [FIX_2026_06_12]稳定性修复：RandomErasing概率从0.5降至0.25
+        transforms.RandomErasing(p=0.25, scale=(0.02, 0.33), ratio=(0.3, 3.3)),
     ])
-    # Validation: Resize(256) + CenterCrop(224) + ToTensor + Normalize
     val_transform = transforms.Compose([
-        transforms.Resize(256),
+        transforms.Resize(256, antialias=False),
         transforms.CenterCrop(224),
         transforms.ToTensor(),
         transforms.Normalize((0.485, 0.456, 0.406), (0.229, 0.224, 0.225)),
@@ -215,8 +210,10 @@ def main():
     model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
     model = DDP(model, device_ids=[local_rank], output_device=local_rank)
 
-    # Parameter grouping: weight_decay for weights, no wd for bias & BN params
-    # [FIX_2026_06_12]稳定性修复：DDP下参数名带module.前缀，按维度(param.ndim==1)判断bias和BN参数更可靠
+    # [NEW] torch.compile with max-autotune
+    model = torch.compile(model, mode="max-autotune")
+
+    # Parameter grouping
     weight_params = []
     no_wd_params = []
     for name, param in model.named_parameters():
@@ -235,16 +232,95 @@ def main():
     criterion = nn.CrossEntropyLoss(label_smoothing=LABEL_SMOOTHING).to(device)
 
     optimizer = optim.SGD(param_groups, lr=PEAK_LR,
-                          momentum=MOMENTUM, nesterov=False)
+                          momentum=MOMENTUM, nesterov=True)
 
     scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=warmup_cosine_lambda)
+
+    # [NEW] AMP: GradScaler for automatic mixed precision
+    scaler = torch.amp.GradScaler('cuda')
+
+    # ====================================================================
+    # WARMUP: trigger torch.compile(max-autotune) BEFORE timed loop
+    #
+    # 目的: 在计时的 100-epoch 循环开始之前完成所有编译。
+    # 方法: 用 dummy 数据跑一次完整的 train fwd+bwd 和 eval fwd，
+    #       触发 max-autotune 的所有 kernel 编译和 autotune。
+    # 之后: 重新 seed + 重新初始化模型/优化器/scaler。
+    #       torch.compile 的 FX graph 缓存使第二次编译近乎瞬时。
+    # ====================================================================
+    if is_main:
+        log("")
+        log("--- Warmup: triggering max-autotune compilation ---")
+    dist.barrier()
+    tw0 = time.perf_counter()
+
+    dummy_data  = torch.randn(LOCAL_BATCH_SIZE, 3, 224, 224, device=device)
+    dummy_data  = dummy_data.to(memory_format=torch.channels_last)
+    dummy_label = torch.randint(0, 1000, (LOCAL_BATCH_SIZE,), device=device)
+
+    # Train warmup
+    model.train()
+    optimizer.zero_grad(set_to_none=True)
+    with torch.amp.autocast('cuda'):
+        out = model(dummy_data)
+        l = criterion(out, dummy_label)
+    scaler.scale(l).backward()
+    scaler.unscale_(optimizer)
+    # Gradient clip disabled to align with C++ AMP (no grad clipping)
+    scaler.step(optimizer)
+    scaler.update()
+
+    # Eval warmup
+    model.eval()
+    with torch.no_grad():
+        with torch.amp.autocast('cuda'):
+            _ = model(dummy_data)
+
+    torch.cuda.synchronize()
+    dist.barrier()
+    tw1 = time.perf_counter()
+    if is_main:
+        log(f"    warmup done in {tw1 - tw0:.3f}s")
+        log("--- Re-initializing for timed run ---")
+
+    # Re-initialize everything so the timed run is pure training cost
+    torch.manual_seed(123 + rank)
+    random.seed(123 + rank)
+    model = VGG16BN().to(device).to(memory_format=torch.channels_last)
+    model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
+    model = DDP(model, device_ids=[local_rank], output_device=local_rank)
+    model = torch.compile(model, mode="max-autotune")  # 第二次编译，缓存命中，近乎瞬时
+
+    weight_params = []
+    no_wd_params = []
+    for name, param in model.named_parameters():
+        if not param.requires_grad:
+            continue
+        if param.ndim == 1:
+            no_wd_params.append(param)
+        else:
+            weight_params.append(param)
+
+    param_groups = [
+        {'params': weight_params, 'weight_decay': WEIGHT_DECAY},
+        {'params': no_wd_params, 'weight_decay': 0.0}
+    ]
+
+    optimizer = optim.SGD(param_groups, lr=PEAK_LR,
+                          momentum=MOMENTUM, nesterov=True)
+    scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=warmup_cosine_lambda)
+    scaler = torch.amp.GradScaler('cuda')
+
+    if is_main:
+        log("--- Timed 100-epoch run begins. ---")
+        log("")
 
     if is_main:
         log("")
         log("=====================================")
-        log(" PyTorch ImageNet VGG16BN Test (DDP)")
+        log(" PyTorch ImageNet VGG16BN Test (AMP + torch.compile)")
         log("=====================================")
-        log(f" Mode:       GPU [FP32] (Eager, SyncBN)")
+        log(f" Mode:       GPU [AMP] (Eager, SyncBN, torch.compile max-autotune)")
         log(f" Device:     cuda:{local_rank} (world_size={world_size})")
         log(f" Network:    VGG-16-BN")
         log(f"   conv(64)x2+BN  -> maxpool -> 112x112")
@@ -256,11 +332,12 @@ def main():
         log(f"           -> fc(4096) -> ReLU -> Dropout(0.5) -> fc(1000)")
         log(f" Conv bias:  false | FC bias: true")
         log(f" Activation: ReLU (fixed)")
-        log(f" Optimizer:  SGD (momentum=0.9, nesterov=False)")
+        log(f" Optimizer:  SGD (momentum=0.9, nesterov=True)")
         log(f" Scheduler:  CosineAnnealing + Warmup(10)")
         log(f" LR:         {WARMUP_LR_START} -> {PEAK_LR} (warmup) -> {ETA_MIN} (cosine)")
         log(f" Weight Decay: {WEIGHT_DECAY} (BN & bias excluded)")
         log(f" Augmentation: RRC(0.08~1.0) + HFlip + ColorJitter(0.2) + RandomErasing(0.25)")
+        log(f" Gradient Clip: disabled")
         log(f" Training:   {TOTAL_EPOCHS} epochs, local_batch_size={LOCAL_BATCH_SIZE} per GPU")
         log(f" Global batch: {LOCAL_BATCH_SIZE * world_size}")
         log("=====================================")
@@ -271,7 +348,7 @@ def main():
     t0 = time.perf_counter()
 
     for epoch in range(TOTAL_EPOCHS):
-        scheduler.step(epoch)  # [FIX_2026_06_12]稳定性修复：在epoch开头更新lr，确保warmup对应当前epoch生效
+        scheduler.step(epoch)
         current_lr = optimizer.param_groups[0]['lr']
         ep_t0 = time.perf_counter()
         train_sampler.set_epoch(epoch)
@@ -286,13 +363,19 @@ def main():
 
             optimizer.zero_grad(set_to_none=True)
 
-            output = model(data)
-            loss = criterion(output, target)
-            loss.backward()
-            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=10.0)  # [FIX_2026_06_12]稳定性修复：加入梯度裁剪防止异常梯度导致训练崩溃
-            optimizer.step()
+            # [NEW] AMP autocast for forward pass
+            with torch.amp.autocast('cuda'):
+                output = model(data)
+                loss = criterion(output, target)
 
-            train_loss += loss * data.size(0)  # [FIX_2026_06_12]稳定性修复：train loss累加保留在GPU，避免每次迭代CPU-GPU同步
+            # [NEW] AMP: scale loss, backward, unscale, step
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
+            # Gradient clip disabled to align with C++ AMP (no grad clipping)
+            scaler.step(optimizer)
+            scaler.update()
+
+            train_loss += loss.detach() * data.size(0)
             train_total += data.size(0)
 
         # Aggregate train stats across all ranks
@@ -310,10 +393,12 @@ def main():
                 data = data.to(device, non_blocking=True).to(memory_format=torch.channels_last)
                 target = target.to(device, non_blocking=True)
 
-                output = model(data)
-                loss = criterion(output, target)
+                # [NEW] AMP autocast for validation
+                with torch.amp.autocast('cuda'):
+                    output = model(data)
+                    loss = criterion(output, target)
 
-                val_loss += loss * data.size(0)  # [FIX_2026_06_12]稳定性修复：val loss累加保留在GPU
+                val_loss += loss.detach() * data.size(0)
 
                 # Top-1
                 _, pred1 = output.topk(1, dim=1)
@@ -352,7 +437,7 @@ def main():
     if is_main:
         log("")
         log("=====================================")
-        log(" Mode:       GPU [FP32] (Eager, DDP, SyncBN)")
+        log(" Mode:       GPU [AMP] (torch.compile max-autotune, DDP, SyncBN)")
         log("=====================================")
         log(f" Best Top-1: {best_top1:.2f}%")
         log(f" Best Top-5: {best_top5:.2f}%")

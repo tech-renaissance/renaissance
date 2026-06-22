@@ -302,6 +302,13 @@ protected:
 
         CompileSpec base_spec = CompileSpec::from_global_registry();
 
+        // [EXY2] 让 Compiler 的 I_A_DATA 分配与 ShapeId 跟随 ArchPlan 推导后的首层输入 C。
+        // 仅在 AMP 下可能改变；对 FP32 或首层 Flatten/ChannelPadding，effective_c == num_color_channels。
+        if (base_spec.amp_enabled && !arch_plan_.layers().empty()) {
+            int effective_c = arch_plan_.layers()[0].in_shape.c();
+            base_spec.num_color_channels = effective_c;
+        }
+
         // ===== 生成 5 个 variant specs =====
         std::vector<CompileSpec> variant_specs;
 

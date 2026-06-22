@@ -13,10 +13,30 @@
 
 namespace tr {
 
+namespace {
+inline int align_up_4(int x) { return (x + 3) / 4 * 4; }
+} // namespace
+
+void ArchPlan::align_amp_input_channels_for_first_conv() {
+    // fuse_ 只在 AMP 模式下为 true（from_blueprint 已校验 fuse && !using_amp 会抛错）
+    if (!fuse_) return;
+    if (layers_.empty()) return;
+
+    const auto& first = layers_[0];
+    if (first.kind != LayerKind::Conv && first.kind != LayerKind::CBR) return;
+
+    int c = input_.c();
+    if (c % 4 == 0) return;  // 已经对齐
+
+    int aligned_c = align_up_4(c);  // 1->4, 3->4
+    input_ = Shape(input_.n(), input_.h(), input_.w(), aligned_c);
+}
+
 void ArchPlan::build(int num_classes) {
     step2_rename_bn();
     step3_normalize_softmax_ce(num_classes);
     step4_normalize_identity();
+    align_amp_input_channels_for_first_conv();  // [EXY2] AMP 首层 Conv/CBR 对齐输入 C
     step6_deduce_shapes();      // derive actual H/W/C first
     step5_normalize_flatten();  // then decide whether Flatten is truly needed
 

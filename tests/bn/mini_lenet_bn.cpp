@@ -144,7 +144,6 @@ int main(int argc, char** argv) {
         .commit();
 
     BluePrint ultimate_mlp = seq(
-        channel_padding(),
         conv(8, 3, 1, 1),
         bn(),
         make_activation(cfg.activation),

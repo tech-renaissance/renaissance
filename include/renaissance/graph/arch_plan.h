@@ -168,6 +168,10 @@ private:
     int                     first_layer_idx_ = -1;
     bool                    fuse_ = true;
 
+    // [EXY2] AMP 模式下，若首层为 Conv/CBR 且输入 C 不是 4 的倍数，
+    //        把 input_ 的逻辑 C 对齐到 4。
+    void align_amp_input_channels_for_first_conv();
+
     static void expand_tree(const class Layer& root,
                             std::vector<ArchLayer>& out,
                             int& current_c,

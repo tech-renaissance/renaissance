@@ -53,7 +53,10 @@ const char* mode_name(TestMode m) {
 }
 
 struct CliConfig {
-    TestMode mode = TestMode::GPU;
+    TestMode mode = TestMode::AMP;
+    bool cpvs = false;
+    bool fully = false;
+    bool dts = false;
 };
 
 CliConfig parse_cli(int argc, char** argv) {
@@ -74,13 +77,22 @@ CliConfig parse_cli(int argc, char** argv) {
             if (mode_set) { std::cerr << "Multiple mode flags.\n"; std::exit(1); }
             cfg.mode = TestMode::AMP;
             mode_set = true;
+        } else if (a == "--cpvs") {
+            cfg.cpvs = true;
+        } else if (a == "--fully") {
+            cfg.fully = true;
+        } else if (a == "--dts") {
+            cfg.dts = true;
         } else if (a == "--help") {
             std::cout << "Usage: " << argv[0] << " [OPTIONS]\n\n"
-                      << "Mode flags (default: --gpu):\n"
+                      << "Mode flags (default: --amp):\n"
                       << "  --cpu          Run on CPU\n"
                       << "  --gpu          Run on GPU (FP32)\n"
                       << "  --amp          Run on GPU (AMP FP16)\n\n"
                       << "Other:\n"
+                      << "  --cpvs         Enable cached preprocessed validation set (CPVS)\n"
+                      << "  --fully        Enable fully-mode training set caching\n"
+                      << "  --dts          Use DTS format (compression level 3)\n"
                       << "  --help         Show this message\n";
             std::exit(0);
         } else {
@@ -121,12 +133,13 @@ int main(int argc, char** argv) {
         .dataset("imagenet", "/root/epfs/dataset/imagenet")
 #endif
         .color_channels(3)
-        .load_workers(1)
+        .load_workers(cfg.fully ? 1 : 16)
         .preprocess_workers(128)  // PyTorch的num_workers是per-RANK，但本框架是总的预处理线程数，对于8-RANK情形要乘以8
         .cpu_binding(false)
-        .fully_mode(true)
+        .fully_mode(cfg.fully)
+        .using_cpvs(cfg.cpvs)
+        .using_dts_format(cfg.dts, 3)
         .normalization(NormMode::IMAGENET)
-
         .train_transforms(
             RandomResizedCrop(224, 0.08f, 1.0f),   // [对齐 PyTorch] scale=(0.08, 1.0)
             RandomHorizontalFlip(),                  // [对齐 PyTorch] HFlip
@@ -144,9 +157,9 @@ int main(int argc, char** argv) {
 
     // VGG-16 with BatchNorm
     // Input: [N, 224, 224, 3]
+    // [EXY2] AMP 模式下首层 Conv 的输入 C 会在 ArchPlan 中自动对齐到 4，
+    //        不再需要显式 channel_padding()。
     BluePrint vgg16bn = seq(
-        channel_padding(),        // [N,224,224,3] -> [N,224,224,8]，本框架暂时需要先对首层通道数进行padding
-
         // Block 1: 224x224 -> 112x112
         conv(64, 3, 1, 1), bn(), relu(),            // [对齐 PyTorch] Conv2d(64,3,pad=1) + BN
         conv(64, 3, 1, 1), bn(), relu(),            // [对齐 PyTorch] Conv2d(64,3,pad=1) + BN

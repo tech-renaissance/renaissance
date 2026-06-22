@@ -399,7 +399,7 @@ void TaskBase::compile_capture_simple() {
                 int channels = reg.num_color_channels();
                 bool using_amp = reg.using_amp();
 
-                int effective_c = (using_amp && channels == 3) ? 4 : channels;
+                int effective_c = using_amp ? ((channels + 3) / 4) * 4 : channels;
                 DType data_dtype = using_amp ? DType::FP16 : DType::FP32;
 
                 size_t label_slot = DistributedTensor::compute_slot_bytes(
