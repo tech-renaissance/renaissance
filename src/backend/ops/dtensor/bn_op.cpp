@@ -169,13 +169,12 @@ static void launch_bn_fp32_bwd_cpu(CpuOpContext* op_ctx) {
 
 // ---- BN CPU INF ----
 static void launch_bn_fp32_inf_cpu(CpuOpContext* op_ctx) {
-    // input_ids:  [0]=X, [1]=eq_scale, [2]=eq_bias, [3]=weight, [4]=bias,
-    //             [5]=next_mean, [6]=next_var, [7]=bn_epsilon
+    // input_ids:  [0]=X, [1]=eq_scale, [2]=eq_bias
     // output_ids: [0]=Y
 
     const float* x = static_cast<const float*>(op_ctx->ctx->ptr_at(op_ctx->input_ids[0]));
-    float* eq_scale = static_cast<float*>(op_ctx->ctx->ptr_at(op_ctx->input_ids[1]));
-    float* eq_bias = static_cast<float*>(op_ctx->ctx->ptr_at(op_ctx->input_ids[2]));
+    const float* eq_scale = static_cast<const float*>(op_ctx->ctx->ptr_at(op_ctx->input_ids[1]));
+    const float* eq_bias  = static_cast<const float*>(op_ctx->ctx->ptr_at(op_ctx->input_ids[2]));
     float* y = static_cast<float*>(op_ctx->ctx->ptr_at(op_ctx->output_ids[0]));
 
     int N = op_ctx->input_shape.n;
@@ -184,28 +183,38 @@ static void launch_bn_fp32_inf_cpu(CpuOpContext* op_ctx) {
     int W = op_ctx->input_shape.w;
     int spatial = N * H * W;
 
-    // 每次 INF 调用时重新计算 eq_scale / eq_bias（极轻量，统一与 GPU 行为）
-    {
-        const float* gamma = static_cast<const float*>(op_ctx->ctx->ptr_at(op_ctx->input_ids[3]));
-        const float* beta  = static_cast<const float*>(op_ctx->ctx->ptr_at(op_ctx->input_ids[4]));
-        const float* running_mean = static_cast<const float*>(op_ctx->ctx->ptr_at(op_ctx->input_ids[5]));
-        const float* running_var  = static_cast<const float*>(op_ctx->ctx->ptr_at(op_ctx->input_ids[6]));
-        const float* eps_ptr = (op_ctx->num_inputs >= 8)
-            ? static_cast<const float*>(op_ctx->ctx->ptr_at(op_ctx->input_ids[7]))
-            : nullptr;
-        float eps = eps_ptr ? *eps_ptr : 1e-5f;
-
-        for (int c = 0; c < C; ++c) {
-            float inv_std = 1.0f / std::sqrt(running_var[c] + eps);
-            eq_scale[c] = gamma[c] * inv_std;
-            eq_bias[c]  = beta[c] - running_mean[c] * eq_scale[c];
-        }
-    }
-
     for (int c = 0; c < C; ++c) {
         for (int i = 0; i < spatial; ++i) {
             y[i * C + c] = x[i * C + c] * eq_scale[c] + eq_bias[c];
         }
+    }
+#if defined(_MSC_VER)
+    _ReadWriteBarrier();
+#endif
+}
+
+// ---- BN CPU UPDATE_EQ_PARAMS ----
+static void launch_bn_update_eq_params_cpu(CpuOpContext* op_ctx) {
+    // input_ids:  [0]=gamma, [1]=beta, [2]=running_mean, [3]=running_var, [4]=bn_epsilon
+    // output_ids: [0]=eq_scale, [1]=eq_bias
+    const float* gamma = static_cast<const float*>(op_ctx->ctx->ptr_at(op_ctx->input_ids[0]));
+    const float* beta  = static_cast<const float*>(op_ctx->ctx->ptr_at(op_ctx->input_ids[1]));
+    const float* rm    = static_cast<const float*>(op_ctx->ctx->ptr_at(op_ctx->input_ids[2]));
+    const float* rv    = static_cast<const float*>(op_ctx->ctx->ptr_at(op_ctx->input_ids[3]));
+    const float* eps_ptr = (op_ctx->num_inputs >= 5)
+        ? static_cast<const float*>(op_ctx->ctx->ptr_at(op_ctx->input_ids[4]))
+        : nullptr;
+
+    float* eq_scale = static_cast<float*>(op_ctx->ctx->ptr_at(op_ctx->output_ids[0]));
+    float* eq_bias  = static_cast<float*>(op_ctx->ctx->ptr_at(op_ctx->output_ids[1]));
+
+    int C = op_ctx->input_shape.c;
+    float eps = eps_ptr ? *eps_ptr : 1e-5f;
+
+    for (int c = 0; c < C; ++c) {
+        float inv_std = 1.0f / std::sqrt(rv[c] + eps);
+        eq_scale[c] = gamma[c] * inv_std;
+        eq_bias[c]  = beta[c] - rm[c] * eq_scale[c];
     }
 #if defined(_MSC_VER)
     _ReadWriteBarrier();
@@ -233,6 +242,15 @@ extern "C" cudaError_t launch_tr_bn_inf_kernel(
     const float* running_mean,
     const float* running_var,
     float eps,
+    void* y,
+    int N, int C, int H, int W,
+    bool is_fp16,
+    cudaStream_t stream);
+
+extern "C" cudaError_t launch_tr_bn_inf_eq_kernel(
+    const void* x,
+    const float* eq_scale,
+    const float* eq_bias,
     void* y,
     int N, int C, int H, int W,
     bool is_fp16,
@@ -592,11 +610,10 @@ static void launch_bn_inf_cuda(
     const DeviceContext& ctx,
     MultiStreamCaptureState& state)
 {
-    // input_ids:  [0]=X, [1]=eq_scale, [2]=eq_bias, [3]=weight, [4]=bias,
-    //             [5]=next_mean, [6]=next_var, [7]=bn_epsilon
+    // input_ids:  [0]=X, [1]=eq_scale, [2]=eq_bias
     // output_ids: [0]=Y
-    TR_CHECK(node.input_ids.size() >= 8, ShapeError,
-             "BN INF requires at least 8 inputs. Got " << node.input_ids.size());
+    TR_CHECK(node.input_ids.size() >= 3, ShapeError,
+             "BN INF requires at least 3 inputs. Got " << node.input_ids.size());
     TR_CHECK(node.output_ids.size() >= 1, ShapeError,
              "BN INF requires at least 1 output. Got " << node.output_ids.size());
 
@@ -619,25 +636,66 @@ static void launch_bn_inf_cuda(
     state.output_stream_idx = si;
     state.streams[si].has_pending_work = true;
 
-    // 合并 eq_scale/eq_bias 计算与 BN INF 为单 kernel
-    {
-        const float* d_gamma = static_cast<const float*>(ctx.ptr_at(node.input_ids[3]));
-        const float* d_beta  = static_cast<const float*>(ctx.ptr_at(node.input_ids[4]));
-        const float* d_rm    = static_cast<const float*>(ctx.ptr_at(node.input_ids[5]));
-        const float* d_rv    = static_cast<const float*>(ctx.ptr_at(node.input_ids[6]));
-        void* d_y            = ctx.ptr_at(node.output_ids[0]);
-        float eps_val = 1e-5f;
-        if (!node.params.is_empty()) {
-            eps_val = node.params.bn().eps;
-        }
+    const float* d_eq_scale = static_cast<const float*>(ctx.ptr_at(node.input_ids[1]));
+    const float* d_eq_bias  = static_cast<const float*>(ctx.ptr_at(node.input_ids[2]));
+    void* d_y = ctx.ptr_at(node.output_ids[0]);
 
-        cudaError_t err = launch_tr_bn_inf_kernel(
-            ctx.ptr_at(node.input_ids[0]),
-            d_gamma, d_beta, d_rm, d_rv, eps_val,
-            d_y, N, C, H, W, is_fp16, stream);
-        if (err != cudaSuccess) {
-            TR_DEVICE_ERROR("BN INF kernel failed: " << cudaGetErrorString(err));
+    cudaError_t err = launch_tr_bn_inf_eq_kernel(
+        ctx.ptr_at(node.input_ids[0]),
+        d_eq_scale, d_eq_bias,
+        d_y, N, C, H, W, is_fp16, stream);
+    if (err != cudaSuccess) {
+        TR_DEVICE_ERROR("BN INF kernel failed: " << cudaGetErrorString(err));
+    }
+
+    cudaEventRecord(state.streams[si].last_done_event, stream);
+}
+
+// ----------------------------------------------------------------------------
+// BN UPDATE_EQ_PARAMS CUDA
+// ----------------------------------------------------------------------------
+static void launch_bn_update_eq_params_cuda(
+    const GraphNode& node,
+    const MemoryPlan& mp,
+    const DeviceContext& ctx,
+    MultiStreamCaptureState& state)
+{
+    // input_ids:  [0]=gamma, [1]=beta, [2]=running_mean, [3]=running_var
+    // output_ids: [0]=eq_scale, [1]=eq_bias
+    const DTensor& dt_w = mp.get_dtensor(node.input_ids[0]);
+    int C = dt_w.shape.c();
+
+    StreamKind sk = get_op_default_stream(node.compute_op);  // UPDATE
+    cudaStream_t stream = static_cast<cudaStream_t>(ctx.stream(sk));
+    int si = state.get_or_register(stream);
+
+    int out_idx = state.output_stream_idx;
+    if (out_idx >= 0) {
+        cudaStream_t prev_stream = state.streams[out_idx].stream;
+        if (prev_stream != stream) {
+            cudaStreamWaitEvent(stream, state.streams[out_idx].last_done_event, 0);
         }
+    }
+    state.output_stream_idx = si;
+    state.streams[si].has_pending_work = true;
+
+    float eps = 1e-5f;
+    if (!node.params.is_empty()) {
+        eps = node.params.bn().eps;
+    }
+
+    cudaError_t err = launch_tr_bn_compute_eq_params_kernel(
+        static_cast<const float*>(ctx.ptr_at(node.input_ids[0])),  // gamma
+        static_cast<const float*>(ctx.ptr_at(node.input_ids[1])),  // beta
+        static_cast<const float*>(ctx.ptr_at(node.input_ids[2])),  // running_mean
+        static_cast<const float*>(ctx.ptr_at(node.input_ids[3])),  // running_var
+        eps,
+        static_cast<float*>(ctx.ptr_at(node.output_ids[0])),       // eq_scale
+        static_cast<float*>(ctx.ptr_at(node.output_ids[1])),       // eq_bias
+        C,
+        stream);
+    if (err != cudaSuccess) {
+        TR_DEVICE_ERROR("BN_UPDATE_EQ_PARAMS kernel failed: " << cudaGetErrorString(err));
     }
 
     cudaEventRecord(state.streams[si].last_done_event, stream);
@@ -698,6 +756,12 @@ void register_op_bn() {
 #ifdef TR_USE_CUDA
     table[static_cast<size_t>(ComputeOp::BN1D_AMP_INF)].launch_cuda = launch_bn_inf_cuda;
     table[static_cast<size_t>(ComputeOp::BN2D_AMP_INF)].launch_cuda = launch_bn_inf_cuda;
+#endif
+
+    // BN_UPDATE_EQ_PARAMS
+    table[static_cast<size_t>(ComputeOp::BN_UPDATE_EQ_PARAMS)].launch_cpu = launch_bn_update_eq_params_cpu;
+#ifdef TR_USE_CUDA
+    table[static_cast<size_t>(ComputeOp::BN_UPDATE_EQ_PARAMS)].launch_cuda = launch_bn_update_eq_params_cuda;
 #endif
 
     // TR_LOG_INFO("backend") << "Registered BN1D/BN2D ops (FP32/AMP x FWD/BWD/INF)";

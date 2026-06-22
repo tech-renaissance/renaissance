@@ -284,9 +284,9 @@ SubgraphPattern build_bn_inference(const OpParams&, const std::vector<TensorDesc
     } else {
         n.op = is_1d ? ComputeOp::BN1D_FP32_INF : ComputeOp::BN2D_FP32_INF;
     }
-    // input_indices: eq_scale(10), eq_bias(9), gamma(0), beta(1), next_mean(5), next_var(6)
-    // gamma/beta/running stats 供 INF 算子首次执行时预计算 eq_scale/eq_bias
-    n.input_indices  = {10, 9, 0, 1, 5, 6};
+    // input_indices: eq_scale(10), eq_bias(9)
+    // X 由 Compiler 在 begin 注入
+    n.input_indices  = {10, 9};
     // Compiler 在 begin 注入 X
     n.output_indices = {2};      // output
     p.nodes.push_back(n);
@@ -507,10 +507,9 @@ SubgraphPattern build_cbr_inference(const OpParams&, const std::vector<TensorDes
     if (descs.size() < 23) return p;
     SubgraphPattern::Node n;
     n.op = ComputeOp::CBR_AMP_INF;
-    // input: amp_w(4), bn_weight(8), bn_bias(9), eq_scale(18), eq_bias(17),
-    //        next_mean(13), next_var(14)
-    // X 由 Compiler 在 begin 注入；bn_epsilon 由 Compiler 在末尾追加
-    n.input_indices  = {4, 8, 9, 18, 17, 13, 14};
+    // input: amp_w(4), eq_scale(18), eq_bias(17)
+    // X 由 Compiler 在 begin 注入
+    n.input_indices  = {4, 18, 17};
     // output: conv_output(1), bn_sum(6), bn_sq_sum(7), bn_output(10),
     //         relu_output(21), relu_mask(22)
     n.output_indices = {1, 6, 7, 10, 21, 22};

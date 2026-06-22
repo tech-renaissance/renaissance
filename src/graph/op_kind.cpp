@@ -139,6 +139,7 @@ std::string compute_op_to_string(ComputeOp op) {
         case ComputeOp::CBR_AMP_BWD:              return "CBR_AMP_BWD";
         case ComputeOp::CBR_AMP_BWD_FIRST_LAYER:  return "CBR_AMP_BWD_FIRST_LAYER";
         case ComputeOp::CBR_AMP_INF:              return "CBR_AMP_INF";
+        case ComputeOp::BN_UPDATE_EQ_PARAMS:     return "BN_UPDATE_EQ_PARAMS";
 
         // === 融合算子（AMP 训练 + INF 推理）===
         case ComputeOp::BOTTLENECK_AMP_FWD:           return "BOTTLENECK_AMP_FWD";
@@ -300,7 +301,8 @@ std::string format_params(ComputeOp op, const OpParams& p) {
         case ComputeOp::BN1D_AMP_FWD:   case ComputeOp::BN1D_AMP_BWD:  case ComputeOp::BN1D_AMP_INF:
         case ComputeOp::BN2D_AMP_FWD:   case ComputeOp::BN2D_AMP_BWD:  case ComputeOp::BN2D_AMP_INF:
         case ComputeOp::BN1D_FP32_FWD:  case ComputeOp::BN1D_FP32_BWD: case ComputeOp::BN1D_FP32_INF:
-        case ComputeOp::BN2D_FP32_FWD:  case ComputeOp::BN2D_FP32_BWD: case ComputeOp::BN2D_FP32_INF: {
+        case ComputeOp::BN2D_FP32_FWD:  case ComputeOp::BN2D_FP32_BWD: case ComputeOp::BN2D_FP32_INF:
+        case ComputeOp::BN_UPDATE_EQ_PARAMS: {
             if (auto* bp = std::get_if<BNParams>(&p.data)) {
                 oss << "eps=" << bp->eps
                     << ",momentum=" << bp->momentum;

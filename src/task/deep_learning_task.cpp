@@ -64,6 +64,7 @@ enum class GraphSlot : uint8_t {
     ACCUM_METRICS_TRAIN_LAST,
     ACCUM_METRICS_VAL_LAST,
     VAL_RESULT_ALLREDUCE,
+    UPDATE_BN_INF_PARAMS,
     CLEAR_METRICS,
     COUNT
 };
@@ -551,6 +552,8 @@ StreamKind DeepLearningTask::stream_for(GraphId gid) {
             return StreamKind::COMP_2;
         case GraphId::LARS_DEEP_CONV_OPT:
             return StreamKind::COMP_3;
+        case GraphId::UPDATE_BN_INF_PARAMS:
+            return StreamKind::UPDATE;
         default:                        return StreamKind::COMP_1;
     }
 }
@@ -759,6 +762,7 @@ void DeepLearningTask::build_exec_table() {
                 g[S(GraphSlot::CAST_MAIN)]        = resolve(GraphId::CAST_MAIN_FP32_TO_FP16, rank, v);
                 g[S(GraphSlot::ACCUM_METRICS)]           = resolve(GraphId::ACCUM_METRICS, rank, v);
                 g[S(GraphSlot::ACCUM_METRICS_TRAIN_LAST)] = resolve(GraphId::ACCUM_METRICS_TRAIN_LAST, rank, v);
+                g[S(GraphSlot::UPDATE_BN_INF_PARAMS)] = resolve(GraphId::UPDATE_BN_INF_PARAMS, rank, v);
             } else {
                 g[S(GraphSlot::INF_MAIN_A)]       = resolve(GraphId::INF_MAIN_A, rank, v);
                 g[S(GraphSlot::INF_MAIN_B)]       = resolve(GraphId::INF_MAIN_B, rank, v);
@@ -1078,6 +1082,7 @@ float DeepLearningTask::run_train_epoch_gpu() {
                 auto n_sc      = g_n[S(GraphSlot::STATS_COMM)];
                 auto n_cm      = g_n[S(GraphSlot::CAST_MAIN)];
                 auto n_accum   = g_n[S(GraphSlot::ACCUM_METRICS)];
+                auto n_upd_bn  = g_n[S(GraphSlot::UPDATE_BN_INF_PARAMS)];
                 auto n_clear   = g_n[S(GraphSlot::CLEAR_METRICS)];
 
                 // ============================================================
@@ -1232,6 +1237,7 @@ float DeepLearningTask::run_train_epoch_gpu() {
                     sync_up();
                     sync_comp();
                     if (using_amp && n_cm) { cudaGraphLaunch(n_cm, s_up); sync_up(); }
+                    if (n_upd_bn) { cudaGraphLaunch(n_upd_bn, s_up); sync_up(); }
                 }
 
             } catch (...) {
@@ -1471,6 +1477,7 @@ float DeepLearningTask::run_train_epoch_cpu() {
     int32_t idx_lars_fc  = idx_for(GraphId::LARS_FC_OPT, 0);
     int32_t idx_lars_fc2 = idx_for(GraphId::LARS_FIRST_CONV_OPT, 0);
     int32_t idx_lars_dc  = idx_for(GraphId::LARS_DEEP_CONV_OPT, 0);
+    int32_t idx_upd_bn  = idx_for(GraphId::UPDATE_BN_INF_PARAMS, 0);
 
     int32_t idx_deep_nb  = idx_for(GraphId::DEEP_FWD_BWD, v_base);
     int32_t idx_fwd_a_nb = idx_for(GraphId::FIRST_LAYER_FWD_A, v_base);
@@ -1531,6 +1538,8 @@ float DeepLearningTask::run_train_epoch_cpu() {
         launch(idx_lars_fc);
         launch(idx_lars_fc2);
         launch(idx_lars_dc);
+
+        if (idx_upd_bn >= 0) launch(idx_upd_bn);
 
         float train_loss = 0.0f;
         if (bl.accum_loss >= 0) {
@@ -1627,6 +1636,8 @@ float DeepLearningTask::run_train_epoch_cpu() {
 
         ctx.set_memory_plan(active_memory_plan_);
     }
+
+    if (idx_upd_bn >= 0) launch(idx_upd_bn);
 
     float train_loss = 0.0f;
     if (bl.accum_loss >= 0) {

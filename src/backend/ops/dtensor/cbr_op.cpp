@@ -62,6 +62,15 @@ extern "C" cudaError_t launch_tr_bn_inf_kernel(
     int N, int C, int H, int W,
     bool is_fp16, cudaStream_t stream);
 
+extern "C" cudaError_t launch_tr_bn_inf_eq_kernel(
+    const void* x,
+    const float* eq_scale,
+    const float* eq_bias,
+    void* y,
+    int N, int C, int H, int W,
+    bool is_fp16,
+    cudaStream_t stream);
+
 // ============================================================================
 // BN 子操作：Graph Cache 结构（复制自 bn_op.cpp，重命名避免符号冲突）
 // ============================================================================
@@ -1096,14 +1105,12 @@ static void launch_cbr_amp_inf_cuda(
     const DeviceContext& ctx,
     MultiStreamCaptureState& state)
 {
-    // input_ids:  [0]=X, [1]=amp_w, [2]=bn_w, [3]=bn_b, [4]=eq_scale, [5]=eq_bias,
-    //             [6]=next_mean, [7]=next_var, [8]=eps
+    // input_ids:  [0]=X, [1]=amp_w, [2]=eq_scale, [3]=eq_bias
     // output_ids: [0]=conv_output, [1]=bn_sum(reserved), [2]=bn_sq_sum(reserved), [3]=bn_output,
     //             [4]=relu_output, [5]=relu_mask
 
     const auto& cbrp = node.params.cbr();
     const auto& cp = cbrp.conv;
-    const auto& bp = cbrp.bn;
 
     // ── 1) Conv INF on COMP_1（纯 conv_fprop，无 GenStats） ────────────
     {
@@ -1152,7 +1159,7 @@ static void launch_cbr_amp_inf_cuda(
         cudaEventRecord(state.streams[si].last_done_event, s);
     }
 
-    // ── 2) BN INF on COMP_2（使用 launch_tr_bn_inf_kernel） ─────────────
+    // ── 2) BN INF on COMP_2（直接读取 eq_scale/eq_bias）─────────────
     {
         StreamKind sk = StreamKind::COMP_2;
         cudaStream_t stream = static_cast<cudaStream_t>(ctx.stream(sk));
@@ -1173,17 +1180,13 @@ static void launch_cbr_amp_inf_cuda(
         int N = shape.n(), H = shape.h(), W = shape.w(), C = shape.c();
         bool is_fp16 = (dt_x.dtype == DType::FP16);
 
-        const float* gamma = static_cast<const float*>(ctx.ptr_at(node.input_ids[2]));  // bn_weight
-        const float* beta  = static_cast<const float*>(ctx.ptr_at(node.input_ids[3]));  // bn_bias
-        const float* rm    = static_cast<const float*>(ctx.ptr_at(node.input_ids[6]));  // next_mean
-        const float* rv    = static_cast<const float*>(ctx.ptr_at(node.input_ids[7]));  // next_var
-        void* y            = ctx.ptr_at(node.output_ids[3]);                             // bn_output
+        const float* eq_scale = static_cast<const float*>(ctx.ptr_at(node.input_ids[2]));
+        const float* eq_bias  = static_cast<const float*>(ctx.ptr_at(node.input_ids[3]));
+        void* y = ctx.ptr_at(node.output_ids[3]);  // bn_output
 
-        float eps_val = bp.eps;
-
-        cudaError_t err = launch_tr_bn_inf_kernel(
+        cudaError_t err = launch_tr_bn_inf_eq_kernel(
             ctx.ptr_at(node.output_ids[0]),  // x = conv_output
-            gamma, beta, rm, rv, eps_val,
+            eq_scale, eq_bias,
             y, N, C, H, W, is_fp16, stream);
         if (err != cudaSuccess) {
             TR_DEVICE_ERROR("CBR_AMP_INF bn kernel failed: " << cudaGetErrorString(err));

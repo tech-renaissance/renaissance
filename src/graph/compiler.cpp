@@ -1704,18 +1704,6 @@ void Compiler::build_computation_graph(const ArchPlan& arch,
                 gn.output_ids.insert(gn.output_ids.end(), orig.begin() + 3, orig.end());   // 6,7,8: loss_p, top1_p, top5_p
             }
 
-            // BN INF: 注入全局标量 bn_epsilon（用于 eq_scale/eq_bias 惰性生成）
-            if (is_bn_inf_op(gn.compute_op)) {
-                const auto& b = memory_plan.baseline();
-                if (b.bn_epsilon >= 0) gn.input_ids.push_back(b.bn_epsilon);
-            }
-
-            // CBR INF: 注入全局标量 bn_epsilon
-            if (gn.compute_op == ComputeOp::CBR_AMP_INF) {
-                const auto& b = memory_plan.baseline();
-                if (b.bn_epsilon >= 0) gn.input_ids.push_back(b.bn_epsilon);
-            }
-
             infer_cg.append(infer_graph_id, gn);
             infer_cg.append(infer_graph_id_b, gn);  // 双缓冲：同时填充 B 桶
         }
@@ -2243,6 +2231,48 @@ void Compiler::build_auxiliary_graphs(ComputationGraph& train_cg, const MemoryPl
         }
         if (has_copy) {
             train_cg.append(GraphId::STATS_COMM, node);
+        }
+    }
+
+    // 13. UPDATE_BN_INF_PARAMS 图：每个 epoch 末统一预计算所有 BN/CBR 层的 eq_scale/eq_bias
+    if (memory_plan.is_region_populated(Region::W_BN_WEIGHT)) {
+        const auto& w_ids  = memory_plan.get_ids_by_region(Region::W_BN_WEIGHT);
+        const auto& b_ids  = memory_plan.get_ids_by_region(Region::W_BN_BIAS);
+        const auto& rm_ids = memory_plan.get_ids_by_region(Region::B_NEXT_MEAN);
+        const auto& rv_ids = memory_plan.get_ids_by_region(Region::B_NEXT_VAR);
+        const auto& es_ids = memory_plan.get_ids_by_region(Region::W_EQ_SCALE);
+        const auto& eb_ids = memory_plan.get_ids_by_region(Region::W_EQ_BIAS);
+
+        size_t n = w_ids.size();
+        TR_CHECK(n == b_ids.size() && n == rm_ids.size() && n == rv_ids.size()
+                 && n == es_ids.size() && n == eb_ids.size(),
+                 ShapeError, "BN update eq params: region count mismatch");
+
+        // 所有 BN/CBR 层共享同一 eps，取第一个有效值即可
+        float common_eps = 1e-5f;
+        for (const auto& layer : arch.layers()) {
+            if (layer.kind == LayerKind::Bn1d || layer.kind == LayerKind::Bn2d ||
+                layer.kind == LayerKind::CBR) {
+                if (std::holds_alternative<BNParams>(layer.params)) {
+                    common_eps = std::get<BNParams>(layer.params).eps;
+                    break;
+                } else if (std::holds_alternative<CbrLayerParams>(layer.params)) {
+                    common_eps = std::get<CbrLayerParams>(layer.params).eps;
+                    break;
+                }
+            }
+        }
+
+        int32_t eps_id = memory_plan.baseline().bn_epsilon;
+        for (size_t i = 0; i < n; ++i) {
+            GraphNode node;
+            node.kind = GraphNode::Kind::COMPUTE;
+            node.compute_op = ComputeOp::BN_UPDATE_EQ_PARAMS;
+            node.params = OpParams(BNParams{common_eps, 0.0f});  // momentum 无关，供 GPU 路径使用
+            node.input_ids  = {w_ids[i], b_ids[i], rm_ids[i], rv_ids[i]};
+            if (eps_id >= 0) node.input_ids.push_back(eps_id);  // 供 CPU 路径使用
+            node.output_ids = {es_ids[i], eb_ids[i]};
+            train_cg.append(GraphId::UPDATE_BN_INF_PARAMS, std::move(node));
         }
     }
 

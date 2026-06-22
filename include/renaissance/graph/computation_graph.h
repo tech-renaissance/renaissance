@@ -102,7 +102,8 @@ enum class GraphId : uint8_t {
     LARS_FC_OPT,            ///< FC 权重 LARS 优化（trust + update，COMP_1）
     LARS_FIRST_CONV_OPT,    ///< 首层卷积 LARS 优化（trust + update，COMP_2）
     LARS_DEEP_CONV_OPT,     ///< 深层卷积 LARS 优化（trust + update，COMP_3）
-    COUNT              ///< = 31
+    UPDATE_BN_INF_PARAMS,  ///< 训练后更新 BN 推理参数 (eq_scale/eq_bias)
+    COUNT              ///< = 32
 };
 
 // ============================================================================
@@ -142,6 +143,7 @@ inline const char* graph_id_to_string(GraphId gid) noexcept {
         case GraphId::LARS_FC_OPT:         return "LARS_FC_OPT";
         case GraphId::LARS_FIRST_CONV_OPT:  return "LARS_FIRST_CONV_OPT";
         case GraphId::LARS_DEEP_CONV_OPT:   return "LARS_DEEP_CONV_OPT";
+        case GraphId::UPDATE_BN_INF_PARAMS: return "UPDATE_BN_INF_PARAMS";
         case GraphId::COUNT:                return "COUNT";
     }
     return "UNKNOWN";
@@ -174,6 +176,7 @@ inline bool is_shape_invariant_graph(GraphId gid) noexcept {
         case GraphId::LARS_FC_OPT:
         case GraphId::LARS_FIRST_CONV_OPT:
         case GraphId::LARS_DEEP_CONV_OPT:
+        case GraphId::UPDATE_BN_INF_PARAMS:
             return true;
         default:
             return false;
@@ -202,6 +205,7 @@ inline bool is_train_graph(GraphId gid) noexcept {
         case GraphId::LARS_FC_OPT:
         case GraphId::LARS_FIRST_CONV_OPT:
         case GraphId::LARS_DEEP_CONV_OPT:
+        case GraphId::UPDATE_BN_INF_PARAMS:
         case GraphId::ACCUM_METRICS:
         case GraphId::ACCUM_METRICS_TRAIN_LAST:
         case GraphId::CLEAR_METRICS:

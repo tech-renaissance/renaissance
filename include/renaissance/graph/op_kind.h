@@ -326,6 +326,8 @@ enum class ComputeOp : uint16_t {
     CBR_AMP_BWD_FIRST_LAYER,
     CBR_AMP_INF,
 
+    BN_UPDATE_EQ_PARAMS,  ///< 根据 running_mean/var 更新 eq_scale/eq_bias
+
     COUNT,              ///< 算子类型总数（哨兵值，用于数组大小计算）
     UNKNOWN = 0xFFFF
 };

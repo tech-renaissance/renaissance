@@ -123,6 +123,10 @@ StreamKind get_op_default_stream(ComputeOp op) noexcept {
         case ComputeOp::CBR_AMP_INF:
             return StreamKind::COMP_1;
 
+        // ===== BN 参数更新 → UPDATE =====
+        case ComputeOp::BN_UPDATE_EQ_PARAMS:
+            return StreamKind::UPDATE;
+
         default:
             return StreamKind::COMP_1;
     }
