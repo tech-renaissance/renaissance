@@ -138,11 +138,10 @@ static void launch_maxpool_fp32_bwd_cpu(CpuOpContext* op_ctx) {
 }
 
 // ---- MaxPool CPU INF ----
-// 朴素四重循环（等同 FWD），写入 Y 和 mask
+// 推理阶段无需 mask（后续无 BWD），仅计算 Y，跳过 argmax 编码
 static void launch_maxpool_fp32_inf_cpu(CpuOpContext* op_ctx) {
     const float* x = static_cast<const float*>(op_ctx->ctx->ptr_at(op_ctx->input_ids[0]));
     float*       y = static_cast<float*>(op_ctx->ctx->ptr_at(op_ctx->output_ids[0]));
-    int8_t*    mask = static_cast<int8_t*>(op_ctx->ctx->ptr_at(op_ctx->output_ids[1]));
 
     int N = op_ctx->input_shape.n, C = op_ctx->input_shape.c;
     int H = op_ctx->input_shape.h, W = op_ctx->input_shape.w;
@@ -156,7 +155,6 @@ static void launch_maxpool_fp32_inf_cpu(CpuOpContext* op_ctx) {
             for (int oh = 0; oh < OH; ++oh) {
                 for (int ow = 0; ow < OW; ++ow) {
                     float max_val = -std::numeric_limits<float>::infinity();
-                    int max_kh = -1, max_kw = -1;
                     for (int kh = 0; kh < k; ++kh) {
                         int ih = oh * s + kh - p;
                         if (ih < 0 || ih >= H) continue;
@@ -164,16 +162,11 @@ static void launch_maxpool_fp32_inf_cpu(CpuOpContext* op_ctx) {
                             int iw = ow * s + kw - p;
                             if (iw < 0 || iw >= W) continue;
                             float val = x[((n * H + ih) * W + iw) * C + c];
-                            if (val > max_val) {
-                                max_val = val;
-                                max_kh = kh;
-                                max_kw = kw;
-                            }
+                            if (val > max_val) max_val = val;
                         }
                     }
                     int out_idx = ((n * OH + oh) * OW + ow) * C + c;
                     y[out_idx] = max_val;
-                    mask[out_idx] = (max_kh >= 0) ? static_cast<int8_t>(max_kh * k + max_kw) : -1;
                 }
             }
         }
@@ -424,38 +417,31 @@ static void launch_maxpool_fp32_fwd_cuda(
     launch_maxpool_fwd_cuda_impl(node, mp, ctx, state, false, false);
 }
 
-static void launch_maxpool_fp32_inf_cuda(
-    const GraphNode& node, const MemoryPlan& mp,
-    const DeviceContext& ctx, MultiStreamCaptureState& state)
-{
-    launch_maxpool_fwd_cuda_impl(node, mp, ctx, state, false, true);
-}
-
 // ---- MaxPool AMP FWD/INF (cuDNN Legacy API) ----
 // AMP 模式下输入/输出可能位于不同 Region（I_A_DATA pc=4 vs F_FEATURE_FP16 pc=8），
 // cuDNN FE Resample 要求输入/输出 padded_c 一致，会报 code 11。
 // Legacy cudnnPoolingForward 允许各自独立的 TensorDescriptor，不受此限制。
 
-struct MaxPoolAmpFwdCache {
+struct MaxPoolLegacyFwdCache {
     cudnnPoolingDescriptor_t pool_desc = nullptr;
     cudnnTensorDescriptor_t x_desc = nullptr, y_desc = nullptr;
 
-    ~MaxPoolAmpFwdCache() {
+    ~MaxPoolLegacyFwdCache() {
         if (pool_desc) cudnnDestroyPoolingDescriptor(pool_desc);
         if (x_desc)    cudnnDestroyTensorDescriptor(x_desc);
         if (y_desc)    cudnnDestroyTensorDescriptor(y_desc);
     }
-    MaxPoolAmpFwdCache(const MaxPoolAmpFwdCache&) = delete;
-    MaxPoolAmpFwdCache& operator=(const MaxPoolAmpFwdCache&) = delete;
-    MaxPoolAmpFwdCache() = default;
-    MaxPoolAmpFwdCache(MaxPoolAmpFwdCache&& o) noexcept
+    MaxPoolLegacyFwdCache(const MaxPoolLegacyFwdCache&) = delete;
+    MaxPoolLegacyFwdCache& operator=(const MaxPoolLegacyFwdCache&) = delete;
+    MaxPoolLegacyFwdCache() = default;
+    MaxPoolLegacyFwdCache(MaxPoolLegacyFwdCache&& o) noexcept
         : pool_desc(o.pool_desc), x_desc(o.x_desc), y_desc(o.y_desc) {
         o.pool_desc = nullptr;
         o.x_desc = o.y_desc = nullptr;
     }
-    MaxPoolAmpFwdCache& operator=(MaxPoolAmpFwdCache&& o) noexcept {
+    MaxPoolLegacyFwdCache& operator=(MaxPoolLegacyFwdCache&& o) noexcept {
         if (this != &o) {
-            this->~MaxPoolAmpFwdCache();
+            this->~MaxPoolLegacyFwdCache();
             pool_desc = o.pool_desc; o.pool_desc = nullptr;
             x_desc = o.x_desc; o.x_desc = nullptr;
             y_desc = o.y_desc; o.y_desc = nullptr;
@@ -464,15 +450,21 @@ struct MaxPoolAmpFwdCache {
     }
 };
 
-static std::unordered_map<MaxPoolFwdCacheKey, MaxPoolAmpFwdCache, MaxPoolFwdCacheKeyHasher>
+static std::unordered_map<MaxPoolFwdCacheKey, MaxPoolLegacyFwdCache, MaxPoolFwdCacheKeyHasher>
     s_maxpool_amp_fwd_caches;
 
-static MaxPoolAmpFwdCache build_maxpool_amp_fwd_cache(
+// INF 专用 Legacy cache（推理阶段无需 mask，与 FWD 分离以避免 mask kernel）
+static std::unordered_map<MaxPoolFwdCacheKey, MaxPoolLegacyFwdCache, MaxPoolFwdCacheKeyHasher>
+    s_maxpool_fp32_inf_caches;
+static std::unordered_map<MaxPoolFwdCacheKey, MaxPoolLegacyFwdCache, MaxPoolFwdCacheKeyHasher>
+    s_maxpool_amp_inf_caches;
+
+static MaxPoolLegacyFwdCache build_maxpool_legacy_fwd_cache(
     const DTensor& dt_x,
     const DTensor& dt_y,
     int            k, int s, int p)
 {
-    MaxPoolAmpFwdCache cache;
+    MaxPoolLegacyFwdCache cache;
 
     cudnnCreatePoolingDescriptor(&cache.pool_desc);
     cudnnSetPooling2dDescriptor(cache.pool_desc,
@@ -526,7 +518,7 @@ static void launch_maxpool_amp_fwd_cuda_impl(
 
     auto it = s_maxpool_amp_fwd_caches.find(key);
     if (it == s_maxpool_amp_fwd_caches.end()) {
-        auto cache = build_maxpool_amp_fwd_cache(dt_x, dt_y, k, s_p, p);
+        auto cache = build_maxpool_legacy_fwd_cache(dt_x, dt_y, k, s_p, p);
         it = s_maxpool_amp_fwd_caches.emplace(key, std::move(cache)).first;
     }
     const auto& cache = it->second;
@@ -572,7 +564,87 @@ static void launch_maxpool_amp_inf_cuda(
     const GraphNode& node, const MemoryPlan& mp,
     const DeviceContext& ctx, MultiStreamCaptureState& state)
 {
-    launch_maxpool_amp_fwd_cuda_impl(node, mp, ctx, state);
+    // 推理阶段无需 mask，仅执行 cuDNN Legacy pooling，跳过 mask kernel
+    const DTensor& dt_x = mp.get_dtensor(node.input_ids[0]);
+    const DTensor& dt_y = mp.get_dtensor(node.output_ids[0]);
+
+    StreamKind sk = get_op_default_stream(node.compute_op);
+    cudaStream_t s  = static_cast<cudaStream_t>(ctx.stream(sk));
+    int          si = state.get_or_register(s);
+    state.output_stream_idx           = si;
+    state.streams[si].has_pending_work = true;
+
+    cudnnHandle_t handle = static_cast<cudnnHandle_t>(ctx.cudnn_handle(sk));
+
+    const auto& pp = node.params.pool();
+    int k = pp.kernel_h, s_p = pp.stride_h, p = pp.pad_h;
+
+    MaxPoolFwdCacheKey key;
+    key.handle_bits = reinterpret_cast<uint64_t>(handle);
+    key.n = dt_x.n(); key.c = dt_x.c(); key.h = dt_x.h(); key.w = dt_x.w();
+    key.k = k; key.s = s_p; key.p = p;
+    key.is_amp = true;
+
+    auto it = s_maxpool_amp_inf_caches.find(key);
+    if (it == s_maxpool_amp_inf_caches.end()) {
+        auto cache = build_maxpool_legacy_fwd_cache(dt_x, dt_y, k, s_p, p);
+        it = s_maxpool_amp_inf_caches.emplace(key, std::move(cache)).first;
+    }
+    const auto& cache = it->second;
+
+    float alpha = 1.0f, beta = 0.0f;
+    TR_CUDNN_CHECK(cudnnPoolingForward(
+        handle, cache.pool_desc,
+        &alpha,
+        cache.x_desc, ctx.ptr_at(node.input_ids[0]),
+        &beta,
+        cache.y_desc, ctx.ptr_at(node.output_ids[0])));
+
+    cudaEventRecord(state.streams[si].last_done_event, s);
+}
+
+// ---- FP32 INF (cuDNN Legacy, 无 mask) ----
+// 推理阶段无需 mask，使用 cuDNN Legacy pooling 直接计算 Y，跳过 mask 生成
+static void launch_maxpool_fp32_inf_cuda(
+    const GraphNode& node, const MemoryPlan& mp,
+    const DeviceContext& ctx, MultiStreamCaptureState& state)
+{
+    const DTensor& dt_x = mp.get_dtensor(node.input_ids[0]);
+    const DTensor& dt_y = mp.get_dtensor(node.output_ids[0]);
+
+    StreamKind sk = get_op_default_stream(node.compute_op);
+    cudaStream_t s  = static_cast<cudaStream_t>(ctx.stream(sk));
+    int          si = state.get_or_register(s);
+    state.output_stream_idx           = si;
+    state.streams[si].has_pending_work = true;
+
+    cudnnHandle_t handle = static_cast<cudnnHandle_t>(ctx.cudnn_handle(sk));
+
+    const auto& pp = node.params.pool();
+    int k = pp.kernel_h, s_p = pp.stride_h, p = pp.pad_h;
+
+    MaxPoolFwdCacheKey key;
+    key.handle_bits = reinterpret_cast<uint64_t>(handle);
+    key.n = dt_x.n(); key.c = dt_x.c(); key.h = dt_x.h(); key.w = dt_x.w();
+    key.k = k; key.s = s_p; key.p = p;
+    key.is_amp = false;
+
+    auto it = s_maxpool_fp32_inf_caches.find(key);
+    if (it == s_maxpool_fp32_inf_caches.end()) {
+        auto cache = build_maxpool_legacy_fwd_cache(dt_x, dt_y, k, s_p, p);
+        it = s_maxpool_fp32_inf_caches.emplace(key, std::move(cache)).first;
+    }
+    const auto& cache = it->second;
+
+    float alpha = 1.0f, beta = 0.0f;
+    TR_CUDNN_CHECK(cudnnPoolingForward(
+        handle, cache.pool_desc,
+        &alpha,
+        cache.x_desc, ctx.ptr_at(node.input_ids[0]),
+        &beta,
+        cache.y_desc, ctx.ptr_at(node.output_ids[0])));
+
+    cudaEventRecord(state.streams[si].last_done_event, s);
 }
 
 // ---- MaxPool BWD (mask-based scatter-add) ----

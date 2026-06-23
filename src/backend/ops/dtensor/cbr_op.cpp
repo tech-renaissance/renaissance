@@ -199,6 +199,55 @@ static std::unordered_map<CBRConvGraphCacheKey, CBRConvGraphCache, CBRConvGraphC
 static std::unordered_map<CBRConvGraphCacheKey, CBRConvGraphCache, CBRConvGraphCacheKeyHasher>
     s_cbr_conv_dgrad_cache;
 
+// ============================================================================
+// CBR_AMP_INF 融合图 Cache（Conv + MUL(eq_scale) + ADD(eq_bias) + ReLU 单图）
+// ============================================================================
+
+struct CBRAmpInfFusedGraphCacheKey {
+    uint64_t handle_bits;
+    int32_t N, H, W, C, K, R, S;
+    int32_t pad_h, pad_w, stride_h, stride_w;
+
+    bool operator==(const CBRAmpInfFusedGraphCacheKey& o) const {
+        return handle_bits == o.handle_bits && N == o.N && H == o.H && W == o.W &&
+               C == o.C && K == o.K && R == o.R && S == o.S &&
+               pad_h == o.pad_h && pad_w == o.pad_w &&
+               stride_h == o.stride_h && stride_w == o.stride_w;
+    }
+};
+
+struct CBRAmpInfFusedGraphCacheKeyHasher {
+    size_t operator()(const CBRAmpInfFusedGraphCacheKey& k) const {
+        size_t h = std::hash<uint64_t>()(k.handle_bits);
+        h ^= std::hash<int32_t>()(k.N)  << 1;
+        h ^= std::hash<int32_t>()(k.H)  << 2;
+        h ^= std::hash<int32_t>()(k.W)  << 3;
+        h ^= std::hash<int32_t>()(k.C)  << 4;
+        h ^= std::hash<int32_t>()(k.K)  << 5;
+        h ^= std::hash<int32_t>()(k.R)  << 6;
+        h ^= std::hash<int32_t>()(k.S)  << 7;
+        h ^= std::hash<int32_t>()(k.pad_h) << 8;
+        h ^= std::hash<int32_t>()(k.pad_w) << 9;
+        h ^= std::hash<int32_t>()(k.stride_h) << 10;
+        h ^= std::hash<int32_t>()(k.stride_w) << 11;
+        return h;
+    }
+};
+
+struct CBRAmpInfFusedGraphCache {
+    std::shared_ptr<fe::graph::Graph> graph;
+    size_t workspace_size = 0;
+    std::shared_ptr<fe::graph::Tensor_attributes> input_ta;
+    std::shared_ptr<fe::graph::Tensor_attributes> weight_ta;
+    std::shared_ptr<fe::graph::Tensor_attributes> eq_scale_ta;
+    std::shared_ptr<fe::graph::Tensor_attributes> eq_bias_ta;
+    std::shared_ptr<fe::graph::Tensor_attributes> output_ta;
+};
+
+static std::unordered_map<CBRAmpInfFusedGraphCacheKey, CBRAmpInfFusedGraphCache,
+                          CBRAmpInfFusedGraphCacheKeyHasher>
+    s_cbr_amp_inf_fused_cache;
+
 template<typename CacheMap>
 static CBRConvGraphCache& get_or_build_cbr_conv_cache(
     CacheMap& cache_map,
@@ -430,6 +479,96 @@ CBRConvGraphCache build_cbr_conv_amp_dgrad_graph(
     cache.tensor_to_id[dY] = dt_dy.id;
     cache.tensor_to_id[W]  = dt_w.id;
     cache.tensor_to_id[dX] = dt_dx.id;
+    return cache;
+}
+
+// ============================================================================
+// CBR_AMP_INF 融合图构建器（Conv + MUL(eq_scale) + ADD(eq_bias) + ReLU 单图）
+// ============================================================================
+
+static CBRAmpInfFusedGraphCache
+build_cbr_amp_inf_fused_graph(
+    const DTensor& dt_x, const DTensor& dt_w,
+    const DTensor& dt_y,
+    const ConvParams& cp, cudnnHandle_t handle)
+{
+    using namespace fe::graph;
+    auto graph = create_cudnn_graph(DType::FP16);
+
+    int64_t K = dt_y.c();
+
+    auto X = graph->tensor(Tensor_attributes()
+        .set_name("X")
+        .set_dim({dt_x.n(), dt_x.padded_c(), dt_x.h(), dt_x.w()})
+        .set_stride(make_nhwc_stride(dt_x))
+        .set_data_type(fe::DataType_t::HALF));
+
+    auto W = graph->tensor(Tensor_attributes()
+        .set_name("W")
+        .set_dim({dt_w.n(), dt_w.padded_c(), dt_w.h(), dt_w.w()})
+        .set_stride(make_krsc_stride(dt_w))
+        .set_data_type(fe::DataType_t::HALF));
+
+    // eq_scale / eq_bias: per-channel, {1,K,1,1}, stride {K,1,K,K}, FP32
+    auto eq_scale = graph->tensor(Tensor_attributes()
+        .set_name("eq_scale")
+        .set_dim({1, K, 1, 1})
+        .set_stride({K, 1, K, K})
+        .set_data_type(fe::DataType_t::FLOAT));
+
+    auto eq_bias = graph->tensor(Tensor_attributes()
+        .set_name("eq_bias")
+        .set_dim({1, K, 1, 1})
+        .set_stride({K, 1, K, K})
+        .set_data_type(fe::DataType_t::FLOAT));
+
+    // Conv fprop
+    auto conv_opts = Conv_fprop_attributes()
+        .set_padding({cp.pad_h, cp.pad_w})
+        .set_stride({cp.stride_h, cp.stride_w})
+        .set_dilation({1, 1});
+
+    auto conv_out = graph->conv_fprop(X, W, conv_opts);
+    conv_out->set_dim(to_fe_dim(dt_y.shape))
+            .set_stride(make_nhwc_stride(dt_y))
+            .set_data_type(fe::DataType_t::HALF);   // 虚拟张量，不 set_output
+
+    // MUL(eq_scale)
+    auto mul_opts = Pointwise_attributes()
+        .set_mode(fe::PointwiseMode_t::MUL)
+        .set_compute_data_type(fe::DataType_t::FLOAT);
+    auto scaled = graph->pointwise(conv_out, eq_scale, mul_opts);
+    scaled->set_data_type(fe::DataType_t::HALF);
+
+    // ADD(eq_bias)
+    auto add_opts = Pointwise_attributes()
+        .set_mode(fe::PointwiseMode_t::ADD)
+        .set_compute_data_type(fe::DataType_t::FLOAT);
+    auto shifted = graph->pointwise(scaled, eq_bias, add_opts);
+    shifted->set_data_type(fe::DataType_t::HALF);
+
+    // ReLU
+    auto relu_opts = Pointwise_attributes()
+        .set_mode(fe::PointwiseMode_t::RELU_FWD)
+        .set_compute_data_type(fe::DataType_t::FLOAT);
+    auto relu_out = graph->pointwise(shifted, relu_opts);
+
+    relu_out->set_output(true)
+            .set_name("relu_output")
+            .set_dim(to_fe_dim(dt_y.shape))
+            .set_stride(make_nhwc_stride(dt_y))
+            .set_data_type(fe::DataType_t::HALF);
+
+    finalize_cudnn_graph(graph.get(), handle);
+
+    CBRAmpInfFusedGraphCache cache;
+    cache.graph = graph;
+    cache.workspace_size = graph->get_workspace_size();
+    cache.input_ta    = X;
+    cache.weight_ta   = W;
+    cache.eq_scale_ta = eq_scale;
+    cache.eq_bias_ta  = eq_bias;
+    cache.output_ta   = relu_out;
     return cache;
 }
 
@@ -1106,17 +1245,84 @@ static void launch_cbr_amp_inf_cuda(
     MultiStreamCaptureState& state)
 {
     // input_ids:  [0]=X, [1]=amp_w, [2]=eq_scale, [3]=eq_bias
-    // output_ids: [0]=conv_output, [1]=bn_sum(reserved), [2]=bn_sq_sum(reserved), [3]=bn_output,
-    //             [4]=relu_output, [5]=relu_mask
+    // output_ids: [0]=conv_output  (fused 路径虚拟化，fallback 仍写入)
+    //             [1]=bn_sum       (reserved, INF 不使用)
+    //             [2]=bn_sq_sum    (reserved, INF 不使用)
+    //             [3]=bn_output    (fused 路径虚拟化，fallback 仍写入)
+    //             [4]=relu_output  (唯一真实输出)
+    //             [5]=relu_mask    (INF 不生成)
 
     const auto& cbrp = node.params.cbr();
     const auto& cp = cbrp.conv;
 
-    // ── 1) Conv INF on COMP_1（纯 conv_fprop，无 GenStats） ────────────
+    const DTensor& dt_x = mp.get_dtensor(node.input_ids[0]);
+    const DTensor& dt_w = mp.get_dtensor(node.input_ids[1]);
+    const DTensor& dt_y = mp.get_dtensor(node.output_ids[4]);  // relu_output
+
+    // 以下输出张量由 memory plan 分配并保留在接口中，但 fused 路径不再写入：
+    // [0] conv_output / [3] bn_output 在 fused 路径中虚拟化；
+    // [1] bn_sum / [2] bn_sq_sum / [5] relu_mask 在 INF 中始终不使用。
+    (void)node.output_ids[1];
+    (void)node.output_ids[2];
+    (void)node.output_ids[5];
+
+    // ── 尝试融合图（Conv + MUL + ADD + ReLU 单图） ──────────────────
     {
-        const DTensor& dt_x = mp.get_dtensor(node.input_ids[0]);
-        const DTensor& dt_w = mp.get_dtensor(node.input_ids[1]);
-        const DTensor& dt_y = mp.get_dtensor(node.output_ids[0]);
+        StreamKind sk = StreamKind::COMP_1;
+        cudaStream_t s = static_cast<cudaStream_t>(ctx.stream(sk));
+        cudnnHandle_t h = static_cast<cudnnHandle_t>(ctx.cudnn_handle(sk));
+        int si = state.get_or_register(s);
+
+        int out_idx = state.output_stream_idx;
+        if (out_idx >= 0) {
+            cudaStream_t prev_stream = state.streams[out_idx].stream;
+            if (prev_stream != s) {
+                cudaStreamWaitEvent(s, state.streams[out_idx].last_done_event, 0);
+            }
+        }
+        state.output_stream_idx = si;
+        state.streams[si].has_pending_work = true;
+
+        try {
+            CBRAmpInfFusedGraphCacheKey key{
+                reinterpret_cast<uint64_t>(h),
+                dt_x.n(), dt_x.h(), dt_x.w(), dt_x.c(),
+                dt_w.n(), dt_w.h(), dt_w.w(),
+                cp.pad_h, cp.pad_w, cp.stride_h, cp.stride_w
+            };
+            auto it = s_cbr_amp_inf_fused_cache.find(key);
+            if (it == s_cbr_amp_inf_fused_cache.end()) {
+                auto cache = build_cbr_amp_inf_fused_graph(
+                    dt_x, dt_w, dt_y, cp, h);
+                it = s_cbr_amp_inf_fused_cache.emplace(key, std::move(cache)).first;
+            }
+            auto& cache = it->second;
+            ctx.ensure_workspace_grow(sk, cache.workspace_size);
+            void* ws = ctx.workspace(sk);
+
+            std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> vp;
+            vp[cache.input_ta]    = ctx.ptr_at(node.input_ids[0]);
+            vp[cache.weight_ta]   = ctx.ptr_at(node.input_ids[1]);
+            vp[cache.eq_scale_ta] = ctx.ptr_at(node.input_ids[2]);
+            vp[cache.eq_bias_ta]  = ctx.ptr_at(node.input_ids[3]);
+            vp[cache.output_ta]   = ctx.ptr_at(node.output_ids[4]);
+
+            TR_CUDNN_FE_CHECK(cache.graph->execute(h, vp, ws),
+                              "CBR_AMP_INF fused execute");
+
+            cudaEventRecord(state.streams[si].last_done_event, s);
+            return;
+        } catch (const std::exception&) {
+            // fused graph 构建/执行失败，回退到三段式
+        }
+    }
+
+    // ── fallback: 三段式 (Conv + BN + ReLU) ──────────────────────────
+    // 1) Conv INF on COMP_1
+    {
+        const DTensor& dt_conv_x = mp.get_dtensor(node.input_ids[0]);
+        const DTensor& dt_conv_w = mp.get_dtensor(node.input_ids[1]);
+        const DTensor& dt_conv_y = mp.get_dtensor(node.output_ids[0]);
 
         StreamKind sk = StreamKind::COMP_1;
         cudaStream_t s = static_cast<cudaStream_t>(ctx.stream(sk));
@@ -1135,19 +1341,19 @@ static void launch_cbr_amp_inf_cuda(
 
         CBRConvGraphCacheKey key{
             reinterpret_cast<uint64_t>(h),
-            dt_x.n(), dt_x.h(), dt_x.w(), dt_x.c(),
-            dt_w.n(), dt_w.h(), dt_w.w(),
+            dt_conv_x.n(), dt_conv_x.h(), dt_conv_x.w(), dt_conv_x.c(),
+            dt_conv_w.n(), dt_conv_w.h(), dt_conv_w.w(),
             cp.pad_h, cp.pad_w, cp.stride_h, cp.stride_w,
             true, ComputeOp::CBR_AMP_INF
         };
         auto& cache = get_or_build_cbr_conv_cache(s_cbr_conv_fwd_cache, key, [&]() {
-            return build_cbr_conv_amp_inf_graph(dt_x, dt_w, dt_y, cp, h);
+            return build_cbr_conv_amp_inf_graph(dt_conv_x, dt_conv_w, dt_conv_y, cp, h);
         });
 
         ctx.ensure_workspace_grow(sk, cache.workspace_size);
         void* ws = ctx.workspace(sk);
 
-        update_cbr_conv_tensor_to_id(cache, dt_x.id, dt_w.id, dt_y.id);
+        update_cbr_conv_tensor_to_id(cache, dt_conv_x.id, dt_conv_w.id, dt_conv_y.id);
         std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> vp;
         for (const auto& [ta, tid] : cache.tensor_to_id) {
             vp[ta] = ctx.ptr_at(static_cast<int>(tid));
@@ -1159,7 +1365,7 @@ static void launch_cbr_amp_inf_cuda(
         cudaEventRecord(state.streams[si].last_done_event, s);
     }
 
-    // ── 2) BN INF on COMP_2（直接读取 eq_scale/eq_bias）─────────────
+    // 2) BN INF on COMP_2
     {
         StreamKind sk = StreamKind::COMP_2;
         cudaStream_t stream = static_cast<cudaStream_t>(ctx.stream(sk));
@@ -1175,10 +1381,10 @@ static void launch_cbr_amp_inf_cuda(
         state.output_stream_idx = si;
         state.streams[si].has_pending_work = true;
 
-        const DTensor& dt_x = mp.get_dtensor(node.output_ids[0]);  // conv_output
-        Shape shape = dt_x.shape;
+        const DTensor& dt_bn_x = mp.get_dtensor(node.output_ids[0]);  // conv_output
+        Shape shape = dt_bn_x.shape;
         int N = shape.n(), H = shape.h(), W = shape.w(), C = shape.c();
-        bool is_fp16 = (dt_x.dtype == DType::FP16);
+        bool is_fp16 = (dt_bn_x.dtype == DType::FP16);
 
         const float* eq_scale = static_cast<const float*>(ctx.ptr_at(node.input_ids[2]));
         const float* eq_bias  = static_cast<const float*>(ctx.ptr_at(node.input_ids[3]));
@@ -1195,7 +1401,7 @@ static void launch_cbr_amp_inf_cuda(
         cudaEventRecord(state.streams[si].last_done_event, stream);
     }
 
-    // ── 3) ReLU INF on COMP_3 ──────────────────────────────────────────
+    // 3) ReLU INF on COMP_3
     {
         StreamKind sk = StreamKind::COMP_3;
         cudaStream_t stream = static_cast<cudaStream_t>(ctx.stream(sk));

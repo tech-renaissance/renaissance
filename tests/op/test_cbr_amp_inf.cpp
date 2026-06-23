@@ -51,8 +51,6 @@ int main(int argc, char** argv) {
         DTensor d_bn_out_cbr   = task.alloc(y_shape, DType::FP16, Region::F_FEATURE_FP16);
         DTensor d_relu_out_cbr = task.alloc(y_shape, DType::FP16, Region::F_FEATURE_FP16);
         DTensor d_relu_mask_cbr = task.alloc(y_shape, DType::INT8, Region::S_MASK);
-        DTensor d_eps_cbr = task.alloc(Shape{1}, DType::FP32, Region::T_TEMP_FP32);
-
         // 分立路径
         DTensor d_x_sep     = task.alloc(x_shape, DType::FP16, Region::F_FEATURE_FP16);
         DTensor d_w_sep     = task.alloc(w_shape, DType::FP16, Region::A_DEEP_CONV);
@@ -83,8 +81,7 @@ int main(int argc, char** argv) {
 
         ComputationGraph g_cbr_inf;
         g_cbr_inf.append(ComputeOp::CBR_AMP_INF,
-            {d_x_cbr.id, d_w_cbr.id, d_bn_w_cbr.id, d_bn_b_cbr.id,
-             d_eq_scale_cbr.id, d_eq_bias_cbr.id, d_rm_cbr.id, d_rv_cbr.id, d_eps_cbr.id},
+            {d_x_cbr.id, d_w_cbr.id, d_eq_scale_cbr.id, d_eq_bias_cbr.id},
             {d_conv_out_cbr.id, d_sum_cbr.id, d_sq_sum_cbr.id, d_bn_out_cbr.id,
              d_relu_out_cbr.id, d_relu_mask_cbr.id},
             OpParams{cbr_p});
@@ -145,7 +142,6 @@ int main(int argc, char** argv) {
         task.transfer_to_rank(h_eq_bias,  d_eq_bias_sep,  0);
 
         Tensor h_eps(Shape{1}, DType::FP32); *h_eps.data<float>() = cfg.eps;
-        task.transfer_to_rank(h_eps, d_eps_cbr, 0);
         task.transfer_to_rank(h_eps, d_eps_sep, 0);
 
         std::cout << "\n--- " << label << " INF ---\n";
