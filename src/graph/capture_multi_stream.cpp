@@ -91,6 +91,20 @@ void insert_cross_op_barrier(const GraphNode& /*prev_node*/,
             case RangeOp::RANGE_MEAN_ALLREDUCE:
             case RangeOp::RANGE_BN_STATS_ALLREDUCE:
                 target_sk = StreamKind::UPDATE; break;
+            case RangeOp::RANGE_D2D_COPY: {
+                cudaStream_t ps = state.primary_stream;
+                if (ps == static_cast<cudaStream_t>(ctx.stream(StreamKind::UPDATE)))
+                    target_sk = StreamKind::UPDATE;
+                else if (ps == static_cast<cudaStream_t>(ctx.stream(StreamKind::COMP_2)))
+                    target_sk = StreamKind::COMP_2;
+                else if (ps == static_cast<cudaStream_t>(ctx.stream(StreamKind::COMP_3)))
+                    target_sk = StreamKind::COMP_3;
+                else if (ps == static_cast<cudaStream_t>(ctx.stream(StreamKind::TRANS)))
+                    target_sk = StreamKind::TRANS;
+                else
+                    target_sk = StreamKind::COMP_1;
+                break;
+            }
             default:
                 target_sk = StreamKind::COMP_1; break;
         }

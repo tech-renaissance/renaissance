@@ -30,7 +30,7 @@ static void launch_range_d2d_copy_cuda(
     const DeviceContext& ctx,
     MultiStreamCaptureState& state)
 {
-    cudaStream_t s = static_cast<cudaStream_t>(ctx.stream(StreamKind::COMP_1));
+    cudaStream_t s = state.primary_stream;
     int si = state.get_or_register(s);
     state.output_stream_idx = si;
     state.streams[si].has_pending_work = true;
