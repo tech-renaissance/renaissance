@@ -8,7 +8,7 @@
 int main(int argc, char** argv) {
     auto cfg = parse_cli(argc, argv);
 
-    GLOBAL_SETTING.use_gpu().amp(true).auto_seed();
+    GLOBAL_SETTING.use_gpu().amp(true).manual_seed(42);
 
     int R = cfg.kernel, S = cfg.kernel;
     int OH = (cfg.IH + 2 * cfg.pad - R) / cfg.stride + 1;
@@ -154,9 +154,13 @@ int main(int argc, char** argv) {
             Tensor h_sep = task.fetch_from_rank(d_sep, 0);
             double mse = is_fp16 ? compute_mse_fp16(h_cbr, h_sep)
                                  : compute_mse_fp32(h_cbr, h_sep);
+            uint32_t crc_cbr = compute_tensor_crc32(h_cbr);
+            uint32_t crc_sep = compute_tensor_crc32(h_sep);
             max_mse = (std::max)(max_mse, mse);
             bool pass = (mse <= thr);
             std::cout << "  " << name << " MSE=" << std::scientific << mse
+                      << "  CRC=[" << crc32_to_hex(crc_cbr)
+                      << ", " << crc32_to_hex(crc_sep) << "]"
                       << (pass ? "  PASS" : "  FAIL") << std::endl;
             if (!pass) all_pass = false;
         };

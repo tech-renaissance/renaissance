@@ -29,6 +29,7 @@ StreamKind gid_to_stream_kind(GraphId gid) noexcept {
         case GraphId::FIRST_COMM:
         case GraphId::DEEP_COMM:
         case GraphId::STATS_COMM:
+        case GraphId::UPDATE_STATS:
             return StreamKind::UPDATE;
         case GraphId::CAST_MAIN_FP32_TO_FP16:
         case GraphId::CAST_EMA_FP32_TO_FP16:
@@ -133,7 +134,10 @@ void GraphExecutor::run_train_step() {
     // 11. BN 统计量通信
     launch(GraphId::STATS_COMM);
 
-    // 12. NaN 检查分支
+    // 12. BN 统计量推进（next→prev 复制）
+    launch(GraphId::UPDATE_STATS);
+
+    // 13. NaN 检查分支
     bool has_nan = check_nan_flag();
     if (!has_nan) {
         launch(GraphId::OPTIMIZER);
@@ -191,6 +195,7 @@ void GraphExecutor::run_train_step_last_batch() {
 
     // 10. 后续与标准 batch 相同
     launch(GraphId::STATS_COMM);
+    launch(GraphId::UPDATE_STATS);
 
     bool has_nan = check_nan_flag();
     if (!has_nan) {

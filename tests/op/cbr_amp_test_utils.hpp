@@ -14,6 +14,7 @@
 #include <cstdlib>
 #include <cmath>
 #include <cstring>
+#include <zlib.h>
 
 #ifdef TR_USE_CUDA
 #include <cuda_fp16.h>
@@ -85,6 +86,60 @@ double compute_mse_int8(const Tensor& a, const Tensor& b) {
         if (pa[i] != pb[i]) diff_count++;
     }
     return static_cast<double>(diff_count) / n;
+}
+
+// Compute CRC-32 over the raw tensor bytes (tight layout, no padding).
+inline uint32_t compute_tensor_crc32(const Tensor& t) {
+    uLong crc = crc32(0L, Z_NULL, 0);
+    const uint8_t* ptr = static_cast<const uint8_t*>(t.data());
+    size_t remaining = t.nbytes();
+    while (remaining > 0) {
+        size_t limit = static_cast<size_t>(UINT_MAX);
+        size_t chunk = (remaining < limit) ? remaining : limit;
+        uInt block = static_cast<uInt>(chunk);
+        crc = crc32(crc, ptr, block);
+        ptr += block;
+        remaining -= block;
+    }
+    return static_cast<uint32_t>(crc);
+}
+
+inline std::string crc32_to_hex(uint32_t crc) {
+    std::ostringstream oss;
+    oss << std::hex << std::uppercase << std::setw(8) << std::setfill('0') << crc;
+    return oss.str();
+}
+
+// Decode cuDNN bit-packed BOOLEAN mask (LSB-first) into byte-per-element 0/1 mask.
+Tensor decode_cudnn_boolean_mask(const Tensor& packed, const Shape& shape) {
+    int64_t n = shape.numel();
+    Tensor decoded(shape, DType::INT8);
+    const uint8_t* src = reinterpret_cast<const uint8_t*>(packed.data<int8_t>());
+    int8_t* dst = decoded.data<int8_t>();
+    for (int64_t i = 0; i < n; ++i) {
+        int64_t byte = i / 8;
+        int bit = i % 8;
+        dst[i] = static_cast<int8_t>((src[byte] >> bit) & 1u);
+    }
+    return decoded;
+}
+
+// Encode byte-per-element 0/1 mask into cuDNN bit-packed BOOLEAN mask (LSB-first).
+// The returned Tensor keeps the original spatial shape so that transfer_to_rank()
+// can copy it into a same-shaped DTensor buffer; only the first (n+7)/8 bytes hold
+// the actual bit-packed data.
+Tensor encode_cudnn_boolean_mask(const Tensor& decoded, const Shape& shape) {
+    int64_t n = shape.numel();
+    Tensor packed(shape, DType::INT8);
+    uint8_t* dst = reinterpret_cast<uint8_t*>(packed.data<int8_t>());
+    std::memset(dst, 0, static_cast<size_t>(n));
+    const int8_t* src = decoded.data<int8_t>();
+    for (int64_t i = 0; i < n; ++i) {
+        if (src[i]) {
+            dst[i / 8] |= static_cast<uint8_t>(1u << (i % 8));
+        }
+    }
+    return packed;
 }
 
 // ── 测试配置 ───────────────────────────────────────────────────────────────

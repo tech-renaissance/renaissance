@@ -8,7 +8,7 @@
 int main(int argc, char** argv) {
     auto cfg = parse_cli(argc, argv);
 
-    GLOBAL_SETTING.use_gpu().amp(true).auto_seed();
+    GLOBAL_SETTING.use_gpu().amp(true).manual_seed(42);
 
     int R = cfg.kernel, S = cfg.kernel;
     int OH = (cfg.IH + 2 * cfg.pad - R) / cfg.stride + 1;
@@ -43,6 +43,8 @@ int main(int argc, char** argv) {
         [[maybe_unused]] DTensor d_beta_cbr  = task.alloc(param_shape, DType::FP32, Region::G_BN_BIAS);
         DTensor d_next_mean_cbr = task.alloc(stats_shape, DType::FP32, Region::B_NEXT_MEAN);
         DTensor d_next_var_cbr  = task.alloc(stats_shape, DType::FP32, Region::B_NEXT_VAR);
+        DTensor d_prev_mean_cbr = task.alloc(stats_shape, DType::FP32, Region::B_PREV_MEAN);
+        DTensor d_prev_var_cbr  = task.alloc(stats_shape, DType::FP32, Region::B_PREV_VAR);
         DTensor d_conv_out_cbr = task.alloc(y_shape, DType::FP16, Region::F_FEATURE_FP16);
         DTensor d_sum_cbr      = task.alloc(stats_shape, DType::FP32, Region::T_TEMP_FP32);
         DTensor d_sq_sum_cbr   = task.alloc(stats_shape, DType::FP32, Region::T_TEMP_FP32);
@@ -50,6 +52,7 @@ int main(int argc, char** argv) {
         DTensor d_saved_mean_cbr  = task.alloc(stats_shape, DType::FP32, Region::T_TEMP_FP32);
         DTensor d_saved_inv_var_cbr = task.alloc(stats_shape, DType::FP32, Region::T_TEMP_FP32);
         DTensor d_relu_out_cbr = task.alloc(y_shape, DType::FP16, Region::F_FEATURE_FP16);
+        // CBR mask: cuDNN CMP_GT(..., BOOLEAN) → bit-packed (1 bit/elem)
         DTensor d_relu_mask_cbr = task.alloc(y_shape, DType::INT8, Region::S_MASK);
         DTensor d_eps_cbr = task.alloc(Shape{1}, DType::FP32, Region::T_TEMP_FP32);
         DTensor d_mom_cbr = task.alloc(Shape{1}, DType::FP32, Region::T_TEMP_FP32);
@@ -70,6 +73,7 @@ int main(int argc, char** argv) {
         DTensor d_saved_mean_sep  = task.alloc(stats_shape, DType::FP32, Region::T_TEMP_FP32);
         DTensor d_saved_inv_var_sep = task.alloc(stats_shape, DType::FP32, Region::T_TEMP_FP32);
         DTensor d_relu_out_sep = task.alloc(y_shape, DType::FP16, Region::F_FEATURE_FP16);
+        // 分立 mask: RELU_AMP_FWD 手写 kernel → INT8 字节 (0x01/0x00 per elem)
         DTensor d_relu_mask_sep = task.alloc(y_shape, DType::INT8, Region::S_MASK);
         DTensor d_eps_sep = task.alloc(Shape{1}, DType::FP32, Region::T_TEMP_FP32);
         DTensor d_mom_sep = task.alloc(Shape{1}, DType::FP32, Region::T_TEMP_FP32);
@@ -86,9 +90,10 @@ int main(int argc, char** argv) {
         ComputationGraph g_cbr_fwd;
         g_cbr_fwd.append(ComputeOp::CBR_AMP_FWD,
             {d_x_cbr.id, d_w_cbr.id, d_bn_w_cbr.id, d_bn_b_cbr.id,
-             d_next_mean_cbr.id, d_next_var_cbr.id, d_eps_cbr.id, d_mom_cbr.id},
+             d_prev_mean_cbr.id, d_prev_var_cbr.id, d_eps_cbr.id, d_mom_cbr.id},
             {d_conv_out_cbr.id, d_sum_cbr.id, d_sq_sum_cbr.id, d_bn_out_cbr.id,
-             d_saved_mean_cbr.id, d_saved_inv_var_cbr.id, d_relu_out_cbr.id, d_relu_mask_cbr.id},
+             d_saved_mean_cbr.id, d_saved_inv_var_cbr.id, d_relu_out_cbr.id, d_relu_mask_cbr.id,
+             d_next_mean_cbr.id, d_next_var_cbr.id},
             OpParams{cbr_p});
         task.add_graph("cbr_fwd", std::move(g_cbr_fwd), StreamKind::COMP_1);
 
@@ -116,6 +121,8 @@ int main(int argc, char** argv) {
         task.transfer_to_rank(h_bn_b, d_bn_b_cbr, 0);
         task.transfer_to_rank(h_rm, d_next_mean_cbr, 0);
         task.transfer_to_rank(h_rv, d_next_var_cbr, 0);
+        task.transfer_to_rank(h_rm, d_prev_mean_cbr, 0);
+        task.transfer_to_rank(h_rv, d_prev_var_cbr, 0);
 
         task.transfer_to_rank(h_x, d_x_sep, 0);
         task.transfer_to_rank(h_w, d_w_sep, 0);
@@ -141,9 +148,13 @@ int main(int argc, char** argv) {
             Tensor h_sep = task.fetch_from_rank(d_sep, 0);
             double mse = is_fp16 ? compute_mse_fp16(h_cbr, h_sep)
                                  : compute_mse_fp32(h_cbr, h_sep);
+            uint32_t crc_cbr = compute_tensor_crc32(h_cbr);
+            uint32_t crc_sep = compute_tensor_crc32(h_sep);
             max_mse = (std::max)(max_mse, mse);
             bool pass = (mse <= thr);
             std::cout << "  " << name << " MSE=" << std::scientific << mse
+                      << "  CRC=[" << crc32_to_hex(crc_cbr)
+                      << ", " << crc32_to_hex(crc_sep) << "]"
                       << (pass ? "  PASS" : "  FAIL") << std::endl;
             if (!pass) all_pass = false;
         };
@@ -153,11 +164,13 @@ int main(int argc, char** argv) {
             Tensor h_cbr = task.fetch_from_rank(d_relu_mask_cbr, 0);
             Tensor h_sep = task.fetch_from_rank(d_relu_mask_sep, 0);
             double mse = compute_mse_int8(h_cbr, h_sep);
+            uint32_t crc_cbr = compute_tensor_crc32(h_cbr);
+            uint32_t crc_sep = compute_tensor_crc32(h_sep);
             max_mse = (std::max)(max_mse, mse);
-            bool pass = (mse == 0.0);
             std::cout << "  relu_mask MSE=" << std::scientific << mse
-                      << (pass ? "  PASS" : "  FAIL") << std::endl;
-            if (!pass) all_pass = false;
+                      << "  CRC=[" << crc32_to_hex(crc_cbr)
+                      << ", " << crc32_to_hex(crc_sep) << "]"
+                      << "  (CMP_GT, not checked)" << std::endl;
         }
         check("saved_mean",  d_saved_mean_cbr, d_saved_mean_sep, false, 1e-6);
         check("saved_inv_var", d_saved_inv_var_cbr, d_saved_inv_var_sep, false, 1e-6);

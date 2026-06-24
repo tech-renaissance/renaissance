@@ -84,7 +84,8 @@ enum class GraphId : uint8_t {
     CAST_DEEP_GRAD_FP16_TO_FP32,   ///< AMP 深层卷积梯度 FP16→FP32
     CAST_FIRST_GRAD_FP16_TO_FP32,  ///< AMP 首层卷积梯度 FP16→FP32
     NAN_CHECK_AND_GRAD_SCALING,    ///< AMP NaN 检查 + 梯度缩放
-    STATS_COMM,        ///< BN 统计量通信
+    STATS_COMM,        ///< BN 统计量通信（仅同步 next_mean/next_var）
+    UPDATE_STATS,      ///< 将同步后的 next 统计量复制到 prev
     OPTIMIZER,         ///< 优化器参数更新
     EMA_UPDATE,        ///< EMA 参数更新
     INF_MAIN_A,        ///< 主模型推理 A
@@ -103,7 +104,7 @@ enum class GraphId : uint8_t {
     LARS_FIRST_CONV_OPT,    ///< 首层卷积 LARS 优化（trust + update，COMP_2）
     LARS_DEEP_CONV_OPT,     ///< 深层卷积 LARS 优化（trust + update，COMP_3）
     UPDATE_BN_INF_PARAMS,  ///< 训练后更新 BN 推理参数 (eq_scale/eq_bias)
-    COUNT              ///< = 32
+    COUNT              ///< = 33
 };
 
 // ============================================================================
@@ -126,6 +127,7 @@ inline const char* graph_id_to_string(GraphId gid) noexcept {
         case GraphId::CAST_FIRST_GRAD_FP16_TO_FP32:  return "CAST_FIRST_GRAD_FP16_TO_FP32";
         case GraphId::NAN_CHECK_AND_GRAD_SCALING:    return "NAN_CHECK_AND_GRAD_SCALING";
         case GraphId::STATS_COMM:        return "STATS_COMM";
+        case GraphId::UPDATE_STATS:      return "UPDATE_STATS";
         case GraphId::OPTIMIZER:         return "OPTIMIZER";
         case GraphId::EMA_UPDATE:        return "EMA_UPDATE";
         case GraphId::INF_MAIN_A:        return "INF_MAIN_A";
@@ -165,6 +167,7 @@ inline bool is_shape_invariant_graph(GraphId gid) noexcept {
         case GraphId::FIRST_COMM:
         case GraphId::DEEP_COMM:
         case GraphId::STATS_COMM:
+        case GraphId::UPDATE_STATS:
         case GraphId::EMA_UPDATE:
         case GraphId::CAST_MAIN_FP32_TO_FP16:
         case GraphId::CAST_EMA_FP32_TO_FP16:
@@ -200,6 +203,7 @@ inline bool is_train_graph(GraphId gid) noexcept {
         case GraphId::FIRST_COMM:
         case GraphId::DEEP_COMM:
         case GraphId::STATS_COMM:
+        case GraphId::UPDATE_STATS:
         case GraphId::OPTIMIZER:
         case GraphId::EMA_UPDATE:
         case GraphId::LARS_FC_OPT:

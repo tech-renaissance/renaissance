@@ -1847,14 +1847,12 @@ void Compiler::build_auxiliary_graphs(ComputationGraph& train_cg, const MemoryPl
             {r_deep}, {r_deep});
     }
 
-    // 5. STATS_COMM 图：BN 统计量 AllReduce（覆盖 B_PREV 与 B_NEXT 四个区）
+    // 5. STATS_COMM 图：BN 统计量多 RANK 同步（仅 B_NEXT 两个区）
     if (has_bn) {
-        MemRange r_prev = memory_plan.region_range(
-            Region::B_PREV_MEAN, Region::B_PREV_VAR);
         MemRange r_next = memory_plan.region_range(
             Region::B_NEXT_MEAN, Region::B_NEXT_VAR);
         train_cg.append_range(GraphId::STATS_COMM,
-            RangeOp::RANGE_BN_STATS_ALLREDUCE, {r_prev, r_next}, {r_prev, r_next});
+            RangeOp::RANGE_BN_STATS_ALLREDUCE, {r_next}, {r_next});
     }
 
     // 6. OPTIMIZER 图：参数更新（优化器感知重构）
@@ -2213,7 +2211,7 @@ void Compiler::build_auxiliary_graphs(ComputationGraph& train_cg, const MemoryPl
         train_cg.append(GraphId::NAN_CHECK_AND_GRAD_SCALING, node);
     }
 
-    // 12-13. RANGE_D2D_COPY - BN统计量复制（新枚举代替 RANGE_BN_STATS_COPY）
+    // 12. UPDATE_STATS 图：将同步后的 next 统计量复制到 prev
     if (has_bn) {
         std::pair<Region, Region> bn_copy_pairs[] = {
             {Region::B_NEXT_MEAN, Region::B_PREV_MEAN},
@@ -2230,7 +2228,7 @@ void Compiler::build_auxiliary_graphs(ComputationGraph& train_cg, const MemoryPl
             has_copy = true;
         }
         if (has_copy) {
-            train_cg.append(GraphId::STATS_COMM, node);
+            train_cg.append(GraphId::UPDATE_STATS, node);
         }
     }
 
