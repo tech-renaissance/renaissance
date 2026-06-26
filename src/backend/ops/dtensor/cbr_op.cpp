@@ -26,6 +26,7 @@
 #include <unordered_map>
 #include <memory>
 #include <functional>
+#include <sstream>
 
 #ifdef TR_USE_CUDA
 #include <cuda_fp16.h>
@@ -34,21 +35,19 @@
 #include <cudnn_frontend/graph_interface.h>
 #endif
 
+// Mode C 经验搜索头文件
+#if defined(USING_A100)
+#include "generated/cbr_experience_a100_fp16.hpp"
+#elif defined(USING_RTX5090)
+#include "generated/cbr_experience_rtx5090_fp16.hpp"
+#endif
+
 namespace tr {
 
 // ============================================================================
 // 外部 kernel 声明
 // ============================================================================
 #ifdef TR_USE_CUDA
-
-// ReLU kernel（定义在 relu_op.cu）
-extern cudaError_t launch_relu_amp_fwd_mask_kernel(
-    const __half* x, __half* y, int8_t* mask,
-    int64_t n, cudaStream_t stream);
-
-extern cudaError_t launch_relu_amp_bwd_kernel(
-    const __half* dY, const int8_t* mask, __half* dX,
-    int64_t n, cudaStream_t stream);
 
 extern cudaError_t launch_relu_amp_inf_kernel(
     const __half* x, __half* y, int64_t n, cudaStream_t stream);
@@ -117,7 +116,6 @@ struct CBRBNGraphCache {
     size_t workspace_size = 0;
 };
 
-std::unordered_map<CBRBNGraphCacheKey, CBRBNGraphCache, CBRBNGraphCacheKeyHash> s_cbr_bn_fwd_caches;
 std::unordered_map<CBRBNGraphCacheKey, CBRBNGraphCache, CBRBNGraphCacheKeyHash> s_cbr_bn_bwd_caches;
 
 static void update_cbr_bn_tensor_to_id(
@@ -200,6 +198,77 @@ static std::unordered_map<CBRConvGraphCacheKey, CBRConvGraphCache, CBRConvGraphC
     s_cbr_conv_dgrad_cache;
 
 // ============================================================================
+// BNFinalize 子图：Cache 结构与辅助函数
+// ============================================================================
+
+struct CBRBNFinalizeCacheKey {
+    uint64_t handle_bits;
+    int32_t N, H, W, C;
+    uint32_t eps_bits;
+    uint32_t momentum_bits;
+
+    bool operator==(const CBRBNFinalizeCacheKey& o) const {
+        return handle_bits == o.handle_bits && N == o.N && H == o.H && W == o.W && C == o.C
+            && eps_bits == o.eps_bits && momentum_bits == o.momentum_bits;
+    }
+};
+
+struct CBRBNFinalizeCacheKeyHash {
+    size_t operator()(const CBRBNFinalizeCacheKey& k) const noexcept {
+        size_t h = std::hash<uint64_t>{}(k.handle_bits);
+        h = h * 31 + std::hash<int32_t>{}(k.N);
+        h = h * 31 + std::hash<int32_t>{}(k.H);
+        h = h * 31 + std::hash<int32_t>{}(k.W);
+        h = h * 31 + std::hash<int32_t>{}(k.C);
+        h = h * 31 + std::hash<uint32_t>{}(k.eps_bits);
+        h = h * 31 + std::hash<uint32_t>{}(k.momentum_bits);
+        return h;
+    }
+};
+
+struct CBRBNFinalizeGraphCache {
+    std::shared_ptr<fe::graph::Graph> graph;
+    std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, int64_t> tensor_to_id;
+    size_t workspace_size = 0;
+};
+
+static std::unordered_map<CBRBNFinalizeCacheKey, CBRBNFinalizeGraphCache, CBRBNFinalizeCacheKeyHash>
+    s_cbr_bn_finalize_caches;
+
+// ============================================================================
+// BN Apply+ReLU 子图：Cache 结构与辅助函数
+// ============================================================================
+
+struct CBRBNReluCacheKey {
+    uint64_t handle_bits;
+    int32_t N, H, W, C;
+
+    bool operator==(const CBRBNReluCacheKey& o) const {
+        return handle_bits == o.handle_bits && N == o.N && H == o.H && W == o.W && C == o.C;
+    }
+};
+
+struct CBRBNReluCacheKeyHash {
+    size_t operator()(const CBRBNReluCacheKey& k) const noexcept {
+        size_t h = std::hash<uint64_t>{}(k.handle_bits);
+        h = h * 31 + std::hash<int32_t>{}(k.N);
+        h = h * 31 + std::hash<int32_t>{}(k.H);
+        h = h * 31 + std::hash<int32_t>{}(k.W);
+        h = h * 31 + std::hash<int32_t>{}(k.C);
+        return h;
+    }
+};
+
+struct CBRBNReluGraphCache {
+    std::shared_ptr<fe::graph::Graph> graph;
+    std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, int64_t> tensor_to_id;
+    size_t workspace_size = 0;
+};
+
+static std::unordered_map<CBRBNReluCacheKey, CBRBNReluGraphCache, CBRBNReluCacheKeyHash>
+    s_cbr_bn_relu_caches;
+
+// ============================================================================
 // CBR_AMP_INF 融合图 Cache（Conv + MUL(eq_scale) + ADD(eq_bias) + ReLU 单图）
 // ============================================================================
 
@@ -280,6 +349,273 @@ static void update_cbr_conv_tensor_to_id(
 }
 
 // ============================================================================
+// Mode C 经验搜索辅助函数
+// ============================================================================
+
+#if defined(USING_A100) || defined(USING_RTX5090)
+static std::string build_shape_key(
+    const std::string& op_type, const std::string& dtype,
+    int64_t N, int64_t H, int64_t W, int64_t C, int64_t K,
+    int64_t R, int64_t S, int64_t stride, int64_t padding)
+{
+    std::ostringstream oss;
+#if defined(USING_A100)
+    oss << "A100-SXM4-80GB";
+#elif defined(USING_RTX5090)
+    oss << "RTX5090";
+#endif
+    oss << "|SM80"
+        << "|cuDNN9.17.0"
+        << "|CUDA13.1"
+        << "|" << op_type << "_" << dtype
+        << "|N" << N << "|H" << H << "|W" << W
+        << "|C" << C << "|K" << K
+        << "|R" << R << "|S" << S
+        << "|U1|V1"
+        << "|P" << padding << "|Q" << padding
+        << "|D" << stride << "|E" << stride
+        << "|NHWC|FP16|FP32";
+    return oss.str();
+}
+
+static std::pair<int, bool> match_and_build_plan(
+    std::shared_ptr<fe::graph::Graph>& graph,
+    const std::vector<int64_t>& candidates,
+    const ta_v4::experience::ExperienceRecord* exp_rec,
+    cudnnHandle_t handle)
+{
+    (void)handle;
+    // Level 1: Winner
+    for (int64_t idx : candidates) {
+        std::string tag;
+        auto status = graph->get_plan_name_at_index(idx, tag);
+        if (status.is_bad()) continue;
+        if (tag == std::string(exp_rec->winner_tag)) {
+            auto build_status = graph->build_plan_at_index(idx);
+            if (!build_status.is_bad()) return {0, true};
+        }
+    }
+    // Level 2: Backup1
+    if (strlen(exp_rec->backup1_tag) > 0) {
+        for (int64_t idx : candidates) {
+            std::string tag;
+            auto status = graph->get_plan_name_at_index(idx, tag);
+            if (status.is_bad()) continue;
+            if (tag == std::string(exp_rec->backup1_tag)) {
+                auto build_status = graph->build_plan_at_index(idx);
+                if (!build_status.is_bad()) return {0, true};
+            }
+        }
+    }
+    // Level 3: Backup2
+    if (strlen(exp_rec->backup2_tag) > 0) {
+        for (int64_t idx : candidates) {
+            std::string tag;
+            auto status = graph->get_plan_name_at_index(idx, tag);
+            if (status.is_bad()) continue;
+            if (tag == std::string(exp_rec->backup2_tag)) {
+                auto build_status = graph->build_plan_at_index(idx);
+                if (!build_status.is_bad()) return {0, true};
+            }
+        }
+    }
+    return {0, false};
+}
+#endif
+
+// ============================================================================
+// BNFinalize 子图：cuDNN FE Graph 构建函数
+// ============================================================================
+
+static CBRBNFinalizeGraphCache build_cbr_bn_finalize_graph(
+    const DTensor& dt_sum, const DTensor& dt_sq_sum,
+    const DTensor& dt_scale, const DTensor& dt_bias,
+    const DTensor& dt_prev_mean, const DTensor& dt_prev_var,
+    const DTensor& dt_next_mean, const DTensor& dt_next_var,
+    const DTensor& dt_saved_mean, const DTensor& dt_saved_inv_var,
+    const DTensor& dt_eq_scale_bias,  // 复用 bn_output 缓冲区
+    float eps, float momentum, int64_t accum_count,
+    cudnnHandle_t handle)
+{
+    using namespace fe::graph;
+
+    auto graph = create_cudnn_graph(DType::FP32);
+    int64_t C = dt_sum.c();
+
+    auto sum = graph->tensor(Tensor_attributes()
+        .set_name("sum")
+        .set_dim({1, C, 1, 1})
+        .set_stride({C, 1, C, C})
+        .set_data_type(fe::DataType_t::FLOAT));
+
+    auto sq_sum = graph->tensor(Tensor_attributes()
+        .set_name("sq_sum")
+        .set_dim({1, C, 1, 1})
+        .set_stride({C, 1, C, C})
+        .set_data_type(fe::DataType_t::FLOAT));
+
+    auto scale = graph->tensor(Tensor_attributes()
+        .set_name("scale")
+        .set_dim({1, C, 1, 1})
+        .set_stride({C, 1, C, C})
+        .set_data_type(fe::DataType_t::FLOAT));
+
+    auto bias = graph->tensor(Tensor_attributes()
+        .set_name("bias")
+        .set_dim({1, C, 1, 1})
+        .set_stride({C, 1, C, C})
+        .set_data_type(fe::DataType_t::FLOAT));
+
+    auto prev_rm = graph->tensor(Tensor_attributes()
+        .set_name("prev_running_mean")
+        .set_dim({1, C, 1, 1})
+        .set_stride({C, 1, C, C})
+        .set_data_type(fe::DataType_t::FLOAT));
+
+    auto prev_rv = graph->tensor(Tensor_attributes()
+        .set_name("prev_running_var")
+        .set_dim({1, C, 1, 1})
+        .set_stride({C, 1, C, C})
+        .set_data_type(fe::DataType_t::FLOAT));
+
+    auto EPS = graph->tensor(fe::graph::Tensor_attributes(eps).set_name("epsilon"));
+    auto MOM = graph->tensor(fe::graph::Tensor_attributes(momentum).set_name("momentum"));
+
+    auto bn_finalize_attrs = BN_finalize_attributes()
+        .set_name("bn_finalize")
+        .set_compute_data_type(fe::DataType_t::FLOAT)
+        .set_previous_running_stats(prev_rm, prev_rv, MOM);
+
+    auto ACC = graph->tensor(fe::graph::Tensor_attributes(accum_count).set_name("accum_count"));
+
+    auto outputs = graph->bn_finalize(sum, sq_sum, scale, bias, EPS, ACC, bn_finalize_attrs);
+    // outputs[0]=eq_scale, [1]=eq_bias, [2]=saved_mean, [3]=saved_inv_var,
+    // [4]=next_running_mean, [5]=next_running_var
+
+    const char* out_names[] = {"eq_scale", "eq_bias", "saved_mean",
+                                "saved_inv_var", "next_rm", "next_rv"};
+    for (int i = 0; i < 6; ++i) {
+        outputs[i]->set_name(out_names[i])
+                   .set_output(true)
+                   .set_dim({1, C, 1, 1})
+                   .set_stride({C, 1, C, C})
+                   .set_data_type(fe::DataType_t::FLOAT);
+    }
+
+    TR_CUDNN_FE_CHECK(graph->validate(), "CBR_AMP_FWD bn_finalize validate");
+    TR_CUDNN_FE_CHECK(graph->build_operation_graph(handle), "CBR_AMP_FWD bn_finalize build op graph");
+    TR_CUDNN_FE_CHECK(graph->create_execution_plans({fe::HeurMode_t::B, fe::HeurMode_t::FALLBACK}), "CBR_AMP_FWD bn_finalize create exec plans");
+    graph->deselect_numeric_notes({fe::NumericalNote_t::NONDETERMINISTIC});
+    TR_CUDNN_FE_CHECK(graph->check_support(handle), "CBR_AMP_FWD bn_finalize check support");
+    TR_CUDNN_FE_CHECK(graph->build_plans(fe::BuildPlanPolicy_t::HEURISTICS_CHOICE), "CBR_AMP_FWD bn_finalize build plans");
+
+    CBRBNFinalizeGraphCache cache;
+    cache.graph = graph;
+    cache.workspace_size = graph->get_workspace_size();
+    cache.tensor_to_id[sum]      = dt_sum.id;
+    cache.tensor_to_id[sq_sum]   = dt_sq_sum.id;
+    cache.tensor_to_id[scale]    = dt_scale.id;
+    cache.tensor_to_id[bias]     = dt_bias.id;
+    cache.tensor_to_id[prev_rm]  = dt_prev_mean.id;
+    cache.tensor_to_id[prev_rv]  = dt_prev_var.id;
+    cache.tensor_to_id[outputs[0]] = dt_eq_scale_bias.id;
+    cache.tensor_to_id[outputs[1]] = dt_eq_scale_bias.id;  // eq_bias 在同一缓冲区
+    cache.tensor_to_id[outputs[2]] = dt_saved_mean.id;
+    cache.tensor_to_id[outputs[3]] = dt_saved_inv_var.id;
+    cache.tensor_to_id[outputs[4]] = dt_next_mean.id;
+    cache.tensor_to_id[outputs[5]] = dt_next_var.id;
+    return cache;
+}
+
+// ============================================================================
+// BN Apply+ReLU 子图：cuDNN FE Graph 构建函数
+// ============================================================================
+
+static CBRBNReluGraphCache build_cbr_bn_relu_graph(
+    const DTensor& dt_x,       // conv_output
+    const DTensor& dt_y,       // relu_output
+    const DTensor& dt_eq_scale_bias,  // eq_scale+eq_bias 缓冲区
+    cudnnHandle_t handle)
+{
+    using namespace fe::graph;
+
+    auto graph = create_cudnn_graph(DType::FP16);
+    graph->set_io_data_type(fe::DataType_t::HALF)
+          .set_intermediate_data_type(fe::DataType_t::HALF)
+          .set_compute_data_type(fe::DataType_t::FLOAT);
+
+    int64_t N = dt_x.n(), C = dt_x.c(), H = dt_x.h(), W = dt_x.w();
+
+    auto x_ta = graph->tensor(Tensor_attributes()
+        .set_name("bn_relu_x")
+        .set_dim({N, C, H, W})
+        .set_stride(make_nhwc_stride(dt_x))
+        .set_data_type(fe::DataType_t::HALF));
+
+    auto eq_scale_ta = graph->tensor(Tensor_attributes()
+        .set_name("eq_scale")
+        .set_dim({1, C, 1, 1})
+        .set_stride({C, 1, C, C})
+        .set_data_type(fe::DataType_t::FLOAT));
+
+    auto eq_bias_ta = graph->tensor(Tensor_attributes()
+        .set_name("eq_bias")
+        .set_dim({1, C, 1, 1})
+        .set_stride({C, 1, C, C})
+        .set_data_type(fe::DataType_t::FLOAT));
+
+    // scaled = X * eq_scale
+    auto scaled = graph->pointwise(x_ta, eq_scale_ta,
+        Pointwise_attributes().set_mode(fe::PointwiseMode_t::MUL)
+            .set_compute_data_type(fe::DataType_t::FLOAT));
+    scaled->set_data_type(fe::DataType_t::HALF);
+
+    // shifted = scaled + eq_bias
+    auto shifted = graph->pointwise(scaled, eq_bias_ta,
+        Pointwise_attributes().set_mode(fe::PointwiseMode_t::ADD)
+            .set_compute_data_type(fe::DataType_t::FLOAT));
+    shifted->set_data_type(fe::DataType_t::HALF);
+
+    // relu = ReLU(shifted)
+    auto relu = graph->pointwise(shifted,
+        Pointwise_attributes().set_mode(fe::PointwiseMode_t::RELU_FWD)
+            .set_compute_data_type(fe::DataType_t::FLOAT));
+    relu->set_name("relu_output")
+        .set_output(true)
+        .set_dim(to_fe_dim(dt_y.shape))
+        .set_stride(make_nhwc_stride(dt_y))
+        .set_data_type(fe::DataType_t::HALF);
+
+    // mask = shifted > 0 (CMP_GT)
+    auto zero = graph->tensor(0.0f);
+    auto mask = graph->pointwise(shifted, zero,
+        Pointwise_attributes().set_mode(fe::PointwiseMode_t::CMP_GT)
+            .set_compute_data_type(fe::DataType_t::FLOAT));
+    mask->set_name("relu_mask")
+        .set_output(true)
+        .set_dim(to_fe_dim(dt_y.shape))
+        .set_stride(make_nhwc_stride(dt_y))
+        .set_data_type(fe::DataType_t::BOOLEAN);
+
+    TR_CUDNN_FE_CHECK(graph->validate(), "CBR_AMP_FWD bn_relu validate");
+    TR_CUDNN_FE_CHECK(graph->build_operation_graph(handle), "CBR_AMP_FWD bn_relu build op graph");
+    TR_CUDNN_FE_CHECK(graph->create_execution_plans({fe::HeurMode_t::B, fe::HeurMode_t::FALLBACK}), "CBR_AMP_FWD bn_relu create exec plans");
+    graph->deselect_numeric_notes({fe::NumericalNote_t::NONDETERMINISTIC});
+    TR_CUDNN_FE_CHECK(graph->check_support(handle), "CBR_AMP_FWD bn_relu check support");
+    TR_CUDNN_FE_CHECK(graph->build_plans(fe::BuildPlanPolicy_t::HEURISTICS_CHOICE), "CBR_AMP_FWD bn_relu build plans");
+
+    CBRBNReluGraphCache cache;
+    cache.graph = graph;
+    cache.workspace_size = graph->get_workspace_size();
+    cache.tensor_to_id[x_ta]         = dt_x.id;
+    cache.tensor_to_id[eq_scale_ta]  = dt_eq_scale_bias.id;
+    cache.tensor_to_id[eq_bias_ta]   = dt_eq_scale_bias.id;
+    cache.tensor_to_id[relu]         = dt_y.id;
+    cache.tensor_to_id[mask]         = -1;  // 由 launch 时动态绑定
+    return cache;
+}
+
+// ============================================================================
 // Conv 子操作：cuDNN FE Graph 构建函数（复制自 conv_op_impl.cpp，重命名）
 // ============================================================================
 
@@ -340,7 +676,34 @@ CBRConvGraphCache build_cbr_conv_amp_fwd_graph(
           .set_stride({K, 1, K, K})
           .set_data_type(fe::DataType_t::FLOAT);
 
-    finalize_cudnn_graph(graph.get(), handle);
+    // Conv+GenStats: 先 build_operation_graph，再尝试 Mode C 经验搜索
+    TR_CUDNN_FE_CHECK(graph->build_operation_graph(handle), "CBR_AMP_FWD conv build op graph");
+
+    bool mode_c_matched = false;
+#if defined(USING_A100) || defined(USING_RTX5090)
+    {
+        std::string key = build_shape_key(
+            "conv_genstats", "fp16",
+            dt_x.n(), dt_x.h(), dt_x.w(), dt_x.c(), K,
+            dt_w.h(), dt_w.w(), cp.stride_h, cp.pad_h);
+        auto exp_rec = ta_v4::experience::lookup(key);
+        if (exp_rec) {
+            graph->create_execution_plans({fe::HeurMode_t::A, fe::HeurMode_t::B});
+            graph->deselect_numeric_notes({fe::NumericalNote_t::NONDETERMINISTIC});
+            std::vector<int64_t> candidates;
+            int64_t count = graph->get_execution_plan_count();
+            for (int64_t i = 0; i < count; ++i) candidates.push_back(i);
+            auto [status, matched] = match_and_build_plan(graph, candidates, exp_rec, handle);
+            mode_c_matched = matched;
+        }
+    }
+#endif
+    if (!mode_c_matched) {
+        TR_CUDNN_FE_CHECK(graph->create_execution_plans({fe::HeurMode_t::B, fe::HeurMode_t::FALLBACK}), "CBR_AMP_FWD conv create exec plans");
+        graph->deselect_numeric_notes({fe::NumericalNote_t::NONDETERMINISTIC});
+        TR_CUDNN_FE_CHECK(graph->check_support(handle), "CBR_AMP_FWD conv check support");
+        TR_CUDNN_FE_CHECK(graph->build_plans(fe::BuildPlanPolicy_t::HEURISTICS_CHOICE), "CBR_AMP_FWD conv build plans");
+    }
 
     CBRConvGraphCache cache;
     cache.graph = graph;
@@ -428,7 +791,42 @@ CBRConvGraphCache build_cbr_conv_amp_wgrad_graph(
        .set_stride(make_krsc_stride(dt_dw))
        .set_data_type(fe::DataType_t::HALF);
 
-    finalize_cudnn_graph(graph.get(), handle);
+    TR_CUDNN_FE_CHECK(graph->validate(),              "CBR_AMP_BWD wgrad validate");
+    TR_CUDNN_FE_CHECK(graph->build_operation_graph(handle), "CBR_AMP_BWD wgrad build op graph");
+
+    bool mode_c_matched = false;
+#if defined(USING_A100) || defined(USING_RTX5090)
+    {
+        std::string key = build_shape_key(
+            "conv_wgrad", "fp16",
+            dt_x.n(), dt_x.h(), dt_x.w(), dt_x.c(), dt_dw.n(),
+            dt_dw.h(), dt_dw.w(), cp.stride_h, cp.pad_h);
+        auto exp_rec = ta_v4::experience::lookup(key);
+        if (exp_rec) {
+            graph->create_execution_plans({fe::HeurMode_t::A, fe::HeurMode_t::B});
+            graph->deselect_numeric_notes({fe::NumericalNote_t::NONDETERMINISTIC});
+            std::vector<int64_t> candidates;
+            int64_t count = graph->get_execution_plan_count();
+            for (int64_t i = 0; i < count; ++i) candidates.push_back(i);
+            auto [status, matched] = match_and_build_plan(
+                graph, candidates, exp_rec, handle);
+            mode_c_matched = matched;
+        }
+    }
+#endif
+
+    if (!mode_c_matched) {
+        // 注意：不能用 finalize_cudnn_graph，因为它会再次调用 create_execution_plans，
+        // 而 Mode C 分支已经调用过一次。此处仿照 FWD 路径的显式 fallback 写法。
+        TR_CUDNN_FE_CHECK(graph->create_execution_plans(
+            {fe::HeurMode_t::B, fe::HeurMode_t::FALLBACK}),
+            "CBR_AMP_BWD wgrad create exec plans");
+        graph->deselect_numeric_notes({fe::NumericalNote_t::NONDETERMINISTIC});
+        TR_CUDNN_FE_CHECK(graph->check_support(handle),
+            "CBR_AMP_BWD wgrad check support");
+        TR_CUDNN_FE_CHECK(graph->build_plans(fe::BuildPlanPolicy_t::HEURISTICS_CHOICE),
+            "CBR_AMP_BWD wgrad build plans");
+    }
 
     CBRConvGraphCache cache;
     cache.graph = graph;
@@ -471,7 +869,40 @@ CBRConvGraphCache build_cbr_conv_amp_dgrad_graph(
        .set_stride(make_nhwc_stride(dt_dx))
        .set_data_type(fe::DataType_t::HALF);
 
-    finalize_cudnn_graph(graph.get(), handle);
+    TR_CUDNN_FE_CHECK(graph->validate(),              "CBR_AMP_BWD dgrad validate");
+    TR_CUDNN_FE_CHECK(graph->build_operation_graph(handle), "CBR_AMP_BWD dgrad build op graph");
+
+    bool mode_c_matched = false;
+#if defined(USING_A100) || defined(USING_RTX5090)
+    {
+        std::string key = build_shape_key(
+            "conv_dgrad", "fp16",
+            dt_dx.n(), dt_dx.h(), dt_dx.w(), dt_dx.c(), dt_w.n(),
+            dt_w.h(), dt_w.w(), cp.stride_h, cp.pad_h);
+        auto exp_rec = ta_v4::experience::lookup(key);
+        if (exp_rec) {
+            graph->create_execution_plans({fe::HeurMode_t::A, fe::HeurMode_t::B});
+            graph->deselect_numeric_notes({fe::NumericalNote_t::NONDETERMINISTIC});
+            std::vector<int64_t> candidates;
+            int64_t count = graph->get_execution_plan_count();
+            for (int64_t i = 0; i < count; ++i) candidates.push_back(i);
+            auto [status, matched] = match_and_build_plan(
+                graph, candidates, exp_rec, handle);
+            mode_c_matched = matched;
+        }
+    }
+#endif
+
+    if (!mode_c_matched) {
+        TR_CUDNN_FE_CHECK(graph->create_execution_plans(
+            {fe::HeurMode_t::B, fe::HeurMode_t::FALLBACK}),
+            "CBR_AMP_BWD dgrad create exec plans");
+        graph->deselect_numeric_notes({fe::NumericalNote_t::NONDETERMINISTIC});
+        TR_CUDNN_FE_CHECK(graph->check_support(handle),
+            "CBR_AMP_BWD dgrad check support");
+        TR_CUDNN_FE_CHECK(graph->build_plans(fe::BuildPlanPolicy_t::HEURISTICS_CHOICE),
+            "CBR_AMP_BWD dgrad build plans");
+    }
 
     CBRConvGraphCache cache;
     cache.graph = graph;
@@ -582,15 +1013,22 @@ static void launch_cbr_amp_fwd_cuda(
     const DeviceContext& ctx,
     MultiStreamCaptureState& state)
 {
-    // input_ids:  [0]=X, [1]=amp_w, [2]=bn_w, [3]=bn_b, [4]=next_mean, [5]=next_var, [6]=eps, [7]=mom
+    // input_ids:  [0]=X, [1]=amp_w, [2]=bn_w, [3]=bn_b,
+    //             [4]=prev_mean, [5]=prev_var, [6]=eps, [7]=mom
     // output_ids: [0]=conv_output, [1]=bn_sum, [2]=bn_sq_sum, [3]=bn_output,
-    //             [4]=saved_mean, [5]=saved_inv_var, [6]=relu_output, [7]=relu_mask
+    //             [4]=saved_mean, [5]=saved_inv_var, [6]=relu_output, [7]=relu_mask,
+    //             [8]=next_mean, [9]=next_var
 
     const auto& cbrp = node.params.cbr();
     const auto& cp = cbrp.conv;
     const auto& bp = cbrp.bn;
 
-    // ── 1) Conv FWD on COMP_1 ──────────────────────────────────────────
+    float eps_val = bp.eps;
+    float mom_val = bp.momentum;
+
+    int64_t K = mp.get_dtensor(node.output_ids[0]).c();  // conv_output channels
+
+    // ── 1) Conv+GenStats on COMP_1 ─────────────────────────────────────
     {
         const DTensor& dt_x      = mp.get_dtensor(node.input_ids[0]);
         const DTensor& dt_w      = mp.get_dtensor(node.input_ids[1]);
@@ -640,12 +1078,31 @@ static void launch_cbr_amp_fwd_cuda(
         cudaEventRecord(state.streams[si].last_done_event, s);
     }
 
-    // ── 2) BN FWD on COMP_2 ────────────────────────────────────────────
+    // ── 2) BNFinalize on COMP_2 ────────────────────────────────────────
     {
-        const DTensor& dt_x     = mp.get_dtensor(node.output_ids[0]);  // conv_output
-        Shape shape = dt_x.shape;
-        int N = shape.n(), H = shape.h(), W = shape.w(), C = shape.c();
-        bool is_fp16 = (dt_x.dtype == DType::FP16);
+        const DTensor& dt_sum         = mp.get_dtensor(node.output_ids[1]);
+        const DTensor& dt_sq_sum      = mp.get_dtensor(node.output_ids[2]);
+        const DTensor& dt_scale       = mp.get_dtensor(node.input_ids[2]);
+        const DTensor& dt_bias        = mp.get_dtensor(node.input_ids[3]);
+        const DTensor& dt_prev_mean   = mp.get_dtensor(node.input_ids[4]);
+        const DTensor& dt_prev_var    = mp.get_dtensor(node.input_ids[5]);
+        const DTensor& dt_next_mean   = mp.get_dtensor(node.output_ids[8]);
+        const DTensor& dt_next_var    = mp.get_dtensor(node.output_ids[9]);
+        const DTensor& dt_saved_mean  = mp.get_dtensor(node.output_ids[4]);
+        const DTensor& dt_saved_inv_var = mp.get_dtensor(node.output_ids[5]);
+        const DTensor& dt_eq_scale_bias = mp.get_dtensor(node.output_ids[3]);  // bn_output 复用
+
+        const DTensor& dt_conv_out_bn = mp.get_dtensor(node.output_ids[0]);
+        int N = dt_conv_out_bn.n();
+        int H = dt_conv_out_bn.h();
+        int W = dt_conv_out_bn.w();
+        int C_conv = dt_conv_out_bn.c();
+        int64_t accum_count = static_cast<int64_t>(N) * H * W;
+
+        // bn_output 缓冲区必须足够容纳 eq_scale + eq_bias (2*K*sizeof(float))
+        TR_CHECK(dt_eq_scale_bias.nbytes() >= 2 * C_conv * sizeof(float),
+                 ValueError,
+                 "CBR_AMP_FWD: bn_output buffer too small for eq_scale/eq_bias");
 
         StreamKind sk = StreamKind::COMP_2;
         cudaStream_t stream = static_cast<cudaStream_t>(ctx.stream(sk));
@@ -664,111 +1121,71 @@ static void launch_cbr_amp_fwd_cuda(
         cudnnHandle_t handle = static_cast<cudnnHandle_t>(ctx.cudnn_handle(sk));
         uint64_t handle_bits = reinterpret_cast<uint64_t>(handle);
 
-        float eps_val = bp.eps;
-        float mom_val = bp.momentum;
-
-        CBRBNGraphCacheKey key{handle_bits, N, H, W, C, is_fp16,
-                               float_to_bits(eps_val), float_to_bits(mom_val)};
-        auto it = s_cbr_bn_fwd_caches.find(key);
-        if (it == s_cbr_bn_fwd_caches.end()) {
-            auto graph = create_cudnn_graph(is_fp16 ? DType::FP16 : DType::FP32);
-            auto dt = is_fp16 ? fe::DataType_t::HALF : fe::DataType_t::FLOAT;
-
-            auto X = graph->tensor(fe::graph::Tensor_attributes()
-                .set_name("X")
-                .set_dim({N, C, H, W})
-                .set_stride({dt_x.n_stride_cuda(), dt_x.c_stride_cuda(),
-                             dt_x.h_stride_cuda(), dt_x.w_stride_cuda()})
-                .set_data_type(dt));
-
-            auto make_param = [&](const char* name) {
-                return graph->tensor(fe::graph::Tensor_attributes()
-                    .set_name(name)
-                    .set_dim({1, C, 1, 1})
-                    .set_stride({C, 1, C, C})
-                    .set_data_type(fe::DataType_t::FLOAT));
-            };
-
-            auto S = make_param("scale");
-            auto B = make_param("bias");
-            auto RM = make_param("running_mean");
-            auto RV = make_param("running_var");
-
-            auto EPS = graph->tensor(fe::graph::Tensor_attributes(eps_val).set_name("epsilon"));
-            auto MOM = graph->tensor(fe::graph::Tensor_attributes(mom_val).set_name("momentum"));
-
-            auto bn_opts = fe::graph::Batchnorm_attributes()
-                .set_previous_running_stats(RM, RV, MOM)
-                .set_epsilon(EPS)
-                .set_compute_data_type(fe::DataType_t::FLOAT);
-
-            auto [Y, saved_mean, saved_inv_var, next_rm, next_rv] =
-                graph->batchnorm(X, S, B, bn_opts);
-
-            Y->set_output(true).set_name("Y").set_data_type(dt);
-            saved_mean->set_output(true).set_name("saved_mean").set_data_type(fe::DataType_t::FLOAT);
-            saved_inv_var->set_output(true).set_name("saved_inv_var").set_data_type(fe::DataType_t::FLOAT);
-            next_rm->set_output(true).set_name("next_rm").set_data_type(fe::DataType_t::FLOAT);
-            next_rv->set_output(true).set_name("next_rv").set_data_type(fe::DataType_t::FLOAT);
-
-            finalize_cudnn_graph(graph.get(), handle);
-
-            CBRBNGraphCache cache;
-            cache.graph = graph;
-            cache.workspace_size = graph->get_workspace_size();
-            cache.tensor_to_id[X] = dt_x.id;
-            cache.tensor_to_id[S] = -1;
-            cache.tensor_to_id[B] = -1;
-            cache.tensor_to_id[RM] = -1;
-            cache.tensor_to_id[RV] = -1;
-            cache.tensor_to_id[EPS] = -1;
-            cache.tensor_to_id[MOM] = -1;
-            cache.tensor_to_id[Y] = -1;
-            cache.tensor_to_id[saved_mean] = -1;
-            cache.tensor_to_id[saved_inv_var] = -1;
-            cache.tensor_to_id[next_rm] = -1;
-            cache.tensor_to_id[next_rv] = -1;
-
-            it = s_cbr_bn_fwd_caches.emplace(key, std::move(cache)).first;
+        CBRBNFinalizeCacheKey key{handle_bits, N, H, W, C_conv,
+                                  float_to_bits(eps_val), float_to_bits(mom_val)};
+        auto it = s_cbr_bn_finalize_caches.find(key);
+        if (it == s_cbr_bn_finalize_caches.end()) {
+            auto cache = build_cbr_bn_finalize_graph(
+                dt_sum, dt_sq_sum, dt_scale, dt_bias,
+                dt_prev_mean, dt_prev_var,
+                dt_next_mean, dt_next_var,
+                dt_saved_mean, dt_saved_inv_var,
+                dt_eq_scale_bias,
+                eps_val, mom_val, accum_count, handle);
+            it = s_cbr_bn_finalize_caches.emplace(key, std::move(cache)).first;
         }
 
-        CBRBNGraphCache& cache = it->second;
-
-        // CBR 专用映射：next_rm/next_rv 显式绑定到 input_ids（原地更新），
-        // 不依赖 output_ids.size() >= 5 的 fallback 逻辑
-        std::unordered_map<std::string, int64_t> name_to_id = {
-            {"X", mp.get_dtensor(node.output_ids[0]).id},        // conv_output
-            {"scale", mp.get_dtensor(node.input_ids[2]).id},      // bn_weight
-            {"bias", mp.get_dtensor(node.input_ids[3]).id},       // bn_bias
-            {"running_mean", mp.get_dtensor(node.input_ids[4]).id}, // next_mean (in-place)
-            {"running_var", mp.get_dtensor(node.input_ids[5]).id},  // next_var (in-place)
-            {"Y", mp.get_dtensor(node.output_ids[3]).id},          // bn_output
-            {"saved_mean", mp.get_dtensor(node.output_ids[4]).id},
-            {"saved_inv_var", mp.get_dtensor(node.output_ids[5]).id},
-            // next_rm/next_rv 显式绑定到 input，原地更新
-            {"next_rm", mp.get_dtensor(node.input_ids[4]).id},
-            {"next_rv", mp.get_dtensor(node.input_ids[5]).id},
-        };
-        update_cbr_bn_tensor_to_id(cache, name_to_id);
-
+        CBRBNFinalizeGraphCache& cache = it->second;
         ctx.ensure_workspace_grow(sk, cache.workspace_size);
         void* workspace = ctx.workspace(sk);
 
-        std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> variant_pack;
-        for (const auto& [ta, dt_id] : cache.tensor_to_id) {
-            if (dt_id >= 0) {
-                variant_pack[ta] = ctx.ptr_at(static_cast<int>(dt_id));
+        // Update tensor IDs
+        std::unordered_map<std::string, int64_t> name_to_id = {
+            {"sum",       dt_sum.id},
+            {"sq_sum",    dt_sq_sum.id},
+            {"scale",     dt_scale.id},
+            {"bias",      dt_bias.id},
+            {"prev_running_mean", dt_prev_mean.id},
+            {"prev_running_var",  dt_prev_var.id},
+            {"eq_scale",  dt_eq_scale_bias.id},
+            {"eq_bias",   dt_eq_scale_bias.id},
+            {"saved_mean",     dt_saved_mean.id},
+            {"saved_inv_var",  dt_saved_inv_var.id},
+            {"next_rm",   dt_next_mean.id},
+            {"next_rv",   dt_next_var.id},
+        };
+        for (auto& [ta, tid] : cache.tensor_to_id) {
+            const std::string& name = ta->get_name();
+            auto it2 = name_to_id.find(name);
+            if (it2 != name_to_id.end()) tid = it2->second;
+        }
+
+        std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> vp;
+        for (const auto& [ta, tid] : cache.tensor_to_id) {
+            if (ta->get_name() == "eq_bias") {
+                vp[ta] = static_cast<char*>(ctx.ptr_at(static_cast<int>(tid)))
+                         + K * sizeof(float);
+            } else {
+                vp[ta] = ctx.ptr_at(static_cast<int>(tid));
             }
         }
 
-        TR_CUDNN_FE_CHECK(cache.graph->execute(handle, variant_pack, workspace),
-                          "CBR_AMP_FWD bn execute");
+        TR_CUDNN_FE_CHECK(cache.graph->execute(handle, vp, workspace),
+                          "CBR_AMP_FWD bn_finalize execute");
 
         cudaEventRecord(state.streams[si].last_done_event, stream);
     }
 
-    // ── 3) ReLU FWD on COMP_3 ──────────────────────────────────────────
+    // ── 3) BN Apply+ReLU on COMP_3 ─────────────────────────────────────
     {
+        const DTensor& dt_x      = mp.get_dtensor(node.output_ids[0]);  // conv_output
+        const DTensor& dt_y      = mp.get_dtensor(node.output_ids[6]);  // relu_output
+        const DTensor& dt_eq_scale_bias = mp.get_dtensor(node.output_ids[3]);  // eq_scale/eq_bias
+
+        int64_t mask_id = mp.get_dtensor(node.output_ids[7]).id;
+
+        int N = dt_x.n(), H = dt_x.h(), W = dt_x.w(), C = dt_x.c();
+
         StreamKind sk = StreamKind::COMP_3;
         cudaStream_t stream = static_cast<cudaStream_t>(ctx.stream(sk));
         int si = state.get_or_register(stream);
@@ -783,20 +1200,153 @@ static void launch_cbr_amp_fwd_cuda(
         state.output_stream_idx = si;
         state.streams[si].has_pending_work = true;
 
-        const __half* x    = static_cast<const __half*>(ctx.ptr_at(node.output_ids[3])); // bn_output
-        __half* y          = static_cast<__half*>(ctx.ptr_at(node.output_ids[6]));        // relu_output
-        int8_t* mask       = static_cast<int8_t*>(ctx.ptr_at(node.output_ids[7]));        // relu_mask
+        cudnnHandle_t handle = static_cast<cudnnHandle_t>(ctx.cudnn_handle(sk));
+        uint64_t handle_bits = reinterpret_cast<uint64_t>(handle);
 
-        const DTensor& dt_bn_out = mp.get_dtensor(node.output_ids[3]);
-        int64_t n = static_cast<int64_t>(dt_bn_out.padded_elems());
-
-        cudaError_t err = launch_relu_amp_fwd_mask_kernel(x, y, mask, n, stream);
-        if (err != cudaSuccess) {
-            TR_DEVICE_ERROR("CBR_AMP_FWD relu kernel failed: " << cudaGetErrorString(err));
+        CBRBNReluCacheKey key{handle_bits, N, H, W, C};
+        auto it = s_cbr_bn_relu_caches.find(key);
+        if (it == s_cbr_bn_relu_caches.end()) {
+            auto cache = build_cbr_bn_relu_graph(dt_x, dt_y, dt_eq_scale_bias, handle);
+            it = s_cbr_bn_relu_caches.emplace(key, std::move(cache)).first;
         }
+
+        CBRBNReluGraphCache& cache = it->second;
+        ctx.ensure_workspace_grow(sk, cache.workspace_size);
+        void* workspace = ctx.workspace(sk);
+
+        // Update tensor IDs
+        std::unordered_map<std::string, int64_t> name_to_id = {
+            {"bn_relu_x",   dt_x.id},
+            {"eq_scale",    dt_eq_scale_bias.id},
+            {"eq_bias",     dt_eq_scale_bias.id},
+            {"relu_output", dt_y.id},
+            {"relu_mask",   mask_id},
+        };
+        for (auto& [ta, tid] : cache.tensor_to_id) {
+            const std::string& name = ta->get_name();
+            auto it2 = name_to_id.find(name);
+            if (it2 != name_to_id.end()) tid = it2->second;
+        }
+
+        std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> vp;
+        for (const auto& [ta, tid] : cache.tensor_to_id) {
+            if (ta->get_name() == "eq_bias") {
+                vp[ta] = static_cast<char*>(ctx.ptr_at(static_cast<int>(tid)))
+                         + K * sizeof(float);
+            } else {
+                vp[ta] = ctx.ptr_at(static_cast<int>(tid));
+            }
+        }
+
+        TR_CUDNN_FE_CHECK(cache.graph->execute(handle, vp, workspace),
+                          "CBR_AMP_FWD bn_relu execute");
 
         cudaEventRecord(state.streams[si].last_done_event, stream);
     }
+
+    }
+
+// ============================================================================
+// BN+ReLU BWD 融合图：cuDNN FE Graph 构建函数
+// ============================================================================
+
+// 注意：dt_bwd_out 绑定到 bn_output 缓冲区，但其中存储的是 dReLU+dBN 的输出，
+// 即 conv_out 的梯度（dL/d(conv_out)），而非 bn_output 的梯度。
+// 这是复用显存的技巧，因为 bn_output 在 BWD 阶段不再需要。
+static CBRBNGraphCache build_cbr_bn_bwd_fused_graph(
+    const DTensor& dt_dy,        // input_ids[0]
+    const DTensor& dt_mask,      // input_ids[5], INT8 buffer, BOOLEAN semantics
+    const DTensor& dt_x,         // output_ids[4], conv_output (BN forward input)
+    const DTensor& dt_scale,     // input_ids[2], bn_weight
+    const DTensor& dt_saved_mean,
+    const DTensor& dt_saved_inv_var,
+    const DTensor& dt_bwd_out,   // output_ids[5], bn_output reused as bn_bwd_out
+                                  // 注意：存的是 dL/d(conv_out)，不是 dL/d(bn_output)
+    const DTensor& dt_dscale,    // output_ids[2]
+    const DTensor& dt_dbias,     // output_ids[3]
+    cudnnHandle_t handle)
+{
+    using namespace fe::graph;
+    auto graph = create_cudnn_graph(DType::FP16);
+
+    int64_t N = dt_dy.n(), C = dt_dy.c(), H = dt_dy.h(), W = dt_dy.w();
+
+    auto dy_ta = graph->tensor(Tensor_attributes()
+        .set_name("dY")
+        .set_dim({N, C, H, W})
+        .set_stride(make_nhwc_stride(dt_dy))
+        .set_data_type(fe::DataType_t::HALF));
+
+    auto mask_ta = graph->tensor(Tensor_attributes()
+        .set_name("mask")
+        .set_dim({N, C, H, W})
+        .set_stride(make_nhwc_stride(dt_mask))
+        .set_data_type(fe::DataType_t::BOOLEAN));
+
+    auto x_ta = graph->tensor(Tensor_attributes()
+        .set_name("X")
+        .set_dim({N, C, H, W})
+        .set_stride(make_nhwc_stride(dt_x))
+        .set_data_type(fe::DataType_t::HALF));
+
+    auto make_param = [&](const char* name) {
+        return graph->tensor(Tensor_attributes()
+            .set_name(name)
+            .set_dim({1, C, 1, 1})
+            .set_stride({C, 1, C, C})
+            .set_data_type(fe::DataType_t::FLOAT));
+    };
+    auto scale_ta = make_param("scale");
+    auto mean_ta  = make_param("saved_mean");
+    auto ivar_ta  = make_param("saved_inv_var");
+
+    // MUL(dY, BOOLEAN mask) 正确解码 bit-packed mask
+    auto mul_opts = Pointwise_attributes()
+        .set_mode(fe::PointwiseMode_t::MUL)
+        .set_compute_data_type(fe::DataType_t::FLOAT);
+    auto dy_masked = graph->pointwise(dy_ta, mask_ta, mul_opts);
+    dy_masked->set_name("dy_masked")
+              .set_data_type(fe::DataType_t::HALF);
+
+    auto dbn_opts = Batchnorm_backward_attributes()
+        .set_saved_mean_and_inv_variance(mean_ta, ivar_ta)
+        .set_compute_data_type(fe::DataType_t::FLOAT);
+    auto [dx, dscale, dbias] = graph->batchnorm_backward(
+        dy_masked, x_ta, scale_ta, dbn_opts);
+
+    dx->set_output(true)
+       .set_name("dX")
+       .set_dim({N, C, H, W})
+       .set_stride(make_nhwc_stride(dt_bwd_out))
+       .set_data_type(fe::DataType_t::HALF);
+
+    dscale->set_output(true)
+          .set_name("dS")
+          .set_dim({1, C, 1, 1})
+          .set_stride({C, 1, C, C})
+          .set_data_type(fe::DataType_t::FLOAT);
+
+    dbias->set_output(true)
+         .set_name("dB")
+         .set_dim({1, C, 1, 1})
+         .set_stride({C, 1, C, C})
+         .set_data_type(fe::DataType_t::FLOAT);
+
+    finalize_cudnn_graph(graph.get(), handle);
+
+    CBRBNGraphCache cache;
+    cache.graph = graph;
+    cache.workspace_size = graph->get_workspace_size();
+    cache.tensor_to_id[dy_ta]      = dt_dy.id;
+    cache.tensor_to_id[mask_ta]    = dt_mask.id;
+    cache.tensor_to_id[x_ta]       = dt_x.id;
+    cache.tensor_to_id[scale_ta]   = dt_scale.id;
+    cache.tensor_to_id[mean_ta]    = dt_saved_mean.id;
+    cache.tensor_to_id[ivar_ta]    = dt_saved_inv_var.id;
+    cache.tensor_to_id[dx]         = dt_bwd_out.id;
+    cache.tensor_to_id[dscale]     = dt_dscale.id;
+    cache.tensor_to_id[dbias]      = dt_dbias.id;
+    return cache;
 }
 
 // ============================================================================
@@ -810,224 +1360,161 @@ static void launch_cbr_amp_bwd_cuda(
     MultiStreamCaptureState& state)
 {
     // input_ids:  [0]=dY, [1]=amp_w, [2]=bn_w, [3]=saved_mean, [4]=saved_inv_var, [5]=mask, [6]=X
-    // output_ids: [0]=dX target, [1]=conv_amp_g, [2]=dγ, [3]=dβ, [4]=conv_output(scratch), [5]=bn_output(scratch)
+    // output_ids: [0]=dX, [1]=conv_amp_g, [2]=dγ, [3]=dβ, [4]=conv_output, [5]=bn_output
 
     const auto& cbrp = node.params.cbr();
     const auto& cp = cbrp.conv;
 
-    // ── 1) ReLU BWD on COMP_3 ──────────────────────────────────────────
+    // ── 1) BN+ReLU BWD on COMP_1 ───────────────────────────────────────
+    int i_bn;
     {
-        StreamKind sk = StreamKind::COMP_3;
-        cudaStream_t stream = static_cast<cudaStream_t>(ctx.stream(sk));
-        int si = state.get_or_register(stream);
+        StreamKind sk = StreamKind::COMP_1;
+        cudaStream_t s = static_cast<cudaStream_t>(ctx.stream(sk));
+        cudnnHandle_t h = static_cast<cudnnHandle_t>(ctx.cudnn_handle(sk));
+        i_bn = state.get_or_register(s);
 
         int out_idx = state.output_stream_idx;
-        if (out_idx >= 0) {
-            cudaStream_t prev_stream = state.streams[out_idx].stream;
-            if (prev_stream != stream) {
-                cudaStreamWaitEvent(stream, state.streams[out_idx].last_done_event, 0);
-            }
+        if (out_idx >= 0 && state.streams[out_idx].stream != s) {
+            cudaStreamWaitEvent(s, state.streams[out_idx].last_done_event, 0);
         }
-        state.output_stream_idx = si;
-        state.streams[si].has_pending_work = true;
+        state.streams[i_bn].has_pending_work = true;
 
-        const __half* dY  = static_cast<const __half*>(ctx.ptr_at(node.input_ids[0]));   // dY
-        const int8_t* mask = static_cast<const int8_t*>(ctx.ptr_at(node.input_ids[5]));   // relu_mask
-        __half* dX_relu    = static_cast<__half*>(ctx.ptr_at(node.output_ids[5]));         // bn_output scratch
+        const DTensor& dt_dy    = mp.get_dtensor(node.input_ids[0]);
+        const DTensor& dt_mask  = mp.get_dtensor(node.input_ids[5]);
+        const DTensor& dt_x     = mp.get_dtensor(node.output_ids[4]); // conv_output
+        const DTensor& dt_scale = mp.get_dtensor(node.input_ids[2]);
+        const DTensor& dt_sm    = mp.get_dtensor(node.input_ids[3]);
+        const DTensor& dt_siv   = mp.get_dtensor(node.input_ids[4]);
+        const DTensor& dt_bout  = mp.get_dtensor(node.output_ids[5]); // bn_output -> bn_bwd_out
+        const DTensor& dt_dscale= mp.get_dtensor(node.output_ids[2]);
+        const DTensor& dt_dbias = mp.get_dtensor(node.output_ids[3]);
 
-        const DTensor& dt_dy = mp.get_dtensor(node.input_ids[0]);
-        int64_t n = static_cast<int64_t>(dt_dy.padded_elems());
+        CBRBNGraphCacheKey key{
+            reinterpret_cast<uint64_t>(h),
+            dt_dy.n(), dt_dy.h(), dt_dy.w(), dt_dy.c(),
+            (dt_dy.dtype == DType::FP16),
+            0u, 0u   // eps/momentum not used
+        };
 
-        cudaError_t err = launch_relu_amp_bwd_kernel(dY, mask, dX_relu, n, stream);
-        if (err != cudaSuccess) {
-            TR_DEVICE_ERROR("CBR_AMP_BWD relu kernel failed: " << cudaGetErrorString(err));
-        }
-
-        cudaEventRecord(state.streams[si].last_done_event, stream);
-    }
-
-    // ── 2) BN BWD on COMP_2 ────────────────────────────────────────────
-    {
-        const DTensor& dt_dy = mp.get_dtensor(node.output_ids[5]);  // bn_output scratch (from ReLU BWD)
-        Shape shape = dt_dy.shape;
-        int N = shape.n(), H = shape.h(), W = shape.w(), C = shape.c();
-        bool is_fp16 = (dt_dy.dtype == DType::FP16);
-
-        StreamKind sk = StreamKind::COMP_2;
-        cudaStream_t stream = static_cast<cudaStream_t>(ctx.stream(sk));
-        int si = state.get_or_register(stream);
-
-        int out_idx = state.output_stream_idx;
-        if (out_idx >= 0) {
-            cudaStream_t prev_stream = state.streams[out_idx].stream;
-            if (prev_stream != stream) {
-                cudaStreamWaitEvent(stream, state.streams[out_idx].last_done_event, 0);
-            }
-        }
-        state.output_stream_idx = si;
-        state.streams[si].has_pending_work = true;
-
-        cudnnHandle_t handle = static_cast<cudnnHandle_t>(ctx.cudnn_handle(sk));
-        uint64_t handle_bits = reinterpret_cast<uint64_t>(handle);
-
-        CBRBNGraphCacheKey key{handle_bits, N, H, W, C, is_fp16};
         auto it = s_cbr_bn_bwd_caches.find(key);
         if (it == s_cbr_bn_bwd_caches.end()) {
-            auto graph = create_cudnn_graph(is_fp16 ? DType::FP16 : DType::FP32);
-            auto dt = is_fp16 ? fe::DataType_t::HALF : fe::DataType_t::FLOAT;
-
-            auto dY = graph->tensor(fe::graph::Tensor_attributes()
-                .set_name("dY")
-                .set_dim({N, C, H, W})
-                .set_stride({dt_dy.n_stride_cuda(), dt_dy.c_stride_cuda(),
-                             dt_dy.h_stride_cuda(), dt_dy.w_stride_cuda()})
-                .set_data_type(dt));
-
-            auto X = graph->tensor(fe::graph::Tensor_attributes()
-                .set_name("X")
-                .set_dim({N, C, H, W})
-                .set_stride({dt_dy.n_stride_cuda(), dt_dy.c_stride_cuda(),
-                             dt_dy.h_stride_cuda(), dt_dy.w_stride_cuda()})
-                .set_data_type(dt));
-
-            auto make_param = [&](const char* name) {
-                return graph->tensor(fe::graph::Tensor_attributes()
-                    .set_name(name)
-                    .set_dim({1, C, 1, 1})
-                    .set_stride({C, 1, C, C})
-                    .set_data_type(fe::DataType_t::FLOAT));
-            };
-
-            auto S = make_param("scale");
-            auto SM = make_param("saved_mean");
-            auto SIV = make_param("saved_inv_var");
-
-            auto dbn_opts = fe::graph::Batchnorm_backward_attributes()
-                .set_saved_mean_and_inv_variance(SM, SIV)
-                .set_compute_data_type(fe::DataType_t::FLOAT);
-
-            auto [dX, dS, dB] = graph->batchnorm_backward(dY, X, S, dbn_opts);
-
-            dX->set_output(true).set_name("dX").set_data_type(dt);
-            dS->set_output(true).set_name("dS").set_data_type(fe::DataType_t::FLOAT);
-            dB->set_output(true).set_name("dB").set_data_type(fe::DataType_t::FLOAT);
-
-            finalize_cudnn_graph(graph.get(), handle);
-
-            CBRBNGraphCache cache;
-            cache.graph = graph;
-            cache.workspace_size = graph->get_workspace_size();
-            cache.tensor_to_id[dY] = -1;
-            cache.tensor_to_id[X] = -1;
-            cache.tensor_to_id[S] = -1;
-            cache.tensor_to_id[SM] = -1;
-            cache.tensor_to_id[SIV] = -1;
-            cache.tensor_to_id[dX] = -1;
-            cache.tensor_to_id[dS] = -1;
-            cache.tensor_to_id[dB] = -1;
-
+            auto cache = build_cbr_bn_bwd_fused_graph(
+                dt_dy, dt_mask, dt_x, dt_scale, dt_sm, dt_siv,
+                dt_bout, dt_dscale, dt_dbias, h);
             it = s_cbr_bn_bwd_caches.emplace(key, std::move(cache)).first;
         }
+        auto& cache = it->second;
 
-        CBRBNGraphCache& cache = it->second;
-
-        // BN BWD 的 X 输入复用 conv_output scratch（output[4]），dX 原地写回
+        ctx.ensure_workspace_grow(sk, cache.workspace_size);
         std::unordered_map<std::string, int64_t> name_to_id = {
-            {"dY", mp.get_dtensor(node.output_ids[5]).id},           // bn_output scratch
-            {"scale", mp.get_dtensor(node.input_ids[2]).id},          // bn_weight
-            {"saved_mean", mp.get_dtensor(node.input_ids[3]).id},
-            {"saved_inv_var", mp.get_dtensor(node.input_ids[4]).id},
-            {"X", mp.get_dtensor(node.output_ids[4]).id},             // conv_output scratch (in-place)
-            {"dX", mp.get_dtensor(node.output_ids[4]).id},            // dX_BN → conv_output scratch
-            {"dS", mp.get_dtensor(node.output_ids[2]).id},            // dγ
-            {"dB", mp.get_dtensor(node.output_ids[3]).id},            // dβ
+            {"dY", dt_dy.id}, {"mask", dt_mask.id}, {"X", dt_x.id},
+            {"scale", dt_scale.id}, {"saved_mean", dt_sm.id},
+            {"saved_inv_var", dt_siv.id}, {"dX", dt_bout.id},
+            {"dS", dt_dscale.id}, {"dB", dt_dbias.id}
         };
         update_cbr_bn_tensor_to_id(cache, name_to_id);
 
-        ctx.ensure_workspace_grow(sk, cache.workspace_size);
-        void* workspace = ctx.workspace(sk);
-
-        std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> variant_pack;
-        for (const auto& [ta, dt_id] : cache.tensor_to_id) {
-            variant_pack[ta] = ctx.ptr_at(static_cast<int>(dt_id));
+        std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> vp;
+        for (const auto& [ta, tid] : cache.tensor_to_id) {
+            vp[ta] = ctx.ptr_at(static_cast<int>(tid));
         }
+        TR_CUDNN_FE_CHECK(cache.graph->execute(h, vp, ctx.workspace(sk)),
+                          "CBR_AMP_BWD bn_bwd fused");
 
-        TR_CUDNN_FE_CHECK(cache.graph->execute(handle, variant_pack, workspace),
-                          "CBR_AMP_BWD bn execute");
-
-        cudaEventRecord(state.streams[si].last_done_event, stream);
+        cudaEventRecord(state.streams[i_bn].last_done_event, s);
+        state.output_stream_idx = i_bn;
     }
 
-    // ── 3) Conv BWD (wgrad + dgrad) on COMP_1 + COMP_3 ────────────────
+    // ── 2) WGrad on COMP_3 ─────────────────────────────────────────────
+    int i_wg;
     {
-        const DTensor& dt_dy = mp.get_dtensor(node.output_ids[4]);  // conv_output scratch (now dX_BN)
-        const DTensor& dt_w  = mp.get_dtensor(node.input_ids[1]);   // amp_w
-        const DTensor& dt_x  = mp.get_dtensor(node.input_ids[6]);   // X_prev (CBR layer input)
-        const DTensor& dt_dx = mp.get_dtensor(node.output_ids[0]);  // dX target
-        const DTensor& dt_dw = mp.get_dtensor(node.output_ids[1]);  // conv_amp_g
+        StreamKind sk = StreamKind::COMP_3;
+        cudaStream_t s = static_cast<cudaStream_t>(ctx.stream(sk));
+        cudnnHandle_t h = static_cast<cudnnHandle_t>(ctx.cudnn_handle(sk));
+        i_wg = state.get_or_register(s);
 
-        cudaStream_t s_dw = static_cast<cudaStream_t>(ctx.stream(StreamKind::COMP_1));
-        cudaStream_t s_dx = static_cast<cudaStream_t>(ctx.stream(StreamKind::COMP_3));
-        cudnnHandle_t h_dw = static_cast<cudnnHandle_t>(ctx.cudnn_handle(StreamKind::COMP_1));
-        cudnnHandle_t h_dx = static_cast<cudnnHandle_t>(ctx.cudnn_handle(StreamKind::COMP_3));
-        int i_dw = state.get_or_register(s_dw);
-        int i_dx = state.get_or_register(s_dx);
+        cudaStreamWaitEvent(s, state.streams[i_bn].last_done_event, 0);
+        state.streams[i_wg].has_pending_work = true;
 
-        int out_idx = state.output_stream_idx;
-        if (out_idx >= 0) {
-            cudaStreamWaitEvent(s_dw, state.streams[out_idx].last_done_event, 0);
-            cudaStreamWaitEvent(s_dx, state.streams[out_idx].last_done_event, 0);
-        }
+        const DTensor& dt_dy = mp.get_dtensor(node.output_ids[5]); // bn_bwd_out
+        const DTensor& dt_x  = mp.get_dtensor(node.input_ids[6]);  // X
+        const DTensor& dt_dw = mp.get_dtensor(node.output_ids[1]); // conv_amp_g
 
-        // === COMP_1: WGrad (FP16) ===
-        CBRConvGraphCacheKey key_w{
-            reinterpret_cast<uint64_t>(h_dw),
+        CBRConvGraphCacheKey key{
+            reinterpret_cast<uint64_t>(h),
             dt_x.n(), dt_x.h(), dt_x.w(), dt_x.c(),
+            dt_dw.n(), dt_dw.h(), dt_dw.w(),
+            cp.pad_h, cp.pad_w, cp.stride_h, cp.stride_w,
+            true, ComputeOp::CBR_AMP_BWD
+        };
+        auto& cache = get_or_build_cbr_conv_cache(s_cbr_conv_wgrad_cache, key, [&]() {
+            return build_cbr_conv_amp_wgrad_graph(dt_dy, dt_x, dt_dw, cp, h);
+        });
+        ctx.ensure_workspace_grow(sk, cache.workspace_size);
+        update_cbr_conv_tensor_to_id(cache, dt_x.id, dt_dw.id, -1, dt_dy.id, -1, dt_dw.id);
+
+        std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> vp;
+        for (const auto& [ta, tid] : cache.tensor_to_id) {
+            vp[ta] = ctx.ptr_at(static_cast<int>(tid));
+        }
+        TR_CUDNN_FE_CHECK(cache.graph->execute(h, vp, ctx.workspace(sk)),
+                          "CBR_AMP_BWD wgrad");
+
+        cudaEventRecord(state.streams[i_wg].last_done_event, s);
+        state.output_stream_idx = i_wg;
+    }
+
+    // ── 3) DGrad on COMP_2 ─────────────────────────────────────────────
+    int i_dg;
+    {
+        StreamKind sk = StreamKind::COMP_2;
+        cudaStream_t s = static_cast<cudaStream_t>(ctx.stream(sk));
+        cudnnHandle_t h = static_cast<cudnnHandle_t>(ctx.cudnn_handle(sk));
+        i_dg = state.get_or_register(s);
+
+        // 等待 WGrad，确保 WGrad 已读完原始 X 后 DGrad 才覆盖 X
+        cudaStreamWaitEvent(s, state.streams[i_wg].last_done_event, 0);
+        state.streams[i_dg].has_pending_work = true;
+
+        const DTensor& dt_dy = mp.get_dtensor(node.output_ids[5]); // bn_bwd_out
+        const DTensor& dt_w  = mp.get_dtensor(node.input_ids[1]);  // amp_w
+        const DTensor& dt_dx = mp.get_dtensor(node.output_ids[0]); // dX target (=X)
+
+        CBRConvGraphCacheKey key{
+            reinterpret_cast<uint64_t>(h),
+            dt_dx.n(), dt_dx.h(), dt_dx.w(), dt_dx.c(),
             dt_w.n(), dt_w.h(), dt_w.w(),
             cp.pad_h, cp.pad_w, cp.stride_h, cp.stride_w,
             true, ComputeOp::CBR_AMP_BWD
         };
-        auto& cache_w = get_or_build_cbr_conv_cache(s_cbr_conv_wgrad_cache, key_w, [&]() {
-            return build_cbr_conv_amp_wgrad_graph(dt_dy, dt_x, dt_dw, cp, h_dw);
+        auto& cache = get_or_build_cbr_conv_cache(s_cbr_conv_dgrad_cache, key, [&]() {
+            return build_cbr_conv_amp_dgrad_graph(dt_dy, dt_w, dt_dx, cp, h);
         });
-        ctx.ensure_workspace_grow(StreamKind::COMP_1, cache_w.workspace_size);
+        ctx.ensure_workspace_grow(sk, cache.workspace_size);
+        update_cbr_conv_tensor_to_id(cache, dt_dx.id, dt_w.id, -1, dt_dy.id, dt_dx.id, -1);
 
-        update_cbr_conv_tensor_to_id(cache_w, dt_x.id, dt_w.id, -1, dt_dy.id, -1, dt_dw.id);
-        std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> vp_w;
-        for (const auto& [ta, tid] : cache_w.tensor_to_id) {
-            vp_w[ta] = ctx.ptr_at(static_cast<int>(tid));
+        std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> vp;
+        for (const auto& [ta, tid] : cache.tensor_to_id) {
+            vp[ta] = ctx.ptr_at(static_cast<int>(tid));
         }
-        TR_CUDNN_FE_CHECK(cache_w.graph->execute(h_dw, vp_w, ctx.workspace(StreamKind::COMP_1)),
-                          "CBR_AMP_BWD wgrad execute");
-        cudaEventRecord(state.streams[i_dw].last_done_event, s_dw);
-        state.streams[i_dw].has_pending_work = true;
+        TR_CUDNN_FE_CHECK(cache.graph->execute(h, vp, ctx.workspace(sk)),
+                          "CBR_AMP_BWD dgrad");
 
-        // === COMP_3: DGrad（等待 WGrad 完成） ===
-        cudaStreamWaitEvent(s_dx, state.streams[i_dw].last_done_event, 0);
+        cudaEventRecord(state.streams[i_dg].last_done_event, s);
+        state.output_stream_idx = i_dg;
+    }
 
-        CBRConvGraphCacheKey key_x{
-            reinterpret_cast<uint64_t>(h_dx),
-            dt_x.n(), dt_x.h(), dt_x.w(), dt_x.c(),
-            dt_w.n(), dt_w.h(), dt_w.w(),
-            cp.pad_h, cp.pad_w, cp.stride_h, cp.stride_w,
-            true, ComputeOp::CBR_AMP_BWD
-        };
-        auto& cache_x = get_or_build_cbr_conv_cache(s_cbr_conv_dgrad_cache, key_x, [&]() {
-            return build_cbr_conv_amp_dgrad_graph(dt_dy, dt_w, dt_dx, cp, h_dx);
-        });
-        ctx.ensure_workspace_grow(StreamKind::COMP_3, cache_x.workspace_size);
+    // ── 4) Join back to COMP_1 ─────────────────────────────────────────
+    {
+        cudaStream_t s1 = static_cast<cudaStream_t>(ctx.stream(StreamKind::COMP_1));
+        int i_s1 = state.get_or_register(s1);
 
-        update_cbr_conv_tensor_to_id(cache_x, dt_x.id, dt_w.id, -1, dt_dy.id, dt_dx.id, -1);
-        std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> vp_x;
-        for (const auto& [ta, tid] : cache_x.tensor_to_id) {
-            vp_x[ta] = ctx.ptr_at(static_cast<int>(tid));
-        }
-        TR_CUDNN_FE_CHECK(cache_x.graph->execute(h_dx, vp_x, ctx.workspace(StreamKind::COMP_3)),
-                          "CBR_AMP_BWD dgrad execute");
-        cudaEventRecord(state.streams[i_dx].last_done_event, s_dx);
-        state.streams[i_dx].has_pending_work = true;
+        cudaStreamWaitEvent(s1, state.streams[i_wg].last_done_event, 0);
+        cudaStreamWaitEvent(s1, state.streams[i_dg].last_done_event, 0);
 
-        state.output_stream_idx = i_dx;
+        state.streams[i_s1].has_pending_work = true;
+        cudaEventRecord(state.streams[i_s1].last_done_event, s1);
+        state.output_stream_idx = i_s1;
     }
 }
 
@@ -1043,194 +1530,120 @@ static void launch_cbr_amp_bwd_first_layer_cuda(
 {
     // input_ids:  [0]=dY, [1]=amp_w, [2]=bn_w, [3]=saved_mean, [4]=saved_inv_var, [5]=mask, [6]=X
     // output_ids: [0]=dX target (Compiler 注入 data_a/data_b, 不写入), [1]=conv_amp_g, [2]=dγ, [3]=dβ,
-    //             [4]=conv_output(scratch), [5]=bn_output(scratch)
+    //             [4]=conv_output, [5]=bn_output
 
     const auto& cbrp = node.params.cbr();
     const auto& cp = cbrp.conv;
 
-    // ── 1) ReLU BWD on COMP_3 ──────────────────────────────────────────
+    // ── 1) BN+ReLU BWD on COMP_1 ───────────────────────────────────────
+    int i_bn;
     {
-        StreamKind sk = StreamKind::COMP_3;
-        cudaStream_t stream = static_cast<cudaStream_t>(ctx.stream(sk));
-        int si = state.get_or_register(stream);
+        StreamKind sk = StreamKind::COMP_1;
+        cudaStream_t s = static_cast<cudaStream_t>(ctx.stream(sk));
+        cudnnHandle_t h = static_cast<cudnnHandle_t>(ctx.cudnn_handle(sk));
+        i_bn = state.get_or_register(s);
 
         int out_idx = state.output_stream_idx;
-        if (out_idx >= 0) {
-            cudaStream_t prev_stream = state.streams[out_idx].stream;
-            if (prev_stream != stream) {
-                cudaStreamWaitEvent(stream, state.streams[out_idx].last_done_event, 0);
-            }
+        if (out_idx >= 0 && state.streams[out_idx].stream != s) {
+            cudaStreamWaitEvent(s, state.streams[out_idx].last_done_event, 0);
         }
-        state.output_stream_idx = si;
-        state.streams[si].has_pending_work = true;
+        state.streams[i_bn].has_pending_work = true;
 
-        const __half* dY  = static_cast<const __half*>(ctx.ptr_at(node.input_ids[0]));
-        const int8_t* mask = static_cast<const int8_t*>(ctx.ptr_at(node.input_ids[5]));
-        __half* dX_relu    = static_cast<__half*>(ctx.ptr_at(node.output_ids[5]));
+        const DTensor& dt_dy    = mp.get_dtensor(node.input_ids[0]);
+        const DTensor& dt_mask  = mp.get_dtensor(node.input_ids[5]);
+        const DTensor& dt_x     = mp.get_dtensor(node.output_ids[4]); // conv_output
+        const DTensor& dt_scale = mp.get_dtensor(node.input_ids[2]);
+        const DTensor& dt_sm    = mp.get_dtensor(node.input_ids[3]);
+        const DTensor& dt_siv   = mp.get_dtensor(node.input_ids[4]);
+        const DTensor& dt_bout  = mp.get_dtensor(node.output_ids[5]); // bn_output -> bn_bwd_out
+        const DTensor& dt_dscale= mp.get_dtensor(node.output_ids[2]);
+        const DTensor& dt_dbias = mp.get_dtensor(node.output_ids[3]);
 
-        const DTensor& dt_dy = mp.get_dtensor(node.input_ids[0]);
-        int64_t n = static_cast<int64_t>(dt_dy.padded_elems());
+        CBRBNGraphCacheKey key{
+            reinterpret_cast<uint64_t>(h),
+            dt_dy.n(), dt_dy.h(), dt_dy.w(), dt_dy.c(),
+            (dt_dy.dtype == DType::FP16),
+            0u, 0u   // eps/momentum not used
+        };
 
-        cudaError_t err = launch_relu_amp_bwd_kernel(dY, mask, dX_relu, n, stream);
-        if (err != cudaSuccess) {
-            TR_DEVICE_ERROR("CBR_AMP_BWD_FIRST_LAYER relu kernel failed: " << cudaGetErrorString(err));
-        }
-
-        cudaEventRecord(state.streams[si].last_done_event, stream);
-    }
-
-    // ── 2) BN BWD on COMP_2 ────────────────────────────────────────────
-    {
-        const DTensor& dt_dy = mp.get_dtensor(node.output_ids[5]);
-        Shape shape = dt_dy.shape;
-        int N = shape.n(), H = shape.h(), W = shape.w(), C = shape.c();
-        bool is_fp16 = (dt_dy.dtype == DType::FP16);
-
-        StreamKind sk = StreamKind::COMP_2;
-        cudaStream_t stream = static_cast<cudaStream_t>(ctx.stream(sk));
-        int si = state.get_or_register(stream);
-
-        int out_idx = state.output_stream_idx;
-        if (out_idx >= 0) {
-            cudaStream_t prev_stream = state.streams[out_idx].stream;
-            if (prev_stream != stream) {
-                cudaStreamWaitEvent(stream, state.streams[out_idx].last_done_event, 0);
-            }
-        }
-        state.output_stream_idx = si;
-        state.streams[si].has_pending_work = true;
-
-        cudnnHandle_t handle = static_cast<cudnnHandle_t>(ctx.cudnn_handle(sk));
-        uint64_t handle_bits = reinterpret_cast<uint64_t>(handle);
-
-        CBRBNGraphCacheKey key{handle_bits, N, H, W, C, is_fp16};
         auto it = s_cbr_bn_bwd_caches.find(key);
         if (it == s_cbr_bn_bwd_caches.end()) {
-            auto graph = create_cudnn_graph(is_fp16 ? DType::FP16 : DType::FP32);
-            auto dt = is_fp16 ? fe::DataType_t::HALF : fe::DataType_t::FLOAT;
-
-            auto dY = graph->tensor(fe::graph::Tensor_attributes()
-                .set_name("dY")
-                .set_dim({N, C, H, W})
-                .set_stride({dt_dy.n_stride_cuda(), dt_dy.c_stride_cuda(),
-                             dt_dy.h_stride_cuda(), dt_dy.w_stride_cuda()})
-                .set_data_type(dt));
-
-            auto X = graph->tensor(fe::graph::Tensor_attributes()
-                .set_name("X")
-                .set_dim({N, C, H, W})
-                .set_stride({dt_dy.n_stride_cuda(), dt_dy.c_stride_cuda(),
-                             dt_dy.h_stride_cuda(), dt_dy.w_stride_cuda()})
-                .set_data_type(dt));
-
-            auto make_param = [&](const char* name) {
-                return graph->tensor(fe::graph::Tensor_attributes()
-                    .set_name(name)
-                    .set_dim({1, C, 1, 1})
-                    .set_stride({C, 1, C, C})
-                    .set_data_type(fe::DataType_t::FLOAT));
-            };
-
-            auto S = make_param("scale");
-            auto SM = make_param("saved_mean");
-            auto SIV = make_param("saved_inv_var");
-
-            auto dbn_opts = fe::graph::Batchnorm_backward_attributes()
-                .set_saved_mean_and_inv_variance(SM, SIV)
-                .set_compute_data_type(fe::DataType_t::FLOAT);
-
-            auto [dX, dS, dB] = graph->batchnorm_backward(dY, X, S, dbn_opts);
-
-            dX->set_output(true).set_name("dX").set_data_type(dt);
-            dS->set_output(true).set_name("dS").set_data_type(fe::DataType_t::FLOAT);
-            dB->set_output(true).set_name("dB").set_data_type(fe::DataType_t::FLOAT);
-
-            finalize_cudnn_graph(graph.get(), handle);
-
-            CBRBNGraphCache cache;
-            cache.graph = graph;
-            cache.workspace_size = graph->get_workspace_size();
-            cache.tensor_to_id[dY] = -1;
-            cache.tensor_to_id[X] = -1;
-            cache.tensor_to_id[S] = -1;
-            cache.tensor_to_id[SM] = -1;
-            cache.tensor_to_id[SIV] = -1;
-            cache.tensor_to_id[dX] = -1;
-            cache.tensor_to_id[dS] = -1;
-            cache.tensor_to_id[dB] = -1;
-
+            auto cache = build_cbr_bn_bwd_fused_graph(
+                dt_dy, dt_mask, dt_x, dt_scale, dt_sm, dt_siv,
+                dt_bout, dt_dscale, dt_dbias, h);
             it = s_cbr_bn_bwd_caches.emplace(key, std::move(cache)).first;
         }
+        auto& cache = it->second;
 
-        CBRBNGraphCache& cache = it->second;
-
+        ctx.ensure_workspace_grow(sk, cache.workspace_size);
         std::unordered_map<std::string, int64_t> name_to_id = {
-            {"dY", mp.get_dtensor(node.output_ids[5]).id},
-            {"scale", mp.get_dtensor(node.input_ids[2]).id},
-            {"saved_mean", mp.get_dtensor(node.input_ids[3]).id},
-            {"saved_inv_var", mp.get_dtensor(node.input_ids[4]).id},
-            {"X", mp.get_dtensor(node.output_ids[4]).id},
-            {"dX", mp.get_dtensor(node.output_ids[4]).id},
-            {"dS", mp.get_dtensor(node.output_ids[2]).id},
-            {"dB", mp.get_dtensor(node.output_ids[3]).id},
+            {"dY", dt_dy.id}, {"mask", dt_mask.id}, {"X", dt_x.id},
+            {"scale", dt_scale.id}, {"saved_mean", dt_sm.id},
+            {"saved_inv_var", dt_siv.id}, {"dX", dt_bout.id},
+            {"dS", dt_dscale.id}, {"dB", dt_dbias.id}
         };
         update_cbr_bn_tensor_to_id(cache, name_to_id);
 
-        ctx.ensure_workspace_grow(sk, cache.workspace_size);
-        void* workspace = ctx.workspace(sk);
-
-        std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> variant_pack;
-        for (const auto& [ta, dt_id] : cache.tensor_to_id) {
-            variant_pack[ta] = ctx.ptr_at(static_cast<int>(dt_id));
+        std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> vp;
+        for (const auto& [ta, tid] : cache.tensor_to_id) {
+            vp[ta] = ctx.ptr_at(static_cast<int>(tid));
         }
+        TR_CUDNN_FE_CHECK(cache.graph->execute(h, vp, ctx.workspace(sk)),
+                          "CBR_AMP_BWD_FIRST_LAYER bn_bwd fused");
 
-        TR_CUDNN_FE_CHECK(cache.graph->execute(handle, variant_pack, workspace),
-                          "CBR_AMP_BWD_FIRST_LAYER bn execute");
-
-        cudaEventRecord(state.streams[si].last_done_event, stream);
+        cudaEventRecord(state.streams[i_bn].last_done_event, s);
+        state.output_stream_idx = i_bn;
     }
 
-    // ── 3) Conv BWD first layer: 仅 wgrad on COMP_1，不写 dX ──────────
+    // ── 2) WGrad on COMP_3 ─────────────────────────────────────────────
+    int i_wg;
     {
-        const DTensor& dt_dy = mp.get_dtensor(node.output_ids[4]);  // conv_output scratch (now dX_BN)
-        const DTensor& dt_w  = mp.get_dtensor(node.input_ids[1]);   // amp_w
-        const DTensor& dt_x  = mp.get_dtensor(node.input_ids[6]);   // X_prev
-        const DTensor& dt_dw = mp.get_dtensor(node.output_ids[1]);  // conv_amp_g
+        StreamKind sk = StreamKind::COMP_3;
+        cudaStream_t s = static_cast<cudaStream_t>(ctx.stream(sk));
+        cudnnHandle_t h = static_cast<cudnnHandle_t>(ctx.cudnn_handle(sk));
+        i_wg = state.get_or_register(s);
 
-        cudaStream_t s_dw = static_cast<cudaStream_t>(ctx.stream(StreamKind::COMP_1));
-        cudnnHandle_t h_dw = static_cast<cudnnHandle_t>(ctx.cudnn_handle(StreamKind::COMP_1));
-        int i_dw = state.get_or_register(s_dw);
+        cudaStreamWaitEvent(s, state.streams[i_bn].last_done_event, 0);
+        state.streams[i_wg].has_pending_work = true;
 
-        int out_idx = state.output_stream_idx;
-        if (out_idx >= 0) {
-            cudaStreamWaitEvent(s_dw, state.streams[out_idx].last_done_event, 0);
-        }
+        const DTensor& dt_dy = mp.get_dtensor(node.output_ids[5]); // bn_bwd_out
+        const DTensor& dt_x  = mp.get_dtensor(node.input_ids[6]);  // X
+        const DTensor& dt_dw = mp.get_dtensor(node.output_ids[1]); // conv_amp_g
 
-        // === 仅 WGrad (FP16) ===
-        CBRConvGraphCacheKey key_w{
-            reinterpret_cast<uint64_t>(h_dw),
+        CBRConvGraphCacheKey key{
+            reinterpret_cast<uint64_t>(h),
             dt_x.n(), dt_x.h(), dt_x.w(), dt_x.c(),
-            dt_w.n(), dt_w.h(), dt_w.w(),
+            dt_dw.n(), dt_dw.h(), dt_dw.w(),
             cp.pad_h, cp.pad_w, cp.stride_h, cp.stride_w,
             true, ComputeOp::CBR_AMP_BWD_FIRST_LAYER
         };
-        auto& cache_w = get_or_build_cbr_conv_cache(s_cbr_conv_wgrad_cache, key_w, [&]() {
-            return build_cbr_conv_amp_wgrad_graph(dt_dy, dt_x, dt_dw, cp, h_dw);
+        auto& cache = get_or_build_cbr_conv_cache(s_cbr_conv_wgrad_cache, key, [&]() {
+            return build_cbr_conv_amp_wgrad_graph(dt_dy, dt_x, dt_dw, cp, h);
         });
-        ctx.ensure_workspace_grow(StreamKind::COMP_1, cache_w.workspace_size);
+        ctx.ensure_workspace_grow(sk, cache.workspace_size);
+        update_cbr_conv_tensor_to_id(cache, dt_x.id, dt_dw.id, -1, dt_dy.id, -1, dt_dw.id);
 
-        update_cbr_conv_tensor_to_id(cache_w, dt_x.id, dt_w.id, -1, dt_dy.id, -1, dt_dw.id);
-        std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> vp_w;
-        for (const auto& [ta, tid] : cache_w.tensor_to_id) {
-            vp_w[ta] = ctx.ptr_at(static_cast<int>(tid));
+        std::unordered_map<std::shared_ptr<fe::graph::Tensor_attributes>, void*> vp;
+        for (const auto& [ta, tid] : cache.tensor_to_id) {
+            vp[ta] = ctx.ptr_at(static_cast<int>(tid));
         }
-        TR_CUDNN_FE_CHECK(cache_w.graph->execute(h_dw, vp_w, ctx.workspace(StreamKind::COMP_1)),
-                          "CBR_AMP_BWD_FIRST_LAYER wgrad execute");
+        TR_CUDNN_FE_CHECK(cache.graph->execute(h, vp, ctx.workspace(sk)),
+                          "CBR_AMP_BWD_FIRST_LAYER wgrad");
 
-        cudaEventRecord(state.streams[i_dw].last_done_event, s_dw);
-        state.streams[i_dw].has_pending_work = true;
+        cudaEventRecord(state.streams[i_wg].last_done_event, s);
+        state.output_stream_idx = i_wg;
+    }
 
-        state.output_stream_idx = i_dw;  // 无 dgrad，输出流即 wgrad 流
+    // ── 3) Join back to COMP_1 (no DGrad for first layer) ──────────────
+    {
+        cudaStream_t s1 = static_cast<cudaStream_t>(ctx.stream(StreamKind::COMP_1));
+        int i_s1 = state.get_or_register(s1);
+
+        cudaStreamWaitEvent(s1, state.streams[i_wg].last_done_event, 0);
+
+        state.streams[i_s1].has_pending_work = true;
+        cudaEventRecord(state.streams[i_s1].last_done_event, s1);
+        state.output_stream_idx = i_s1;
     }
 }
 

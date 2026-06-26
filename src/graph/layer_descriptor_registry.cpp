@@ -476,12 +476,13 @@ SubgraphPattern build_cbr_forward(const OpParams&, const std::vector<TensorDesc>
     if (descs.size() < 23) return p;
     SubgraphPattern::Node n;
     n.op = ComputeOp::CBR_AMP_FWD;
-    // input: amp_w(4), bn_weight(8), bn_bias(9), next_mean(13), next_var(14)
+    // input: amp_w(4), bn_weight(8), bn_bias(9), prev_mean(11), prev_var(12)
     // X 由 Compiler 在 begin 注入；bn_epsilon / bn_momentum 由 Compiler 在末尾追加
-    n.input_indices  = {4, 8, 9, 13, 14};
+    n.input_indices  = {4, 8, 9, 11, 12};
     // output: conv_output(1), bn_sum(6), bn_sq_sum(7), bn_output(10),
-    //         saved_mean(19), saved_inv_var(20), relu_output(21), relu_mask(22)
-    n.output_indices = {1, 6, 7, 10, 19, 20, 21, 22};
+    //         saved_mean(19), saved_inv_var(20), relu_output(21), relu_mask(22),
+    //         next_mean(13), next_var(14)
+    n.output_indices = {1, 6, 7, 10, 19, 20, 21, 22, 13, 14};
     p.nodes.push_back(n);
     return p;
 }
@@ -495,7 +496,11 @@ SubgraphPattern build_cbr_backward(const OpParams&, const std::vector<TensorDesc
     // dY 由 Compiler 在 begin 注入；X 由 Compiler 在末尾追加
     n.input_indices  = {4, 8, 19, 20, 22};
     // output: conv_amp_g_fp16(5), bn_weight_grad(15), bn_bias_grad(16)
-    //         scratch: conv_output(1), bn_output(10)
+    // scratch:
+    //   conv_output(1) -> BN 正向输入 X（只读，不可被覆盖）
+    //   bn_output(10)  -> 复用为 dReLU+dBN 输出 bn_bwd_out
+    //     注意：bn_output 中存储的是 conv_out 的梯度（dL/d(conv_out)），
+    //     并非 bn_output 的梯度。这是复用显存的技巧。
     // dX 由 Compiler 以 in-place 方式注入到 output_ids[0]
     n.output_indices = {5, 15, 16, 1, 10};
     p.nodes.push_back(n);
