@@ -75,7 +75,7 @@ int main(int argc, char** argv) {
         DTensor d_bn_out_sep   = task.alloc(y_shape, DType::FP16, Region::F_FEATURE_FP16);
         DTensor d_saved_mean_sep  = task.alloc(stats_shape, DType::FP32, Region::T_TEMP_FP32);
         DTensor d_saved_inv_var_sep = task.alloc(stats_shape, DType::FP32, Region::T_TEMP_FP32);
-        DTensor d_relu_out_sep = task.alloc(y_shape, DType::FP16, Region::F_FEATURE_FP16);
+        [[maybe_unused]] DTensor d_relu_out_sep = task.alloc(y_shape, DType::FP16, Region::F_FEATURE_FP16);
         // 分立 RELU_BWD 需要 INT8 字节 mask (0x01/0x00)
         DTensor d_relu_mask_sep = task.alloc(y_shape, DType::INT8, Region::S_MASK);
         DTensor d_dy_sep    = task.alloc(y_shape, DType::FP16, Region::F_FEATURE_FP16);

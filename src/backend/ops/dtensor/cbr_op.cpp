@@ -688,7 +688,8 @@ CBRConvGraphCache build_cbr_conv_amp_fwd_graph(
             dt_w.h(), dt_w.w(), cp.stride_h, cp.pad_h);
         auto exp_rec = ta_v4::experience::lookup(key);
         if (exp_rec) {
-            graph->create_execution_plans({fe::HeurMode_t::A, fe::HeurMode_t::B});
+            TR_CUDNN_FE_CHECK(graph->create_execution_plans({fe::HeurMode_t::A, fe::HeurMode_t::B}),
+                "CBR_AMP_FWD conv create exec plans (mode C)");
             graph->deselect_numeric_notes({fe::NumericalNote_t::NONDETERMINISTIC});
             std::vector<int64_t> candidates;
             int64_t count = graph->get_execution_plan_count();
@@ -803,7 +804,8 @@ CBRConvGraphCache build_cbr_conv_amp_wgrad_graph(
             dt_dw.h(), dt_dw.w(), cp.stride_h, cp.pad_h);
         auto exp_rec = ta_v4::experience::lookup(key);
         if (exp_rec) {
-            graph->create_execution_plans({fe::HeurMode_t::A, fe::HeurMode_t::B});
+            TR_CUDNN_FE_CHECK(graph->create_execution_plans({fe::HeurMode_t::A, fe::HeurMode_t::B}),
+                "CBR_AMP_BWD wgrad create exec plans (mode C)");
             graph->deselect_numeric_notes({fe::NumericalNote_t::NONDETERMINISTIC});
             std::vector<int64_t> candidates;
             int64_t count = graph->get_execution_plan_count();
@@ -881,7 +883,8 @@ CBRConvGraphCache build_cbr_conv_amp_dgrad_graph(
             dt_w.h(), dt_w.w(), cp.stride_h, cp.pad_h);
         auto exp_rec = ta_v4::experience::lookup(key);
         if (exp_rec) {
-            graph->create_execution_plans({fe::HeurMode_t::A, fe::HeurMode_t::B});
+            TR_CUDNN_FE_CHECK(graph->create_execution_plans({fe::HeurMode_t::A, fe::HeurMode_t::B}),
+                "CBR_AMP_BWD dgrad create exec plans (mode C)");
             graph->deselect_numeric_notes({fe::NumericalNote_t::NONDETERMINISTIC});
             std::vector<int64_t> candidates;
             int64_t count = graph->get_execution_plan_count();
