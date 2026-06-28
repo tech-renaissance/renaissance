@@ -464,4 +464,3 @@ else()
 endif()
 
 message(STATUS "  - mnist_best_dropout: MNIST MLP with Dropout ultimate accuracy test")
-

@@ -373,4 +373,3 @@ FC 和 RELU 被捕获到了同一个 CUDA Graph 中。 具体来说：
 - capture_graph() 对这个 ComputationGraph 调用 一次 cudaStreamBeginCapture / cudaStreamEndCapture ，中间遍历所有节点。FC 和 RELU 虽然在 cuDNN 层面是独立 kernel、没有做融合，但它们属于同一个捕获会话，最终产生 一个 cudaGraphExec_t 。
 - 运行时 task.run() 通过 cudaGraphLaunch(graph_exec, stream) 一次性提交整个图， 消除 HOST 端逐个 kernel launch 的开销 。
 这和 cbr_fwd_fp16.cpp 的本质完全一致 —— 都是"一个 Capture 对包含多个算子 → 一张 CUDA Graph"。差异仅在于 cbr_fwd_fp16.cpp 是手工三流 Fork-Join 拓扑，而当前框架在每个 ComputationGraph 内使用单流顺序执行（流的分配在 图之间 做 —— fwd_bwd 跑计算流、 update_weights 跑更新流等）。
-

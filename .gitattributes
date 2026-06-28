@@ -1,0 +1,116 @@
+# ============================================================
+# 配置文件自身
+# ============================================================
+.gitattributes text eol=lf
+.editorconfig  text eol=lf
+
+# ============================================================
+# 源代码：统一为 LF
+# ============================================================
+*.cpp   text eol=lf
+*.h     text eol=lf
+*.hpp   text eol=lf
+*.cu    text eol=lf
+*.cuh   text eol=lf
+*.c     text eol=lf
+
+# ============================================================
+# 脚本与文档：统一为 LF
+# ============================================================
+*.py      text eol=lf
+*.sh      text eol=lf
+*.md      text eol=lf
+*.txt     text eol=lf
+*.json    text eol=lf
+*.yaml    text eol=lf
+*.yml     text eol=lf
+*.cmake   text eol=lf
+*.cfg     text eol=lf
+*.ini     text eol=lf
+CMakeLists.txt text eol=lf
+
+# ============================================================
+# Windows 批处理：保留 CRLF
+# ============================================================
+*.bat     text eol=crlf
+*.cmd     text eol=crlf
+
+# ============================================================
+# IDE 配置：统一为 LF
+# ============================================================
+.idea/**  text eol=lf
+
+# ============================================================
+# 日志文件：按二进制处理
+# ============================================================
+*.log     binary
+
+# ============================================================
+# 其他文本文件
+# ============================================================
+LICENSE   text eol=lf
+.gitignore text eol=lf
+
+# ============================================================
+# 二进制文件：禁止转换
+# ============================================================
+# 图片
+*.png     binary
+*.jpg     binary
+*.jpeg    binary
+*.gif     binary
+*.ico     binary
+*.bmp     binary
+*.svg     binary
+
+# 文档
+*.pdf     binary
+
+# 压缩包
+*.zip     binary
+*.tar     binary
+*.gz      binary
+*.bz2     binary
+*.7z      binary
+
+# 库文件
+*.dll     binary
+*.exe     binary
+*.so      binary
+*.a       binary
+*.lib     binary
+
+# Python 编译产物
+*.pyc     binary
+*.pyo     binary
+
+# 模型/权重文件
+*.onnx    binary
+*.pth     binary
+*.pt      binary
+*.weights binary
+*.pb      binary
+
+# 音视频
+*.mp4     binary
+*.wav     binary
+*.mp3     binary
+
+# 字体
+*.ttf     binary
+*.woff    binary
+*.woff2   binary
+
+# ============================================================
+# 第三方代码：不参与任何换行符/编码归一化，保持原样
+# （放在最后以覆盖上面的通用扩展名规则）
+# ============================================================
+include/renaissance/core/node.hpp       -text
+include/renaissance/core/fkyaml_fwd.hpp -text
+Simd/**                                 -text
+
+# ============================================================
+# 生成代码：由生成器决定，不参与归一化
+# （放在最后以覆盖上面的通用扩展名规则）
+# ============================================================
+include/generated/**                    -text

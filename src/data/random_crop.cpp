@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @file random_crop.cpp
  * @brief 随机裁剪操作实现
  * @version 4.20.1

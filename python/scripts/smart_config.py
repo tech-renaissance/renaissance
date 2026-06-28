@@ -2603,4 +2603,3 @@ def run_smart_config():
     print_colored("==============================================", Colors.BOLD)
 
     return True
-

@@ -122,4 +122,3 @@
 #include "renaissance/task/task_base.h"
 #include "renaissance/task/simple_task.h"
 #include "renaissance/task/deep_learning_task.h"
-

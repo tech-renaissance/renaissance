@@ -165,4 +165,3 @@ $env:PATH = "C:\Program Files\NVIDIA\CUDNN\v9.17\bin\13.1;C:\Program Files\NVIDI
 ```shell
 powershell.exe -Command "$env:PATH = 'C:\Program Files\NVIDIA\CUDNN\v9.17\bin\13.1;C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v13.1\bin;' + $env:PATH; Start-Process -FilePath 'B:\Softwares\miniconda3\envs\py313\python.exe' -ArgumentList 'r:\renaissance\tests\bn\mnist_best_adamw.py --gpu' -NoNewWindow -Wait -RedirectStandardOutput 'r:\renaissance\mnist_best_adamw_gpu_run1.txt' -RedirectStandardError 'r:\renaissance\mnist_best_adamw_gpu_run1_err.txt'; Write-Output 'GPU_RUN1_DONE'"
 ```
-

@@ -40,4 +40,3 @@
 /root/epfs/R/renaissance/build/bin/tests/perf/test_gap_fc_perf --amp
 
 ```
-

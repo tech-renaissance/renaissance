@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @file logger.h
  * @brief 日志器类声明
  * @details 轻量级、线程安全、可编译关闭的日志器，支持四级日志（DEBUG/INFO/WARN/ERROR）和模块化标记

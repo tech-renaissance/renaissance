@@ -1,4 +1,4 @@
-﻿/**
+/**
  * @file logger.cpp
  * @brief 日志器类实现
  * @version 4.20.1

@@ -656,5 +656,3 @@ message(STATUS "  - test_cbr_amp_fwd: CBR AMP FWD equivalence test")
 message(STATUS "  - test_cbr_amp_bwd: CBR AMP BWD equivalence test")
 message(STATUS "  - test_cbr_amp_bwd_first_layer: CBR AMP BWD_FIRST_LAYER equivalence test")
 message(STATUS "  - test_cbr_amp_inf: CBR AMP INF equivalence test")
-
-

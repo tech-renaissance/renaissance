@@ -1,0 +1,33 @@
+# Build directories
+build/
+build_legacy/
+out/
+cmake-build-*/
+
+# Generated build scripts (run configure.py to regenerate)
+build.bat
+setup_cuda_env.bat
+
+# Generated configuration directory (run configure.py to regenerate)
+config/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db

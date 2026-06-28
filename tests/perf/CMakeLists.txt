@@ -315,4 +315,3 @@ else()
 endif()
 
 message(STATUS "  - perf_cbr_inf: CBR_AMP_INF performance test")
-
