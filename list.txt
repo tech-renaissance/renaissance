@@ -1,0 +1,35 @@
+说明：本列表中的每一个条目是指该目录下的文件，不包括其子目录下的文件。
+      例如，第 1 条 "include/" 仅指 include/renaissance.h 这一个文件，
+      而不包括 include/renaissance/ 子目录下的任何文件。
+
+排除项（不纳入本次修改范围）：
+- include/renaissance/core/node.hpp        （第三方 fkYAML 库）
+- include/renaissance/core/fkyaml_fwd.hpp  （第三方 fkYAML 库）
+- include/generated/                       （生成代码）
+
+1 include/
+2 include/renaissance/algo/
+3 include/renaissance/backend/
+4 include/renaissance/core/       （跳过 node.hpp、fkyaml_fwd.hpp — 第三方）
+5 include/renaissance/data/
+6 include/renaissance/graph/
+7 include/renaissance/task/
+8 include/renaissance/tensor/
+9 src/algo/
+10 src/backend/
+11 src/backend/ops/dtensor/
+12 src/backend/ops/range/
+13 src/core/
+14 src/data/
+15 src/graph/
+16 src/task/
+17 src/tensor/
+18 tests/bn/
+19 tests/correction/
+20 tests/fp16/
+21 tests/graph/
+22 tests/integration/
+23 tests/op/
+24 tests/perf/
+25 tests/ref/
+26 tests/top/

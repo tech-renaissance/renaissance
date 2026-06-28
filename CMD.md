@@ -16,7 +16,10 @@
 
 `include/`、`src/`、`tests/` 目录下的所有 `.h`、`.hpp`、`.cpp`、`.cu` 文件。具体范围听从最新指示。
 
-**排除项**：第三方代码（如 `node.hpp` 的 fkyaml 库、`Simd/` 目录等）不纳入本次修改范围。
+**排除项**：以下文件/目录不纳入本次修改范围：
+
+- **第三方代码**：`include/renaissance/core/node.hpp`（fkYAML 库）、`include/renaissance/core/fkyaml_fwd.hpp`（fkYAML 库）、`Simd/` 目录等。
+- **生成代码**：`include/generated/` 目录下的所有文件。
 
 ---
 
