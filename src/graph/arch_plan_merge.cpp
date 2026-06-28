@@ -1,8 +1,8 @@
 /**
  * @file arch_plan_merge.cpp
- * @brief Step7-10：Block合并、四元/三元/二元融合、首层标记
+ * @brief Step7-10：Block 合并、四元/三元/二元融合、首层标记
  * @version 4.20.1
- * @date 2026-04-20
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 所属系列: graph
  */

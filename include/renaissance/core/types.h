@@ -2,7 +2,7 @@
  * @file types.h
  * @brief 基础类型定义：Shape、DType、Phase、StreamKind、Region（65个）、PlanConfig、Metric、InputSpec、TrainingResult、OptimizerKind
  * @version 4.20.1
- * @date 2026-04-20
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 依赖项: <cstdint>, <string>
  * @note 所属系列: core
@@ -52,7 +52,7 @@ struct Shape {
     /**
      * @brief 从4个元素构造Shape [N,H,W,C]
      *
-     * 【重要编译器优化问题】
+     * 重要：MSVC /O2 优化问题
      * 本构造函数必须使用 TR_NOINLINE 和 volatile 写入，原因如下：
      *
      * 1. 问题现象：在MSVC Release模式(/O2 /Ob2 /arch:AVX2)下，普通的初始化列表会被错误优化，
@@ -67,10 +67,7 @@ struct Shape {
      *    - TR_NOINLINE: 禁止内联，强制生成函数调用，避免优化错误
      *    - volatile 写入: 强制生成实际的内存写入指令，防止编译器优化赋值顺序
      *
-     * 4. 警告：请勿删除 TR_NOINLINE 或 volatile 写入，否则会导致Shape构造失败
-     *
-     * @bug MSVC /O2 优化bug，影响简单POD结构体的构造函数
-     * @date 2026-05-01 技术觉醒团队调试发现并修复
+     * @warning 请勿删除 TR_NOINLINE 或 volatile 写入，否则会导致Shape构造失败
      */
     TR_NOINLINE Shape(int n, int h, int w, int c) : dims{n, h, w, c} {
         // 强制内存写入，防止编译器优化导致的参数传递错误
@@ -230,7 +227,9 @@ enum class OptimizerKind : uint8_t {
     ADAMW            ///< Adam with decoupled weight decay
 };
 
-/// 卷积搜索模式枚举
+/**
+ * @brief 卷积搜索模式枚举
+ */
 enum class ConvSearchMode : uint8_t {
     HEURISTIC_B = 0,   ///< 默认启发式搜索
     EXHAUSTIVE_C = 1   ///< 穷举搜索（仅 AMP Conv，仅 A100/RTX5090）
@@ -238,7 +237,6 @@ enum class ConvSearchMode : uint8_t {
 
 // ============================================================================
 // 显存区域铁律（65个Region，低地址→高地址，001-065）
-// 基于REGION_FINAL.md V2.9规范，技术觉醒团队2026-05-12
 // ============================================================================
 enum class Region : uint8_t {
     // B-Series: BN统计量（epoch级生命周期）

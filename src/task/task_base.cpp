@@ -1,10 +1,10 @@
 /**
  * @file task_base.cpp
  * @brief TaskBase 核心实现 —— dry run 引擎
- * @version 4.20.2
- * @date 2026-05-13
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
- * @note 设计决策：compile() 要求 phase == MEMORY_LOCKED（显式契约）
+ * @note 所属系列: task
  */
 
 #include "renaissance/task/task_base.h"

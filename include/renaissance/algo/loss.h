@@ -2,7 +2,7 @@
  * @file loss.h
  * @brief 损失函数配置：一期唯一支持 CrossEntropyLoss
  * @version 4.20.1
- * @date 2026-04-20
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 依赖项: core/tr_exception.h
  * @note 所属系列: algo

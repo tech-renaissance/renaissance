@@ -1,9 +1,10 @@
 /**
  * @file flatten_op.cpp
  * @brief FLATTEN 算子实现 — 元素复制重排：[n,h,w,c] → [n,1,1,h*w*c]
- * @version 2.0.0
- * @date 2026-05-18
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
+ * @note 所属系列: backend/ops/dtensor
  * @note CPU 路径：compact 布局，直接 memcpy
  * @note CUDA 路径：逐元素 kernel，正确处理 padded_c 与 H*W*C 的展平映射
  * @note 必定涉及元素的复制重排（GPU 上 padded_c 可能 > C）

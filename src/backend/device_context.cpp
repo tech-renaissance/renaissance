@@ -1,8 +1,10 @@
 /**
  * @file device_context.cpp
  * @brief DeviceContext 实现 —— 新版重构：per-stream cuDNN handles + MemoryPlan 动态解析
- * @version 4.21.0
- * @date 2026-05-17
+ * @version 4.20.1
+ * @date 2026-06-28
+ * @author 技术觉醒团队
+ * @note 所属系列: backend
  */
 
 #include "renaissance/backend/device_context.h"

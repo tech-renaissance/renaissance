@@ -1,3 +1,12 @@
+/**
+ * @file accum_op.cpp
+ * @brief RangeOp RANGE_ACCUM_METRICS 实现 —— 累积损失和准确率统计
+ * @version 4.20.1
+ * @date 2026-06-28
+ * @author 技术觉醒团队
+ * @note 所属系列: backend/ops/range
+ */
+
 #include "renaissance/backend/op_registry.h"
 #include "renaissance/backend/device_context.h"
 #include "renaissance/graph/memory_plan.h"
@@ -24,6 +33,13 @@ namespace {
 
 #ifdef TR_USE_CUDA
 
+/**
+ * @brief RANGE_ACCUM_METRICS 的 CUDA 实现
+ * @param node 计算图节点
+ * @param mp 内存计划
+ * @param ctx 设备上下文
+ * @param state 多流捕获状态
+ */
 static void launch_range_accum_metrics_cuda(
     const GraphNode& node,
     const MemoryPlan& mp,
@@ -61,6 +77,10 @@ static void launch_range_accum_metrics_cuda(
 
 #endif // TR_USE_CUDA
 
+/**
+ * @brief RANGE_ACCUM_METRICS 的 CPU 实现
+ * @param op_ctx CPU 操作上下文
+ */
 static void launch_range_accum_metrics_cpu(CpuOpContext* op_ctx) {
     const DeviceContext& ctx = *op_ctx->ctx;
     const MemoryPlan* mp = ctx.memory_plan();

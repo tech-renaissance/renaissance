@@ -1,8 +1,8 @@
 /**
  * @file layer_descriptor.h
  * @brief 层知识契约 —— LayerDescriptor + TensorDesc + InferContext + SubgraphPattern + LayerContext
- * @version 4.20.2
- * @date 2026-05-13
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 依赖项: renaissance/core/types.h, renaissance/graph/op_kind.h, renaissance/graph/shape_id.h
  * @note 所属系列: graph

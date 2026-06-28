@@ -1,11 +1,12 @@
 /**
  * @file test_nin_no_dropout.cpp
  * @brief CIFAR-10 NIN (Network in Network, no Dropout) 准确率测试
- * @version 1.0.0
- * @date 2026-06-10
- * @author Team Tech-Renaissance
+ * @version 4.20.1
+ * @date 2026-06-28
+ * @author 技术觉醒团队
+ * @note 所属系列: tests/integration
  *
- * 参考: EMK.md 中 NIN 原始论文 (Lin et al., 2013) 的 CIFAR-10 配置
+ * 参考: NIN 原始论文 (Lin et al., 2013) 的 CIFAR-10 配置
  * 目标: NIN (without Dropout) + Data Augmentation
  * 注: 原始论文 91.19% (8.81% error) 使用 Dropout；本文件移除了 Dropout 以评估其影响。
  *

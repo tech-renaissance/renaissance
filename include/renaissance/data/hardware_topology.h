@@ -1,12 +1,11 @@
 /**
  * @file hardware_topology.h
  * @brief 硬件拓扑检测类（NUMA、GPU、CPU物理核）
- * @version 1.0.0
- * @date 2026-02-18
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 所属系列: data
  * @details
- * 参考tests/bind/a.cpp实现
  * - 检测NUMA节点和CPU拓扑
  * - 检测GPU NUMA亲和性
  * - 构建物理核视图（处理超线程）

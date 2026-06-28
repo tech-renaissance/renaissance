@@ -1,9 +1,10 @@
 /**
  * @file channel_padding_op.cu
  * @brief ChannelPadding 算子 CUDA Kernel — C 通道填充到 8 的倍数
- * @version 1.0.0
- * @date 2026-06-09
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
+ * @note 所属系列: backend/ops/dtensor
  * @note 输入 [N,H,W,C_in]（可能有 padding）→ 输出 [N,H,W,C_out]（compact，C_out=ceil8(C_in)）
  * @note 正向：c<C_in 复制，c>=C_in 补零；反向：只复制前 C_in 个通道
  */

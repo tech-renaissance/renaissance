@@ -1,8 +1,10 @@
 /**
  * @file test_bn_fwd_bwd.cpp
  * @brief BN1D/BN2D FWD+BWD+INF 数学正确性测试 — 支持 CPU / GPU FP32 / GPU AMP
- * @version 1.0.0
- * @date 2026-06-07
+ * @version 4.20.1
+ * @date 2026-06-28
+ * @author 技术觉醒团队
+ * @note 所属系列: tests/bn
  *
  * 用法：
  *   test_bn_fwd_bwd.exe --cpu --bn1d  [--batch 8] [--C 16]

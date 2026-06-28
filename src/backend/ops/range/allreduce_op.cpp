@@ -1,7 +1,10 @@
 /**
  * @file allreduce_op.cpp
- * @brief RangeOp 通用 AllReduce — RANGE_SUM_ALLREDUCE / RANGE_MEAN_ALLREDUCE
- * @version 4.21.0
+ * @brief RangeOp 通用 AllReduce — RANGE_SUM_ALLREDUCE / RANGE_MEAN_ALLREDUCE / RANGE_BN_STATS_ALLREDUCE
+ * @version 4.20.1
+ * @date 2026-06-28
+ * @author 技术觉醒团队
+ * @note 所属系列: backend/ops/range
  */
 
 #include "renaissance/backend/op_registry.h"

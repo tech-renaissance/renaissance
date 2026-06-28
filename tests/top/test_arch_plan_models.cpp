@@ -3,7 +3,7 @@
  * @brief ArchPlan多模型端到端测试 - AMP模式 + 算子融合
  * @details 在启用AMP和算子融合的情况下测试多个经典模型架构
  * @version 4.20.1
- * @date 2026-05-13
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 所属系列: tests/top
  * @note 配置: AMP=ON, Fusion=ON (fuse=true)

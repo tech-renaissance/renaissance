@@ -1,9 +1,10 @@
 /**
- * @file mini_lenet.cpp
+ * @file mini_lenet_bn.cpp
  * @brief MNIST mini-LeNet 准确率测试
- * @version 1.0.0
- * @date 2026-05-30
- * @author Team Tech-Renaissance
+ * @version 4.20.1
+ * @date 2026-06-28
+ * @author 技术觉醒团队
+ * @note 所属系列: tests/bn
  *
  * 核心策略：
  * - 网络结构：conv(6,3,1,1) → 400 → 120 → 84 → 10

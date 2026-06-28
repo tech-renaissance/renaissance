@@ -1,8 +1,8 @@
 /**
  * @file cbr_op.cpp
  * @brief CBR（Conv+BN2D+ReLU）融合算子 AMP 实现
- * @version 1.0.0
- * @date 2026-06-20
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 依赖项: op_registry.h, device_context.h, cudnn_utils.h
  * @note 所属系列: backend/ops/dtensor

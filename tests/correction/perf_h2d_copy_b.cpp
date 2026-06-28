@@ -1,9 +1,10 @@
 /**
  * @file perf_h2d_copy_b.cpp
  * @brief RANGE_H2D_COPY_B 异步 H2D 传输性能测试
- * @version 1.0.0
- * @date 2026-05-23
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
+ * @note 所属系列: tests/correction
  *
  * 测量指标:
  *   - H2D 延迟 (us/iter): 单次 graph launch + 异步传输耗时

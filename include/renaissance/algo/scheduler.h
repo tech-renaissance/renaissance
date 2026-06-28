@@ -1,12 +1,11 @@
 /**
  * @file scheduler.h
  * @brief 学习率调度器基类及派生类：PolynomialLR / CosineAnnealingLR / StepLR / ConstantLR / MultiStepLR / ExponentialLR / WSDLR / CosineAnnealingWithWarmRestartsLR
- * @version 4.20.2
- * @date 2026-05-14
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 依赖项: core/tr_exception.h, <cstdint>, <cmath>
  * @note 所属系列: algo
- * @note 设计依据: LR_FINAL.md, OTS_FINAL.md
  *
  * @note 重要设计说明：
  *   本调度器采用无状态（stateless）纯函数设计。给定 (epoch, batch) 直接计算学习率，
@@ -364,8 +363,10 @@ public:
         LRScheduler::step_by_epoch(); return *this;
     }
 
-    /// @brief 衰减起始位置，以占 total_decay 的比例表示（0.0 ~ 1.0）
-    /// @note 0.8 表示前 80% 为 stable，后 20% 线性衰减到 end_lr
+    /**
+     * @brief 衰减起始位置，以占 total_decay 的比例表示（0.0 ~ 1.0）
+     * @param fraction 衰减起始比例，0.8 表示前 80% 为 stable，后 20% 线性衰减到 end_lr
+     */
     WSDLR& decay_start(float fraction);
     WSDLR& end_lr(float lr);
 

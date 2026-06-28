@@ -1,8 +1,8 @@
 /**
  * @file graph_executor.cpp
  * @brief GraphExecutor 实现：训练/验证工作流 + A/B 双缓冲 + 双图并行
- * @version 4.21.0
- * @date 2026-05-16
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 依赖项: graph_executor.h, captured_graph.h, device_context.h
  * @note 所属系列: backend

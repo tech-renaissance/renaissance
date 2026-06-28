@@ -1,9 +1,10 @@
 /**
  * @file imagenet_loader_dts.cpp
- * @brief ImageNet数据加载器（DTS格式）实现 - V4.0彻底重写
- * @version 4.0.0
- * @date 2026-01-22
+ * @brief ImageNet 数据加载器（DTS 格式）实现
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
+ * @note 所属系列: data
  */
 
 #include "renaissance/data/imagenet_loader_dts.h"
@@ -386,7 +387,7 @@ void ImageNetLoaderDts::configure(int num_load_workers, int num_preproc_workers,
     TR_CHECK(num_preproc_workers >= 1 && num_preproc_workers <= 256, ValueError,
              "num_preproc_workers must be in [1, 256], got " << num_preproc_workers);
 
-    // 验证2的幂（姜总工推荐）
+    // 验证2的幂
     if ((num_load_workers & (num_load_workers - 1)) != 0) {
         LOG_WARN << "num_load_workers is not a power of 2: " << num_load_workers;
     }
@@ -399,7 +400,7 @@ void ImageNetLoaderDts::configure(int num_load_workers, int num_preproc_workers,
     skip_first_ = skip_first;
     verify_crc_ = verify_crc;
 
-    // 确定预取系数（姜总工推荐）
+    // 确定预取系数
     if (num_load_workers_ == 1) {
         prefetch_factor_ = 2;  // N=1时，PF最小为2
     } else {
@@ -606,7 +607,7 @@ void ImageNetLoaderDts::begin_epoch(int epoch_id, bool is_train) {
 
     // 4. 根据模式启动加载
     if (current_set_->mode == LoadMode::FULLY) {
-        // FULLY模式：PARTIAL的扩展版 - 多缓冲同步加载（姜总工的设计）
+        // FULLY模式：PARTIAL的扩展版 - 多缓冲同步加载
         //
         // 关键差异：
         // - PARTIAL: 2个buffer循环复用（A → B → A → B...）
@@ -751,7 +752,7 @@ void ImageNetLoaderDts::begin_epoch(int epoch_id, bool is_train) {
             // 直接从thread_sample_info数组读取，避免竞争
         }
     } else {
-        // PARTIAL模式：启动双缓冲加载（姜总工的同步设计）
+        // PARTIAL模式：启动双缓冲加载
 
         // 在共享缓冲区模式下，确保使用共享缓冲区
         Buffer* actual_buffer_A = &current_set_->buffer_A;
@@ -931,7 +932,7 @@ bool ImageNetLoaderDts::get_next_sample(int preproc_worker_id, int32_t& label,
     /**
      * 获取下一个样本（严格按顺序领取）
      *
-     * 领取策略（姜总工V4.0架构）：
+     * 领取策略（V4.0 架构）：
      * - Worker i的第k次调用 → 读取第 (i + k×M) 个样本
      * - M = num_preproc_workers_
      * - i = preproc_worker_id
@@ -1097,7 +1098,7 @@ bool ImageNetLoaderDts::get_next_sample(int preproc_worker_id, int32_t& label,
     // PARTIAL模式
     else {
         /**
-         * PARTIAL模式：双缓冲JOIN切换（姜总工的设计）
+         * PARTIAL模式：双缓冲JOIN切换
          *
          * 核心逻辑：
          * 1. Worker按静态步长M领取样本：第k次调用 → 样本 (worker_id + k×M)
@@ -1860,7 +1861,7 @@ void ImageNetLoaderDts::load_one_buffer_batch_fully(Dataset& ds, uint32_t buffer
 
 void ImageNetLoaderDts::load_next_buffer() {
     /**
-     * 加载下一个buffer（姜总工的同步设计）
+     * 加载下一个buffer
      *
      * 流程：
      * 1. 找到当前ready_buffer和下一个buffer

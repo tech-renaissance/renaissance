@@ -1,9 +1,10 @@
 /**
  * @file test_mean_allreduce.cpp
  * @brief RANGE_MEAN_ALLREDUCE 数学正确性测试（GPU / AMP）
- * @version 1.0.0
- * @date 2026-05-20
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
+ * @note 所属系列: tests/correction
  *
  * 设计意图：
  *   本测试特意在同一 region（G_FC_BIAS）内分配两个形状不同、连续排列的 DTensor，

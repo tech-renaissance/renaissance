@@ -1,9 +1,10 @@
 /**
  * @file test_channel_padding.cpp
  * @brief ChannelPadding FWD+BWD 串接测试 — 支持 CPU / GPU / AMP 三种模式
- * @version 1.0.0
- * @date 2026-06-09
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
+ * @note 所属系列: tests/op
  *
  * 用法：
  *   test_channel_padding.exe --cpu

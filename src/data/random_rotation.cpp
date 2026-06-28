@@ -1,8 +1,8 @@
 /**
  * @file random_rotation.cpp
  * @brief 随机旋转操作实现
- * @version 1.0.0
- * @date 2026-02-22
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 所属系列: data
  */

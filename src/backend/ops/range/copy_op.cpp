@@ -1,10 +1,9 @@
 /**
  * @file copy_op.cpp
  * @brief RangeOp RANGE_D2D_COPY 实现 —— 通用 Device-to-Device 拷贝
- * @version 4.21.0
- * @date 2026-05-19
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
- * @note 依赖项: op_registry.h, device_context.h, memory_plan.h
  * @note 所属系列: backend/ops/range
  */
 

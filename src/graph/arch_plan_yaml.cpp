@@ -1,8 +1,8 @@
 /**
  * @file arch_plan_yaml.cpp
- * @brief YAML序列化与反序列化（fkYAML单头文件）
+ * @brief YAML 序列化与反序列化
  * @version 4.20.1
- * @date 2026-04-20
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 所属系列: graph
  */

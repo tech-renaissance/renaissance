@@ -1,8 +1,10 @@
 /**
  * @file test_maxpool_fwd_inf.cpp
  * @brief MaxPool FWD vs INF 输出一致性测试 — 支持 CPU / GPU / AMP
- * @version 1.0.0
- * @date 2026-06-21
+ * @version 4.20.1
+ * @date 2026-06-28
+ * @author 技术觉醒团队
+ * @note 所属系列: tests/op
  *
  * 用法：
  *   test_maxpool_fwd_inf.exe --cpu

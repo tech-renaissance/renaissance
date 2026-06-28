@@ -1,10 +1,9 @@
 /**
  * @file capture_cpu.cpp
  * @brief CPU 后端图捕获：收集 CpuOp 序列
- * @version 4.21.0
- * @date 2026-05-16
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
- * @note 依赖项: captured_graph.h, device_context.h, memory_plan.h
  * @note 所属系列: graph
  */
 

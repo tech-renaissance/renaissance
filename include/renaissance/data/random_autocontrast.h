@@ -1,8 +1,8 @@
 /**
  * @file random_autocontrast.h
  * @brief 随机自动对比度操作
- * @version 1.0.0
- * @date 2026-02-22
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 依赖项: philox.h
  * @note 所属系列: data

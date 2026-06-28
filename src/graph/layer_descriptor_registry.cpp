@@ -1,12 +1,10 @@
 /**
  * @file layer_descriptor_registry.cpp
- * @brief LayerDescriptor注册表实现 — 全层四铁律合规版
- * @version 4.20.5
- * @date 2026-05-14
+ * @brief LayerDescriptor 注册表实现
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
- * @note 依赖项: layer_descriptor.h, arch_plan.h, op_kind.h
  * @note 所属系列: graph
- * @note 四铁律: 同LayerKind跨CompileSpec返回相同数量/顺序/名称/Region的TensorDesc
  */
 
 #include "renaissance/graph/layer_descriptor.h"

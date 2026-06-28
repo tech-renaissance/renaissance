@@ -1,8 +1,10 @@
 /**
  * @file test_gap.cpp
  * @brief GAP FWD+BWD 数学正确性测试 — 支持 CPU / GPU FP32 / GPU AMP
- * @version 1.1.0
- * @date 2026-05-18
+ * @version 4.20.1
+ * @date 2026-06-28
+ * @author 技术觉醒团队
+ * @note 所属系列: tests/correction
  *
  * 用法：
  *   test_gap.exe --cpu    [--batch 8] [--H 7] [--W 7] [--C 2048]

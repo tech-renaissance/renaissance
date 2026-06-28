@@ -2,7 +2,7 @@
  * @file fused_normalization.h
  * @brief 图像归一化预处理操作（终极融合版）
  * @version 4.20.1
- * @date 2026-04-20
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 依赖项: immintrin.h(AVX2)或Eigen/Core(跨平台)
  * @note 所属系列: data

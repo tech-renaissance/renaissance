@@ -3,7 +3,7 @@
  * @brief 测试ResNet-50三种定义方式的YAML checksum一致性 - AMP融合模式
  * @details 验证不同定义风格在AMP融合模式下产生相同的YAML输出
  * @version 4.20.1
- * @date 2026-05-13
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 所属系列: tests/top
  * @note 配置: AMP=ON, Fusion=ON

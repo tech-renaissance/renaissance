@@ -1,10 +1,9 @@
 /**
  * @file capture_cuda.cpp
  * @brief CUDA 图捕获主逻辑：BeginCapture → Replay → EndCapture → Instantiate
- * @version 4.21.0
- * @date 2026-05-16
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
- * @note 依赖项: captured_graph.h, device_context.h, memory_plan.h, op_registry.h, capture_multi_stream helpers
  * @note 所属系列: graph
  */
 

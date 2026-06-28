@@ -1,8 +1,8 @@
 /**
  * @file conv_op_impl.cpp
  * @brief CONV算子的cuDNN FE Graph构建实现（FP32 + AMP，6个算子变体）
- * @version 4.22.0
- * @date 2026-06-03
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 依赖项: cudnn_frontend.h, cudnn_utils.h, distributed_tensor.h
  * @note 所属系列: backend/ops/dtensor

@@ -2,7 +2,7 @@
  * @file init_config.h
  * @brief 初始化配置 — 8字节紧凑布局的初始化策略描述符
  * @version 4.20.1
- * @date 2026-04-20
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 依赖项: renaissance/core/types.h
  * @note 所属系列: core

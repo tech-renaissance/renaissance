@@ -1,9 +1,10 @@
 /**
- * @file example_dual_graph_cpu.cpp
+ * @file dual_graph_cpu.cpp
  * @brief Dual-graph example: compute and transfer on CPU (forced CPU execution)
  * @version 4.20.1
- * @date 2026-04-20
+ * @date 2026-06-28
  * @author 技术觉醒团队
+ * @note 所属系列: tests/graph
  */
 
 #include "renaissance.h"

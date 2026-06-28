@@ -2,10 +2,10 @@
  * @file file_handle.h
  * @brief 跨平台文件句柄RAII封装
  * @details 提供Windows和Linux平台的文件操作统一接口
- * @version 1.0.0
- * @date 2026-01-23
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
- * @note 所属系统: data
+ * @note 所属系列: data
  */
 
 #pragma once

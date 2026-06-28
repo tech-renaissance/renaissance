@@ -4,7 +4,7 @@
  * @details 从 BluePrint 接收模型定义，经 10 步管线生成标准化、全融合的架构描述，
  *          支持 YAML 序列化往返。
  * @version 4.20.1
- * @date 2026-04-20
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 所属系列: graph
  */
@@ -168,8 +168,8 @@ private:
     int                     first_layer_idx_ = -1;
     bool                    fuse_ = true;
 
-    // [EXY2] AMP 模式下，若首层为 Conv/CBR 且输入 C 不是 4 的倍数，
-    //        把 input_ 的逻辑 C 对齐到 4。
+    // AMP 模式下，若首层为 Conv/CBR 且输入 C 不是 4 的倍数，
+    // 把 input_ 的逻辑 C 对齐到 4。
     void align_amp_input_channels_for_first_conv();
 
     static void expand_tree(const class Layer& root,

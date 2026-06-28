@@ -1,7 +1,10 @@
 /**
  * @file adam_bc_op.cu
  * @brief Adam / AdamW Bias Correction — GPU kernel + CUDA launcher
- * @version 4.21.0
+ * @version 4.20.1
+ * @date 2026-06-28
+ * @author 技术觉醒团队
+ * @note 所属系列: backend/ops/dtensor
  */
 
 #ifdef TR_USE_CUDA

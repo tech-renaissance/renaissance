@@ -1,11 +1,12 @@
 /**
  * @file ta_v4_common_fp16.hpp
  * @brief 技术觉醒V4公共基础设施层（FP16专用版本，单一真理源）
- * @version 1.0.0
- * @date 2026-04-12
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
+ * @note 所属系列: tests/fp16
  *
- * @note 设计原则（基于8位特级专家共识）：
+ * @note 设计原则：
  *   1. 单点真理源：所有公共代码仅此一处定义
  *   2. 最小侵入：完全兼容现有cbr_fwd/cbr_bwd实现
  *   3. 零性能损耗：全inline，编译期优化

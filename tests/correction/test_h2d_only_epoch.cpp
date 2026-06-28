@@ -1,9 +1,10 @@
 /**
  * @file test_h2d_only_epoch.cpp
  * @brief H2D-Only Epoch 测试：测量 Preprocessor → TransferStation → cudaMemcpy 每 epoch 耗时
- * @version 1.0.0
- * @date 2026-05-24
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
+ * @note 所属系列: tests/correction
  *
  * 设计原则：
  * - 直接复用 test_pw_ultimate.cpp 的 PO 工厂函数（create_po / create_resize_crop_po）

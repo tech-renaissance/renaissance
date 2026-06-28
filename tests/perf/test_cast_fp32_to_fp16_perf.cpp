@@ -1,9 +1,10 @@
 /**
  * @file test_cast_fp32_to_fp16_perf.cpp
  * @brief RANGE_CAST_FP32_TO_FP16 专用性能测试 — 大张量 {5,1024,1024,5}
- * @version 1.0.0
- * @date 2026-05-20
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
+ * @note 所属系列: tests/perf
  */
 
 #include "renaissance.h"

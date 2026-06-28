@@ -1,19 +1,19 @@
 /**
  * @file softmax_ce_op.cpp
  * @brief SOFTMAX_CE 融合算子 — CPU 实现 + CUDA 分发 + 注册
- * @version 5.1.0
- * @date 2026-05-21
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 依赖项: op_registry.h, device_context.h, capture_multi_stream.h
- *         6 个算子: FP32_FWD/BWD/INF + AMP_FWD/BWD/INF
- *         —— 单批量端到端 Softmax+CrossEntropyLoss 融合
- *         —— FWD: 6 output (loss + inv_scaling + pred + probs + top1 + top5)，
+ * @note 所属系列: backend/ops/dtensor
+ * @note 6 个算子: FP32_FWD/BWD/INF + AMP_FWD/BWD/INF
+ * @note —— 单批量端到端 Softmax+CrossEntropyLoss 融合
+ * @note —— FWD: 6 output (loss + inv_scaling + pred + probs + top1 + top5)，
  *             但 kernel 仅写入 loss + probs + inv_scaling（训练用轻量版）
- *         —— INF: 6 output，kernel 完整写入 top1/top5/pred + loss + probs + inv_scaling（推理用）
- *         —— FWD 与 INF 已完全独立：各自拥有独立的 CPU inner + CUDA kernel + dispatch
- *         —— AMP: FP16 I/O, 内部 FP32 核心
- *         —— 基线 ID（scaling/labels/loss/top1/top5）由 Compiler Phase 4 注入
- * @note 所属系列: op
+ * @note —— INF: 6 output，kernel 完整写入 top1/top5/pred + loss + probs + inv_scaling（推理用）
+ * @note —— FWD 与 INF 已完全独立：各自拥有独立的 CPU inner + CUDA kernel + dispatch
+ * @note —— AMP: FP16 I/O, 内部 FP32 核心
+ * @note —— 基线 ID（scaling/labels/loss/top1/top5）由 Compiler Phase 4 注入
  */
 
 #include "renaissance/backend/op_registry.h"

@@ -1,10 +1,9 @@
 /**
  * @file compiler.cpp
- * @brief Compiler 实现 — 从 ArchPlan 编译生成 MemoryPlan + ComputationGraph
- * @version 4.20.4
- * @date 2026-05-14
+ * @brief Compiler 实现 —— 从 ArchPlan 编译生成 MemoryPlan + ComputationGraph
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
- * @note 依赖项: compiler.h, arch_plan.h, memory_plan.h, initializer.h
  * @note 所属系列: graph
  * @note 权重格式: KRSC (K=out_ch, R=kH, S=kW, C=in_ch), DTensor 为 NHWC
  */

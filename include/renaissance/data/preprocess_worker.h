@@ -1,8 +1,8 @@
 /**
  * @file preprocess_worker.h
  * @brief 预处理工作器（每个线程一个）
- * @version 2.1.0（测试模式版）
- * @date 2026-02-17
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 所属系列: data
  */

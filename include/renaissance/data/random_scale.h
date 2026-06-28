@@ -1,8 +1,8 @@
 /**
  * @file random_scale.h
  * @brief 随机缩放操作（独立宽高比例，STB实现）
- * @version 1.0.0
- * @date 2026-03-01
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 依赖项: philox.h, STB
  * @note 所属系列: data

@@ -1,9 +1,10 @@
 /**
  * @file tanh_op.cpp
  * @brief TANH 算子的 CPU 实现 + 手写 CUDA kernel 分发
- * @version 1.2.0
- * @date 2026-05-21
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
+ * @note 所属系列: backend/ops/dtensor
  * @note 数学公式：FWD: y = tanh(x), BWD: dx = dy * (1 - tanh(x)^2) (重计算)
  * @note FWD 为 1-input 1-output, BWD 为 1-input 1-output (x in-place, 重计算 tanh)
  */

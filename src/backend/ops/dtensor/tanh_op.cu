@@ -1,11 +1,12 @@
 /**
  * @file tanh_op.cu
  * @brief TANH 算子的 CUDA kernel — FWD + BWD 重计算版本
- * @version 2.0.0
- * @date 2026-05-21
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
+ * @note 所属系列: backend/ops/dtensor
  * @note FWD: y = tanh(x)
- *       BWD: 1-input-1-output, dx = dy * (1 - tanh(x)^2), dx in-place to x
+ * @note BWD: 1-input-1-output, dx = dy * (1 - tanh(x)^2), dx in-place to x
  */
 
 #ifdef TR_USE_CUDA

@@ -3,8 +3,8 @@
  * @brief 通用样本加载器（用于部署场景）
  * @details 接受未知新样本，支持动态格式的样本输入（JPEG、NHWC Tensor）
  *          所有样本标签固定为 0，始终为验证模式
- * @version V3.10.0
- * @date 2026-02-01
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 所属系列: data
  */

@@ -2,11 +2,11 @@
  * @file downloader.h
  * @brief 下载器类声明
  * @details 基于libcurl实现的文件下载器，支持主URL和备用URL，自动创建目录，支持文件覆盖控制
- * @version 3.6.12
- * @date 2025-12-28
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 依赖项: libcurl
- * @note 所属系列: base
+ * @note 所属系列: core
  */
 
 #pragma once

@@ -1,11 +1,11 @@
 /**
  * @file memory_plan.h
  * @brief MemoryPlan - 基于65-Region规范的显存布局引擎
- * @version 4.20.2
- * @date 2026-05-13
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 依赖项: renaissance/core/types.h, renaissance/core/tr_exception.h, renaissance/tensor/distributed_tensor.h
- * @note 所属系列: memory
+ * @note 所属系列: graph
  * @note 关键修改：新增私有 alloc(shape, dtype, region, slot_bytes) 重载供 Compiler 使用
  */
 

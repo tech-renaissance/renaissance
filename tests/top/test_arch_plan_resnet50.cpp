@@ -3,7 +3,7 @@
  * @brief 架构规划端到端测试：ResNet-50完整管线 + YAML往返 - AMP融合模式
  * @details 验证ResNet-50的10步编译管线和YAML序列化往返一致性
  * @version 4.20.1
- * @date 2026-05-13
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 所属系列: tests/top
  * @note 配置: AMP=ON, Fusion=ON

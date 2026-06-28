@@ -1,9 +1,10 @@
 /**
  * @file test_pw_ultimate.cpp
  * @brief PW综合测试：普通模式（非test mode），完整测试Preprocessor功能
- * @version 1.0.0
- * @date 2026-02-21
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
+ * @note 所属系列: tests/correction
  */
 
 #include "renaissance.h"

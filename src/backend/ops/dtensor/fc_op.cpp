@@ -1,9 +1,11 @@
 /**
  * @file fc_op.cpp
- * @brief FC 绠楀瓙瀹炵幇锛歭aunch_cuda / launch_cpu / 绠楀瓙琛ㄦ敞鍐? * @version 4.21.0
- * @date 2026-05-16
- * @author 鎶€鏈閱掑洟闃? * @note 渚濊禆椤? op_registry.h, device_context.h, capture_multi_stream.h
- * @note 鎵€灞炵郴鍒? backend/ops/dtensor
+ * @brief FC 算子实现：launch_cuda / launch_cpu / 算子表注册
+ * @version 4.20.1
+ * @date 2026-06-28
+ * @author 技术觉醒团队
+ * @note 依赖项: op_registry.h, device_context.h, capture_multi_stream.h
+ * @note 所属系列: backend/ops/dtensor
  */
 
 #include "renaissance/backend/op_registry.h"

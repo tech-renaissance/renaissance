@@ -1,6 +1,10 @@
 /**
  * @file perf_cbr_inf.cpp
  * @brief CBR_AMP_INF 性能测试
+ * @version 4.20.1
+ * @date 2026-06-28
+ * @author 技术觉醒团队
+ * @note 所属系列: tests/perf
  *
  * 默认形状: 输入 [512,224,224,4], 卷积核 7x7, stride=2, pad=3, 输出 112x112x64
  * 预热 5 次, 计时 100 次取平均

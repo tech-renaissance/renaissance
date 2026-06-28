@@ -1,8 +1,8 @@
 /**
  * @file dtensor_copy_op.cpp
  * @brief DTensor 级 Device-to-Device 拷贝算子
- * @version 4.21.0
- * @date 2026-05-22
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 依赖项: op_registry.h, device_context.h, capture_multi_stream.h
  * @note 所属系列: backend/ops/dtensor

@@ -2,7 +2,7 @@
  * @file op_kind.cpp
  * @brief 算子类型字符串转换实现
  * @version 4.20.1
- * @date 2026-04-20
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 所属系列: graph
  */

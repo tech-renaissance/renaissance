@@ -1,9 +1,10 @@
 /**
  * @file test_adamw_weight.cpp
  * @brief RANGE_UPDATE_WEIGHT_ADAMW 数学正确性测试
- * @version 1.0.0
- * @date 2026-05-21
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
+ * @note 所属系列: tests/correction
  *
  * 设计意图：
  *   验证 AdamW Weight 更新算子的数值正确性。

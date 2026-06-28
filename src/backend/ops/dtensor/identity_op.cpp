@@ -1,9 +1,10 @@
 /**
  * @file identity_op.cpp
  * @brief IDENTITY 算子的 CPU 实现 + CUDA 分发函数
- * @version 1.1.0
- * @date 2026-05-17
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
+ * @note 所属系列: backend/ops/dtensor
  * @note IDENTITY 是恒等映射：y = x（前向），dx = dy（反向）
  * @note CUDA 路径使用 cudaMemcpyAsync（硬件加速，比自定义 kernel 快 10~50 倍）
  */

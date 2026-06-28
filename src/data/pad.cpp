@@ -1,10 +1,10 @@
-/*
+/**
  * @file pad.cpp
- * @brief Padding operation implementation
- * @version 1.0.0
- * @date 2026-02-23
- * @author Tech Renaissance Team
- * @note Series: data
+ * @brief 填充操作实现
+ * @version 4.20.1
+ * @date 2026-06-28
+ * @author 技术觉醒团队
+ * @note 所属系列: data
  */
 
 #include "renaissance/data/pad.h"

@@ -1,9 +1,10 @@
 /**
  * @file imagenet_loader_raw.cpp
- * @brief ImageNet数据加载器（原始格式）实现
- * @version 1.0.0
- * @date 2026-01-31
+ * @brief ImageNet 数据加载器（原始格式）实现
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
+ * @note 所属系列: data
  */
 
 #include "renaissance/data/imagenet_loader_raw.h"
@@ -865,7 +866,7 @@ void ImageNetLoaderRaw::perform_global_shuffle(std::vector<RawFileInfo>& files,
 void ImageNetLoaderRaw::assign_parts(std::vector<RawFileInfo>& files,
                                       RawDataset& ds) {
     /**
-     * 简单均匀分配算法（姜总工要求："不需要太复杂的算法"）
+     * 简单均匀分配算法
      *
      * 策略：
      * 1. 计算每个PART的目标大小 = total_size / 16
@@ -1036,7 +1037,7 @@ void ImageNetLoaderRaw::configure(int num_load_workers, int num_preproc_workers,
     TR_CHECK(num_preproc_workers >= 1 && num_preproc_workers <= 256, ValueError,
              "num_preproc_workers must be in [1, 256], got " << num_preproc_workers);
 
-    // 验证2的幂（姜总工推荐，与DTS一致）
+    // 验证2的幂（与DTS一致）
     if ((num_load_workers & (num_load_workers - 1)) != 0) {
         LOG_DEBUG << "num_load_workers is not a power of 2: " << num_load_workers;
     }
@@ -1185,7 +1186,7 @@ void ImageNetLoaderRaw::begin_epoch(int epoch_id, bool is_train) {
         current_set_->is_last_buffer = false;
 
     } else {
-        // FULLY模式：PARTIAL的扩展版 - 多缓冲同步加载（姜总工的设计）
+        // FULLY模式：PARTIAL的扩展版 - 多缓冲同步加载
         //
         // 关键差异：
         // - PARTIAL: 2个buffer循环复用（A → B → A → B...）
@@ -1588,7 +1589,7 @@ void ImageNetLoaderRaw::io_worker_func_raw(int thread_id, RawBuffer& buffer,
                                             uint32_t start_group_idx,
                                             RawDataset& ds) {
     /**
-     * IO Worker函数（姜总工的静态分配设计）
+     * IO Worker函数
      *
      * RAW Loader与DTS Loader的关键差异：
      * - DTS：每个BLOCK一个slot，共N×PF个slot，slot_idx = block_seq
@@ -2190,7 +2191,7 @@ void ImageNetLoaderRaw::shuffle_samples(std::vector<uint32_t>& locations, uint64
 
 void ImageNetLoaderRaw::load_next_buffer() {
     /**
-     * 加载下一个buffer（姜总工的同步设计）
+     * 加载下一个buffer
      */
 
     if (current_set_ == nullptr) {
@@ -2596,7 +2597,7 @@ bool ImageNetLoaderRaw::get_next_sample(int preproc_worker_id, int32_t& label,
     // FULLY模式（与DTS Loader完全相同的逻辑）
     else {
         /**
-         * FULLY模式：多缓冲JOIN切换（姜总工的设计）
+         * FULLY模式：多缓冲JOIN切换
          *
          * 核心逻辑（与PARTIAL完全相同，只是buffer数量不同）：
          * 1. Worker按静态步长M领取样本：第k次调用 → 样本 (worker_id + k×M)

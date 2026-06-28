@@ -1,6 +1,10 @@
 /**
  * @file test_cbr_amp_bwd.cpp
  * @brief CBR_AMP_BWD vs Conv+BN2D+ReLU BWD 等价性测试
+ * @version 4.20.1
+ * @date 2026-06-28
+ * @author 技术觉醒团队
+ * @note 所属系列: tests/op
  * @note mask 语义统一：由 CBR_AMP_FWD 生成 bit-packed BOOLEAN mask，
  *       解码为语义 0/1 mask 后，分别编码为 bit-packed 喂 CBR_BWD、
  *       以 INT8 字节形式喂分立 RELU_BWD，确保两条路径 mask 语义相同、格式不同。

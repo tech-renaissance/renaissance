@@ -2,7 +2,7 @@
  * @file initializer.h
  * @brief 初始化器 — 非单例值类型，负责策略推导和数学工具
  * @version 4.20.1
- * @date 2026-04-20
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 依赖项: init_config.h, tensor.h
  * @note 所属系列: core
@@ -163,7 +163,9 @@ public:
 
     [[nodiscard]] bool zero_gamma() const noexcept { return zero_gamma_; }
 
-    /// @brief ZERO_GAMMA 策略是否激活（通过 bn(InitKind::ZERO_GAMMA) 或 zero_gamma(true)）
+    /**
+     * @brief ZERO_GAMMA 策略是否激活（通过 bn(InitKind::ZERO_GAMMA) 或 zero_gamma(true)）
+     */
     [[nodiscard]] bool is_zero_gamma() const noexcept {
         return bn_kind_ == InitKind::ZERO_GAMMA || zero_gamma_;
     }

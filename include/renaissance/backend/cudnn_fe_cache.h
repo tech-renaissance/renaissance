@@ -1,3 +1,12 @@
+/**
+ * @file cudnn_fe_cache.h
+ * @brief cuDNN Frontend Graph Cache 模板：消除 Host 端开销
+ * @version 4.20.1
+ * @date 2026-06-28
+ * @author 技术觉醒团队
+ * @note 所属系列: backend
+ */
+
 #pragma once
 
 #ifdef TR_USE_CUDA

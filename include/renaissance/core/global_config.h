@@ -2,9 +2,10 @@
  * @file global_config.h
  * @brief 全局配置和常量定义
  * @details 定义框架级别的配置选项、枚举类型和便捷宏
- * @version 3.6.18
- * @date 2026-01-03
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
+ * @note 所属系列: core
  */
 
 #pragma once

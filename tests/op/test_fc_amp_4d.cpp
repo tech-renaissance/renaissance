@@ -1,8 +1,10 @@
 /**
  * @file test_fc_amp_4d.cpp
  * @brief FC 4D 输入等价性测试 — 支持 CPU / GPU FP32 / GPU AMP
- * @version 2.0.0
- * @date 2026-06-09
+ * @version 4.20.1
+ * @date 2026-06-28
+ * @author 技术觉醒团队
+ * @note 所属系列: tests/op
  *
  * 测试内容：
  *   构造 4D 输入 [N, H, W, C]（C%8==0），验证：

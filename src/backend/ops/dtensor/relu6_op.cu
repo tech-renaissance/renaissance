@@ -1,11 +1,12 @@
 /**
  * @file relu6_op.cu
  * @brief ReLU6 算子的 CUDA kernel — FWD + BWD 重计算版本
- * @version 1.0.0
- * @date 2026-05-31
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
+ * @note 所属系列: backend/ops/dtensor
  * @note FWD: y = min(max(x, 0), 6)
- *       BWD: dx = dy * (0 < x < 6 ? 1 : 0) (重计算)
+ * @note BWD: dx = dy * (0 < x < 6 ? 1 : 0) (重计算)
  */
 
 #ifdef TR_USE_CUDA

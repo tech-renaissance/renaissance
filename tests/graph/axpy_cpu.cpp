@@ -1,9 +1,10 @@
 /**
- * @file example_axpy_cpu.cpp
+ * @file axpy_cpu.cpp
  * @brief Simple AXPY example: C = alpha * A + B with forced CPU execution
  * @version 4.20.1
- * @date 2026-04-20
- * @author Team Tech-Renaissance
+ * @date 2026-06-28
+ * @author 技术觉醒团队
+ * @note 所属系列: tests/graph
  */
 
 #include "renaissance.h"

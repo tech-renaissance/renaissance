@@ -1,8 +1,10 @@
 /**
  * @file test_h2d_copy_bandwidth.cpp
  * @brief RANGE_H2D_COPY_A/B 等效带宽测试（CIFAR10/ImageNet，GPU/AMP，多RANK）
- * @version 2.0.0
- * @date 2026-05-23
+ * @version 4.20.1
+ * @date 2026-06-28
+ * @author 技术觉醒团队
+ * @note 所属系列: tests/correction
  *
  * 设计意图：
  *   测量异步 H2D copy 算子在 DeepLearningTask 中的等效带宽。

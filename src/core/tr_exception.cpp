@@ -1,11 +1,9 @@
 /**
  * @file tr_exception.cpp
- * @brief 异常类实现 + 全局terminate handler
- * @details 实现TRException的方法和全局terminate handler自动安装
+ * @brief 异常类实现 + 全局 terminate handler
  * @version 4.20.1
- * @date 2026-04-20
+ * @date 2026-06-28
  * @author 技术觉醒团队
- * @note 依赖项: tr_exception.h
  * @note 所属系列: core
  */
 

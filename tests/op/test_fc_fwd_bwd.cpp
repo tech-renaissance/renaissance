@@ -1,9 +1,10 @@
 /**
  * @file test_fc_fwd_bwd.cpp
  * @brief FC FWD+BWD 串接测试 — 支持 CPU / GPU FP32 / GPU AMP 三种模式
- * @version 2.0.0
- * @date 2026-05-18
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
+ * @note 所属系列: tests/op
  *
  * 用法：
  *   test_fc_fwd_bwd.exe --cpu    [--batch 8] [--in 2048] [--out 512]

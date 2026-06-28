@@ -1,3 +1,12 @@
+/**
+ * @file rng_comparison_test.cpp
+ * @brief RNG 统计特性对比测试
+ * @version 4.20.1
+ * @date 2026-06-28
+ * @author 技术觉醒团队
+ * @note 所属系列: tests/correction
+ */
+
 #include "renaissance/renaissance.h"
 #include <iostream>
 #include <iomanip>

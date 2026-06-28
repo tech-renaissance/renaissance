@@ -4,7 +4,7 @@
  * @details 提供 seq/cbr/block/repeat/gap_fc 等工厂函数，用 14 行定义 ResNet-50。
  *          BluePrint 是用户定义模型的唯一入口，通过 compile() 生成 Flow IR。
  * @version 4.20.1
- * @date 2026-04-20
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 所属系列: graph
  */
@@ -311,42 +311,32 @@ inline Layer gap_fc(int out_features, bool bias) {
 /**
  * @brief ResNet Bottleneck块（1x1->3x3->1x1结构）
  *
- * ========================================================================
- * 【重要设计原则】能融合就融合，绝不拆分！
- * ========================================================================
+ * 设计原则：Bottleneck 结构应保持为整体融合算子，不应拆分为子图。
  *
- * TR4框架的核心设计理念是：**能融合成大粒度算子就绝不拆分成小算子**
+ * 原因：
+ * 1. 后端已经为 Bottleneck 结构实现了专用融合算子（BOTTLENECK_AMP_FWD/BOTTLENECK_AMP_BWD），
+ *    融合算子可实现更好的内存访问模式和指令级并行，减少 kernel launch 开销。
  *
- * 为什么block()必须保持为整体融合算子？
+ * 2. 拆分 Bottleneck 会破坏后端融合优化，导致性能下降，
+ *    增加 kernel launch 次数和同步开销，无法利用专用的 Bottleneck 融合 kernel。
  *
- * 1. 我们有专门的BOTTLENECK_AMP_FWD/BOTTLENECK_AMP_BWD算子
- *    - 后端已经为Bottleneck结构进行了极致优化
- *    - 融合算子可以实现更好的内存访问模式和指令级并行
- *    - 减少kernel launch开销，最大化利用硬件性能
- *
- * 2. 拆分Bottleneck的严重后果：
- *    - 破坏后端融合优化，导致性能大幅下降
- *    - 增加kernel launch次数，增加同步开销
- *    - 无法利用专用的Bottleneck融合kernel
- *    - 违背TR4追求极致性能的核心理念
- *
- * 3. BluePrint API的正确使用方式：
- *    - 正确：block(64, 256, standard)  - 完整的Bottleneck块
- *    - 错误：手动拆成cbr + cbr + cbr + add2 - 破坏融合！
- *    - 错误：在Flow解析时拆解 - 破坏融合！
+ * 3. BluePrint API 的正确使用方式：
+ *    - 正确：block(64, 256, standard) — 完整的 Bottleneck 块
+ *    - 错误：手动拆成 cbr + cbr + cbr + add2，破坏融合
+ *    - 错误：在 Flow 解析时拆解，破坏融合
  *
  * 4. 自动融合机制：
- *    - 即使开发者错误地写成了seq(cbr(...), cbr(...), cbr(...), add2(...))
- *    - 编译器也应该识别出Bottleneck模式并融合为单个算子
- *    - 但最正确的做法是：从一开始就用block() API
+ *    即使写成了 seq(cbr(...), cbr(...), cbr(...), add2(...))，
+ *    编译器也应识别出 Bottleneck 模式并融合为单个算子。
+ *    推荐从一开始就使用 block() API。
  *
- * @param mid_ch bottleneck通道数（主分支第一个1x1卷积的输出通道数）
- * @param out_ch 输出通道数（主分支第二个1x1卷积的输出通道数）
- * @param style BlockStyle类型（RESNET_1_3_1或RESNET_1_3_1_DS）
- * @return Layer对象，保持为整体融合算子
+ * @param mid_ch bottleneck 通道数（主分支第一个 1x1 卷积的输出通道数）
+ * @param out_ch 输出通道数（主分支第二个 1x1 卷积的输出通道数）
+ * @param style BlockStyle 类型（RESNET_1_3_1 或 RESNET_1_3_1_DS）
+ * @return Layer 对象，保持为整体融合算子
  *
- * @note 调用后会生成NodeKind::Block节点，在Compiler中保持为BOTTLENECK_AMP_FWD
- * @warning 禁止在任何阶段（BluePrint定义、Flow解析、后端实现）将Bottleneck拆分为子图！
+ * @note 调用后会生成 NodeKind::Block 节点，在 Compiler 中保持为 BOTTLENECK_AMP_FWD
+ * @warning 禁止在任何阶段（BluePrint 定义、Flow 解析、后端实现）将 Bottleneck 拆分为子图
  */
 inline Layer block(int mid_ch, int out_ch, BlockStyle style) {
     if (style != BlockStyle::RESNET_1_3_1 && style != BlockStyle::RESNET_1_3_1_DS) {

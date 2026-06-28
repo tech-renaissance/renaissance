@@ -1,9 +1,10 @@
 /**
  * @file test_maxpool_fwd_bwd.cpp
  * @brief MaxPool FWD+BWD 数学正确性测试 — 支持 CPU / GPU / AMP 三种模式
- * @version 1.1.0
- * @date 2026-06-03
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
+ * @note 所属系列: tests/op
  *
  * 用法：
  *   test_maxpool_fwd_bwd.exe --cpu  [--shape 8,224,224,64 --kernel 3 --stride 2 --padding 1]

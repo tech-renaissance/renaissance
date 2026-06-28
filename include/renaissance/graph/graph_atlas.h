@@ -1,8 +1,8 @@
 /**
  * @file graph_atlas.h
  * @brief 图集映射表 —— 三阶段桥梁 [6 variants × 16 GraphIds]
- * @version 4.20.2
- * @date 2026-05-13
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 依赖项: renaissance/graph/computation_graph.h, renaissance/graph/shape_id.h
  * @note 所属系列: graph

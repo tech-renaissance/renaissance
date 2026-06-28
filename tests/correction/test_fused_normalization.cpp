@@ -1,9 +1,10 @@
 /**
  * @file test_fused_normalization.cpp
  * @brief FusedNormalization FP32 vs AMP 数值差别测试
- * @version 1.0.0
- * @date 2026-05-28
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
+ * @note 所属系列: tests/correction
  *
  * 测试目的：
  *   比较 FusedNormalization 对于 MNIST 大小图像 (1×28×28×1) 的 FP32 和 AMP 版本

@@ -1,9 +1,10 @@
 /**
  * @file test_check_nan.cpp
  * @brief RANGE_CHECK_NAN 数学正确性测试
- * @version 1.0.0
- * @date 2026-05-20
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
+ * @note 所属系列: tests/correction
  *
  * 测试 CHECK_NAN 需要 output_ids[0] 存放 NaN 标志 DTensor。
  * 用原始 GraphNode 构建（append_range 不支持 output_ids）。

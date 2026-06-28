@@ -1,9 +1,10 @@
 /**
  * @file channel_padding_op.cpp
  * @brief ChannelPadding 算子实现 — C 通道填充到 8 的倍数
- * @version 1.0.0
- * @date 2026-06-09
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
+ * @note 所属系列: backend/ops/dtensor
  * @note CPU 路径：compact 布局，逐元素复制 + 补零
  * @note CUDA 路径：逐元素 kernel，正确处理 padded_c
  */

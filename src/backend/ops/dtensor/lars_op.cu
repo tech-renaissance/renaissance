@@ -1,7 +1,10 @@
 /**
  * @file lars_op.cu
  * @brief LARS / LARS_NESTEROV ComputeOp CUDA kernel
- * @version 4.21.0
+ * @version 4.20.1
+ * @date 2026-06-28
+ * @author 技术觉醒团队
+ * @note 所属系列: backend/ops/dtensor
  */
 
 #ifdef TR_USE_CUDA

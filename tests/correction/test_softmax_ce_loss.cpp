@@ -1,8 +1,10 @@
 /**
  * @file test_softmax_ce_loss.cpp
  * @brief 独立测试 SoftmaxCE FWD/INF 的 loss 输出差异
- * @version 1.0.0
- * @date 2026-05-28
+ * @version 4.20.1
+ * @date 2026-06-28
+ * @author 技术觉醒团队
+ * @note 所属系列: tests/correction
  *
  * 用法: test_softmax_ce_loss --cpu | --gpu
  * 输出: CPU/GPU 下 FWD loss、INF loss、两者差值

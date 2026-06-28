@@ -1,8 +1,10 @@
 /**
  * @file test_softmax_ce.cpp
  * @brief SOFTMAX_CE FWD+BWD 数学正确性测试 — 支持 CPU / GPU FP32 / GPU AMP
- * @version 1.1.0
- * @date 2026-05-19
+ * @version 4.20.1
+ * @date 2026-06-28
+ * @author 技术觉醒团队
+ * @note 所属系列: tests/correction
  *
  * 用法：
  *   test_softmax_ce.exe --cpu    [--batch 8] [--num_classes 1000]

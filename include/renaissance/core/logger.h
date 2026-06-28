@@ -3,9 +3,8 @@
  * @brief 日志器类声明
  * @details 轻量级、线程安全、可编译关闭的日志器，支持四级日志（DEBUG/INFO/WARN/ERROR）和模块化标记
  * @version 4.20.1
- * @date 2026-04-20
+ * @date 2026-06-28
  * @author 技术觉醒团队
- * @note 依赖项:
  * @note 所属系列: core
  */
 

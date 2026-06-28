@@ -1,6 +1,10 @@
 /**
  * @file test_cbr_amp_inf.cpp
  * @brief CBR_AMP_INF vs Conv+BN2D+ReLU INF 等价性测试
+ * @version 4.20.1
+ * @date 2026-06-28
+ * @author 技术觉醒团队
+ * @note 所属系列: tests/op
  */
 
 #include "cbr_amp_test_utils.hpp"

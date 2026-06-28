@@ -1,10 +1,11 @@
 /**
  * @file captured_graph.h
  * @brief 双后端可执行图 —— CUDA Graph / CPU 函数队列统一封装
- * @version 4.21.0
- * @date 2026-05-17
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
- * @note P_ULTIMATE 实施：去 #ifdef 切割，per_rank_execs_ 封装内部，CpuOp 裸函数指针
+ * @note 去 #ifdef 切割，per_rank_execs_ 封装内部，CpuOp 裸函数指针
+ * @note 所属系列: graph
  */
 
 #pragma once
@@ -46,7 +47,7 @@ struct CpuOp {
 /**
  * @brief 双后端可执行图
  *
- * 核心设计原则（P_ULTIMATE §3.1）：
+ * 核心设计原则：
  * 1. #ifdef TR_USE_CUDA 只进函数体，不进类定义
  * 2. 后端运行时确定，运行期不变
  * 3. per_rank_execs_ 封装在 CapturedGraph 内部
@@ -83,7 +84,7 @@ public:
     };
 
     /**
-     * @brief 单 rank 捕获入口（完整版，P_ULTIMATE.md Phase B）
+     * @brief 单 rank 捕获入口
      *
      * @param cg       纯算子拓扑
      * @param mp       该变体的 MemoryPlan

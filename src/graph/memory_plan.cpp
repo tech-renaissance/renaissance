@@ -1,10 +1,9 @@
 /**
  * @file memory_plan.cpp
- * @brief MemoryPlan实现 - 基于65-Region规范的显存布局引擎
+ * @brief MemoryPlan 实现 —— 基于 Region 规范的显存布局引擎
  * @version 4.20.1
- * @date 2026-04-20
+ * @date 2026-06-28
  * @author 技术觉醒团队
- * @note 依赖项: renaissance/graph/memory_plan.h, renaissance/core/types.h
  * @note 所属系列: graph
  */
 

@@ -1,23 +1,10 @@
 /**
- * @file mnist_best.cpp
- * @brief MNIST MLP极限准确率测试 - 最强配置
- * @version 1.0.0
- * @date 2026-05-30
- * @author Team Tech-Renaissance
- *
- * 设计原则：
- * - 综合AWY_FINAL.md和AWY_FINAL_K.md两家之长
- * - 仅使用已验证可用的框架功能
- * - 在零框架改动前提下达到最高准确率
- *
- * 核心策略：
- * - 网络结构：1024→400→120→84→10（32x32输入展平后接四层FC）
- * - 激活函数：ReLU（全票通过的最优选择）
- * - Bias：true（AWY_FINAL选择，补偿无BN）
- * - 优化器：AdamW with weight_decay=1e-4
- * - 学习率：CosineAnnealing+warmup(5)（AWY_FINAL选择，更稳定）
- * - 数据增强：Pad+Rotation+Scale+Autocontrast+Erasing（无Crop，保持32x32）
- * - 训练轮数：100 epochs（平衡点）
+ * @file mlp_adamw_larger.cpp
+ * @brief MLP AdamW优化器测试 - 较大网络规模
+ * @version 4.20.1
+ * @date 2026-06-28
+ * @author 技术觉醒团队
+ * @note 所属系列: tests/integration
  */
 
 #include "renaissance.h"
@@ -131,66 +118,58 @@ int main(int argc, char** argv) {
         .dataset("mnist", "/root/epfs/dataset/mnist")
 #endif
         .color_channels(1)
-        .load_workers(8)           // 数据加载线程数
-        .preprocess_workers(8)     // 预处理线程数
-        .cpu_binding(true)        // CPU核心绑定
+        .load_workers(8)               // 数据加载线程数
+        .preprocess_workers(8)         // 预处理线程数
+        .cpu_binding(true)             // CPU核心绑定
         .normalization(NormMode::MNIST)
 
-        // 训练时使用前辈验证的最强预处理链
         .train_transforms(
-            Pad(2),                         // 扩展到32x32，为后续操作提供空间
-            RandomRotation(15.0f, 0),       // ±15度旋转
-            RandomScale(0.9f, 1.1f),        // 0.9-1.1倍缩放
-            RandomAutocontrast(0.5f),       // 50%概率自动对比度调整
-            RandomErasing(0.5f)             // 50%概率随机擦除
+            Pad(2),                       // 扩展到32x32，为后续操作提供空间
+            RandomRotation(15.0f, 0),   // ±15度旋转
+            RandomScale(0.9f, 1.1f),    // 0.9-1.1倍缩放
+            RandomAutocontrast(0.5f),    // 50%概率自动对比度调整
+            RandomErasing(0.5f)          // 50%概率随机擦除
         )
 
-        // 验证时不做增强
         .val_transforms(
-            Pad(2)                          // 扩展到32x32，为后续操作提供空间
+            Pad(2)                        // 扩展到32x32，为后续操作提供空间
         )
         .commit();
 
-    // 网络结构：1024→400→120→84→10（32x32输入展平后接四层FC）
-    // 采用AWY_FINAL的选择：三层隐藏层 + bias=true
-
     BluePrint ultimate_mlp = seq(
-        fc(400, true),                     // 首层
-        make_activation(cfg.activation),   // 动态选择激活函数
-        fc(120, true),                     // 中间层
-        make_activation(cfg.activation),   // 动态选择激活函数
-        fc(84, true),                      // 瓶颈层
-        make_activation(cfg.activation),   // 动态选择激活函数
-        fc(10, true)                       // 输出层
+        fc(400, true),                   // 首层
+        make_activation(cfg.activation), // 动态选择激活函数
+        fc(120, true),                   // 中间层
+        make_activation(cfg.activation), // 动态选择激活函数
+        fc(84, true),                   // 瓶颈层
+        make_activation(cfg.activation), // 动态选择激活函数
+        fc(10, true)                    // 输出层
     );
 
     DeepLearningTask task;
     task.model(ultimate_mlp)
         .loss(CrossEntropyLoss().label_smoothing(0.1f))  // Label Smoothing交叉熵损失
 
-        // 初始化：Kaiming Uniform + FAN_IN（ReLU标准初始化）
         .initializer(Initializer()
-            .fc(InitKind::KAIMING_UNIFORM)
-            .fan(FanMode::FAN_IN))
+            .fc(InitKind::KAIMING_UNIFORM)  // Kaiming Uniform初始化
+            .fan(FanMode::FAN_IN))          // FAN_IN模式
 
-        .total_epochs(kTotalEpochs)           // 充分训练轮数
+        .total_epochs(kTotalEpochs)         // 充分训练轮数
 
-        // 优化器：AdamW（自适应学习率优化器）
         .optimizer(AdamW()
-            .beta1(0.9f)                      // 标准动量参数
-            .beta2(0.999f)                    // 标准二阶矩参数
-            .eps(1e-8f)                       // 数值稳定性
-            .weight_decay(1e-4f))             // 适中的权重衰减
+            .beta1(0.9f)                    // 标准动量参数
+            .beta2(0.999f)                  // 标准二阶矩参数
+            .eps(1e-8f)                     // 数值稳定性
+            .weight_decay(1e-4f))           // 适中的权重衰减
 
-        // 学习率调度：CosineAnnealing + warmup
         .scheduler(CosineAnnealingLR()
-            .base_lr(0.001f)                  // AdamW标准初始学习率
-            .eta_min(1e-6f)                   // 最小学习率
-            .warmup(5)                        // 5轮预热
-            .step_by_epoch())                 // 按epoch更新
+            .base_lr(0.001f)                // AdamW标准初始学习率
+            .eta_min(1e-6f)                 // 最小学习率
+            .warmup(5)                      // 5轮预热
+            .step_by_epoch())               // 按epoch更新
 
-        .validate_every(1, 1)                // 每轮验证
-        .early_stop_by_top1(0.999f)          // 极高目标早停
+        .validate_every(1, 1)              // 每轮验证
+        .early_stop_by_top1(0.999f)        // 极高目标早停
         .metrics(Metric::TRAIN_LOSS | Metric::VAL_LOSS | Metric::VAL_TOP1);
 
     std::cout << "\n=====================================\n"
@@ -223,7 +202,6 @@ int main(int argc, char** argv) {
               << " Time per Epoch: " << elapsed / kTotalEpochs << " s\n"
               << "=====================================\n";
 
-    // 根据准确率给出评价
     if (result.best_top1 >= 0.985f) {
         std::cout << "EXCELLENT! Accuracy >= 98.5%\n";
         std::cout << "Target achieved: Goal met!\n";
@@ -243,6 +221,5 @@ int main(int argc, char** argv) {
 
     std::cout << "=====================================\n";
 
-    // 返回值：98.5%以上返回0（成功），否则返回1（失败）
     return result.best_top1 >= 0.985f ? 0 : 1;
 }

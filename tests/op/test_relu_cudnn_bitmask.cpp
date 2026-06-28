@@ -1,6 +1,10 @@
 /**
  * @file test_relu_cudnn_bitmask.cpp
  * @brief 独立 ReLU 算子性能测试（cuDNN Frontend bitmask 方法，对齐 *old.cpp）
+ * @version 4.20.1
+ * @date 2026-06-28
+ * @author 技术觉醒团队
+ * @note 所属系列: tests/op
  * @note 单 GPU，AMP FP16，形状 8x1024x1024x8，预热5次+计时100次
  * @note BWD 使用 MUL(dY, mask) 而非 RELU_BWD(dY, y)，完全对齐 cbr_bwd_fp16_old.cpp
  * @note 无参数解析，全部默认配置

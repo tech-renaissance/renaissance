@@ -1,8 +1,8 @@
 /**
  * @file decode_strategy.h
  * @brief JPEG解码策略封装
- * @version 1.0.0
- * @date 2026-02-17
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 所属系列: data
  */

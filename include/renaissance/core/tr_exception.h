@@ -3,9 +3,8 @@
  * @brief 框架异常系统（渐进式增强架构）
  * @details 技术觉醒框架统一异常体系，支持Context Chain多层上下文，自动记录日志
  * @version 4.20.1
- * @date 2026-04-20
+ * @date 2026-06-28
  * @author 技术觉醒团队
- * @note 依赖项:
  * @note 所属系列: core
  */
 
@@ -152,7 +151,7 @@ TR_DEFINE_EXCEPTION(ZeroDivisionError);
 TR_DEFINE_EXCEPTION(ShapeError);
 TR_DEFINE_EXCEPTION(DeviceError);
 TR_DEFINE_EXCEPTION(MemoryError);
-TR_DEFINE_EXCEPTION(TimeoutError);  // P0-2修复：添加超时异常
+TR_DEFINE_EXCEPTION(TimeoutError);  // 添加超时异常
 
 // 生产级核心异常类型（4.20.1）
 TR_DEFINE_EXCEPTION(GPUOutOfMemoryError);  // GPU显存不足（可恢复）

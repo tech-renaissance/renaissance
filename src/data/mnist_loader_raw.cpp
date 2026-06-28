@@ -1,3 +1,12 @@
+/**
+ * @file mnist_loader_raw.cpp
+ * @brief MNIST 原始数据加载器实现
+ * @version 4.20.1
+ * @date 2026-06-28
+ * @author 技术觉醒团队
+ * @note 所属系列: data
+ */
+
 #ifdef _WIN32
     #ifndef NOMINMAX
         #define NOMINMAX

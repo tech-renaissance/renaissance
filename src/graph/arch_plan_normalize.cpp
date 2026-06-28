@@ -1,8 +1,8 @@
 /**
  * @file arch_plan_normalize.cpp
- * @brief Step2-5：BN重命名、SoftmaxCE/Identity/Flatten规范化
+ * @brief Step2-5：BN 重命名、SoftmaxCE/Identity/Flatten 规范化
  * @version 4.20.1
- * @date 2026-04-20
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 所属系列: graph
  */
@@ -36,7 +36,7 @@ void ArchPlan::build(int num_classes) {
     step2_rename_bn();
     step3_normalize_softmax_ce(num_classes);
     step4_normalize_identity();
-    align_amp_input_channels_for_first_conv();  // [EXY2] AMP 首层 Conv/CBR 对齐输入 C
+    align_amp_input_channels_for_first_conv();  // AMP 首层 Conv/CBR 对齐输入 C
     step6_deduce_shapes();      // derive actual H/W/C first
     step5_normalize_flatten();  // then decide whether Flatten is truly needed
 

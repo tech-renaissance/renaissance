@@ -1,8 +1,8 @@
 /**
  * @file axpy_op.cu
  * @brief AXPY算子的CUDA kernel实现（FP32版本）
- * @version 4.21.0
- * @date 2026-05-16
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 依赖项: cuda_runtime.h
  * @note 所属系列: backend/ops/dtensor

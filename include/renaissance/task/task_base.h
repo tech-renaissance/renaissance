@@ -2,7 +2,7 @@
  * @file task_base.h
  * @brief TaskBase 类声明：静态图任务抽象基类，强制三阶段状态机
  * @version 4.20.1
- * @date 2026-04-20
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 依赖项: core/types, tensor/distributed_tensor, tensor/tensor, graph/memory_plan, graph/computation_graph
  * @note 所属系列: task

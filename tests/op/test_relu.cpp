@@ -2,8 +2,9 @@
  * @file test_relu.cpp
  * @brief ReLU算子数学正确性验证测试
  * @version 4.20.1
- * @date 2026-04-20
+ * @date 2026-06-28
  * @author 技术觉醒团队
+ * @note 所属系列: tests/op
  * @note 设计原则: 4种ComputeOp × 2后端 = 8组合, 2种CPU AMP无效(TR_TYPE_ERROR), 6种有效
  * @note 参照: tests/graph/axpy.cpp (GPU) + axpy_cpu.cpp (CPU) 的顶层写法
  */

@@ -1,8 +1,8 @@
 /**
  * @file op_stream_policy.cpp
  * @brief 算子默认流策略实现
- * @version 4.21.0
- * @date 2026-05-18
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 所属系列: backend
  */

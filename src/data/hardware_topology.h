@@ -1,11 +1,10 @@
 /**
  * @file hardware_topology.h
- * @brief 硬件拓扑发现和CPU绑核规划
- * @version 1.0.0
- * @date 2026-02-18
+ * @brief 硬件拓扑发现和 CPU 绑核规划
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 所属系列: data
- * @note 完整移植自 tests/bind/a.cpp，用 TR_SCENE_GPU_CLOUD 宏保护
  */
 
 #pragma once

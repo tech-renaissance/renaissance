@@ -1,12 +1,12 @@
 /**
  * @file compile_spec.h
  * @brief 编译参数集 —— 取代 Config 类名，描述单个编译变体的参数
- * @version 4.20.2
- * @date 2026-05-13
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 依赖项: renaissance/core/types.h, renaissance/graph/shape_id.h
  * @note 所属系列: graph
- * @note IMPORTANT.md 禁止任何名为 Config 的类名，统一使用 CompileSpec
+ * @note 禁止任何名为 Config 的类名，统一使用 CompileSpec
  */
 
 #pragma once

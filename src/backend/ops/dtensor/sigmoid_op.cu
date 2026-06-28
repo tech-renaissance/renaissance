@@ -1,11 +1,12 @@
 /**
  * @file sigmoid_op.cu
  * @brief Sigmoid 算子的 CUDA kernel — FWD + BWD 重计算版本
- * @version 1.0.0
- * @date 2026-05-31
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
+ * @note 所属系列: backend/ops/dtensor
  * @note FWD: y = σ(x) = 1 / (1 + e^(-x))
- *       BWD: dx = dy * σ(x) * (1 - σ(x)) (重计算)
+ * @note BWD: dx = dy * σ(x) * (1 - σ(x)) (重计算)
  */
 
 #ifdef TR_USE_CUDA

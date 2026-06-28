@@ -1,10 +1,10 @@
 /**
  * @file mnist_loader_raw.h
  * @brief MNIST数据加载器（RAW格式，从官方原始.ubyte文件读取）
- * @version 1.0.0
- * @date 2026-02-01
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
- * @note 所属系统: data
+ * @note 所属系列: data
  */
 
 #pragma once

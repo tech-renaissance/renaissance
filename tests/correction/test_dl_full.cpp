@@ -1,4 +1,11 @@
-
+/**
+ * @file test_dl_full.cpp
+ * @brief 深度学习框架完整流程测试
+ * @version 4.20.1
+ * @date 2026-06-28
+ * @author 技术觉醒团队
+ * @note 所属系列: tests/correction
+ */
 
 #include "renaissance.h"
 #include <chrono>

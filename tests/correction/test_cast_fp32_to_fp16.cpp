@@ -1,9 +1,10 @@
 /**
  * @file test_cast_fp32_to_fp16.cpp
  * @brief RANGE_CAST_FP32_TO_FP16 数学正确性测试（仅 AMP 模式）
- * @version 1.2.0
- * @date 2026-05-20
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
+ * @note 所属系列: tests/correction
  *
  * 设计意图：
  *   本测试特意在同一 region（W_FC_WEIGHT / A_FC_WEIGHT）内分配两个形状不同、

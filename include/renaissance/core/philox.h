@@ -3,11 +3,11 @@
  * @brief Philox4x32-10 伪随机数生成算法（CPU/GPU通用）
  * @details Counter-Based RNG，支持并行可复现生成
  *          参考：Salmon et al., "Parallel Random Numbers: As Easy as 1, 2, 3"
- * @version 3.6.8
- * @date 2025-12-27
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 依赖项: 无（纯C++标准库 + CUDA兼容）
- * @note 所属系列: base
+ * @note 所属系列: core
  */
 
 #pragma once

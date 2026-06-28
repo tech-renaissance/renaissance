@@ -1,8 +1,8 @@
 /**
  * @file compiler.h
  * @brief Compiler — 五阶段编排器，从 ArchPlan 编译生成 MemoryPlan + ComputationGraph
- * @version 4.20.4
- * @date 2026-05-14
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 依赖项: renaissance/graph/arch_plan.h, renaissance/graph/compile_spec.h,
  *               renaissance/graph/memory_plan.h, renaissance/graph/computation_graph.h
@@ -264,8 +264,8 @@ Shape get_output_shape(LayerKind kind, const std::vector<TensorDesc>& descs);
  *   - FC层：分配W_FC_WEIGHT、W_FC_BIAS
  *   - 自动识别并标记BN3层（用于ZERO_GAMMA初始化策略）
  *
- * 注意：这是简化版本的编译器，专注于MemoryPlan生成。
- * 完整的五阶段编译器（ULTIMATE_TOP_DESIGN.md）将在后续实现。
+ * 注意：这是简化版本的编译器，专注于 MemoryPlan 生成。
+ * 完整的五阶段编译器将在后续实现。
  */
 void compile_arch_plan(const ArchPlan& plan, MemoryPlan& memory_plan, Initializer& initializer);
 

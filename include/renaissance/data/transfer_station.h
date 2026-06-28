@@ -1,8 +1,8 @@
 /**
  * @file transfer_station.h
  * @brief TransferStation双缓冲区管理类
- * @version 3.1.0
- * @date 2026-02-20
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 所属系列: data
  *

@@ -1,9 +1,10 @@
 /**
  * @file padding_mode.h
  * @brief 填充模式定义
- * @version 1.0.0
- * @date 2026-02-23
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
+ * @note 所属系列: data
  */
 
 #pragma once

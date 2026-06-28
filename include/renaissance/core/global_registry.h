@@ -2,7 +2,7 @@
  * @file global_registry.h
  * @brief 全局注册表 - 线程安全的全局配置管理类
  * @version 4.20.1
- * @date 2026-04-20
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 所属系列: core
  */

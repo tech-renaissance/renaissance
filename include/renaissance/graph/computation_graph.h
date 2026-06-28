@@ -1,8 +1,8 @@
 /**
  * @file computation_graph.h
  * @brief 计算图 —— GraphNode 与 ComputationGraph，纯算子拓扑容器
- * @version 4.20.2
- * @date 2026-05-13
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 依赖项: renaissance/graph/op_kind.h, renaissance/graph/shape_id.h
  * @note 所属系列: graph
@@ -29,7 +29,7 @@ namespace tr {
 /**
  * @brief 计算图的统一节点类型
  *
- * 支持两种操作模式（OOOPS_FINAL.md 终局决策）：
+ * 支持两种操作模式：
  *   - COMPUTE：DTensor 级操作（ComputeOp），关联 DTensor 全局 ID
  *   - RANGE：  Region 级批量操作（RangeOp），使用预计算 (offset, size) 范围
  *
@@ -41,7 +41,7 @@ struct GraphNode {
     Kind kind = Kind::COMPUTE;
 
     union {
-        ComputeOp compute_op;   ///< DTensor 级操作（43 枚举值，OPS_NAME.md）
+        ComputeOp compute_op;   ///< DTensor 级操作
         RangeOp   range_op;     ///< Region 级操作（22 枚举值）
     };
 

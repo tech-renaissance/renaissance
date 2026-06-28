@@ -2,7 +2,7 @@
  * @file simple_task.h
  * @brief 手动绘图任务门面：暴露 TaskBase 的手动构图接口，提供极简用户体验
  * @version 4.20.1
- * @date 2026-04-20
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 依赖项: task_base.h
  * @note 所属系列: task

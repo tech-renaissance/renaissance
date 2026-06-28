@@ -1,9 +1,10 @@
 /**
  * @file test_avgpool_fwd_bwd.cpp
  * @brief AvgPool FWD+BWD 数学正确性测试 — 支持 CPU / GPU / AMP 三种模式
- * @version 1.0.0
- * @date 2026-06-06
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
+ * @note 所属系列: tests/op
  *
  * 用法：
  *   test_avgpool_fwd_bwd.exe --cpu  [--shape 8,16,16,64 --kernel 2 --stride 2 --padding 0]

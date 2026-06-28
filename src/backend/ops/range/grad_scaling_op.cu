@@ -1,7 +1,10 @@
 /**
  * @file grad_scaling_op.cu
- * @brief RANGE_GRAD_SCALING CUDA kernel
- * @version 4.21.0
+ * @brief RANGE_GRAD_SCALING CUDA 内核实现
+ * @version 4.20.1
+ * @date 2026-06-28
+ * @author 技术觉醒团队
+ * @note 所属系列: backend/ops/range
  */
 
 #ifdef TR_USE_CUDA

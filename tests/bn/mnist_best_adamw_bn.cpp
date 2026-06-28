@@ -1,22 +1,22 @@
 /**
- * @file mnist_best.cpp
+ * @file mnist_best_adamw_bn.cpp
  * @brief MNIST MLP极限准确率测试 - 最强配置
- * @version 1.0.0
- * @date 2026-05-30
- * @author Team Tech-Renaissance
+ * @version 4.20.1
+ * @date 2026-06-28
+ * @author 技术觉醒团队
+ * @note 所属系列: tests/bn
  *
  * 设计原则：
- * - 综合AWY_FINAL.md和AWY_FINAL_K.md两家之长
  * - 仅使用已验证可用的框架功能
  * - 在零框架改动前提下达到最高准确率
  *
  * 核心策略：
- * - 网络结构：1024→512→256（比AWY_FINAL_K更宽，配合Label Smoothing=0.1）
- * - 激活函数：ReLU（全票通过的最优选择）
- * - Bias：true（AWY_FINAL选择，补偿无BN）
+ * - 网络结构：1024→512→256（配合Label Smoothing=0.1）
+ * - 激活函数：ReLU（最优选择）
+ * - Bias：true（补偿无BN）
  * - 优化器：AdamW with weight_decay=1e-4（MLPerf Closed配置）
- * - 学习率：CosineAnnealing+warmup(5)（AWY_FINAL选择，更稳定）
- * - 数据增强：完整6种预处理链（前辈验证的最强组合）
+ * - 学习率：CosineAnnealing+warmup(5)（更稳定）
+ * - 数据增强：完整6种预处理链
  * - 训练轮数：100 epochs（平衡点）
  */
 

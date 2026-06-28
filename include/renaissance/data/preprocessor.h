@@ -1,8 +1,8 @@
 /**
  * @file preprocessor.h
- * @brief 图像预处理器（V4.0 - 姜总工的新设计）
+ * @brief 图像预处理器（V4.0）
  * @version 4.20.1
- * @date 2026-04-20
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 所属系列: data
  * @note 替代旧的PreprocessorEmulator
@@ -281,7 +281,7 @@ private:
 
 /**
  * @class Preprocessor
- * @brief 图像预处理器（姜总工的V4.0设计）
+ * @brief 图像预处理器（V4.0设计）
  *
  * 核心特性：
  * - M个worker严格按顺序领取样本

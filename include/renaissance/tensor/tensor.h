@@ -2,7 +2,7 @@
  * @file tensor.h
  * @brief CPU 端数据容器（二等公民），仅用于主机-设备数据搬运
  * @version 4.20.1
- * @date 2026-04-20
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 所属系列: tensor
  */

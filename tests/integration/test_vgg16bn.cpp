@@ -1,11 +1,12 @@
 /**
  * @file test_vgg16bn.cpp
  * @brief ImageNet VGG-16-BN 准确率测试（多 RANK / DDP）
- * @version 1.0.0
- * @date 2026-06-13
- * @author Team Tech-Renaissance
+ * @version 4.20.1
+ * @date 2026-06-28
+ * @author 技术觉醒团队
+ * @note 所属系列: tests/integration
  *
- * 超参数对齐 test_vgg16bn.py（PyTorch DDP 参考实现）。
+ * 超参数对齐 PyTorch DDP 参考实现。
  * 多 RANK 模板参考 test_nin.cpp。
  *
  * 网络结构: VGG-16 with BatchNorm
@@ -157,7 +158,7 @@ int main(int argc, char** argv) {
 
     // VGG-16 with BatchNorm
     // Input: [N, 224, 224, 3]
-    // [EXY2] AMP 模式下首层 Conv 的输入 C 会在 ArchPlan 中自动对齐到 4，
+    // AMP 模式下首层 Conv 的输入 C 会在 ArchPlan 中自动对齐到 4，
     //        不再需要显式 channel_padding()。
     BluePrint vgg16bn = seq(
         // Block 1: 224x224 -> 112x112

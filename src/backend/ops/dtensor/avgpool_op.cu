@@ -1,3 +1,12 @@
+/**
+ * @file avgpool_op.cu
+ * @brief Average Pooling 算子 CUDA kernel 实现
+ * @version 4.20.1
+ * @date 2026-06-28
+ * @author 技术觉醒团队
+ * @note 所属系列: backend/ops/dtensor
+ */
+
 #include <cuda_runtime.h>
 #include <cuda_fp16.h>
 #include <climits>

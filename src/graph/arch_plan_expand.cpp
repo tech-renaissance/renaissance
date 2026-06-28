@@ -1,8 +1,8 @@
 /**
  * @file arch_plan_expand.cpp
- * @brief BluePrint桥接与Step1：树展开、Block参数补全、名称转译
+ * @brief BluePrint 桥接与 Step1：树展开、Block 参数补全、名称转译
  * @version 4.20.1
- * @date 2026-04-20
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 所属系列: graph
  */

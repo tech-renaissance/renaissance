@@ -1,9 +1,10 @@
 /**
  * @file test_dropout.cpp
  * @brief Dropout FWD+BWD+INF 数学属性测试 — 与 PyTorch 无关，自包含验证
- * @version 1.0.0
- * @date 2026-06-03
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
+ * @note 所属系列: tests/op
  *
  * 用法：
  *   test_dropout.exe --cpu  [--shape 8,1,1,1024 --p 0.5]

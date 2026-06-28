@@ -1,8 +1,8 @@
 /**
- * @file task.h
+ * @file deep_learning_task.h
  * @brief 深度学习训练任务门面：封装完整训练循环、验证、SEMA、早停与指标收集
  * @version 4.20.1
- * @date 2026-04-20
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 依赖项: task_base.h, blueprint.h, loss.h, optimizer.h, scheduler.h
  * @note 所属系列: task
@@ -302,7 +302,7 @@ protected:
 
         CompileSpec base_spec = CompileSpec::from_global_registry();
 
-        // [EXY2] 让 Compiler 的 I_A_DATA 分配与 ShapeId 跟随 ArchPlan 推导后的首层输入 C。
+        // 让 Compiler 的 I_A_DATA 分配与 ShapeId 跟随 ArchPlan 推导后的首层输入 C。
         // 仅在 AMP 下可能改变；对 FP32 或首层 Flatten/ChannelPadding，effective_c == num_color_channels。
         if (base_spec.amp_enabled && !arch_plan_.layers().empty()) {
             int effective_c = arch_plan_.layers()[0].in_shape.c();

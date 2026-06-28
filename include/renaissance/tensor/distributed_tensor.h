@@ -1,12 +1,11 @@
 /**
  * @file distributed_tensor.h
  * @brief 分布式张量 — "一张图纸，八卡共享"的内存抽象
- * @version 4.20.2
- * @date 2026-05-13
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 依赖项: renaissance/core/types.h
  * @note 所属系列: tensor
- * @note 关键修改：slot_bytes_ 与 shape 解耦为构造时常量，支持跨变体 offset 一致
  */
 
 #pragma once

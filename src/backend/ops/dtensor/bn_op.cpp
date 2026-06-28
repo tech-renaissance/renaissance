@@ -1,8 +1,8 @@
 /**
  * @file bn_op.cpp
  * @brief BN1D / BN2D 算子实现：CPU 朴素循环 + GPU cuDNN Frontend
- * @version 4.21.0
- * @date 2026-06-07
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 依赖项: op_registry.h, device_context.h, capture_multi_stream.h, cudnn_utils.h
  * @note 所属系列: backend/ops/dtensor

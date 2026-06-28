@@ -2,9 +2,8 @@
  * @file initializer.cpp
  * @brief Initializer 实现：策略推导 + 数学工具
  * @version 4.20.1
- * @date 2026-04-20
+ * @date 2026-06-28
  * @author 技术觉醒团队
- * @note 依赖项: initializer.h, logger.h, tensor.h, tr_exception.h
  * @note 所属系列: core
  */
 

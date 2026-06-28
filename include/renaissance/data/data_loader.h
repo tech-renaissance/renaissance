@@ -1,8 +1,8 @@
 /**
  * @file data_loader.h
  * @brief 数据加载器抽象基类
- * @version 3.8.0
- * @date 2026-01-17
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 所属系列: data
  */

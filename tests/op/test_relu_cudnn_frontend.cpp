@@ -1,6 +1,10 @@
 /**
  * @file test_relu_cudnn_frontend.cpp
  * @brief 独立 ReLU 算子性能测试（cuDNN Frontend，OLD 方法）
+ * @version 4.20.1
+ * @date 2026-06-28
+ * @author 技术觉醒团队
+ * @note 所属系列: tests/op
  * @note 单 GPU，AMP FP16，形状 8x1024x1024x8，预热5次+计时100次
  * @note 无参数解析，全部默认配置
  */

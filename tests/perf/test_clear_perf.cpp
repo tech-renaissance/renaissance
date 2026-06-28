@@ -1,9 +1,10 @@
 /**
  * @file test_clear_perf.cpp
  * @brief RANGE_CLEAR 专用性能测试 —— 不验证数值，只测耗时
- * @version 1.0.0
- * @date 2026-05-20
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
+ * @note 所属系列: tests/perf
  *
  * 固定配置：
  *   - Region 大小: ~100MB FP32 / ~50MB FP16 per region（3 个区域共 ~300MB / ~150MB）

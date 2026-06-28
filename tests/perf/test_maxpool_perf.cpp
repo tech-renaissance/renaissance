@@ -1,8 +1,10 @@
 /**
  * @file test_maxpool_perf.cpp
  * @brief MaxPool 性能测试 —— FWD/BWD/INF 单独计时
- * @version 1.0.0
- * @date 2026-06-03
+ * @version 4.20.1
+ * @date 2026-06-28
+ * @author 技术觉醒团队
+ * @note 所属系列: tests/perf
  *
  * 固定配置：
  *   - 输入形状: [512, 112, 112, 64] (NHWC)

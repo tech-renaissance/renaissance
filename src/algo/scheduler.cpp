@@ -1,10 +1,10 @@
 /**
  * @file scheduler.cpp
  * @brief 学习率调度器实现
- * @version 4.20.2
- * @date 2026-05-14
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
- * @note 设计依据: LR_FINAL.md, OTS_FINAL.md
+ * @note 所属系列: algo
  *
  * @note 重要：本文件不提供 step() / reset() / get_current_lr()。
  *   调度器为无状态纯函数设计，LR 由 get_lr_by_batch() / get_lr_by_epoch() 直接计算。

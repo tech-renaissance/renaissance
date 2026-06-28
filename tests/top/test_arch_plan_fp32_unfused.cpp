@@ -3,7 +3,7 @@
  * @brief FP32模式 + 不融合算子测试 - 与AMP融合版本对比
  * @details 测试LeNet-5和ResNet-50在FP32不融合模式下的表现，用于对比验证融合效果
  * @version 4.20.1
- * @date 2026-05-13
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 所属系列: tests/top
  * @note 配置: AMP=OFF, Fusion=OFF (fuse=false)

@@ -1,8 +1,8 @@
 /**
  * @file color_jitter.cpp
  * @brief 颜色抖动操作实现
- * @version 1.0.0
- * @date 2026-02-22
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 所属系列: data
  */

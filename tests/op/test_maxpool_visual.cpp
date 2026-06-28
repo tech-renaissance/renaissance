@@ -1,8 +1,10 @@
 /**
  * @file test_maxpool_visual.cpp
  * @brief MaxPool 梯度归属可视化验证 — 小型张量 [1,8,8,2]，NHWC 布局，手动打印验证
- * @version 1.2.0
- * @date 2026-06-03
+ * @version 4.20.1
+ * @date 2026-06-28
+ * @author 技术觉醒团队
+ * @note 所属系列: tests/op
  *
  * 用法：
  *   test_maxpool_visual.exe --cpu

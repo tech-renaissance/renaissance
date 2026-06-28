@@ -1,10 +1,10 @@
 /**
  * @file captured_graph.cpp
- * @brief CapturedGraph实现——双后端图捕获与运行
- * @version 4.21.0
- * @date 2026-05-16
+ * @brief CapturedGraph 实现 —— 双后端图捕获与运行
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
- * @note 基于P_ULTIMATE.md设计，实现双后端CapturedGraph
+ * @note 所属系列: graph
  */
 
 #include "renaissance/graph/captured_graph.h"

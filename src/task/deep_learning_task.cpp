@@ -1,9 +1,10 @@
 /**
  * @file deep_learning_task.cpp
  * @brief 深度学习训练任务实现
- * @version 4.01.05
- * @date 2026-05-14
- * @note on_prepare() 使用新版五阶段 Compiler::compile() 流程
+ * @version 4.20.1
+ * @date 2026-06-28
+ * @author 技术觉醒团队
+ * @note 所属系列: task
  */
 
 #include "renaissance/task/deep_learning_task.h"
@@ -1964,7 +1965,7 @@ int DeepLearningTask::get_current_train_resolution() const {
 void DeepLearningTask::save_model_to(const std::string& path, bool is_ema) {
     // TODO: 序列化模型到 .mdl 格式
     //
-    // 【姜总工指示】：模型序列化必须在模型训练和验证成功实现之后再开发。
+    // 模型序列化必须在模型训练和验证成功实现之后再开发。
     // 当前优先级：较低（P3），待核心训练功能完成后再实现。
     //
     // 计划包含：BluePrint、Flow、MemoryPlan、ComputationGraphs、所有权重参数

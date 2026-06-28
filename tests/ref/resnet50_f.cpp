@@ -2,8 +2,9 @@
  * @file resnet50_f.cpp
  * @brief ResNet-50 training under completely open rules
  * @version 4.20.1
- * @date 2026-04-20
- * @author Team Tech-Renaissance
+ * @date 2026-06-28
+ * @author 技术觉醒团队
+ * @note 所属系列: tests/ref
  */
 
 #include "renaissance.h"

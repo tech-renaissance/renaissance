@@ -1,9 +1,10 @@
 /**
  * @file test_adamw_bias.cpp
  * @brief RANGE_UPDATE_BIAS_ADAM 数学正确性测试（AdamW Bias = Adam Bias）
- * @version 1.0.0
- * @date 2026-05-30
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
+ * @note 所属系列: tests/correction
  *
  * 设计意图：
  *   验证 AdamW Bias 更新算子的数值正确性。

@@ -4,11 +4,11 @@
  * @details 基于Philox4x32-10的Counter-Based RNG
  *          核心特性：多线程可复现、高性能、跨平台
  *          使用Pimpl模式避免在头文件中包含<atomic>
- * @version 3.6.8
- * @date 2025-12-27
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 依赖项: 无
- * @note 所属系列: base
+ * @note 所属系列: core
  */
 
 #pragma once

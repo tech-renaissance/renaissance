@@ -1,7 +1,10 @@
 /**
  * @file cast_op.cpp
  * @brief RangeOp 类型转换实现 — RANGE_CAST_FP32_TO_FP16 / RANGE_CAST_FP16_TO_FP32
- * @version 4.21.0
+ * @version 4.20.1
+ * @date 2026-06-28
+ * @author 技术觉醒团队
+ * @note 所属系列: backend/ops/range
  */
 
 #include "renaissance/backend/op_registry.h"

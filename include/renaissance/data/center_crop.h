@@ -1,9 +1,10 @@
 /**
  * @file center_crop.h
  * @brief 中心裁剪操作
- * @version 1.0.0
- * @date 2026-02-17
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
+ * @note 所属系列: data
  */
 
 #pragma once

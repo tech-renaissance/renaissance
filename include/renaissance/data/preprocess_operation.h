@@ -1,8 +1,8 @@
 /**
  * @file preprocess_operation.h
  * @brief 预处理操作抽象基类
- * @version 1.0.0
- * @date 2026-02-17
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 所属系列: data
  */

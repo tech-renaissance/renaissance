@@ -1,9 +1,10 @@
 /**
  * @file test_clear.cpp
  * @brief RANGE_CLEAR 数学正确性测试 — 通用内存清零
- * @version 1.1.0
- * @date 2026-05-20
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
+ * @note 所属系列: tests/correction
  *
  * 用法：
  *   test_clear.exe --cpu   (FP32, ~300MB)

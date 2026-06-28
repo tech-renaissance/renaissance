@@ -2,7 +2,7 @@
  * @file tensor.cpp
  * @brief Tensor 类实现
  * @version 4.20.1
- * @date 2026-04-20
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 所属系列: tensor
  * @note 依赖项: mimalloc (CPU)，CUDA Runtime (GPU)，Philox RNG，zlib
@@ -1713,7 +1713,7 @@ void Tensor::format_tensor_content(std::ostream& os, int precision) const {
         return oss.str();
     };
 
-    // [FIX] 专家意见B1-7.3: 大张量截断打印，避免终端被海量输出刷爆
+    // 大张量截断打印，避免终端被海量输出刷爆
     // 当元素总数超过 1000 时，仅输出前6个和后6个元素，中间用 ... 省略
     constexpr int64_t kTruncateThreshold = 1000;
     constexpr int64_t kTruncateEdge     = 6;

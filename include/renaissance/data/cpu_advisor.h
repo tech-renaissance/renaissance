@@ -1,12 +1,11 @@
 /**
  * @file cpu_advisor.h
  * @brief CPU分配顾问（NUMA感知的核心绑定算法）
- * @version 1.0.0
- * @date 2026-02-18
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 所属系列: data
  * @details
- * 参考tests/bind/a.cpp的Scheduler类
  * - 基于物理核的Round Robin分配
  * - 避免超线程争用（优先用主线程）
  * - NUMA本地化（绑定到GPU所在NUMA节点）

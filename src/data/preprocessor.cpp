@@ -1,9 +1,10 @@
 /**
  * @file preprocessor.cpp
- * @brief 图像预处理器实现（V4.0 - 姜总工的新设计）
- * @version 4.0.0
- * @date 2026-01-22
+ * @brief 图像预处理器实现
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
+ * @note 所属系列: data
  */
 
 #include "renaissance/data/preprocessor.h"
@@ -680,7 +681,7 @@ void Preprocessor::run(DataLoader& loader) {
         LOG_DEBUG << "Worker " << i << ": " << count << " samples (total)";
     }
 
-    // 验证样本数均匀性（姜总工的要求：最多相差1）
+    // 验证样本数均匀性（要求：最多相差1）
     if (max_count - min_count > 1) {
         LOG_WARN << "Worker sample distribution is not uniform: difference="
                  << (max_count - min_count) << " (expected <= 1)";
@@ -688,7 +689,7 @@ void Preprocessor::run(DataLoader& loader) {
 }
 
 // =============================================================================
-// Worker线程函数（姜总工的静态领取设计）
+// Worker线程函数
 // =============================================================================
 // 解码缓冲区管理
 // =============================================================================
@@ -2701,7 +2702,7 @@ void Preprocessor::calculate_workshop_sizes([[maybe_unused]] int ref_resolution_
     };
 
     // ==================== 1. 计算D区大小 ====================
-    // 根据list.md的实际测量数据（2026-02-22统计）
+    // 根据实际测量数据
     if (is_imagenet()) {
         // ImageNet需要解码，D区大小取决于压缩级别
         switch (imagenet_compression_level_) {

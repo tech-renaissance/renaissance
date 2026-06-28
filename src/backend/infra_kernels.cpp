@@ -2,7 +2,7 @@
  * @file infra_kernels.cpp
  * @brief CPU 基础设施 kernel（通用工具，不对应具体算子）
  * @version 4.20.1
- * @date 2026-04-20
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 所属系列: backend
  * @note 依赖项: Eigen3 (可选)

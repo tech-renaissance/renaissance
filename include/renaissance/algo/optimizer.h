@@ -2,7 +2,7 @@
  * @file optimizer.h
  * @brief 优化器配置系统：SGD/LARS/Adam/AdamW
  * @version 4.20.1
- * @date 2026-04-20
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 依赖项: <memory>, <string>
  * @note 所属系列: algo
@@ -491,8 +491,10 @@ private:
     AdamWConfig config_;
 };
 
-/// @brief 根据OptimizerKind推导PlanConfig的优化器相关字段
-/// @note bn_folded/need_mask 由调用方根据网络结构设置，不在此函数内处理
+/**
+ * @brief 根据OptimizerKind推导PlanConfig的优化器相关字段
+ * @note bn_folded/need_mask 由调用方根据网络结构设置，不在此函数内处理
+ */
 inline PlanConfig plan_config_from_optimizer(OptimizerKind kind, bool has_ema = false) {
     PlanConfig cfg;
     cfg.has_ema      = has_ema;

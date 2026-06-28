@@ -1,10 +1,10 @@
 /**
  * @file mnist_loader_dts.h
  * @brief MNIST数据加载器（DTS格式）- FULLY模式专用
- * @version 1.0.0
- * @date 2026-01-23
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
- * @note 所属系统: data
+ * @note 所属系列: data
  */
 
 #pragma once

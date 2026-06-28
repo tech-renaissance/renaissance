@@ -1,9 +1,10 @@
 /**
  * @file test_h2d_copy_dtensor.cpp
  * @brief RANGE_H2D_COPY_DTENSOR 数学正确性测试
- * @version 1.0.0
- * @date 2026-05-21
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
+ * @note 所属系列: tests/correction
  *
  * 设计意图：
  *   验证 RANGE_H2D_COPY_DTENSOR 异步 H2D 传输的数据正确性。

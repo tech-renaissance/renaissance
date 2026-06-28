@@ -1,8 +1,8 @@
 /**
  * @file softmax_ce_op.cu
  * @brief SOFTMAX_CE 融合算子（Softmax + CrossEntropy）CUDA kernel 实现
- * @version 3.0.0
- * @date 2026-06-12
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 依赖项: cuda_runtime.h, cuda_fp16.h
  * @note 所属系列: backend/ops/dtensor
@@ -12,7 +12,7 @@
  * @note 核心修正：全局 reduce + DTensor-only（kernel 内读 scaling/写 inv_scaling）
  * @note V2.2.0: 用 const void* / void* 替代 float* 传 logits/grad，消除 strict aliasing violation
  * @note V2.3.0: FWD 与 INF 拆分为独立 kernel，FWD 移除 top1/top5/pred 计算
- * @note V3.0.0: 移除所有 atomicAdd，改用 per-sample partial + 确定性单 block reduce kernel，
+ * @note V3.0.0: 移除所有 atomicAdd，改用 per-sample partial + 确定性单 block reduce kernel
  *               消除跨 block 浮点累加顺序不确定性；INF 的 top1/top5 用 INT32 partial 累加
  */
 

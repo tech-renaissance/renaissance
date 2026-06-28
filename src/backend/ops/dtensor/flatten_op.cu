@@ -1,9 +1,10 @@
 /**
  * @file flatten_op.cu
  * @brief FLATTEN 算子 CUDA Kernel — 元素级复制重排
- * @version 1.0.0
- * @date 2026-05-18
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
+ * @note 所属系列: backend/ops/dtensor
  * @note 输入 [N,H,W,C]（可能有 padding）→ 输出 [N,1,1,H*W*C]（compact）
  */
 

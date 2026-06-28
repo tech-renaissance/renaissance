@@ -1,10 +1,11 @@
 /**
  * @file op_registry.cpp
- * @brief 绠楀瓙娉ㄥ唽琛ㄥ疄鐜帮細鍏ㄥ眬琛ㄥ畾涔?+ 榛樿娉ㄥ唽 + cuDNN 绠楀瓙鍒ゅ畾 + 棰勭儹
- * @version 4.21.0
- * @date 2026-05-16
- * @author 鎶€鏈閱掑洟闃? * @note 渚濊禆椤? op_registry.h, op_kind.h, device_context.h
- * @note 鎵€灞炵郴鍒? backend
+ * @brief 算子注册表实现：全局表定义 + 默认注册 + cuDNN 算子判定 + 预热
+ * @version 4.20.1
+ * @date 2026-06-28
+ * @author 技术觉醒团队
+ * @note 依赖项: op_registry.h, op_kind.h, device_context.h
+ * @note 所属系列: backend
  */
 
 #include "renaissance/backend/op_registry.h"

@@ -1,8 +1,8 @@
 /**
  * @file staging_param_pool.h
  * @brief Per-RANK Staging参数区（StagingParamPool）
- * @version 1.0.0
- * @date 2026-05-21
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 所属系列: core
  * @details

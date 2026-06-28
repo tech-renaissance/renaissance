@@ -1,20 +1,11 @@
 /**
  * @file h2d_op.cpp
  * @brief RangeOp H2D 异步传输实现 —— RANGE_H2D_COPY_A / RANGE_H2D_COPY_B / RANGE_H2D_COPY_DTENSOR
- * @version 5.0.0
- * @date 2026-05-21
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
- * @note 依赖项: op_registry.h, device_context.h, memory_plan.h, global_registry.h,
- *              staging_param_pool.h
+ * @note 依赖项: op_registry.h, device_context.h, memory_plan.h, global_registry.h, staging_param_pool.h
  * @note 所属系列: backend/ops/range
- * @note
- *   v5.0 (2026-05-21): UTK_FINAL 重构
- *     - 删除 s_placeholder_h2d + s_pinned_map + lookup_pinned_for_capture
- *       + get_dtensor_pinned_buffer
- *     - A/B 算子: 从 StagingBufferPool 获取真实 per-rank 指针做 src
- *     - DTENSOR 算子: 从 StagingParamPool 获取 per-rank 参数区指针做 src
- *     - CPU DTENSOR kernel: std::memcpy 从 StagingParamPool
- *     - 新增 get_label_aligned() / align_up_256_with_padding()
  */
 
 #include "renaissance/backend/op_registry.h"

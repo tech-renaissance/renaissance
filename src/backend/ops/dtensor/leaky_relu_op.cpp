@@ -1,9 +1,10 @@
 /**
  * @file leaky_relu_op.cpp
  * @brief LeakyReLU 算子的 CPU 实现 + CUDA kernel 分发 + 注册
- * @version 1.0.0
- * @date 2026-05-31
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
+ * @note 所属系列: backend/ops/dtensor
  * @note slope = 0.01 硬编码
  */
 

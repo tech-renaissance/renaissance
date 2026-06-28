@@ -1,8 +1,10 @@
 /**
  * @file test_mlp_final.cpp
  * @brief 三层MLP (784-512-256-10) + SoftmaxCE 数学正确性测试
- * @version 1.0.0
- * @date 2026-05-21
+ * @version 4.20.1
+ * @date 2026-06-28
+ * @author 技术觉醒团队
+ * @note 所属系列: tests/correction
  *
  * FWD: X[7,28,28,1] → Flatten → FC1 → Tanh → FC2 → Tanh → FC3 → SoftmaxCE
  * BWD: SoftmaxCE_BWD → FC3_BWD → Tanh2_BWD → FC2_BWD → Tanh1_BWD → FC1_BWD → Flatten_BWD

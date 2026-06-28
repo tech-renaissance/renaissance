@@ -1,9 +1,10 @@
 /**
- * @file example_dual_graph.cpp
+ * @file dual_graph.cpp
  * @brief Dual-graph example: overlapping compute and transfer on 4 ranks
  * @version 4.20.1
- * @date 2026-04-20
+ * @date 2026-06-28
  * @author 技术觉醒团队
+ * @note 所属系列: tests/graph
  */
 
 #include "renaissance.h"

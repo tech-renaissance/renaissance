@@ -1,9 +1,10 @@
 /**
  * @file tensor_dtensor_loopback.cpp
  * @brief Tensor-DTensor简单回环测试：验证数据传输是否正常
- * @version 4.21.0
- * @date 2026-05-17
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
+ * @note 所属系列: tests/graph
  */
 
 #include "renaissance.h"

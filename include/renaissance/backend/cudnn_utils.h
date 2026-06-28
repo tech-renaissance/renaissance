@@ -2,7 +2,7 @@
  * @file cudnn_utils.h
  * @brief cuDNN辅助函数：消除代码重复，提供公共工具
  * @version 4.20.1
- * @date 2026-04-20
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 依赖项: cudnn_frontend.h, types.h, exception.h
  * @note 所属系列: backend

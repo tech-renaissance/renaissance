@@ -1,7 +1,10 @@
 /**
  * @file optimizer_op.cpp
- * @brief 优化器 RangeOp CPU/CUDA launchers + 9 注册函数
- * @version 4.21.0
+ * @brief 优化器 RangeOp CPU/CUDA launchers 实现 —— SGD/Momentum/Nesterov/Adam/AdamW
+ * @version 4.20.1
+ * @date 2026-06-28
+ * @author 技术觉醒团队
+ * @note 所属系列: backend/ops/range
  */
 
 #include "renaissance/backend/op_registry.h"

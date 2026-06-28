@@ -1,8 +1,10 @@
 /**
  * @file test_softmax_ce_perf_inf.cpp
  * @brief SOFTMAX_CE INF (推理) 性能测试 —— 专用耗时测试，不做数值验证
- * @version 1.0.0
- * @date 2026-05-19
+ * @version 4.20.1
+ * @date 2026-06-28
+ * @author 技术觉醒团队
+ * @note 所属系列: tests/perf
  *
  * 固定配置：
  *   - 类别数: 1000

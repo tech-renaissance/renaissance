@@ -1,8 +1,8 @@
 /**
  * @file relu_op.cu
  * @brief ReLU 算子的 CUDA kernel 实现（FP32 + FP16/AMP 手动kernel）
- * @version 4.23.0
- * @date 2026-05-28
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 依赖项: cuda_runtime.h, cuda_fp16.h
  * @note 所属系列: backend/ops/dtensor

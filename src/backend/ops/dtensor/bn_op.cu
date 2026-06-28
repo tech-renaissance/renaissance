@@ -1,9 +1,11 @@
 /**
  * @file bn_op.cu
  * @brief BN1D / BN2D 专属 CUDA kernels
- * @version 4.21.0
- * @date 2026-06-07
+ * @version 4.20.1
+ * @date 2026-06-28
+ * @author 技术觉醒团队
  * @note 依赖项: cuda_runtime.h
+ * @note 所属系列: backend/ops/dtensor
  */
 
 #ifdef TR_USE_CUDA

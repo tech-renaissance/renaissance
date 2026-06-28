@@ -2,8 +2,9 @@
  * @file mnist_mlp_3.cpp
  * @brief 3-layer MLP (784-512-256-10) for MNIST classification
  * @version 4.20.1
- * @date 2026-04-20
- * @author Team Tech-Renaissance
+ * @date 2026-06-28
+ * @author 技术觉醒团队
+ * @note 所属系列: tests/ref
  */
 
 #include "renaissance.h"

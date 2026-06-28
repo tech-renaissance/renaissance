@@ -3,8 +3,8 @@
  * @brief ImageNet数据加载器（原始格式）- 直接从文件夹加载JPEG文件
  * @details 采用与DTS Loader相同的架构：双缓冲+Join同步+完全静态分配
  *          核心特性：100%稳定、零竞争、完全可复现、高性能
- * @version 1.0.0
- * @date 2026-01-31
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 依赖项: 无外部依赖，仅标准库
  * @note 所属系列: data

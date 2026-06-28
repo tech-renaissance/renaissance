@@ -1,8 +1,8 @@
 /**
  * @file arch_plan_shape.cpp
- * @brief Step6：NHWC形状推导与局部重算
+ * @brief Step6：NHWC 形状推导与局部重算
  * @version 4.20.1
- * @date 2026-04-20
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 所属系列: graph
  */

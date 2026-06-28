@@ -1,6 +1,10 @@
 /**
  * @file lars_common.h
  * @brief LARS 公共常量定义
+ * @version 4.20.1
+ * @date 2026-06-28
+ * @author 技术觉醒团队
+ * @note 所属系列: backend
  */
 #pragma once
 

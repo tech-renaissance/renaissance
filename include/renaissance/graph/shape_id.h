@@ -1,8 +1,8 @@
 /**
  * @file shape_id.h
  * @brief 形状去重键 —— 用于 CUDA Graph 跨变体去重
- * @version 4.20.2
- * @date 2026-05-13
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 依赖项: <cstdint>, <functional>
  * @note 所属系列: graph

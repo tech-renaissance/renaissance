@@ -3,8 +3,8 @@
  * @brief ImageNet数据加载器（DTS格式）- V4.0彻底重写
  * @details 采用双缓冲+Join同步+完全静态分配的新架构
  *          核心特性：100%稳定、零竞争、完全可复现、高性能（2.7+ GB/s）
- * @version 4.0.0
- * @date 2026-01-22
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 依赖项: zlib (CRC-32验证)
  * @note 所属系列: data

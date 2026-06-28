@@ -1,11 +1,9 @@
 ﻿/**
  * @file logger.cpp
  * @brief 日志器类实现
- * @details 实现线程安全的日志输出功能，支持控制台、文件输出和运行时级别控制
  * @version 4.20.1
- * @date 2026-04-20
+ * @date 2026-06-28
  * @author 技术觉醒团队
- * @note 依赖项: logger.h, tr_exception.h
  * @note 所属系列: core
  */
 

@@ -1,7 +1,10 @@
 /**
  * @file grad_scaling_op.cpp
- * @brief RangeOp RANGE_GRAD_SCALING — AMP grad scaling 条件回退
- * @version 4.21.0
+ * @brief RangeOp RANGE_GRAD_SCALING 实现 —— AMP 梯度缩放条件回退
+ * @version 4.20.1
+ * @date 2026-06-28
+ * @author 技术觉醒团队
+ * @note 所属系列: backend/ops/range
  */
 
 #include "renaissance/backend/op_registry.h"

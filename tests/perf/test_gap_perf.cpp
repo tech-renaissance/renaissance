@@ -1,8 +1,10 @@
 /**
  * @file test_gap_perf.cpp
  * @brief GAP 性能测试 —— 专用耗时测试，不做数值验证
- * @version 1.1.0
- * @date 2026-05-18
+ * @version 4.20.1
+ * @date 2026-06-28
+ * @author 技术觉醒团队
+ * @note 所属系列: tests/perf
  *
  * 固定配置：
  *   - 输入形状: Batch=512, H=7, W=7, C=2048 (NHWC)

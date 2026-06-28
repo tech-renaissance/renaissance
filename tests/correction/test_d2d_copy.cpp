@@ -1,3 +1,12 @@
+/**
+ * @file test_d2d_copy.cpp
+ * @brief D2D Copy 性能与正确性测试
+ * @version 4.20.1
+ * @date 2026-06-28
+ * @author 技术觉醒团队
+ * @note 所属系列: tests/correction
+ */
+
 #include "renaissance.h"
 #include <iomanip>
 #include <iostream>

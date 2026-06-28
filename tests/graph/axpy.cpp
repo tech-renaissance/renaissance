@@ -1,9 +1,10 @@
 /**
- * @file example_axpy.cpp
+ * @file axpy.cpp
  * @brief Simple AXPY example: C = alpha * A + B with adaptive GPU configuration
  * @version 4.20.1
- * @date 2026-04-20
- * @author Team Tech-Renaissance
+ * @date 2026-06-28
+ * @author 技术觉醒团队
+ * @note 所属系列: tests/graph
  */
 
 #include "renaissance.h"

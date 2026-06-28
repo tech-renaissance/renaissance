@@ -1,8 +1,8 @@
 /**
  * @file transfer_station.cpp
- * @brief TransferStation实现（延迟终止版本 - OP方案）
- * @version 3.1.0
- * @date 2026-02-20
+ * @brief TransferStation 实现
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 所属系列: data
  *

@@ -1,11 +1,10 @@
 /**
  * @file rng.cpp
  * @brief 随机数生成器实现
- * @version 3.6.8
- * @date 2025-12-27
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
- * @note 依赖项: rng.h, philox.h
- * @note 所属系列: base
+ * @note 所属系列: core
  */
 
 #include "renaissance/core/rng.h"

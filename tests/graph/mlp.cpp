@@ -1,12 +1,12 @@
 /**
- * @file test_mnist_mlp.cpp
+ * @file mlp.cpp
  * @brief MNIST MLP端到端dry-run测试 — 打印ArchPlan/MemoryPlan/ComputationGraph
  * @details 2层MLP(784->17->10), GPU模式, batch_size=512, 不执行实际计算
  *          支持--optimizer参数选择优化器类型(0-6)
- * @version 4.20.8
- * @date 2026-05-15
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
- * @note 所属系列: tests/top
+ * @note 所属系列: tests/graph
  * @note 参考: tests/ref/resnet50_c.cpp 的 DeepLearningTask 配置模式
  */
 

@@ -1,6 +1,10 @@
 /**
  * @file test_cbr_amp_fwd.cpp
  * @brief CBR_AMP_FWD vs Conv+BN2D+ReLU FWD 等价性测试
+ * @version 4.20.1
+ * @date 2026-06-28
+ * @author 技术觉醒团队
+ * @note 所属系列: tests/op
  */
 
 #include "cbr_amp_test_utils.hpp"

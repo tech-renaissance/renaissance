@@ -1,10 +1,9 @@
 /**
  * @file capture_multi_stream.cpp
  * @brief 多流捕获状态管理实现
- * @version 4.21.0
- * @date 2026-05-16
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
- * @note 依赖项: capture_multi_stream.h, device_context.h, computation_graph.h
  * @note 所属系列: graph
  */
 

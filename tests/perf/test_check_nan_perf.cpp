@@ -1,9 +1,10 @@
 /**
  * @file test_check_nan_perf.cpp
  * @brief RANGE_CHECK_NAN 专用性能测试 — 大张量 {5,1024,1024,5}
- * @version 1.0.0
- * @date 2026-05-20
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
+ * @note 所属系列: tests/perf
  *
  * 用原始 GraphNode 构建（需要 output_ids[0] 存 flag DTensor）。
  */

@@ -1,8 +1,8 @@
 /**
  * @file sample_info.h
  * @brief 样本信息结构体（FULLY模式第二个epoch及以后使用）
- * @version 1.0.0
- * @date 2026-02-08
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 所属系列: data
  */

@@ -1,9 +1,10 @@
 /**
  * @file silu_op.cpp
  * @brief SiLU (Sigmoid Linear Unit) 算子的 CPU 实现 + CUDA kernel 分发 + 注册
- * @version 1.0.0
- * @date 2026-06-01
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
+ * @note 所属系列: backend/ops/dtensor
  */
 
 #include "renaissance/backend/op_registry.h"

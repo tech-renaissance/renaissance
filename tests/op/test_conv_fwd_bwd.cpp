@@ -1,8 +1,10 @@
 /**
  * @file test_conv_fwd_bwd.cpp
  * @brief Conv FWD+BWD 串接测试 — 支持 CPU / GPU FP32 / GPU AMP 三种模式
- * @version 1.0.0
- * @date 2026-06-03
+ * @version 4.20.1
+ * @date 2026-06-28
+ * @author 技术觉醒团队
+ * @note 所属系列: tests/op
  *
  * 用法：
  *   test_conv_fwd_bwd.exe --cpu    [--batch 4] [--IH 32] [--IW 32] [--C 16] [--K 32] [--kernel 3] [--stride 1] [--pad 1]

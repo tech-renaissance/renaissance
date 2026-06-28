@@ -1,7 +1,10 @@
 /**
  * @file lars_op.cpp
  * @brief LARS / LARS_NESTEROV ComputeOp CPU fallback + CUDA launch + registration
- * @version 4.21.0
+ * @version 4.20.1
+ * @date 2026-06-28
+ * @author 技术觉醒团队
+ * @note 所属系列: backend/ops/dtensor
  */
 
 #include "renaissance/backend/op_registry.h"

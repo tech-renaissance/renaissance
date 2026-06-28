@@ -1,9 +1,10 @@
 /**
  * @file test_relu6_fwd_bwd.cpp
  * @brief ReLU6 FWD+BWD 串接测试 — 支持 CPU / GPU / AMP 三种模式
- * @version 1.0.0
- * @date 2026-06-01
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
+ * @note 所属系列: tests/op
  *
  * 用法：
  *   test_relu6_fwd_bwd.exe --cpu  [--shape 8,1024,1024,8]

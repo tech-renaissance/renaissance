@@ -2,7 +2,7 @@
  * @file optimizer.cpp
  * @brief 优化器配置系统实现
  * @version 4.20.1
- * @date 2026-04-20
+ * @date 2026-06-28
  * @author 技术觉醒团队
  * @note 所属系列: algo
  */

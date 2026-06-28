@@ -1,9 +1,10 @@
 /**
  * @file resize.h
  * @brief Resize操作（双线性插值，Simd加速）
- * @version 1.0.0
- * @date 2026-02-17
+ * @version 4.20.1
+ * @date 2026-06-28
  * @author 技术觉醒团队
+ * @note 所属系列: data
  */
 
 #pragma once
