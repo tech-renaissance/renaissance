@@ -1,6 +1,6 @@
 # Tech-Renaissance / 技术觉醒
 
-> 基于 C++17 / CUDA 13.1 / cuDNN 9.17 的静态图深度学习训练框架 —— V4.20.644
+> 基于 C++17 / CUDA 13.1 / cuDNN 9.17 的静态图深度学习训练框架 —— V4.20.646
 
 ## Features
 
@@ -64,4 +64,4 @@ int main() {
 
 ## License
 
-本项目采用 [GNU Affero General Public License v3.0](LICENSE)。
+本项目采用 [Apache License 2.0](LICENSE)。
