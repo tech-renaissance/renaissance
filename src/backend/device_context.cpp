@@ -416,9 +416,9 @@ void DeviceContext::ensure_workspace_grow(StreamKind kind, size_t req_size) cons
 
     ws.size = aligned_size;
 
-    TR_LOG_INFO("backend") << "DeviceContext " << device_id_
-                           << ": workspace for stream " << static_cast<int>(kind)
-                           << " grown to " << aligned_size << " bytes";
+//     TR_LOG_INFO("backend") << "DeviceContext " << device_id_
+//                            << ": workspace for stream " << static_cast<int>(kind)
+//                            << " grown to " << aligned_size << " bytes";
 #else
     (void)kind;
     (void)req_size;

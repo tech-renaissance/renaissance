@@ -227,3 +227,92 @@ else()
 endif()
 
 message(STATUS "  - test_dropout_perf: Dropout FWD+BWD+INF performance test")
+
+# CBR_AMP_FWD 性能测试
+add_executable(perf_cbr_fwd perf_cbr_fwd.cpp)
+target_link_libraries(perf_cbr_fwd PRIVATE renaissance)
+target_compile_definitions(perf_cbr_fwd PRIVATE TR_LOG_LEVEL=1)
+
+if(TR_USE_CUDA)
+    setup_gpu_runtime_env(perf_cbr_fwd)
+endif()
+
+set_target_properties(perf_cbr_fwd PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/perf
+    WIN32_EXECUTABLE FALSE
+)
+
+if(MSVC)
+    target_compile_options(perf_cbr_fwd PRIVATE /W4 /utf-8 /wd4244 /wd4505 /wd4458 /wd4127)
+else()
+    target_compile_options(perf_cbr_fwd PRIVATE -Wall -Wextra -Wpedantic -Wno-unused-function)
+endif()
+
+message(STATUS "  - perf_cbr_fwd: CBR_AMP_FWD performance test")
+
+# CBR_AMP_BWD 性能测试
+add_executable(perf_cbr_bwd perf_cbr_bwd.cpp)
+target_link_libraries(perf_cbr_bwd PRIVATE renaissance)
+target_compile_definitions(perf_cbr_bwd PRIVATE TR_LOG_LEVEL=1)
+
+if(TR_USE_CUDA)
+    setup_gpu_runtime_env(perf_cbr_bwd)
+endif()
+
+set_target_properties(perf_cbr_bwd PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/perf
+    WIN32_EXECUTABLE FALSE
+)
+
+if(MSVC)
+    target_compile_options(perf_cbr_bwd PRIVATE /W4 /utf-8 /wd4244 /wd4505 /wd4458 /wd4127)
+else()
+    target_compile_options(perf_cbr_bwd PRIVATE -Wall -Wextra -Wpedantic -Wno-unused-function)
+endif()
+
+message(STATUS "  - perf_cbr_bwd: CBR_AMP_BWD performance test")
+
+# CBR_AMP_BWD_FIRST_LAYER 性能测试
+add_executable(perf_cbr_bwd_first_layer perf_cbr_bwd_first_layer.cpp)
+target_link_libraries(perf_cbr_bwd_first_layer PRIVATE renaissance)
+target_compile_definitions(perf_cbr_bwd_first_layer PRIVATE TR_LOG_LEVEL=1)
+
+if(TR_USE_CUDA)
+    setup_gpu_runtime_env(perf_cbr_bwd_first_layer)
+endif()
+
+set_target_properties(perf_cbr_bwd_first_layer PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/perf
+    WIN32_EXECUTABLE FALSE
+)
+
+if(MSVC)
+    target_compile_options(perf_cbr_bwd_first_layer PRIVATE /W4 /utf-8 /wd4244 /wd4505 /wd4458 /wd4127)
+else()
+    target_compile_options(perf_cbr_bwd_first_layer PRIVATE -Wall -Wextra -Wpedantic -Wno-unused-function)
+endif()
+
+message(STATUS "  - perf_cbr_bwd_first_layer: CBR_AMP_BWD_FIRST_LAYER performance test")
+
+# CBR_AMP_INF 性能测试
+add_executable(perf_cbr_inf perf_cbr_inf.cpp)
+target_link_libraries(perf_cbr_inf PRIVATE renaissance)
+target_compile_definitions(perf_cbr_inf PRIVATE TR_LOG_LEVEL=1)
+
+if(TR_USE_CUDA)
+    setup_gpu_runtime_env(perf_cbr_inf)
+endif()
+
+set_target_properties(perf_cbr_inf PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/perf
+    WIN32_EXECUTABLE FALSE
+)
+
+if(MSVC)
+    target_compile_options(perf_cbr_inf PRIVATE /W4 /utf-8 /wd4244 /wd4505 /wd4458 /wd4127)
+else()
+    target_compile_options(perf_cbr_inf PRIVATE -Wall -Wextra -Wpedantic -Wno-unused-function)
+endif()
+
+message(STATUS "  - perf_cbr_inf: CBR_AMP_INF performance test")
+

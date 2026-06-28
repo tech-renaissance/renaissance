@@ -1,4 +1,4 @@
 ﻿build/
 build_legacy/
-__pycache__/
-*.pyc
+**/__pycache__/
+**/*.pyc
