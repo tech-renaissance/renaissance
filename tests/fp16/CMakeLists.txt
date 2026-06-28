@@ -2,11 +2,9 @@
 # FP16 Tests (Legacy — CBR fusion targets removed)
 # ============================================================================
 
-message(STATUS "Configuring FP16 tests (no active targets)")
-
 # Only build when TR_USE_CUDA is enabled
 if(NOT TR_USE_CUDA)
-    message(STATUS "FP16 tests disabled (TR_USE_CUDA is OFF)")
+    message(STATUS "FP16 tests: skipped (CUDA disabled)")
     return()
 endif()
 
@@ -32,13 +30,17 @@ include_directories(
 # Add cuDNN include directory
 if(DEFINED CUDNN_INCLUDE_DIR)
     include_directories(${CUDNN_INCLUDE_DIR})
-    message(STATUS "FP16 tests: cuDNN include directory: ${CUDNN_INCLUDE_DIR}")
+    if(TR_CMAKE_VERBOSE)
+        message(STATUS "FP16 tests: cuDNN include directory: ${CUDNN_INCLUDE_DIR}")
+    endif()
 endif()
 
 # Add CUDA include directory (if defined by main CMake)
 if(DEFINED CUDA_INCLUDE_DIRS)
     include_directories(${CUDA_INCLUDE_DIRS})
-    message(STATUS "FP16 tests: CUDA include directories: ${CUDA_INCLUDE_DIRS}")
+    if(TR_CMAKE_VERBOSE)
+        message(STATUS "FP16 tests: CUDA include directories: ${CUDA_INCLUDE_DIRS}")
+    endif()
 endif()
 
 # ============================================================================
@@ -54,7 +56,9 @@ if(MSVC)
         # 禁用CUDA/cuDNN未引用函数警告（正常优化行为）
         /wd4505  # 已删除具有内部链接的未引用函数
     )
-    message(STATUS "FP16 tests: Disabled third-party library warnings (C4458, C4127, C4244, C4505)")
+    if(TR_CMAKE_VERBOSE)
+        message(STATUS "FP16 tests: Disabled third-party library warnings (C4458, C4127, C4244, C4505)")
+    endif()
 endif()
 
 # ============================================================================
@@ -64,12 +68,14 @@ endif()
 # Add cuDNN Frontend include directory if defined
 if(DEFINED TR_CUDNN_FRONTEND_INCLUDE_DIR)
     include_directories(${TR_CUDNN_FRONTEND_INCLUDE_DIR})
-    message(STATUS "cuDNN Frontend include directory: ${TR_CUDNN_FRONTEND_INCLUDE_DIR}")
+    if(TR_CMAKE_VERBOSE)
+        message(STATUS "FP16 tests: cuDNN Frontend include directory: ${TR_CUDNN_FRONTEND_INCLUDE_DIR}")
+    endif()
 elseif(DEFINED TR_CUDNN_FRONTEND_PATH)
     include_directories(${TR_CUDNN_FRONTEND_PATH}/include)
-    message(STATUS "cuDNN Frontend include directory: ${TR_CUDNN_FRONTEND_PATH}/include")
+    if(TR_CMAKE_VERBOSE)
+        message(STATUS "FP16 tests: cuDNN Frontend include directory: ${TR_CUDNN_FRONTEND_PATH}/include")
+    endif()
 else()
     message(WARNING "TR_CUDNN_FRONTEND_INCLUDE_DIR and TR_CUDNN_FRONTEND_PATH not defined - FP16 tests may not compile")
 endif()
-
-message(STATUS "FP16 tests configuration complete")

@@ -16,8 +16,6 @@ if(DEFINED TR_WORKSPACE)
                     RESULT_VARIABLE WORKSPACE_RESULT)
     if(NOT WORKSPACE_RESULT EQUAL 0)
         message(WARNING "Failed to create workspace directory: ${TR_WORKSPACE}")
-    else()
-        message(STATUS "Workspace directory ensured: ${TR_WORKSPACE}")
     endif()
 else()
     # 如果未定义TR_WORKSPACE，使用默认路径
@@ -26,8 +24,6 @@ else()
                     RESULT_VARIABLE WORKSPACE_RESULT)
     if(NOT WORKSPACE_RESULT EQUAL 0)
         message(WARNING "Failed to create default workspace directory: ${TR_WORKSPACE}")
-    else()
-        message(STATUS "Default workspace directory created: ${TR_WORKSPACE}")
     endif()
 endif()
 
@@ -123,9 +119,11 @@ endfunction()
 
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/core AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/core)
     add_subdirectory(core)
-    message(STATUS "Including core tests")
+    message(STATUS "[Tests] Core tests: included")
 else()
-    message(STATUS "Skipping core tests (directory not found)")
+    if(TR_CMAKE_VERBOSE)
+        message(STATUS "Optional test suite 'core' not present")
+    endif()
 endif()
 
 # ============================================================================
@@ -134,9 +132,11 @@ endif()
 
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/prep AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/prep)
     add_subdirectory(prep)
-    message(STATUS "Including prep tests")
+    message(STATUS "[Tests] Prep tests: included")
 else()
-    message(STATUS "Skipping prep tests (directory not found)")
+    if(TR_CMAKE_VERBOSE)
+        message(STATUS "Optional test suite 'prep' not present")
+    endif()
 endif()
 
 # ============================================================================
@@ -145,9 +145,11 @@ endif()
 
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/graph AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/graph)
     add_subdirectory(graph)
-    message(STATUS "Including graph tests")
+    message(STATUS "[Tests] Graph tests: included")
 else()
-    message(STATUS "Skipping graph tests (directory not found)")
+    if(TR_CMAKE_VERBOSE)
+        message(STATUS "Optional test suite 'graph' not present")
+    endif()
 endif()
 
 # ============================================================================
@@ -156,7 +158,7 @@ endif()
 
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/top AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/top)
     add_subdirectory(top)
-    message(STATUS "Including top integration tests")
+    message(STATUS "[Tests] Top integration tests: included")
 endif()
 
 # ============================================================================
@@ -184,7 +186,7 @@ endif()
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/fp16 AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/fp16)
     if(TR_USE_CUDA)
         add_subdirectory(fp16)
-        message(STATUS "Including fp16 tests")
+        message(STATUS "[Tests] FP16 tests: included")
     else()
         message(STATUS "Skipping fp16 tests (TR_USE_CUDA is OFF)")
     endif()
@@ -212,7 +214,7 @@ endif()
 # ============================================================================
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/correction AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/correction)
     add_subdirectory(correction)
-    message(STATUS "Including correction tests")
+    message(STATUS "[Tests] Correction tests: included")
 endif()
 
 # ============================================================================
@@ -220,7 +222,7 @@ endif()
 # ============================================================================
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/perf AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/perf)
     add_subdirectory(perf)
-    message(STATUS "Including perf tests")
+    message(STATUS "[Tests] Perf tests: included")
 endif()
 
 # ============================================================================
@@ -228,7 +230,7 @@ endif()
 # ============================================================================
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/integration AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/integration)
     add_subdirectory(integration)
-    message(STATUS "Including integration tests")
+    message(STATUS "[Tests] Integration tests: included")
 endif()
 
 # ============================================================================
@@ -236,7 +238,7 @@ endif()
 # ============================================================================
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/bn AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/bn)
     add_subdirectory(bn)
-    message(STATUS "Including bn operator correctness tests")
+    message(STATUS "[Tests] BN tests: included")
 endif()
 
 # ============================================================================
@@ -244,7 +246,7 @@ endif()
 # ============================================================================
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/op AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/op)
     add_subdirectory(op)
-    message(STATUS "Including operator correctness tests")
+    message(STATUS "[Tests] Op tests: included")
 endif()
 
 # ============================================================================
@@ -269,11 +271,3 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/ref AND IS_DIRECTORY ${CMAKE_CURRENT_SOURC
         message(STATUS "  - mnist_mlp_3: MNIST 3-Layer MLP (784-512-256-10)")
     endif()
 endif()
-
-# ============================================================================
-# 输出单元测试信息
-# ============================================================================
-
-message(STATUS "=== Unit Tests Configuration ===")
-message(STATUS "Unit tests will be built in: ${TESTS_OUTPUT_DIR}")
-message(STATUS "=== Unit Tests Configuration Complete ===")

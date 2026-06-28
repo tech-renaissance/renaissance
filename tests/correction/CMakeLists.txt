@@ -271,6 +271,20 @@ set(OPT_WEIGHT_TESTS
     test_adam_bias
     test_adamw_bias
 )
+
+# 优化器测试描述映射
+set(OPT_DESC_test_sgd_bias             "RANGE_UPDATE_BIAS_SGD correction test")
+set(OPT_DESC_test_momentum_weight      "RANGE_UPDATE_WEIGHT_MOMENTUM correction test")
+set(OPT_DESC_test_momentum_bias        "RANGE_UPDATE_BIAS_MOMENTUM correction test")
+set(OPT_DESC_test_nesterov_weight      "RANGE_UPDATE_WEIGHT_NESTEROV correction test")
+set(OPT_DESC_test_nesterov_bias        "RANGE_UPDATE_BIAS_NESTEROV correction test")
+set(OPT_DESC_test_lars_weight          "RANGE_UPDATE_WEIGHT_LARS correction test")
+set(OPT_DESC_test_lars_nesterov_weight "RANGE_UPDATE_WEIGHT_LARS_NESTEROV correction test")
+set(OPT_DESC_test_adam_weight          "RANGE_UPDATE_WEIGHT_ADAM correction test")
+set(OPT_DESC_test_adamw_weight         "RANGE_UPDATE_WEIGHT_ADAMW correction test")
+set(OPT_DESC_test_adam_bias            "RANGE_UPDATE_BIAS_ADAM correction test")
+set(OPT_DESC_test_adamw_bias           "RANGE_UPDATE_BIAS_ADAMW correction test")
+
 foreach(test_name IN LISTS OPT_WEIGHT_TESTS)
     add_executable(${test_name} ${test_name}.cpp)
     target_link_libraries(${test_name} PRIVATE renaissance)
@@ -287,7 +301,8 @@ foreach(test_name IN LISTS OPT_WEIGHT_TESTS)
     else()
         target_compile_options(${test_name} PRIVATE -Wall -Wextra -Wpedantic -Wno-unused-function)
     endif()
-    message(STATUS "  - ${test_name}")
+    set(_desc "${OPT_DESC_${test_name}}")
+    message(STATUS "  - ${test_name}: ${_desc}")
 endforeach()
 
 # RANGE_H2D_COPY 系列：数学正确性测试 + 性能测试
