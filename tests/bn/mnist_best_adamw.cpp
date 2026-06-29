@@ -119,7 +119,7 @@ int main(int argc, char** argv) {
 
     GLOBAL_SETTING
         .manual_seed(123)           // 固定随机种子，确保可复现
-        .global_batch_size(128)     // 全局batch size，自动按world_size缩放
+        .global_batch_size(200)     // 全局batch size，自动按world_size缩放
         .train_resolution(28)      // MNIST标准分辨率
         .val_resolution(28)
         .use_tf32(true);           // 启用TF32加速
@@ -131,9 +131,9 @@ int main(int argc, char** argv) {
         .dataset("mnist", "/root/epfs/dataset/mnist")
 #endif
         .color_channels(1)
-        .load_workers(8)           // 数据加载线程数
+        .load_workers(1)           // 数据加载线程数
         .preprocess_workers(8)     // 预处理线程数
-        .cpu_binding(true)        // CPU核心绑定
+        .cpu_binding(false)        // CPU核心绑定
         .normalization(NormMode::MNIST)
 
         // 训练时使用前辈验证的最强预处理链

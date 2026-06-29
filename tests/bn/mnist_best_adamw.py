@@ -108,7 +108,7 @@ if __name__ == '__main__':
         torch.set_float32_matmul_precision('high')
 
     torch.manual_seed(123)
-    batch_size = 128
+    batch_size = 200
     epochs = 100
 
     # -----------------------------------------------------------------------

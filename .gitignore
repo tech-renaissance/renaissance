@@ -4,6 +4,8 @@ build_legacy/
 out/
 cmake-build-*/
 
+docs/
+
 # Generated build scripts (run configure.py to regenerate)
 build.bat
 setup_cuda_env.bat
