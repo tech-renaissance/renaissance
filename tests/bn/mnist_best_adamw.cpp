@@ -131,18 +131,15 @@ int main(int argc, char** argv) {
         .dataset("mnist", "/root/epfs/dataset/mnist")
 #endif
         .color_channels(1)
-        .load_workers(1)           // 数据加载线程数
-        .preprocess_workers(8)     // 预处理线程数
-        .cpu_binding(false)        // CPU核心绑定
+        .preprocess_workers(8)
         .normalization(NormMode::MNIST)
 
         // 训练时使用前辈验证的最强预处理链
         .train_transforms(
             Pad(2),                      // 扩展到32x32，为后续操作提供空间
+            RandomCrop(28),                 // 裁剪回28x28
             RandomRotation(15.0f, 0),       // ±15度旋转
             RandomScale(0.9f, 1.1f),        // 0.9-1.1倍缩放
-            RandomCrop(28),                 // 裁剪回28x28
-            RandomAutocontrast(0.5f),       // 50%概率自动对比度调整
             RandomErasing(0.5f)             // 50%概率随机擦除
         )
 
@@ -202,7 +199,7 @@ int main(int argc, char** argv) {
               << "Optimizer: AdamW (beta1=0.9, beta2=0.999, eps=1e-8, wd=1e-4)\n"
               << "Scheduler: CosineAnnealing + Warmup(5)\n"
               << "Augmentation: Pad+Rotation+Scale+Crop+Autocontrast+Erasing\n"
-              << "Training: 100 epochs, batch_size=128\n"
+              << "Training: 100 epochs, batch_size=200\n"
               << "=====================================\n";
 
     task.compile();

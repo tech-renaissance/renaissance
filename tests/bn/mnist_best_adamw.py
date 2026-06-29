@@ -8,14 +8,6 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
 
-# ---------------------------------------------------------------------------
-# RandomAutocontrast compatibility (torchvision >= 0.10)
-# ---------------------------------------------------------------------------
-try:
-    _RandomAutocontrast = transforms.RandomAutocontrast
-    _HAS_AUTOCONTRAST = True
-except AttributeError:
-    _HAS_AUTOCONTRAST = False
 
 parser = argparse.ArgumentParser(description="PyTorch MNIST MLP Ultimate benchmark")
 parser.add_argument("--cpu", action="store_true", help="Run on CPU (FP32)")
@@ -98,8 +90,6 @@ if __name__ == '__main__':
     print(f" Activation: ReLU", flush=True)
     print(f" Optimizer:  AdamW (beta1=0.9, beta2=0.999, eps=1e-8, wd=1e-4)", flush=True)
     print(f" Scheduler:  CosineAnnealing + Warmup(5)", flush=True)
-    if not _HAS_AUTOCONTRAST:
-        print(" Warning:    RandomAutocontrast not available (torchvision < 0.10)", flush=True)
     print("===========================================", flush=True)
 
     if device.type == "cuda":
@@ -118,13 +108,9 @@ if __name__ == '__main__':
     # -----------------------------------------------------------------------
     train_transform_list = [
         transforms.Pad((2, 2, 2, 2), fill=0),
+        transforms.RandomCrop(28),
         transforms.RandomRotation(15, fill=0),
         transforms.RandomAffine(0, scale=(0.9, 1.1)),
-        transforms.RandomCrop(28),
-    ]
-    if _HAS_AUTOCONTRAST:
-        train_transform_list.append(transforms.RandomAutocontrast(p=0.5))
-    train_transform_list += [
         transforms.ToTensor(),
         transforms.Normalize((0.1307,), (0.3081,)),
         transforms.RandomErasing(p=0.5, value=0),  # [对齐 CPP] C++ FusedNormalization 擦除区域填 0.0
