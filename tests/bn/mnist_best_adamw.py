@@ -103,17 +103,17 @@ if __name__ == '__main__':
 
     # -----------------------------------------------------------------------
     # Transforms: match TR4 as closely as possible
-    # TR4 order: Pad -> RandomRotation -> RandomScale -> RandomCrop
-    #            -> RandomAutocontrast -> (ToTensor + Normalize + RandomErasing)
+    # CPP order: Pad -> RandomCrop -> RandomRotation -> RandomScale
+    #            -> (ToTensor + Normalize + RandomErasing)
     # -----------------------------------------------------------------------
     train_transform_list = [
         transforms.Pad((2, 2, 2, 2), fill=0),
         transforms.RandomCrop(28),
-        transforms.RandomRotation(15, fill=0),
-        transforms.RandomAffine(0, scale=(0.9, 1.1)),
+        transforms.RandomRotation(20, fill=0),          # [对齐 CPP] C++ RandomRotation(20.0f, 0)
+        transforms.RandomAffine(0, scale=(0.8, 1.2)),   # [对齐 CPP] C++ RandomScale(0.8f, 1.2f)
         transforms.ToTensor(),
         transforms.Normalize((0.1307,), (0.3081,)),
-        transforms.RandomErasing(p=0.5, value=0),  # [对齐 CPP] C++ FusedNormalization 擦除区域填 0.0
+        transforms.RandomErasing(p=0.5, value=0),       # [对齐 CPP] C++ RandomErasing(0.5f)
     ]
     train_transform = transforms.Compose(train_transform_list)
 

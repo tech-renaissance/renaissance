@@ -138,8 +138,8 @@ int main(int argc, char** argv) {
         .train_transforms(
             Pad(2),                      // 扩展到32x32，为后续操作提供空间
             RandomCrop(28),                 // 裁剪回28x28
-            RandomRotation(15.0f, 0),       // ±15度旋转
-            RandomScale(0.9f, 1.1f),        // 0.9-1.1倍缩放
+            RandomRotation(20.0f, 0),       // ±15度旋转
+            RandomScale(0.8f, 1.2f),        // 0.9-1.1倍缩放
             RandomErasing(0.5f)             // 50%概率随机擦除
         )
 
