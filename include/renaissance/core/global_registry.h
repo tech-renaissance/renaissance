@@ -619,6 +619,17 @@ public:
     GlobalRegistry& val_resolution(int value);
 
     /**
+     * @brief 同时设置训练和验证分辨率
+     * @param value 训练和验证共用分辨率，必须大于0
+     * @throws TRException::ValueError 如果value不大于0
+     * @return GlobalRegistry 引用，支持链式调用
+     * @details
+     * - 依次调用 train_resolution(value) 和 val_resolution(value)
+     * - 效果等价于同时设置 .train_resolution(value).val_resolution(value)
+     */
+    GlobalRegistry& input_resolution(int value);
+
+    /**
      * @brief 设置渐进式训练分辨率
      * @param pair_begin 起始参数对 (starting_epoch, train_sample_resolution_begin)
      * @param pair_end 结束参数对 (boundary_epoch, train_sample_resolution_end)

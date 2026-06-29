@@ -511,7 +511,7 @@ private:
     int num_classes_ = 1000;
     int val_interval_ = 1;
     int val_offset_ = 0;
-    float early_stop_thr_ = 0.999f;
+    float early_stop_thr_ = 0.9999f;
     bool use_sema_ = false;
     float sema_decay_ = 0.9f;
     float grad_clip_max_abs_ = -1.0f;  // <=0 表示不裁剪

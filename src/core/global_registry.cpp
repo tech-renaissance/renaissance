@@ -1508,6 +1508,12 @@ GlobalRegistry& GlobalRegistry::val_resolution(int value) {
     return *this;
 }
 
+GlobalRegistry& GlobalRegistry::input_resolution(int value) {
+    train_resolution(value);
+    val_resolution(value);
+    return *this;
+}
+
 GlobalRegistry& GlobalRegistry::train_resolution(std::pair<int, int> pair_begin, std::pair<int, int> pair_end) {
     // 解包参数对
     auto [starting_epoch, train_sample_resolution_begin] = pair_begin;

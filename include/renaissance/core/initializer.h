@@ -173,7 +173,7 @@ public:
 private:
     // 层类型策略
     InitKind conv_kind_    = InitKind::TRUNC_NORMAL;  ///< MLPerf CONV 默认
-    InitKind fc_kind_      = InitKind::FIXED_NORMAL;   ///< MLPerf FC 默认
+    InitKind fc_kind_      = InitKind::KAIMING_UNIFORM; ///< FC 默认 Kaiming Uniform
     InitKind bn_kind_      = InitKind::STANDARD;       ///< BN 默认 STANDARD
     float    fc_param_     = 0.01f;                     ///< FC FIXED_NORMAL 的 σ
     float    kaiming_a_    = 0.0f;                      ///< Kaiming a 参数，gain=√(2/(1+a²))

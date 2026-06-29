@@ -250,6 +250,14 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/op AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE
 endif()
 
 # ============================================================================
+# example 子目录（框架使用示例）
+# ============================================================================
+if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/example AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/example)
+    add_subdirectory(example)
+    message(STATUS "[Tests] Example tests: included")
+endif()
+
+# ============================================================================
 # ref 子目录（MNIST MLP 参考实现）
 # ============================================================================
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/ref AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/ref)

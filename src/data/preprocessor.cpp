@@ -3195,6 +3195,19 @@ Setup& Setup::operator=(Setup&& other) noexcept {
 Setup& Setup::dataset(const std::string& name, const std::string& path) {
     state_->dataset_name = name;
     state_->dataset_path = path;
+
+    // 根据数据集名称自动推导颜色通道数
+    std::string name_lower = name;
+    std::transform(name_lower.begin(), name_lower.end(), name_lower.begin(), ::tolower);
+    if (name_lower == "mnist") {
+        state_->color_channels = 1;
+    } else if (name_lower == "cifar10" || name_lower == "cifar_10" || name_lower == "cifar-10" ||
+               name_lower == "cifar100" || name_lower == "cifar_100" || name_lower == "cifar-100" ||
+               name_lower == "imagenet") {
+        state_->color_channels = 3;
+    }
+    // 其他未知数据集保持默认的 3，用户仍可通过 .color_channels() 覆盖
+
     return *this;
 }
 

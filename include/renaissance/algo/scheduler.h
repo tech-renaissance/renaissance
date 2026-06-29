@@ -93,7 +93,7 @@ protected:
     float warmup_start_lr_        = 0.0f;
     float warmup_start_factor_    = 0.0f;
     bool  warmup_start_is_absolute_ = false;
-    bool  step_by_batch_          = true;
+    bool  step_by_batch_          = false;
     bool  step_mode_locked_       = false;
 
     int   total_epochs_     = 0;
@@ -178,7 +178,7 @@ protected:
     const char* name() const override { return "CosineAnnealingLR"; }
 
 private:
-    float eta_min_ = 0.0f;
+    float eta_min_ = 1e-6f;
 };
 
 // ============================================================================
