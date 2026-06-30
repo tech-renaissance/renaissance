@@ -1,6 +1,7 @@
 import argparse
 import math
 import time
+from pathlib import Path
 
 import torch
 import torch.nn as nn
@@ -122,8 +123,12 @@ if __name__ == '__main__':
         transforms.Normalize((0.1307,), (0.3081,)),
     ])
 
-    train_set = datasets.MNIST("T:/dataset/mnist", train=True,  download=False, transform=train_transform)
-    val_set   = datasets.MNIST("T:/dataset/mnist", train=False, download=False, transform=val_transform)
+    # [对齐 CPP] 使用与 C++ 示例相同的数据集路径：项目根目录下的 data/mnist
+    project_root = Path(__file__).resolve().parents[2]
+    mnist_root = project_root / "data" / "mnist"
+
+    train_set = datasets.MNIST(str(mnist_root), train=True,  download=True, transform=train_transform)
+    val_set   = datasets.MNIST(str(mnist_root), train=False, download=True, transform=val_transform)
 
     pin_mem = (device.type == "cuda")
     # [对齐 CPP] num_workers=8 对齐 C++ preprocess_workers(8)
