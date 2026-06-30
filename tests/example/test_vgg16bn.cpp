@@ -4,7 +4,7 @@
  * @version 4.20.1
  * @date 2026-06-28
  * @author 技术觉醒团队
- * @note 所属系列: tests/integration
+ * @note 所属系列: tests/example
  *
  * 超参数对齐 PyTorch DDP 参考实现。
  * 多 RANK 模板参考 test_nin.cpp。

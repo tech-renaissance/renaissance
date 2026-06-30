@@ -114,54 +114,6 @@ function(setup_gpu_runtime_env target_name)
 endfunction()
 
 # ============================================================================
-# 包含core子目录（Logger、TRException等核心组件测试）
-# ============================================================================
-
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/core AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/core)
-    add_subdirectory(core)
-    message(STATUS "[Tests] Core tests: included")
-else()
-    if(TR_CMAKE_VERBOSE)
-        message(STATUS "Optional test suite 'core' not present")
-    endif()
-endif()
-
-# ============================================================================
-# 包含prep子目录（Preprocessor相关测试）
-# ============================================================================
-
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/prep AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/prep)
-    add_subdirectory(prep)
-    message(STATUS "[Tests] Prep tests: included")
-else()
-    if(TR_CMAKE_VERBOSE)
-        message(STATUS "Optional test suite 'prep' not present")
-    endif()
-endif()
-
-# ============================================================================
-# 包含graph子目录（BluePrint、Compiler、Flow等测试）
-# ============================================================================
-
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/graph AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/graph)
-    add_subdirectory(graph)
-    message(STATUS "[Tests] Graph tests: included")
-else()
-    if(TR_CMAKE_VERBOSE)
-        message(STATUS "Optional test suite 'graph' not present")
-    endif()
-endif()
-
-# ============================================================================
-# 包含top子目录（ResNet-50等顶级集成测试）
-# ============================================================================
-
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/top AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/top)
-    add_subdirectory(top)
-    message(STATUS "[Tests] Top integration tests: included")
-endif()
-
-# ============================================================================
 # mlp 子目录（MLP原型测试，仅CUDA平台）
 # ============================================================================
 
@@ -178,19 +130,6 @@ endif()
 #         message(STATUS "Skipping mlp test (TR_USE_CUDA is OFF)")
 #     endif()
 # endif()
-
-# ============================================================================
-# fp16 子目录（FP16算子测试，仅CUDA平台）
-# ============================================================================
-
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/fp16 AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/fp16)
-    if(TR_USE_CUDA)
-        add_subdirectory(fp16)
-        message(STATUS "[Tests] FP16 tests: included")
-    else()
-        message(STATUS "Skipping fp16 tests (TR_USE_CUDA is OFF)")
-    endif()
-endif()
 
 # ============================================================================
 # 未来添加其他测试板块时的示例：
@@ -226,22 +165,6 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/perf AND IS_DIRECTORY ${CMAKE_CURRENT_SOUR
 endif()
 
 # ============================================================================
-# integration 子目录（端到端集成测试）
-# ============================================================================
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/integration AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/integration)
-    add_subdirectory(integration)
-    message(STATUS "[Tests] Integration tests: included")
-endif()
-
-# ============================================================================
-# bn 子目录（BatchNorm 算子数学正确性验证测试）
-# ============================================================================
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/bn AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/bn)
-    add_subdirectory(bn)
-    message(STATUS "[Tests] BN tests: included")
-endif()
-
-# ============================================================================
 # op 子目录（算子数学正确性验证测试）
 # ============================================================================
 if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/op AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/op)
@@ -257,25 +180,4 @@ if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/example AND IS_DIRECTORY ${CMAKE_CURRENT_S
     message(STATUS "[Tests] Example tests: included")
 endif()
 
-# ============================================================================
-# ref 子目录（MNIST MLP 参考实现）
-# ============================================================================
-if(EXISTS ${CMAKE_CURRENT_SOURCE_DIR}/ref AND IS_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/ref)
-    if(TR_USE_CUDA)
-        add_executable(mnist_mlp_3 ref/mnist_mlp_3.cpp)
-        target_compile_definitions(mnist_mlp_3 PRIVATE TR_LOG_LEVEL=1)
-        target_link_libraries(mnist_mlp_3 PRIVATE renaissance)
-        setup_gpu_runtime_env(mnist_mlp_3)
-        set_target_properties(mnist_mlp_3 PROPERTIES
-            RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin/tests/ref
-        )
-        if(WIN32)
-            set_target_properties(mnist_mlp_3 PROPERTIES WIN32_EXECUTABLE FALSE)
-            target_compile_options(mnist_mlp_3 PRIVATE /W4 /utf-8
-                /wd4244 /wd4505 /wd4458 /wd4127)
-        else()
-            target_compile_options(mnist_mlp_3 PRIVATE -Wall -Wextra -Wpedantic -Wno-unused-function)
-        endif()
-        message(STATUS "  - mnist_mlp_3: MNIST 3-Layer MLP (784-512-256-10)")
-    endif()
-endif()
+
