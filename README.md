@@ -1,6 +1,8 @@
 # Tech-Renaissance / 技术觉醒
 
-> 基于 C++17 / CUDA 13.1 / cuDNN 9.17 的静态图深度学习训练框架 —— V4.20.684
+![Tech-Renaissance Logo](resources/main_logo.png)
+
+> 单人团队以AI技术开发的超轻量级高性能深度学习训练框架
 
 
 
