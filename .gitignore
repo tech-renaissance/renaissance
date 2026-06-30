@@ -5,6 +5,7 @@ out/
 cmake-build-*/
 
 docs/
+data/
 
 # Generated build scripts (run configure.py to regenerate)
 build.bat
@@ -26,6 +27,7 @@ __pycache__/
 *.swp
 *.swo
 *~
+.claude/
 
 # Logs
 *.log
