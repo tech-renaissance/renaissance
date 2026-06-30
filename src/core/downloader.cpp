@@ -37,7 +37,7 @@ Downloader::Downloader()
     if (!curl_initialized) {
         curl_global_init(CURL_GLOBAL_ALL);
         curl_initialized = true;
-        LOG_INFO << "libcurl initialized";
+        // LOG_INFO << "libcurl initialized";
     }
 }
 
@@ -57,9 +57,9 @@ void Downloader::set_url(const std::string& url, const std::string& spare_url) {
     url_ = url;
     spare_url_ = spare_url;
 
-    LOG_INFO << "Downloader URL set to: " << url;
+    // LOG_INFO << "Downloader URL set to: " << url;
     if (!spare_url.empty()) {
-        LOG_INFO << "Downloader spare URL set to: " << spare_url;
+        // LOG_INFO << "Downloader spare URL set to: " << spare_url;
     }
 }
 
@@ -97,7 +97,7 @@ bool Downloader::download_to(const std::string& dir_name,
     try {
         if (!fs::exists(dir_path)) {
             fs::create_directories(dir_path);
-            LOG_INFO << "Created directory: " << dir_path.string();
+            // LOG_INFO << "Created directory: " << dir_path.string();
         }
     } catch (const fs::filesystem_error& e) {
         TR_VALUE_ERROR("Failed to create directory: " << dir_path.string()
@@ -108,17 +108,17 @@ bool Downloader::download_to(const std::string& dir_name,
     if (fs::exists(full_path)) {
         if (!cover) {
             file_already_exists_ = true;
-            LOG_INFO << "File already exists, skipping download: " << full_path.string();
+            // LOG_INFO << "File already exists, skipping download: " << full_path.string();
             return true;
         } else {
-            LOG_INFO << "File exists, will overwrite: " << full_path.string();
+            // LOG_INFO << "File exists, will overwrite: " << full_path.string();
             fs::remove(full_path);
         }
     }
 
     // 尝试从主URL下载
-    LOG_INFO << "Starting download from: " << url_;
-    LOG_INFO << "Target path: " << full_path.string();
+    // LOG_INFO << "Starting download from: " << url_;
+    // LOG_INFO << "Target path: " << full_path.string();
 
     bool success = download_impl(url_, full_path.string());
 
@@ -132,8 +132,8 @@ bool Downloader::download_to(const std::string& dir_name,
         // 验证文件是否真的创建成功
         if (fs::exists(full_path)) {
             uintmax_t file_size = fs::file_size(full_path);
-            LOG_INFO << "Download completed: " << full_path.string()
-                     << " (size: " << file_size << " bytes)";
+            // LOG_INFO << "Download completed: " << full_path.string()
+            //          << " (size: " << file_size << " bytes)";
             return true;
         } else {
             TR_VALUE_ERROR("Download reported success but file not found: " << full_path.string());
@@ -292,8 +292,8 @@ int Downloader::progress_callback(void* clientp,
         // 默认：每10%打印一次进度
         if (percent >= progress->last_reported_percent + 10 ||
             percent == 100) {
-            LOG_INFO << "Downloading: " << percent << "%"
-                     << " (" << dlnow << " / " << dltotal << " bytes)";
+            // LOG_INFO << "Downloading: " << percent << "%"
+            //          << " (" << dlnow << " / " << dltotal << " bytes)";
             progress->last_reported_percent = percent;
         }
     }

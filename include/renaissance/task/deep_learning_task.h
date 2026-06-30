@@ -53,6 +53,33 @@ struct H2DRunResult {
     H2DTestResult aggregate_val() const;
 };
 
+// 前向声明
+enum class CompileInfo : uint32_t;
+
+inline CompileInfo operator|(CompileInfo a, CompileInfo b) {
+    return static_cast<CompileInfo>(static_cast<uint32_t>(a) | static_cast<uint32_t>(b));
+}
+
+inline bool has_info(CompileInfo flags, CompileInfo info) {
+    return (static_cast<uint32_t>(flags) & static_cast<uint32_t>(info)) != 0;
+}
+
+/**
+ * @brief 编译诊断信息级别
+ *
+ * 位掩码枚举，用于控制 compile() 时打印的诊断信息范围。
+ * 默认只打印模型架构（ArchPlan），需要调试时可组合开启 MemoryPlan 和
+ * Train/Inference ComputationGraph 的详细 dump。
+ */
+enum class CompileInfo : uint32_t {
+    NONE        = 0,
+    ARCH_PLAN   = 1 << 0,   // 模型架构
+    MEMORY_PLAN = 1 << 1,   // 内存布局
+    TRAIN_GRAPH = 1 << 2,   // 训练计算图
+    INFER_GRAPH = 1 << 3,   // 推理计算图
+    ALL         = ARCH_PLAN | MEMORY_PLAN | TRAIN_GRAPH | INFER_GRAPH
+};
+
 /**
  * @class DeepLearningTask
  * @brief 深度学习训练任务门面
@@ -242,11 +269,34 @@ public:
     // DeepLearningTask 用户只关心训练循环，不暴露底层图执行能力
     // 取消 using TaskBase::run; 避免引入 TaskBase 的重载歧义
 
+    /**
+     * @brief 编译：默认只打印 ArchPlan
+     *
+     * 无参版本总是把诊断级别恢复为 CompileInfo::ARCH_PLAN，
+     * 因此普通用户调用 task.compile() 时输出保持简洁。
+     */
+    void compile();
+
+    /**
+     * @brief 编译：显式指定诊断信息打印级别
+     * @param info 位掩码组合，例如 CompileInfo::ALL 或
+     *             CompileInfo::ARCH_PLAN | CompileInfo::MEMORY_PLAN
+     */
+    void compile(CompileInfo info);
+
     [[nodiscard]] TrainingResult run();       // 执行完整训练循环
     [[nodiscard]] TrainingResult dry_run();   // 仅打印配置，不执行实际训练
 
 private:
     TrainingResult run_impl(bool dry_run);    // run() 和 dry_run() 共享实现
+
+    /**
+     * @brief 编译诊断信息级别
+     *
+     * 由 compile() / compile(CompileInfo) 设置，在 TaskBase::compile_impl()
+     * 中通过 friend 关系读取，控制 COMPILE INFORMATION 块的打印范围。
+     */
+    CompileInfo compile_info_ = CompileInfo::ARCH_PLAN;
 
 protected:
     /**

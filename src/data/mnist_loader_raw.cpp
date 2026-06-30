@@ -763,8 +763,6 @@ bool MnistLoaderRaw::verify(const std::string& save_path, bool verbose) {
 }
 
 void MnistLoaderRaw::extract(const std::string& save_path) {
-    LOG_INFO << "Extracting MNIST dataset files...";
-
     // Define expected output files (only check RAW files, not DTS files)
     const std::vector<std::string> expected_files = {
         "train-images-idx3-ubyte",
@@ -791,6 +789,9 @@ void MnistLoaderRaw::extract(const std::string& save_path) {
         return;
     }
 
+    // 真正需要解压时才打印
+    // LOG_INFO << "Extracting MNIST dataset files...";
+
     // Case 2: Some files exist but not all - delete existing files and re-extract
     if (!existing_files.empty()) {
         LOG_WARN << "Incomplete extraction detected. Deleting existing extracted files and re-extracting...";
@@ -813,7 +814,7 @@ void MnistLoaderRaw::extract(const std::string& save_path) {
         std::string gz_path = entry.path().string();
         std::string output_path = gz_path.substr(0, gz_path.size() - 3);  // Remove .gz
 
-        LOG_INFO << "Extracting: " << filename;
+        // LOG_INFO << "Extracting: " << filename;
 
         // Open gzip file
         struct archive* a = archive_read_new();

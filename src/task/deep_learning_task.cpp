@@ -388,6 +388,21 @@ DeepLearningTask& DeepLearningTask::num_classes(int n) {
 }
 
 // =============================================================================
+// 编译
+// =============================================================================
+
+void DeepLearningTask::compile() {
+    // 无参版本明确恢复默认：只打印 ArchPlan
+    compile_info_ = CompileInfo::ARCH_PLAN;
+    TaskBase::compile();
+}
+
+void DeepLearningTask::compile(CompileInfo info) {
+    compile_info_ = info;
+    TaskBase::compile();
+}
+
+// =============================================================================
 // 主训练循环
 // =============================================================================
 

@@ -333,22 +333,42 @@ void TaskBase::compile_impl(bool debug_mode) {
         #endif
 
         // ========== 诊断打印：ArchPlan / MemoryPlan / ComputationGraph ==========
-        std::cout << "\n========== COMPILE DIAGNOSTICS ==========" << std::endl;
-        std::cout << "--- ArchPlan ---" << std::endl;
-        std::cout << dl->arch_plan_.to_string() << std::endl;
-        std::cout << "--- MemoryPlan ---" << std::endl;
-        if (dl->active_memory_plan_) {
-            std::cout << dl->active_memory_plan_->dump_layout() << std::endl;
+        CompileInfo any_info = CompileInfo::ARCH_PLAN
+                             | CompileInfo::MEMORY_PLAN
+                             | CompileInfo::TRAIN_GRAPH
+                             | CompileInfo::INFER_GRAPH;
+
+        if (has_info(dl->compile_info_, any_info)) {
+            std::cout << "\n========== COMPILE INFORMATION ==========" << std::endl;
+
+            if (has_info(dl->compile_info_, CompileInfo::ARCH_PLAN)) {
+                std::cout << "--- ArchPlan ---" << std::endl;
+                std::cout << dl->arch_plan_.to_string() << std::endl;
+            }
+
+            if (has_info(dl->compile_info_, CompileInfo::MEMORY_PLAN)) {
+                std::cout << "--- MemoryPlan ---" << std::endl;
+                if (dl->active_memory_plan_) {
+                    std::cout << dl->active_memory_plan_->dump_layout() << std::endl;
+                }
+            }
+
+            if (has_info(dl->compile_info_, CompileInfo::TRAIN_GRAPH)) {
+                std::cout << "--- Train ComputationGraph ---" << std::endl;
+                if (dl->train_cg_) {
+                    std::cout << dl->train_cg_->debug_dump(true) << std::endl;
+                }
+            }
+
+            if (has_info(dl->compile_info_, CompileInfo::INFER_GRAPH)) {
+                std::cout << "--- Inference ComputationGraph ---" << std::endl;
+                if (dl->infer_cg_) {
+                    std::cout << dl->infer_cg_->debug_dump(true) << std::endl;
+                }
+            }
+
+            std::cout << "=========================================\n" << std::endl;
         }
-        std::cout << "--- Train ComputationGraph ---" << std::endl;
-        if (dl->train_cg_) {
-            std::cout << dl->train_cg_->debug_dump(true) << std::endl;
-        }
-        std::cout << "--- Inference ComputationGraph ---" << std::endl;
-        if (dl->infer_cg_) {
-            std::cout << dl->infer_cg_->debug_dump(true) << std::endl;
-        }
-        std::cout << "=========================================\n" << std::endl;
     }
 }
 

@@ -253,7 +253,7 @@ int main(int argc, char** argv) {
               << "Target: 73.36% (original paper)\n"
               << "=====================================\n";
 
-    task.compile();
+    task.compile(CompileInfo::ALL);
 
     auto t0 = std::chrono::steady_clock::now();
     auto result = task.run();
