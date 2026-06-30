@@ -1,6 +1,8 @@
 # Tech-Renaissance / 技术觉醒
 
-> 基于 C++17 / CUDA 13.1 / cuDNN 9.17 的静态图深度学习训练框架 —— V4.20.646
+> 基于 C++17 / CUDA 13.1 / cuDNN 9.17 的静态图深度学习训练框架 —— V4.20.684
+
+
 
 ## Features
 
@@ -13,6 +15,8 @@
 - 任务生命周期管理：三阶段状态机（PLANNING → MEMORY_LOCKED → COMPILED），确保编译期与运行期严格分离
 - 灵活的数据预处理：支持 ImageNet、CIFAR、MNIST 等数据集，内置 RandomResizedCrop、ColorJitter、Normalize 等增强操作
 
+
+
 ## Requirements
 
 - C++17 编译器（GCC ≥ 9 / MSVC ≥ 2022 / Clang ≥ 12）
@@ -22,26 +26,19 @@
 - Python 3（用于 configure.py）
 - 依赖库：turbojpeg、Simd Library、Eigen3、XNNPACK（CPU 模式）
 
+
+
 ## Quick Start
 
 ```bash
-git clone https://github.com/xxx/renaissance.git
+git clone https://github.com/tech-renaissance/renaissance.git
 cd renaissance
 python configure.py
-cmake -B build -S . -DCMAKE_BUILD_TYPE=Release
-cmake --build build -j
+./build.sh
+./build/bin/tests/example/mlp_mnist
 ```
 
-```cpp
-#include <renaissance.h>
 
-int main() {
-    using namespace tr;
-    GlobalRegistry::instance().use_gpu("0");      // 或 use_cpu() 纯 CPU 模式
-    Tensor a(Shape(1, 2, 2, 3), DType::FP32);    // NHWC: 1 张 2x2 RGB 图像
-    a.fill(1.0f);
-}
-```
 
 ## Architecture
 
@@ -55,12 +52,7 @@ int main() {
 | Task | `src/task/` | `include/renaissance/task/` | 训练/推理任务门面与生命周期 |
 | Backend | `src/backend/` | `include/renaissance/backend/` | 算子注册、设备上下文、图执行器、内存池 |
 
-## Documentation
 
-- [公共 API 索引](include/renaissance/README.md)
-- [测试说明](tests/README.md)
-- [编译指南](docs/alpha_build.md)
-- [代码规范](docs/rules.md)
 
 ## License
 
