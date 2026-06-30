@@ -1979,11 +1979,52 @@ void DeepLearningTask::save_model_to(const std::string& path, bool is_ema) {
 // 日志输出
 // =============================================================================
 
+std::string DeepLearningTask::build_epoch_log_header() const {
+    std::ostringstream oss;
+    oss << std::setw(6) << "Epoch" << " | ";
+
+    if (has_metric(metrics_, Metric::TRAIN_LOSS)) {
+        oss << std::setw(10) << "Train Loss" << " | ";
+    }
+    if (has_metric(metrics_, Metric::VAL_LOSS)) {
+        oss << std::setw(10) << "Val Loss" << " | ";
+    }
+    if (has_metric(metrics_, Metric::VAL_TOP1)) {
+        oss << std::setw(9) << "Top1" << "% | ";
+    }
+    if (has_metric(metrics_, Metric::VAL_TOP5)) {
+        oss << std::setw(9) << "Top5" << "% | ";
+    }
+    if (has_metric(metrics_, Metric::EMA_TOP1)) {
+        if (use_sema_) {
+            oss << std::setw(9) << "EMA Top1" << "% | ";
+        } else {
+            oss << std::string(10, ' ') << " | ";
+        }
+    }
+    oss << std::setw(12) << "LR" << " | ";
+    oss << std::setw(7) << "Time(s)";
+
+    return oss.str();
+}
+
+void DeepLearningTask::log_epoch_header() const {
+    const std::string header = build_epoch_log_header();
+    const std::string sep(header.size() + 3, '=');
+    std::cout << sep << '\n'
+              << header << '\n'
+              << sep << '\n'
+              << std::flush;
+}
+
 void DeepLearningTask::log_epoch_results(float train_loss, float val_loss,
                             float top1, float top5,
                             float ema_top1, float ema_top5,
                             float lr, double epoch_time_sec) {
     (void)ema_top5;
+    if (current_epoch_ == 0) {
+        log_epoch_header();
+    }
     // 对齐全票通过测试样例的日志格式
     std::ostringstream oss;
     oss << std::setw(6) << (current_epoch_ + 1) << " | ";
@@ -2015,6 +2056,10 @@ void DeepLearningTask::log_epoch_results(float train_loss, float val_loss,
 
 void DeepLearningTask::log_final_summary(double total_time_sec) const {
     (void)total_time_sec;
+    const std::string header = build_epoch_log_header();
+    if (!header.empty()) {
+        std::cout << std::string(header.size() + 3, '=') << '\n' << std::flush;
+    }
     // int hours = static_cast<int>(total_time_sec) / 3600;
     // int minutes = (static_cast<int>(total_time_sec) % 3600) / 60;
     // int seconds = static_cast<int>(total_time_sec) % 60;

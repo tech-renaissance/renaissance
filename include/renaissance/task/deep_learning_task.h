@@ -632,6 +632,12 @@ private:
     /** @brief 保存模型到指定路径 */
     void save_model_to(const std::string& path, bool is_ema = false);
 
+    /** @brief 构造 epoch 结果表头字符串（根据 metrics_ 动态生成） */
+    [[nodiscard]] std::string build_epoch_log_header() const;
+
+    /** @brief 打印 epoch 结果表头（上下带等号线） */
+    void log_epoch_header() const;
+
     /** @brief 打印 epoch 结果日志 */
     void log_epoch_results(float train_loss, float val_loss,
                           float top1, float top5,
