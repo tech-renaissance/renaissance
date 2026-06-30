@@ -1,4 +1,3 @@
-import argparse
 import math
 import time
 from pathlib import Path
@@ -8,12 +7,6 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
-
-
-parser = argparse.ArgumentParser(description="PyTorch MNIST MLP Example")
-parser.add_argument("--cpu", action="store_true", help="Run on CPU (FP32)")
-parser.add_argument("--gpu", action="store_true", help="Run on GPU (FP32)")
-parser.add_argument("--amp", action="store_true", help="Run on GPU with AMP (FP16)")
 
 
 class UltimateMLP(nn.Module):
@@ -67,20 +60,10 @@ def warmup_cosine_lambda(epoch):
 
 
 if __name__ == '__main__':
-    args = parser.parse_args()
-
-    if args.amp:
-        mode = "AMP"
-        device = torch.device("cuda")
-        use_amp = True
-    elif args.gpu:
-        mode = "GPU"
-        device = torch.device("cuda")
-        use_amp = False
-    else:
-        mode = "CPU"
-        device = torch.device("cpu")
-        use_amp = False
+    # 固定使用 GPU + AMP + torch.compile
+    mode = "AMP"
+    device = torch.device("cuda")
+    use_amp = True
 
     print("===========================================", flush=True)
     print(" PyTorch MNIST MLP Example", flush=True)
