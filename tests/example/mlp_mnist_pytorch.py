@@ -45,16 +45,14 @@ BASE_LR       = 0.001
 
 def warmup_cosine_lambda(epoch):
     """
-    Match TR4 CosineAnnealingLR + warmup(5) behaviour exactly.
-    Epoch 1 (epoch=0): lr = 0
-    Epoch 2 (epoch=1): lr = 0.0002
-    ...
-    Epoch 6 (epoch=5): lr = 0.001  (base_lr reached)
-    Epoch 7+          : cosine annealing down to eta_min
+    匹配 C++ CosineAnnealingLR(base_lr=0.001, eta_min=1e-6, warmup=5) 的 step-by-epoch 行为。
+    C++ 在 epoch 模式下，最后一个 epoch 精确降到 eta_min，因此衰减区间总长度 = total_epochs - warmup_epochs - 1。
     """
-    if epoch < WARMUP_EPOCHS:
-        return epoch / WARMUP_EPOCHS          # 0 -> 0.0, 1 -> 0.2, ..., 4 -> 0.8
-    progress = (epoch - WARMUP_EPOCHS) / (TOTAL_EPOCHS - WARMUP_EPOCHS)
+    if epoch <= WARMUP_EPOCHS:
+        return epoch / WARMUP_EPOCHS          # epoch 0 -> 0.0, ..., epoch 5 -> 1.0
+    decay_total = max(1, TOTAL_EPOCHS - WARMUP_EPOCHS - 1)
+    progress = (epoch - WARMUP_EPOCHS) / decay_total
+    progress = min(progress, 1.0)
     cos_val = 0.5 * (1.0 + math.cos(math.pi * progress))
     return (ETA_MIN + (BASE_LR - ETA_MIN) * cos_val) / BASE_LR
 
@@ -63,23 +61,20 @@ if __name__ == '__main__':
     # 固定使用 GPU + AMP + torch.compile
     mode = "AMP"
     device = torch.device("cuda")
-    use_amp = True
 
-    print("===========================================", flush=True)
-    print(" PyTorch MNIST MLP Example", flush=True)
-    print("===========================================", flush=True)
-    print(f" Mode:       {mode}", flush=True)
-    print(f" Device:     {device}", flush=True)
-    print(f" Network:    784->1024->512->256->10", flush=True)
-    print(f" Activation: ReLU", flush=True)
-    print(f" Optimizer:  AdamW (beta1=0.9, beta2=0.999, eps=1e-8, wd=1e-4)", flush=True)
-    print(f" Scheduler:  CosineAnnealing + Warmup(5)", flush=True)
-    print("===========================================", flush=True)
+    print("\n========== COMPILE INFORMATION ==========", flush=True)
+    print(f"  Device:     {device}", flush=True)
+    print(f"  Mode:       {mode}", flush=True)
+    print(f"  Network:    784->1024->512->256->10", flush=True)
+    print(f"  Activation: ReLU", flush=True)
+    print(f"  Optimizer:  AdamW (beta1=0.9, beta2=0.999, eps=1e-8, wd=1e-4)", flush=True)
+    print(f"  Scheduler:  CosineAnnealing + Warmup(5)", flush=True)
+    print("=========================================", flush=True)
 
-    if device.type == "cuda":
-        torch.backends.cuda.matmul.allow_tf32 = True
-        torch.backends.cudnn.allow_tf32 = True
-        torch.set_float32_matmul_precision('high')
+    # 启用 TF32 与高精度矩阵运算，提升 AMP 训练速度
+    torch.backends.cuda.matmul.allow_tf32 = True
+    torch.backends.cudnn.allow_tf32 = True
+    torch.set_float32_matmul_precision('high')
 
     torch.manual_seed(123)
     batch_size = 200
@@ -113,7 +108,7 @@ if __name__ == '__main__':
     train_set = datasets.MNIST(str(mnist_root), train=True,  download=True, transform=train_transform)
     val_set   = datasets.MNIST(str(mnist_root), train=False, download=True, transform=val_transform)
 
-    pin_mem = (device.type == "cuda")
+    pin_mem = True
     # [对齐 CPP] num_workers=8 对齐 C++ preprocess_workers(8)
     train_loader = DataLoader(train_set, batch_size=batch_size, shuffle=True,
                               pin_memory=pin_mem, num_workers=8, persistent_workers=True)
@@ -123,38 +118,32 @@ if __name__ == '__main__':
     model = UltimateMLP().to(device)
 
     # [对齐 CPP] torch.compile(max-autotune) 对齐 C++ 图级优化/算子融合
-    if hasattr(torch, "compile") and device.type == "cuda":
+    if hasattr(torch, "compile"):
         model = torch.compile(model, mode="max-autotune")
 
     criterion = nn.CrossEntropyLoss(label_smoothing=0.1)
 
-    # 参数分组：weight 用 AdamW (wd=1e-4)，bias 用 Adam (wd=0.0) 以匹配 CPP 行为
-    weight_params = []
-    bias_params = []
-    for name, param in model.named_parameters():
-        if not param.requires_grad:
-            continue
-        if 'bias' in name or len(param.shape) == 1:
-            bias_params.append(param)
+    # [对齐 CPP] bias 等一维参数不施加 weight_decay，与 C++ 底层 WEIGHT/BIAS 分离 kernel 行为一致
+    weight_params, bias_like_params = [], []
+    for param in model.parameters():
+        if param.ndim <= 1:
+            bias_like_params.append(param)
         else:
             weight_params.append(param)
-
-    param_groups = [
+    optimizer = optim.AdamW([
         {'params': weight_params, 'weight_decay': 1e-4},
-        {'params': bias_params, 'weight_decay': 0.0}
-    ]
-    optimizer = optim.AdamW(param_groups, lr=BASE_LR,
-                            betas=(0.9, 0.999), eps=1e-8)
+        {'params': bias_like_params, 'weight_decay': 0.0},
+    ], lr=BASE_LR, betas=(0.9, 0.999), eps=1e-8)
     scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=warmup_cosine_lambda)
 
-    scaler = torch.amp.GradScaler("cuda") if use_amp else None
+    scaler = torch.amp.GradScaler("cuda")
 
     # ====================================================================
     # WARMUP: 触发 torch.compile(max-autotune) 编译，隔离编译耗时
     # 流程：compile → dummy batch(触发编译) → sync → 打印耗时 →
     #       re-seed → re-init → re-compile → 正式开始计时
     # ====================================================================
-    if hasattr(torch, "compile") and device.type == "cuda":
+    if hasattr(torch, "compile"):
         print("\n--- Warmup: triggering max-autotune compilation ---", flush=True)
         tw0 = time.perf_counter()
 
@@ -163,26 +152,16 @@ if __name__ == '__main__':
 
         model.train()
         optimizer.zero_grad()
-        if use_amp:
-            with torch.amp.autocast("cuda"):
-                out = model(dummy_data)
-                l = criterion(out, dummy_label)
-            scaler.scale(l).backward()
-            scaler.step(optimizer)
-            scaler.update()
-        else:
+        with torch.amp.autocast("cuda"):
             out = model(dummy_data)
             l = criterion(out, dummy_label)
-            l.backward()
-            optimizer.step()
+        scaler.scale(l).backward()
+        scaler.step(optimizer)
+        scaler.update()
 
         model.eval()
-        with torch.no_grad():
-            if use_amp:
-                with torch.amp.autocast("cuda"):
-                    _ = model(dummy_data)
-            else:
-                _ = model(dummy_data)
+        with torch.no_grad(), torch.amp.autocast("cuda"):
+            _ = model(dummy_data)
 
         torch.cuda.synchronize()
         tw1 = time.perf_counter()
@@ -192,36 +171,26 @@ if __name__ == '__main__':
         # [对齐 CPP] re-seed + re-init + re-compile，与 C++ task.compile() 后全新起点一致
         torch.manual_seed(123)
         model = UltimateMLP().to(device)
-        model = torch.compile(model, mode="max-autotune")  # 第二次 compile 走 FX cache，几乎瞬间完成
+        if hasattr(torch, "compile"):
+            model = torch.compile(model, mode="max-autotune")
 
-        # 重新分组参数
-        weight_params = []
-        bias_params = []
-        for name, param in model.named_parameters():
-            if not param.requires_grad:
-                continue
-            # [对齐 CPP] bias 参数 wd=0，与 C++ 中 bias 参数分组一致
-            if 'bias' in name or len(param.shape) == 1:
-                bias_params.append(param)
+        # [对齐 CPP] 重新初始化优化器，bias 等一维参数不施加 weight_decay
+        weight_params, bias_like_params = [], []
+        for param in model.parameters():
+            if param.ndim <= 1:
+                bias_like_params.append(param)
             else:
                 weight_params.append(param)
-
-        param_groups = [
+        optimizer = optim.AdamW([
             {'params': weight_params, 'weight_decay': 1e-4},
-            {'params': bias_params, 'weight_decay': 0.0}
-        ]
-        optimizer = optim.AdamW(param_groups, lr=BASE_LR,
-                                betas=(0.9, 0.999), eps=1e-8)
+            {'params': bias_like_params, 'weight_decay': 0.0},
+        ], lr=BASE_LR, betas=(0.9, 0.999), eps=1e-8)
         scheduler = optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=warmup_cosine_lambda)
-        if use_amp:
-            scaler = torch.amp.GradScaler("cuda")
-        print("--- Re-initialized.  Timed 100-epoch run begins. ---\n", flush=True)
-
+        scaler = torch.amp.GradScaler("cuda")
     best_acc = 0.0
     best_epoch = 0
     # [对齐 CPP] 计时前显式同步 CUDA，确保无未完成 kernel 干扰计时
-    if device.type == "cuda":
-        torch.cuda.synchronize()
+    torch.cuda.synchronize()
     t0 = time.perf_counter()
 
     for epoch in range(epochs):
@@ -235,18 +204,12 @@ if __name__ == '__main__':
             target = target.to(device, non_blocking=True)
             optimizer.zero_grad()
 
-            if use_amp:
-                with torch.amp.autocast("cuda"):
-                    output = model(data)
-                    loss = criterion(output, target)
-                scaler.scale(loss).backward()
-                scaler.step(optimizer)
-                scaler.update()
-            else:
+            with torch.amp.autocast("cuda"):
                 output = model(data)
                 loss = criterion(output, target)
-                loss.backward()
-                optimizer.step()
+            scaler.scale(loss).backward()
+            scaler.step(optimizer)
+            scaler.update()
 
             train_loss += loss.item()
 
@@ -262,11 +225,7 @@ if __name__ == '__main__':
                 data = data.to(device, non_blocking=True)
                 target = target.to(device, non_blocking=True)
 
-                if use_amp:
-                    with torch.amp.autocast("cuda"):
-                        output = model(data)
-                        val_loss += criterion(output, target).item()
-                else:
+                with torch.amp.autocast("cuda"):
                     output = model(data)
                     val_loss += criterion(output, target).item()
 
@@ -281,11 +240,6 @@ if __name__ == '__main__':
             best_acc = acc
             best_epoch = epoch + 1
 
-        # 早停阈值 99.9%，与 C++ 示例中 early_stop_by_top1(0.999f) 一致
-        if acc >= 99.9:
-            print(f"Early stop at epoch {epoch+1}: val_top1={acc:.2f}% >= 99.9%", flush=True)
-            break
-
         current_lr = optimizer.param_groups[0]['lr']
         ep_t1 = time.perf_counter()
 
@@ -295,8 +249,7 @@ if __name__ == '__main__':
         scheduler.step()
 
     # [对齐 CPP] 计时后显式同步 CUDA，确保所有 kernel 已完成再取时间
-    if device.type == "cuda":
-        torch.cuda.synchronize()
+    torch.cuda.synchronize()
     t1 = time.perf_counter()
     print("\n========== TRAINING RESULT ==========", flush=True)
     print(f"  Best Top-1:      {best_acc:.2f}%", flush=True)
