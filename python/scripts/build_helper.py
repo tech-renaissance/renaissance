@@ -11,7 +11,7 @@ import sys
 
 PROJECT_ROOT = r"R:\renaissance"
 VCVARS_BAT = r"C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvars64.bat"
-BUILD_DIR = os.path.join(PROJECT_ROOT, "build", "windows-msvc-release")
+BUILD_DIR = os.path.join(PROJECT_ROOT, "build")
 CMAKE_TOOLCHAIN = r"T:/Softwares/vcpkg/scripts/buildsystems/vcpkg.cmake"
 
 

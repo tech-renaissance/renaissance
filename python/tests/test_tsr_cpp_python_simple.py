@@ -33,7 +33,7 @@ TSR-V4.20 C++/Python互操作性快速测试
 
 【手动分步验证方式】
   步骤 1 - 运行 C++ 生成文件：
-    build/windows-msvc-release/bin/tests/tensor/test_tsr_interop.exe
+    build/bin/tests/tensor/test_tsr_interop.exe
     （生成 workspace/test_cpp_raw.tsr 和 test_cpp_zlib.tsr）
 
   步骤 2 - 运行 Python 完成验证：
@@ -41,11 +41,11 @@ TSR-V4.20 C++/Python互操作性快速测试
     （加载 C++ 文件并生成 Python 文件供 C++ 验证）
 
   步骤 3 - 再次运行 C++ 完成双向验证：
-    build/windows-msvc-release/bin/tests/tensor/test_tsr_interop.exe
+    build/bin/tests/tensor/test_tsr_interop.exe
     （加载 Python 生成的文件完成 Python→C++ 验证）
 
 【C++ 可执行文件路径】
-  Windows: build/windows-msvc-release/bin/tests/tensor/test_tsr_interop.exe
+  Windows: build/bin/tests/tensor/test_tsr_interop.exe
   Linux:   build/linux-release/bin/tests/tensor/test_tsr_interop
 
 【返回值】
@@ -230,7 +230,7 @@ def main():
     # ================================================================
     # 5. 自动调用 C++ 可执行文件完成反向验证
     # ================================================================
-    # 调用 build/windows-msvc-release/bin/tests/tensor/test_tsr_interop.exe
+    # 调用 build/bin/tests/tensor/test_tsr_interop.exe
     # C++ 端会加载 TR_WORKSPACE/test_python_raw.tsr 完成 Python->C++ 验证
     # 若可执行文件不存在，输出提示并跳过此步骤
     # ================================================================
@@ -240,7 +240,7 @@ def main():
     # 若构建目录或目标平台不同，需相应调整此路径
     cpp_exe = os.path.join(
         os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
-        "build", "windows-msvc-release", "bin", "tests", "tensor", "test_tsr_interop.exe"
+        "build", "bin", "tests", "tensor", "test_tsr_interop.exe"
     )
 
     # 标记C++反向验证是否执行并成功
@@ -248,7 +248,7 @@ def main():
 
     if not os.path.exists(cpp_exe):
         print(f"  C++ test binary not found: {cpp_exe}")
-        print("  Please run: cmake --build build/windows-msvc-release --target test_tsr_interop")
+        print("  Please run: cmake --build build --target test_tsr_interop")
     else:
         print(f"  Running: {cpp_exe}")
         try:

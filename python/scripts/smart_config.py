@@ -2064,8 +2064,8 @@ def generate_build_script(scene: str, deps: Dict, sys_info: Dict) -> Tuple[str, 
 
     if sys_info["is_windows"]:
         # Windows脚本 - 2025-12-23验证版本
-        # 使用正确的构建目录：build/windows-msvc-release
-        windows_build_dir = "build/windows-msvc-release"
+        # 统一使用 build 目录，与 Linux 保持一致，不再创建 windows-msvc-release 子目录
+        windows_build_dir = BUILD_DIR
 
         # VS路径推导
         vcvars_path = "C:/Program Files/Microsoft Visual Studio/2022/Community/VC/Auxiliary/Build/vcvars64.bat"
