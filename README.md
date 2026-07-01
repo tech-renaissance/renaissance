@@ -32,7 +32,7 @@
 
 在 A100 × 8 的 GPU 云服务器平台上，分别用 Tech-Renaissance、PyTorch（2.9.0）、TensorFlow（2.15.1）进行 VGG16BN 的 ImageNet 训练。结果显示，即使面对写法高度优化的 PyTorch 和 TensorFlow 训练脚本，Tech-Renaissance 依然表现出明显的吞吐量优势，且训练的准确率结果完全符合 VGG16BN 的预期水准（TOP-1 73.80% | TOP-5 91.71%）。
 
-![VGG16BN Training Throughput](resources/vgg_perf.png)
+![VGG16BN Training Throughput](resources/vgg16bn_perf.png)
 
 | 框架 | 吞吐量 (Images/sec) | 每 Epoch 用时 (s) | 加速比 (vs PyTorch) |
 | :--: | :--------: | :--------: | :--------: |
