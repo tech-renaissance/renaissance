@@ -2,7 +2,7 @@
 
 ![Tech-Renaissance Logo](resources/main_logo.png)
 
-> 单人团队以 AI 技术开发的超轻量级高性能深度学习训练框架
+> **单人团队以 AI 技术开发的超轻量级高性能深度学习训练框架**
 
 ![Newest Version](resources/badge_version.png)
 
@@ -28,6 +28,8 @@
 - 超高线程并发：多线程预处理，即使开启超过200个线程依然完美并发，且不破坏随机可复现性
 - 跨平台：支持 Windows 和 Linux 系统，支持 Turing 及以后的架构（常用的 GPU 包括 A100、A10、L20、T4、RTX5090等均已通过测试）
 - 极简API：科学设计顶层API，写法优雅、功能强大，34 行代码完整训练 MLP 至 99.4% 以上的 MNIST 准确率，新手无痛入坑，老手省心炼丹
+
+
 
 
 
@@ -59,6 +61,8 @@
 
 
 
+
+
 ## 基本依赖
 
 |    工具/库     |  最低版本   |
@@ -80,6 +84,8 @@
 |    mimalloc    |     3.2     |
 |      stb       | 2024-07-29  |
 |      simd      |     6.2     |
+
+
 
 
 
@@ -109,6 +115,8 @@ cd /opt/tr4/renaissance && python configure.py
 
 
 
+
+
 ## 文件结构
 
 | 模块 | 源码 | 公开头文件 | 职责 |
@@ -123,6 +131,8 @@ cd /opt/tr4/renaissance && python configure.py
 
 
 
+
+
 ## 团队组成
 
 核心设计人员（按贡献程度排序）：ChatGPT 5、GLM 4.6、Gemini 3、Kimi K2.6、Sonnet 4.6、Opus 4.6
@@ -130,6 +140,8 @@ cd /opt/tr4/renaissance && python configure.py
 核心开发人员（按贡献程度排序）：Sonnet 4.6、DeepSeek V4 Pro、Kimi K2.6
 
 其他人员：一个人类
+
+
 
 
 
