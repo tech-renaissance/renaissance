@@ -33,11 +33,23 @@
 ## Quick Start
 
 ```bash
-git clone https://github.com/tech-renaissance/renaissance.git
-cd renaissance
-python configure.py
+# 克隆项目
+mkdir -p /opt/tr4 && cd /opt/tr4
+git clone https://gitee.com/tech-renaissance/renaissance.git
+
+# 启动容器
+docker pull crpi-vbtd6yj00u83ugqk.cn-beijing.personal.cr.aliyuncs.com/tech-renaissance/tr4:v4.20
+docker run -d -it --name tr4-dev --gpus all --cap-add SYS_NICE -v /opt/tr4:/opt/tr4 -w /opt/tr4 \
+    crpi-vbtd6yj00u83ugqk.cn-beijing.personal.cr.aliyuncs.com/tech-renaissance/tr4:v4.20 \
+    tail -f /dev/null
+docker exec -it tr4-dev bash
+
+# 配置编译
+cd /opt/tr4/renaissance && python configure.py
 ./build.sh
-./build/bin/tests/example/mlp_mnist
+
+# 运行示例
+/opt/tr4/renaissance/build/bin/tests/example/mlp_mnist
 ```
 
 
