@@ -4,13 +4,7 @@
 
 > 单人团队以 AI 技术开发的超轻量级高性能深度学习训练框架
 
-![Newest Version](resources/badge_version.png)
-
-![Ubuntu 24.04](resources/badge_ubuntu.png) ![Windows 11](resources/badge_windows.png)
-
-![A100](resources/badge_a100.png) ![A10](resources/badge_a10.png) ![L20](resources/badge_l20.png) ![T4](resources/badge_t4.png) ![RTX 4060](resources/badge_rtx4060.png) ![RTX 4090](resources/badge_rtx4090.png) ![RTX 5090](resources/badge_rtx5090.png)
-
- ![L20](resources/badge_doc.png) 
+![Newest Version](resources/badge_version.png)![Ubuntu 24.04](resources/badge_ubuntu.png) ![Windows 11](resources/badge_windows.png)
 
 
 
