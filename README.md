@@ -47,7 +47,7 @@
 | TensorFlow + XLA | 7,766.34 | 164.964 | +5.65% faster |
 | **Tech-Renaissance** | **9,310.13** | **137.610** | **+26.65% faster** |
 
-（注：对比为严格公平对比，三者在同一机器运行测试，使用完全相同的超参数、模型结构、训练算法和预处理线程数，且均开启 AMP，PyTorch 开启 torch.compile、TensorFlow 开启 XLA，且均排除编译用时。详见[测试样例](tests/example)）
+（注：对比为严格公平对比，三者在同一机器运行测试，使用完全相同的超参数、模型结构、训练算法和预处理线程数，且均开启 AMP，PyTorch 开启 torch.compile、TensorFlow 开启 XLA，且均排除编译用时。详见 [测试样例](tests/example)）
 
 
 
@@ -57,7 +57,15 @@
 
 ![Tech-Renaissance Logo](resources/mlp_perf.png)
 
-（注：对比为严格公平对比，双方在同一机器运行测试，使用完全相同的超参数、模型结构、训练算法和预处理线程数，且均开启 AMP，PyTorch 开启 torch.compile 且排除编译用时。详见[测试样例](tests/example)）
+具体多平台训练性能数据如下（指标为每秒训练的epoch数，基于 5 次运行总用时的中位数计算）：
+
+| 指标 | RTX4060 | L20 | A100 | A10 | RTX5090 | T4 | RTX4090 |
+| :--: | :-----: | :-: | :--: | :-: | :-----: | :-: | :-----: |
+| Tech-Renaissance (epochs/s) | 3.11 | 2.54 | 2.66 | 2.70 | 2.61 | 2.19 | 2.28 |
+| PyTorch (epochs/s) | 0.45 | 0.33 | 0.33 | 0.34 | 0.25 | 0.16 | 0.17 |
+| 加速比 | 6.90x | 7.64x | 8.02x | 8.05x | 10.58x | 13.27x | 13.58x |
+
+（注：对比为严格公平对比，双方在同一机器运行测试，使用完全相同的超参数、模型结构、训练算法和预处理线程数，且均开启 AMP，PyTorch 开启 torch.compile 且排除编译用时。详见 [测试样例](tests/example)）
 
 
 
