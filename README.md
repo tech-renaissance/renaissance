@@ -4,7 +4,9 @@
 
 > 单人团队以 AI 技术开发的超轻量级高性能深度学习训练框架
 
-![Newest Version](resources/badge_version.png)![Ubuntu 24.04](resources/badge_ubuntu.png) ![Windows 11](resources/badge_windows.png)
+![Newest Version](resources/badge_version.png)
+
+![Ubuntu 24.04](resources/badge_ubuntu.png) ![Windows 11](resources/badge_windows.png)
 
 
 
