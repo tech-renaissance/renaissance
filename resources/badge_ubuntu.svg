@@ -1,0 +1,41 @@
+<svg
+  width="169"
+  height="20"
+  xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient
+      id="a"
+      x1="0"
+      y1="0"
+      x2="0"
+      y2="1"
+      gradientUnits="userSpaceOnUse"
+      gradientTransform="matrix(169 0 0 20 -0 0)">
+      <stop offset="0" stop-color="#bbbbbb" stop-opacity="0.1"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0.1"/>
+    </linearGradient>
+  </defs>
+  <path fill="#555555" stroke="none"
+    d="M 3 0 L 166 0 C 167.657 0 169 1.343 169 3
+    L 169 17 C 169 18.657 167.657 20 166 20
+    L 3 20 C 1.343 20 0 18.657 0 17 L 0 3 C 0 1.343 1.343 0 3 0 Z"/>
+  <path fill="#44cc11" stroke="none"
+    d="M 101 0 L 166 0 C 167.657 0 169 1.343 169 3
+    L 169 17 C 169 18.657 167.657 20 166 20
+    L 101 20 C 99.657 20 98.657 18.657 98.657 17
+    L 98.657 3 C 98.657 1.343 99.657 0 101 0 Z"/>
+  <path fill="#44cc11" stroke="none"
+    d="M 101 0 L 114 0 L 114 20 L 101 20 Z"/>
+  <path fill="url(#a)" stroke="none"
+    d="M 3 0 L 166 0 C 167.657 0 169 1.343 169 3
+    L 169 17 C 169 18.657 167.657 20 166 20
+    L 3 20 C 1.343 20 0 18.657 0 17 L 0 3 C 0 1.343 1.343 0 3 0 Z"/>
+  <g fill="#ffffff" font-family="DejaVu Sans,Verdana,Geneva,sans-serif" font-size="11" font-weight="400">
+    <text x="10" y="14" fill="#010101" fill-opacity="0.3">Ubuntu 24.04</text>
+    <text x="10" y="13" fill="#ffffff">Ubuntu 24.04</text>
+  </g>
+  <g fill="#ffffff" font-family="DejaVu Sans,Verdana,Geneva,sans-serif" font-size="11" font-weight="bold">
+    <text x="112" y="14" fill="#010101" fill-opacity="0.3">Passing</text>
+    <text x="112" y="13" fill="#ffffff">Passing</text>
+  </g>
+</svg>

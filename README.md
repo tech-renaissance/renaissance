@@ -4,6 +4,14 @@
 
 > 单人团队以 AI 技术开发的超轻量级高性能深度学习训练框架
 
+![Newest Version](resources/badge_version.svg)
+
+![Ubuntu 24.04](resources/badge_ubuntu.svg) ![Windows 11](resources/badge_windows.svg)
+
+![A100](resources/badge_a100.svg) ![A10](resources/badge_a10.svg) ![L20](resources/badge_l20.svg) ![T4](resources/badge_t4.svg) ![RTX 4060](resources/badge_rtx4060.svg) ![RTX 4090](resources/badge_rtx4090.svg) ![RTX 5090](resources/badge_rtx5090.svg)
+
+ ![L20](resources/badge_doc.svg) 
+
 
 
 ## 技术特点
@@ -22,13 +30,14 @@
 - 多流架构：具备三计算流+传输流+更新流，高效实现并行化、流水化，借助新架构的NVIDIA GPU的高效调度能力，实测性能上明显领先于传统双流架构的深度学习框架
 - 随机可复现性：严格设计的架构与算法实现，符合可复现要求，在不调用非确定性算子的情形下，同一程序在同一平台上多次运行可得到字节级一致的结果
 - 超高线程并发：多线程预处理，即使开启超过200个线程依然完美并发，且不破坏随机可复现性
+- 跨平台：支持 Windows 和 Linux 系统，支持 Turing 及以后的架构（常用的 GPU 包括 A100、A10、L20、T4、RTX5090等均已通过测试）
 - 极简API：科学设计顶层API，写法优雅、功能强大，34 行代码完整训练 MLP 至 99.4% 以上的 MNIST 准确率，新手无痛入坑，老手省心炼丹
 
 
 
 ## 性能测试
 
-### VGG16BN训练吞吐量与 PyTorch、TensorFlow 的对比
+### VGG16BN 训练吞吐量方面与 PyTorch、TensorFlow 的对比
 
 在 A100 × 8 的 GPU 云服务器平台上，分别用 Tech-Renaissance、PyTorch（2.9.0）、TensorFlow（2.15.1）进行 VGG16BN 的 ImageNet 训练。结果显示，即使面对写法高度优化的 PyTorch 和 TensorFlow 训练脚本，Tech-Renaissance 依然表现出明显的吞吐量优势，且训练的准确率结果完全符合 VGG16BN 的预期水准（TOP-1 73.80% | TOP-5 91.71%）。
 
@@ -79,6 +88,8 @@
 
 
 ## 快速开始
+
+本项目推荐以 Docker 容器的方式运行。
 
 ```bash
 # 克隆项目
