@@ -10,6 +10,13 @@
 
 
 
+## 相关链接
+
+| 🌐 [官方网站](https://tech-renaissance.cn/) | 📖 [安装教程](https://tech-renaissance.cn/install.html) | 📚 [开发文档](https://tech-renaissance.cn/docs.html) | 📝 [官方博客](https://tech-renaissance.cn/blog/) |
+| :--------: | :--------: | :--------: | :--------: |
+
+
+
 ## 技术特点
 
 - 静态图编译执行：通过 Compiler 将模型结构和训练任务编译为高度优化的计算图，大幅提升训练速度
